@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Environment
+.env
+!.env.example
+
+# uv
+uv.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Mini-Agent data
+.mini-agent/
