@@ -232,6 +232,17 @@ async def test_grep_include_filter(tool_context):
     assert result.metadata["matches"] == 1
 
 
+async def test_grep_context_lines(tool_context):
+    f = tool_context.working_dir / "ctx.txt"
+    f.write_text("before\ntarget\nafter\n", encoding="utf-8")
+
+    result = await GrepTool().execute(tool_context, pattern="target", context=1)
+    assert not result.is_error
+    assert "before" in result.output
+    assert "target" in result.output
+    assert "after" in result.output
+
+
 async def test_grep_invalid_regex(tool_context):
     result = await GrepTool().execute(tool_context, pattern="[invalid")
     assert result.is_error

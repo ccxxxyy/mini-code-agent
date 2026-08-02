@@ -77,23 +77,24 @@
 ## Phase 3: 安全 + Hook (P3)
 
 ### P3.1 权限系统
-- [ ] `models/permissions.py` — PermissionLevel, PermissionScope, PermissionRule, PermissionRequest, PermissionDecision
-- [ ] `security/permission.py` — PermissionManager (check, check_path, check_command, grant_session)
-- [ ] `security/path_guard.py` — PathGuard (敏感目录拒绝, 项目目录允许, 其余 ask)
-- [ ] `security/tool_filter.py` — ToolFilter (上下文过滤)
+- [x] `models/permissions.py` — PermissionLevel, PermissionScope, PermissionRule, PermissionRequest, PermissionDecision
+- [x] `security/permission.py` — PermissionManager (check, check_path, check_command, grant_session, 危险命令正则检测)
+- [x] `security/path_guard.py` — PathGuard (敏感目录拒绝, 项目目录允许, 其余 ask, 敏感文件模式含 .env/密钥)
+- [x] `security/tool_filter.py` — ToolFilter (上下文过滤)
 
 ### P3.2 Hook 系统
-- [ ] `tools/hooks.py` — HookStage, HookContext, HookAction, HookResult, HookFn, HookManager
-- [ ] 内置 Hook: 危险命令确认, 敏感文件保护
-- [ ] Agent Loop 集成 Hook 链 (PRE_TOOL, POST_TOOL, PRE_LLM, POST_LLM)
+- [x] `tools/hooks.py` — HookStage, HookContext, HookAction, HookResult, HookFn, HookManager (优先级+短路)
+- [x] 内置防护: 危险命令确认 (PermissionManager 正则), 敏感文件保护 (PathGuard 模式)
+- [x] Agent Loop 集成安全管道 (PermissionCheck → PRE_TOOL → execute → POST_TOOL)
 
 ### P3.3 TUI 权限交互
-- [ ] `ui/terminal.py` 扩展 — confirm() 确认弹窗
+- [x] `ui/terminal.py` 扩展 — confirm() 确认弹窗 (y/n 交互)
 
 ### P3.4 验证
-- [ ] bash 执行 `rm -rf /` → 触发确认弹窗
-- [ ] 尝试读取 `~/.ssh/id_rsa` → 拒绝
-- [ ] 正常读写项目内文件 → 自动允许
+- [x] bash 执行危险命令 → 触发确认 (rm -rf 单测: 无UI拒绝/用户批准执行/用户拒绝阻止)
+- [x] 尝试读取 `~/.ssh/id_rsa` → 拒绝 (PathGuard 单测)
+- [x] 正常读写项目内文件 → 自动允许 (AgentLoop 集成测试)
+- [x] 附加: .env 敏感文件拦截, PRE_TOOL Hook 阻止, POST_TOOL Hook 观察 (集成测试覆盖)
 
 ---
 

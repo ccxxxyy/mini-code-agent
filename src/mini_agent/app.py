@@ -15,8 +15,11 @@ from mini_agent.models.events import (
 )
 from mini_agent.models.message import Message, Role
 from mini_agent.models.session import Session
+from mini_agent.security.path_guard import PathGuard
+from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
+from mini_agent.tools.hooks import HookManager
 from mini_agent.ui.terminal import Terminal
 
 SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal, working in {working_dir}.
@@ -62,12 +65,27 @@ class Application:
             config=config,
         )
 
+        # Security: path guard + permission manager wired to terminal confirm
+        path_guard = PathGuard(
+            tool_config=config.tools,
+            security_config=config.security,
+            project_dir=working_dir,
+        )
+        self.permission_manager = PermissionManager(
+            config=config.security,
+            path_guard=path_guard,
+            confirm_callback=self.terminal.confirm,
+        )
+        self.hook_manager = HookManager()
+
         self.agent_loop = AgentLoop(
             llm=self._llm,
             tool_registry=self.tool_registry,
             event_bus=self.event_bus,
             config=config,
             tool_context=tool_context,
+            permission_manager=self.permission_manager,
+            hook_manager=self.hook_manager,
         )
 
         # Wire agent loop callbacks to terminal rendering

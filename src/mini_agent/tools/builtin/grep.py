@@ -41,6 +41,13 @@ class GrepTool(Tool):
                     description="Glob filter for file names, e.g. '*.py' (default: all files)",
                     required=False,
                 ),
+                ToolParameter(
+                    name="context",
+                    type="integer",
+                    description="Number of context lines to show before/after each match",
+                    required=False,
+                    default=0,
+                ),
             ],
         )
 
@@ -50,6 +57,7 @@ class GrepTool(Tool):
         if not base.is_absolute():
             base = ctx.working_dir / base
         include = kwargs.get("include")
+        context_lines = int(kwargs.get("context", 0))
 
         try:
             regex = re.compile(pattern)
@@ -82,12 +90,23 @@ class GrepTool(Tool):
                 continue
 
             file_matched = False
-            for lineno, line in enumerate(text.splitlines(), 1):
+            all_lines = text.splitlines()
+            for lineno, line in enumerate(all_lines, 1):
                 if regex.search(line):
-                    display = line.strip()
-                    if len(display) > 200:
-                        display = display[:200] + "..."
-                    matches.append(f"{f}:{lineno}: {display}")
+                    if context_lines > 0:
+                        lo = max(0, lineno - 1 - context_lines)
+                        hi = min(len(all_lines), lineno + context_lines)
+                        for ci in range(lo, hi):
+                            prefix = ":" if ci == lineno - 1 else "-"
+                            display = all_lines[ci].strip()
+                            if len(display) > 200:
+                                display = display[:200] + "..."
+                            matches.append(f"{f}:{ci + 1}{prefix} {display}")
+                    else:
+                        display = line.strip()
+                        if len(display) > 200:
+                            display = display[:200] + "..."
+                        matches.append(f"{f}:{lineno}: {display}")
                     file_matched = True
                     if len(matches) >= MAX_MATCHES:
                         break

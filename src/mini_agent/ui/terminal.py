@@ -33,6 +33,31 @@ class Terminal:
         self._ensure_prompt_session()
         return await self._prompt_session.prompt_async("> ")
 
+    async def confirm(self, prompt: str) -> bool | str:
+        """Ask user for confirmation.
+
+        Returns True (allow once), False (deny), or "always" (allow for session).
+        """
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold yellow]{prompt}[/bold yellow]\n\n"
+                f"[dim]y = allow once  /  a = always allow (this session)  /  n = deny[/dim]",
+                title="[red]Confirmation Required[/red]",
+                border_style="yellow",
+                expand=False,
+            )
+        )
+        self._ensure_prompt_session()
+        while True:
+            answer = (await self._prompt_session.prompt_async("allow? [y/a/n] > ")).strip().lower()
+            if answer in ("y", "yes"):
+                return True
+            if answer in ("a", "always"):
+                return "always"
+            if answer in ("n", "no"):
+                return False
+
     def start_stream(self) -> None:
         self.renderer.start()
 
