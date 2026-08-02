@@ -1,0 +1,81 @@
+"""Configuration dataclasses."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class LLMConfig:
+    provider: str = "openai"
+    model: str = "gpt-4o"
+    api_key: str = ""
+    base_url: str | None = None
+    max_tokens: int = 4096
+    temperature: float = 0.0
+    timeout: float = 120.0
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class ToolConfig:
+    enabled_tools: list[str] = field(
+        default_factory=lambda: [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "bash",
+            "glob",
+            "grep",
+        ]
+    )
+    bash_timeout: float = 120.0
+    max_file_size: int = 10_000_000
+    allowed_paths: list[str] = field(default_factory=list)
+    denied_paths: list[str] = field(default_factory=lambda: ["~/.ssh", "~/.aws", "~/.gnupg"])
+
+
+@dataclass
+class MCPServerConfig:
+    command: str = ""
+    args: list[str] = field(default_factory=list)
+    url: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+    transport: str = "stdio"
+
+
+@dataclass
+class MCPConfig:
+    servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+
+
+@dataclass
+class MemoryConfig:
+    context_window: int = 128_000
+    compression_threshold: float = 0.75
+    persistent_memory_dir: str = "~/.mini-agent/memory"
+    project_memory_file: str = ".mini-agent/memory.json"
+    auto_extract: bool = True
+
+
+@dataclass
+class SecurityConfig:
+    permission_mode: str = "ask"
+    allowed_commands: list[str] = field(default_factory=list)
+    denied_commands: list[str] = field(
+        default_factory=lambda: ["rm -rf /", "sudo", "curl|sh", "wget|sh"]
+    )
+    worktree_base_dir: str = ".mini-agent/worktrees"
+
+
+@dataclass
+class AgentConfig:
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    tools: ToolConfig = field(default_factory=ToolConfig)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
+    max_agent_iterations: int = 50
+    enable_plan_mode: bool = True
+    skill_dirs: list[str] = field(default_factory=lambda: ["./skills", "~/.mini-agent/skills"])
+    theme: str = "default"
