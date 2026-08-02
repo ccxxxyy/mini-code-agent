@@ -1,0 +1,93 @@
+"""EditFile tool -- exact string replacement in a file."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from mini_agent.models.message import ToolResult
+from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+
+
+class EditFileTool(Tool):
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="edit_file",
+            description=(
+                "Replace an exact string in a file with a new string. "
+                "old_text must appear exactly once in the file unless replace_all is true."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="file_path",
+                    type="string",
+                    description="Path to the file to edit (absolute or relative to working dir)",
+                ),
+                ToolParameter(
+                    name="old_text",
+                    type="string",
+                    description="Exact text to find and replace",
+                ),
+                ToolParameter(
+                    name="new_text",
+                    type="string",
+                    description="Text to replace old_text with",
+                ),
+                ToolParameter(
+                    name="replace_all",
+                    type="boolean",
+                    description="Replace all occurrences (default false: exactly one match)",
+                    required=False,
+                    default=False,
+                ),
+            ],
+        )
+
+    async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        file_path = Path(kwargs["file_path"])
+        if not file_path.is_absolute():
+            file_path = ctx.working_dir / file_path
+        old_text = kwargs["old_text"]
+        new_text = kwargs["new_text"]
+        replace_all = bool(kwargs.get("replace_all", False))
+
+        if not file_path.is_file():
+            return self.error_result("", f"File not found: {file_path}")
+
+        if old_text == new_text:
+            return self.error_result("", "old_text and new_text are identical")
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except OSError as e:
+            return self.error_result("", f"Failed to read {file_path}: {e}")
+
+        count = content.count(old_text)
+        if count == 0:
+            return self.error_result("", f"old_text not found in {file_path}")
+        if count > 1 and not replace_all:
+            return self.error_result(
+                "",
+                f"old_text appears {count} times in {file_path}. "
+                "Provide more context to make it unique, or set replace_all=true.",
+            )
+
+        if replace_all:
+            new_content = content.replace(old_text, new_text)
+            replaced = count
+        else:
+            new_content = content.replace(old_text, new_text, 1)
+            replaced = 1
+
+        try:
+            file_path.write_text(new_content, encoding="utf-8")
+        except OSError as e:
+            return self.error_result("", f"Failed to write {file_path}: {e}")
+
+        return ToolResult(
+            call_id="",
+            name="edit_file",
+            output=f"Replaced {replaced} occurrence(s) in {file_path}",
+            metadata={"replacements": replaced},
+        )
