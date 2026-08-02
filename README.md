@@ -185,8 +185,8 @@ mini-code-agent/
 ## 开发状态
 
 - [x] P1：基础对话能力（项目结构、数据模型、事件系统、LLM Provider、TUI、对话循环）
-- [ ] P2：工具系统 + Agent Loop（6 个核心工具、ReAct 循环）
-- [ ] P3：安全 + Hook（权限管理、路径守卫、生命周期钩子）
+- [x] P2：工具系统 + Agent Loop（6 个核心工具、ReAct 循环）
+- [x] P3：安全 + Hook（权限管理、路径守卫、生命周期钩子）
 - [ ] P4：记忆 + 上下文管理（压缩、会话持久化、跨会话记忆）
 - [ ] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议）
 - [ ] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队）

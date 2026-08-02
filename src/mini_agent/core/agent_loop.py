@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from mini_agent.core.agent_state import AgentPhase, AgentState
 from mini_agent.events.bus import EventBus
@@ -17,7 +18,10 @@ from mini_agent.models.events import (
     TurnCompleteEvent,
 )
 from mini_agent.models.message import Conversation, Message, Role, ToolCall, ToolResult
+from mini_agent.models.permissions import PermissionDecision
+from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
+from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookStage
 
 # Callback invoked with each streaming text delta (for UI rendering)
 StreamCallback = Callable[[str], None]
@@ -36,12 +40,16 @@ class AgentLoop:
         event_bus: EventBus,
         config: AgentConfig,
         tool_context: ToolContext,
+        permission_manager: PermissionManager | None = None,
+        hook_manager: HookManager | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
         self._event_bus = event_bus
         self._config = config
         self._tool_context = tool_context
+        self._permissions = permission_manager
+        self._hooks = hook_manager or HookManager()
         self._state = AgentState(max_iterations=config.max_agent_iterations)
         self._cancelled = False
 
@@ -177,26 +185,7 @@ class AgentLoop:
                 is_error=True,
             )
         else:
-            try:
-                validated = tool.validate_args(tc.arguments)
-                raw = await tool.execute(self._tool_context, **validated)
-                # Re-attach the call_id (tools don't know it)
-                result = ToolResult(
-                    call_id=tc.id,
-                    name=raw.name,
-                    output=raw.output,
-                    is_error=raw.is_error,
-                    metadata=raw.metadata,
-                )
-            except ValueError as e:
-                result = ToolResult(call_id=tc.id, name=tc.name, output=str(e), is_error=True)
-            except Exception as e:
-                result = ToolResult(
-                    call_id=tc.id,
-                    name=tc.name,
-                    output=f"Tool execution error: {e}",
-                    is_error=True,
-                )
+            result = await self._run_tool_pipeline(tc, tool)
 
         duration_ms = (time.monotonic() - start) * 1000
         await self._event_bus.emit(
@@ -210,6 +199,83 @@ class AgentLoop:
         if self.on_tool_end:
             self.on_tool_end(result)
         return result
+
+    async def _run_tool_pipeline(self, tc: ToolCall, tool) -> ToolResult:
+        """Full security pipeline: permission -> PRE_TOOL hook -> execute -> POST_TOOL hook."""
+        # 1. Permission check
+        if self._permissions is not None:
+            decision = await self._check_permission(tc)
+            if decision == PermissionDecision.DENIED:
+                return ToolResult(
+                    call_id=tc.id,
+                    name=tc.name,
+                    output=f"Permission denied for {tc.name}",
+                    is_error=True,
+                )
+
+        # 2. PRE_TOOL hooks (can block or modify args)
+        args = dict(tc.arguments)
+        hook_ctx = HookContext(stage=HookStage.PRE_TOOL, tool_name=tc.name, tool_args=args)
+        hook_result = await self._hooks.run(hook_ctx)
+        if hook_result.action == HookAction.BLOCK:
+            return ToolResult(
+                call_id=tc.id,
+                name=tc.name,
+                output=f"Blocked by hook: {hook_result.reason}",
+                is_error=True,
+            )
+        if hook_ctx.tool_args is not None:
+            args = hook_ctx.tool_args
+
+        # 3. Execute
+        try:
+            validated = tool.validate_args(args)
+            raw = await tool.execute(self._tool_context, **validated)
+            result = ToolResult(
+                call_id=tc.id,
+                name=raw.name,
+                output=raw.output,
+                is_error=raw.is_error,
+                metadata=raw.metadata,
+            )
+        except ValueError as e:
+            result = ToolResult(call_id=tc.id, name=tc.name, output=str(e), is_error=True)
+        except Exception as e:
+            result = ToolResult(
+                call_id=tc.id,
+                name=tc.name,
+                output=f"Tool execution error: {e}",
+                is_error=True,
+            )
+
+        # 4. POST_TOOL hooks (observe)
+        await self._hooks.run(
+            HookContext(
+                stage=HookStage.POST_TOOL,
+                tool_name=tc.name,
+                tool_args=args,
+                tool_result=result,
+            )
+        )
+        return result
+
+    async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
+        """Route permission check by tool type."""
+        assert self._permissions is not None
+        if tc.name == "bash":
+            command = str(tc.arguments.get("command", ""))
+            return await self._permissions.check_command(command)
+        if tc.name in ("read_file", "glob", "grep"):
+            path_arg = tc.arguments.get("file_path") or tc.arguments.get("path")
+            if path_arg:
+                return await self._permissions.check_path(Path(str(path_arg)), "read")
+            return PermissionDecision.GRANTED
+        if tc.name in ("write_file", "edit_file"):
+            path_arg = tc.arguments.get("file_path")
+            if path_arg:
+                return await self._permissions.check_path(Path(str(path_arg)), "write")
+            return PermissionDecision.GRANTED
+        return PermissionDecision.GRANTED
 
     def _should_continue(self) -> bool:
         """Decide whether to continue the ReAct loop."""
