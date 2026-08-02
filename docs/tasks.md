@@ -3,74 +3,74 @@
 ## Phase 1: 基础对话 (P1)
 
 ### P1.1 项目初始化
-- [ ] 创建 `pyproject.toml`（uv, 入口 mini-agent, 依赖 rich/prompt_toolkit/httpx）
-- [ ] 创建 `.python-version` (3.11)
-- [ ] 创建 `src/mini_agent/__init__.py` + `__main__.py`
-- [ ] 创建 `CLAUDE.md` 项目指令
-- [ ] `uv sync` 验证依赖安装
+- [x] 创建 `pyproject.toml`（uv, 入口 mini-agent, 依赖 rich/prompt_toolkit/httpx）
+- [x] 创建 `.python-version` (3.11)
+- [x] 创建 `src/mini_agent/__init__.py` + `__main__.py`
+- [x] 创建 `CLAUDE.md` 项目指令
+- [x] `uv sync` 验证依赖安装
 
 ### P1.2 核心数据模型
-- [ ] `models/message.py` — Role, ToolCall, ToolResult, Message, Conversation
-- [ ] `models/events.py` — Event 基类 + UserMessageEvent, LLMStreamChunkEvent, LLMResponseEvent
-- [ ] `models/config.py` — LLMConfig, ToolConfig, MCPConfig, MemoryConfig, SecurityConfig, AgentConfig
-- [ ] `models/session.py` — Session, SessionMetadata
+- [x] `models/message.py` — Role, ToolCall, ToolResult, Message, Conversation
+- [x] `models/events.py` — Event 基类 + UserMessageEvent, LLMStreamChunkEvent, LLMResponseEvent
+- [x] `models/config.py` — LLMConfig, ToolConfig, MCPConfig, MemoryConfig, SecurityConfig, AgentConfig
+- [x] `models/session.py` — Session, SessionMetadata
 
 ### P1.3 事件系统
-- [ ] `events/bus.py` — EventBus (async pub/sub, on/off/emit/on_any)
-- [ ] `events/types.py` — 辅助导出
+- [x] `events/bus.py` — EventBus (async pub/sub, on/off/emit/on_any)
+- [x] `events/types.py` — 辅助导出
 
 ### P1.4 配置系统
-- [ ] `config/defaults.py` — 内置默认配置值
-- [ ] `config/loader.py` — 分层配置加载 (defaults → user → project → env → CLI)
+- [x] `config/defaults.py` — 内置默认配置值
+- [x] `config/loader.py` — 分层配置加载 (defaults → .env → env → CLI)
 
 ### P1.5 LLM Provider
-- [ ] `llm/base.py` — LLMProvider ABC, StreamChunk, ToolCallDelta, TokenUsage, LLMResponse
-- [ ] `llm/openai_provider.py` — OpenAI 兼容 Provider (httpx, 流式, tool_calls 解析)
-- [ ] `llm/registry.py` — ProviderRegistry (register/create)
-- [ ] `llm/token_counter.py` — 基础 token 计数 (tiktoken)
+- [x] `llm/base.py` — LLMProvider ABC, StreamChunk, ToolCallDelta, TokenUsage, LLMResponse
+- [x] `llm/openai_provider.py` — OpenAI 兼容 Provider (httpx, 流式, tool_calls 解析)
+- [x] `llm/registry.py` — ProviderRegistry (register/create)
+- [x] `llm/token_counter.py` — 基础 token 计数 (tiktoken 可选, 无则 chars/4 估算)
 
 ### P1.6 TUI 基础
-- [ ] `ui/terminal.py` — Terminal 类 (Rich Console + Prompt Toolkit input)
-- [ ] `ui/renderer.py` — 流式文本渲染 (Markdown 渲染)
-- [ ] `ui/input_handler.py` — 基础输入处理 (多行, 历史)
+- [x] `ui/terminal.py` — Terminal 类 (Rich Console + Prompt Toolkit input)
+- [x] `ui/renderer.py` — 流式文本渲染 (Markdown 渲染)
+- [x] `ui/input_handler.py` — 基础输入处理 (多行, 历史)
 
 ### P1.7 应用编排
-- [ ] `cli.py` — CLI 入口 (argparse: --model, --provider, --config)
-- [ ] `app.py` — Application 编排器 (装配 EventBus + LLM + Terminal, 简单对话循环)
+- [x] `cli.py` — CLI 入口 (argparse: --model, --provider, --api-key, --base-url)
+- [x] `app.py` — Application 编排器 (装配 EventBus + LLM + Terminal + AgentLoop)
 
 ### P1.8 验证
-- [ ] `uv run mini-agent` 可启动终端
-- [ ] 输入消息后 LLM 流式响应
-- [ ] 多轮对话上下文保持
+- [x] `uv run mini-agent` 可启动终端 (--version 验证通过)
+- [x] 输入消息后 LLM 流式响应 (真实 API 流式验证通过)
+- [x] 多轮对话上下文保持 (Conversation.to_api_messages 携带全部历史)
 
 ---
 
 ## Phase 2: 工具系统 + Agent Loop (P2)
 
 ### P2.1 工具基础设施
-- [ ] `tools/base.py` — Tool ABC, ToolParameter, ToolSchema, ToolContext, ToolRegistry
+- [x] `tools/base.py` — Tool ABC, ToolParameter, ToolSchema, ToolContext, ToolRegistry
 
 ### P2.2 六个核心工具
-- [ ] `tools/builtin/read_file.py` — ReadFileTool (路径, offset, limit, 行号输出)
-- [ ] `tools/builtin/write_file.py` — WriteFileTool (路径, 内容, 覆盖确认)
-- [ ] `tools/builtin/edit_file.py` — EditFileTool (路径, old_text, new_text, replace_all)
-- [ ] `tools/builtin/bash.py` — BashTool (命令, timeout, working_dir)
-- [ ] `tools/builtin/glob_tool.py` — GlobTool (pattern, path)
-- [ ] `tools/builtin/grep.py` — GrepTool (pattern, path, include, context lines)
+- [x] `tools/builtin/read_file.py` — ReadFileTool (路径, offset, limit, 行号输出)
+- [x] `tools/builtin/write_file.py` — WriteFileTool (路径, 内容, 自动建父目录)
+- [x] `tools/builtin/edit_file.py` — EditFileTool (路径, old_text, new_text, replace_all)
+- [x] `tools/builtin/bash.py` — BashTool (命令, timeout, working_dir, Win/Unix 兼容)
+- [x] `tools/builtin/glob_tool.py` — GlobTool (pattern, path, 按修改时间排序)
+- [x] `tools/builtin/grep.py` — GrepTool (pattern, path, include 过滤)
 
 ### P2.3 Agent 核心
-- [ ] `core/agent_state.py` — AgentPhase, AgentState, PlanStep
-- [ ] `core/errors.py` — 异常体系 (AgentError, ToolError, LLMError, PermissionError)
-- [ ] `core/agent_loop.py` — ReAct AgentLoop (_think, _act, _observe, _should_continue, cancel)
+- [x] `core/agent_state.py` — AgentPhase, AgentState (PlanStep 推迟到 P6 Plan 模式)
+- [x] `core/errors.py` — 异常体系 (AgentError, ToolError, LLMError, MaxIterations, UserCancelled)
+- [x] `core/agent_loop.py` — ReAct AgentLoop (_think, _act, _should_continue, cancel, 死循环检测)
 
 ### P2.4 TUI 扩展
-- [ ] `ui/terminal.py` 扩展 — 工具调用渲染 (名称+参数), spinner, 结果展示
-- [ ] `ui/components.py` — Spinner, ToolCallPanel, PermissionPrompt
+- [x] `ui/terminal.py` 扩展 — 工具调用渲染 (名称+参数), 结果展示
+- [x] `ui/components.py` — Spinner, Status, ToolCallPanel (PermissionPrompt 属 P3)
 
 ### P2.5 验证
-- [ ] "读取 README 并总结" → 自主调用 ReadFile → 处理 → 回答
-- [ ] "查找包含 TODO 的文件" → Grep 工具 → 列出结果
-- [ ] 多步工具链正常执行 (think → tool → observe → think → answer)
+- [x] "读取 README 并总结" → 自主调用 ReadFile → 处理 → 回答 (真实 API E2E 验证通过)
+- [x] "查找包含 TODO 的文件" → Grep 工具 → 列出结果 (真实 API E2E 验证通过)
+- [x] 多步工具链正常执行 (think → tool → observe → think → answer, MockLLM 单测覆盖)
 
 ---
 

@@ -1,0 +1,202 @@
+"""Tests for the ReAct agent loop with a mock LLM provider."""
+
+import json
+from collections.abc import AsyncIterator
+from typing import Any
+
+from mini_agent.core.agent_loop import AgentLoop
+from mini_agent.core.agent_state import AgentPhase
+from mini_agent.events.bus import EventBus
+from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
+from mini_agent.models.config import AgentConfig
+from mini_agent.models.message import Conversation, Role
+from mini_agent.tools.base import ToolRegistry
+from mini_agent.tools.builtin import ReadFileTool
+
+
+class MockLLM(LLMProvider):
+    """Mock provider that replays scripted responses."""
+
+    def __init__(self, scripts: list[list[StreamChunk]]) -> None:
+        self._scripts = scripts
+        self._call_count = 0
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        script = self._scripts[min(self._call_count, len(self._scripts) - 1)]
+        self._call_count += 1
+        for chunk in script:
+            yield chunk
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+    @property
+    def context_window(self) -> int:
+        return 128_000
+
+
+def text_response(text: str) -> list[StreamChunk]:
+    return [StreamChunk(delta=text), StreamChunk(finish_reason="stop")]
+
+
+def tool_call_response(name: str, arguments: dict) -> list[StreamChunk]:
+    return [
+        StreamChunk(
+            tool_call_deltas=[
+                ToolCallDelta(
+                    index=0,
+                    id="call_1",
+                    name=name,
+                    arguments_delta=json.dumps(arguments),
+                )
+            ]
+        ),
+        StreamChunk(finish_reason="tool_calls"),
+    ]
+
+
+def make_loop(scripts, tool_context, registry=None):
+    config = AgentConfig()
+    if registry is None:
+        registry = ToolRegistry()
+        registry.register(ReadFileTool())
+    return AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=config,
+        tool_context=tool_context,
+    )
+
+
+async def test_direct_answer_no_tools(tool_context):
+    loop = make_loop([text_response("Hello!")], tool_context)
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert result == "Hello!"
+    assert loop.state.phase == AgentPhase.IDLE
+    assert len(conv.messages) == 1
+    assert conv.messages[0].role == Role.ASSISTANT
+
+
+async def test_tool_call_then_answer(tool_context):
+    f = tool_context.working_dir / "data.txt"
+    f.write_text("secret content", encoding="utf-8")
+
+    scripts = [
+        tool_call_response("read_file", {"file_path": str(f)}),
+        text_response("The file contains: secret content"),
+    ]
+    loop = make_loop(scripts, tool_context)
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert "secret content" in result
+    # assistant(tool_call) + tool(result) + assistant(answer)
+    assert len(conv.messages) == 3
+    assert conv.messages[0].tool_calls[0].name == "read_file"
+    assert conv.messages[1].role == Role.TOOL
+    assert "secret content" in conv.messages[1].tool_result.output
+
+
+async def test_unknown_tool_returns_error(tool_context):
+    scripts = [
+        tool_call_response("nonexistent_tool", {}),
+        text_response("done"),
+    ]
+    loop = make_loop(scripts, tool_context)
+    conv = Conversation()
+    await loop.run(conv)
+
+    tool_msg = conv.messages[1]
+    assert tool_msg.tool_result.is_error
+    assert "Unknown tool" in tool_msg.tool_result.output
+
+
+async def test_invalid_args_returns_error(tool_context):
+    # read_file requires file_path, send empty args
+    scripts = [
+        tool_call_response("read_file", {}),
+        text_response("done"),
+    ]
+    loop = make_loop(scripts, tool_context)
+    conv = Conversation()
+    await loop.run(conv)
+
+    tool_msg = conv.messages[1]
+    assert tool_msg.tool_result.is_error
+    assert "file_path" in tool_msg.tool_result.output
+
+
+async def test_infinite_loop_guard(tool_context):
+    f = tool_context.working_dir / "x.txt"
+    f.write_text("data", encoding="utf-8")
+
+    # LLM keeps calling the same tool forever
+    scripts = [tool_call_response("read_file", {"file_path": str(f)})]
+    loop = make_loop(scripts, tool_context)
+    conv = Conversation()
+    await loop.run(conv)
+
+    # Guard kicks in after 6 identical consecutive calls
+    read_calls = [m for m in conv.messages if m.tool_calls]
+    assert len(read_calls) <= 7
+
+
+async def test_max_iterations_guard(tool_context):
+    f = tool_context.working_dir / "x.txt"
+    f.write_text("data", encoding="utf-8")
+
+    config = AgentConfig(max_agent_iterations=3)
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    # Alternate between two tools to bypass the same-tool guard
+    scripts = [tool_call_response("read_file", {"file_path": str(f)})]
+    loop = AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=config,
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.state.iteration <= 3
+
+
+async def test_stream_callbacks(tool_context):
+    deltas = []
+    loop = make_loop([text_response("streamed text")], tool_context)
+    loop.on_stream_delta = deltas.append
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert "".join(deltas) == "streamed text"
+
+
+async def test_tool_callbacks(tool_context):
+    f = tool_context.working_dir / "cb.txt"
+    f.write_text("x", encoding="utf-8")
+
+    started = []
+    ended = []
+    scripts = [
+        tool_call_response("read_file", {"file_path": str(f)}),
+        text_response("done"),
+    ]
+    loop = make_loop(scripts, tool_context)
+    loop.on_tool_start = lambda tc: started.append(tc.name)
+    loop.on_tool_end = lambda tr: ended.append(tr.name)
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert started == ["read_file"]
+    assert ended == ["read_file"]

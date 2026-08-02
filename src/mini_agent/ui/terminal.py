@@ -49,9 +49,25 @@ class Terminal:
         self.console.print(f"[dim]{message}[/dim]")
 
     def show_tool_call(self, name: str, args: dict) -> None:
-        self.console.print(f"  [yellow]Tool:[/yellow] {name}", highlight=False)
+        arg_preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
+        self.console.print(
+            f"  [bold yellow]⚙ {name}[/bold yellow][dim]({arg_preview})[/dim]",
+            highlight=False,
+        )
 
     def show_tool_result(self, name: str, output: str, is_error: bool = False) -> None:
-        style = "red" if is_error else "green"
-        truncated = output[:500] + "..." if len(output) > 500 else output
-        self.console.print(f"  [{style}]Result:[/{style}] {truncated}", highlight=False)
+        if is_error:
+            preview = output[:300] + "..." if len(output) > 300 else output
+            self.console.print(f"  [red]✗ {preview}[/red]", highlight=False)
+        else:
+            lines = output.count("\n") + 1
+            chars = len(output)
+            self.console.print(
+                f"  [green]✓[/green] [dim]{lines} lines, {chars} chars[/dim]",
+                highlight=False,
+            )
+
+    @staticmethod
+    def _truncate_value(value: object, max_len: int = 60) -> str:
+        s = repr(value)
+        return s[:max_len] + "..." if len(s) > max_len else s
