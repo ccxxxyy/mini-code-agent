@@ -206,17 +206,21 @@ mini-code-agent/
 │       ├── events/             # 事件总线系统
 │       ├── config/             # 分层配置加载
 │       ├── llm/                # LLM Provider 抽象层
-│       ├── ui/                 # TUI 终端界面
-│       ├── tools/              # 工具系统（开发中）
-│       ├── core/               # Agent 引擎（开发中）
-│       ├── memory/             # 记忆系统（开发中）
-│       ├── security/           # 安全层（开发中）
-│       └── extensions/         # 扩展协议（开发中）
+│       ├── ui/                 # TUI 终端界面（主题、补全、流式渲染）
+│       ├── tools/              # 工具系统（6 内置工具 + MCP + Hook）
+│       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
+│       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
+│       ├── security/           # 安全层（权限、路径守卫、worktree）
+│       └── extensions/         # 扩展协议（Skill、Slash 命令）
 ├── tests/                      # 测试
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
-    └── checklist.md            # 验收检查清单
+    ├── checklist.md            # 验收检查清单
+    ├── capabilities.md         # 能力对照表（18 项需求逐条实现证据）
+    ├── tech-notes.md           # 核心技术实现原理与方案选型
+    ├── roadmap.md              # 后续演进路线图
+    └── positioning.md          # 项目立意与价值定位（含答辩问答备忘）
 ```
 
 ## 开发状态
@@ -227,7 +231,9 @@ mini-code-agent/
 - [x] P4：记忆 + 上下文管理（压缩、会话持久化、跨会话记忆）
 - [x] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议、Anthropic Provider）
 - [x] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队、Plan 模式）
-- [ ] P7：打磨 + 测试
+- [x] P7：打磨 + 测试（179 个测试、错误友好提示、token 缓存、主题系统、历史持久化）
+
+**全部 7 个阶段已完成。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## License
 

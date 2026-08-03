@@ -18,10 +18,16 @@ class Terminal:
         self.renderer = StreamRenderer(self.console)
         self._completer = SlashCommandCompleter()
         self._prompt_session = None
+        self._toolbar_provider = None
 
-    def show_welcome(self) -> None:
+    def show_welcome(self, llm_info: str = "") -> None:
         self.console.print()
-        self.console.print("  [bold #6c71c4]Mini-Code-Agent[/bold #6c71c4] [dim]v0.1.0[/dim]")
+        from mini_agent import __version__
+
+        header = f"  [bold #6c71c4]Mini-Code-Agent[/bold #6c71c4] [dim]v{__version__}[/dim]"
+        if llm_info:
+            header += f" [dim]|[/dim] [#6c71c4]{llm_info}[/#6c71c4]"
+        self.console.print(header)
         self.console.print(
             "  [dim]Type your message to chat. /help for commands. Ctrl+C to exit.[/dim]"
         )
@@ -31,9 +37,18 @@ class Terminal:
         """Update the slash command list for auto-completion. 更新用于自动补全的斜杠命令列表。"""
         self._completer.set_commands(commands)
 
-    def _ensure_prompt_session(self):
+    def set_toolbar_provider(self, provider) -> None:
+        """Set a callable that returns the bottom toolbar text (e.g. model name).
+        设置返回底部工具栏文本的回调（例如模型名）。
+        """
+        self._toolbar_provider = provider
+
+    def _ensure_prompt_session(self) -> None:
         if self._prompt_session is None:
-            self._prompt_session = create_prompt_session(completer=self._completer)
+            self._prompt_session = create_prompt_session(
+                completer=self._completer,
+                toolbar_provider=self._toolbar_provider,
+            )
 
     async def get_user_input(self) -> str:
         self._ensure_prompt_session()

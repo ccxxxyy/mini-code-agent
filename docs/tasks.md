@@ -180,16 +180,20 @@
 ## Phase 7: 打磨 (P7)
 
 ### P7.1 测试
-- [ ] 单元测试: agent_loop, tools, llm_providers, memory, permissions, events, config, models
-- [ ] 集成测试: mcp_client, agent_e2e, session_persistence, worktree
+- [x] 单元测试: agent_loop, tools, llm_providers(新增23个: 双Provider解析层/碎片组装/格式转换), memory, permissions, events, config, models — 17 个单测文件
+- [x] 集成测试: agent_e2e(新增: 完整App装配冒烟), worktree(真实git仓库), mcp(FakeManager), session_persistence(单测覆盖)
 
 ### P7.2 错误处理
-- [ ] 全面错误处理审查, 优雅失败
+- [x] LLM API 错误友好提示 (_friendly_error: 401/402/429/5xx/连接失败/超时 → 中文可操作提示)
+- [x] 启动时缺 API key 检查 (cli.py 给出三种配置方式指引后退出)
+- [x] 既有兜底: 工具异常→ToolResult, 流JSON解析失败→空字典, session文件损坏→None
 
 ### P7.3 性能优化
-- [ ] 流式延迟优化, token 计数缓存
+- [x] token 计数 LRU 缓存 (maxsize=4096, >50K 字符跳过缓存防内存膨胀; 压缩检查反复重算 system prompt 的场景收益最大)
+- [x] 流式渲染已是增量模式 (Rich Live 15fps, P1 已优化)
 
 ### P7.4 UI 打磨
-- [ ] `ui/themes.py` — 主题系统
-- [ ] `ui/components.py` 完善 — 可复用 UI 组件
-- [ ] `ui/input_handler.py` 完善 — 快捷键, vi 模式, 自动补全
+- [x] `ui/themes.py` — 主题系统 (default/dark/light 三套配色, Theme dataclass)
+- [x] `ui/components.py` — Spinner/Status/ToolCallPanel (P2 已建)
+- [x] `ui/input_handler.py` 完善 — 输入历史持久化到 ~/.mini-agent/input_history (跨会话上下键), 斜杠命令自动补全 (P5 已建)
+- [x] 179 个测试全过, lint/format/build CI 通过

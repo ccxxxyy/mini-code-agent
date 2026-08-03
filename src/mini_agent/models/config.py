@@ -71,6 +71,8 @@ class SecurityConfig:
 @dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
+    # Named LLM profiles for /model switching 用于 /model 切换的命名 LLM 档案
+    llm_profiles: dict[str, LLMConfig] = field(default_factory=dict)
     tools: ToolConfig = field(default_factory=ToolConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)

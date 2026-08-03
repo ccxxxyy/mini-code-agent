@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mini_agent.extensions.slash_commands import SlashCommand
 
 if TYPE_CHECKING:
     from mini_agent.app import Application
+
+# Command handler signature 命令处理函数签名
+HandlerFn = Callable[[str, Any], Awaitable[str]]
 
 
 def register_builtin_commands(app: Application) -> None:
@@ -94,7 +98,7 @@ def register_builtin_commands(app: Application) -> None:
     )
 
 
-def _make_help(app: Application):
+def _make_help(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         cmds = app.slash_commands.list_commands()
         lines = ["**Available Commands 可用命令：**", ""]
@@ -105,7 +109,7 @@ def _make_help(app: Application):
     return handler
 
 
-def _make_clear(app: Application):
+def _make_clear(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         system_prompt = app.session.conversation.system_prompt
         app.session.conversation.messages.clear()
@@ -116,7 +120,7 @@ def _make_clear(app: Application):
     return handler
 
 
-def _make_status(app: Application):
+def _make_status(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         import sys
 
@@ -142,19 +146,44 @@ def _make_status(app: Application):
     return handler
 
 
-def _make_model(app: Application):
+def _make_model(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
-        if not args.strip():
-            return f"Current model: {app.config.llm.model}"
-        new_model = args.strip()
-        app.config.llm.model = new_model
-        app.session.metadata.model = new_model
-        return f"Model switched to: {new_model}"
+        arg = args.strip()
+
+        # No args: show current model + switchable models
+        # 无参数：显示当前模型和可切换模型列表
+        if not arg:
+            lines = [f"当前 LLM: {app.config.llm.model} ({app.config.llm.provider})"]
+            if app.config.llm_profiles:
+                lines.append("")
+                lines.append("**可切换模型 (用 /model <名称> 切换):**")
+                for name, p in app.config.llm_profiles.items():
+                    current = " ← 当前" if p.model == app.config.llm.model else ""
+                    lines.append(f"  `{name}` — {p.model} ({p.provider}){current}")
+            else:
+                lines.append("提示: 在 .env 中配置 MINI_AGENT_MODELS 可定义多个可切换模型")
+            return "\n".join(lines)
+
+        # Named model match: switch full config (model+key+url+provider)
+        # 匹配模型名称：切换完整配置（模型+密钥+地址+Provider）
+        if arg in app.config.llm_profiles:
+            app.switch_llm_profile(arg)
+            return f"已切换到 `{arg}`: {app.config.llm.model} ({app.config.llm.provider})"
+
+        # Fallback: treat as a raw model name (same provider/key)
+        # 兜底: 作为裸模型名处理（沿用当前 provider 和密钥）
+        app.config.llm.model = arg
+        app.session.metadata.model = arg
+        from mini_agent.llm.registry import ProviderRegistry
+
+        app._llm = ProviderRegistry.create(app.config.llm)
+        app.agent_loop._llm = app._llm
+        return f"模型已切换为: {arg}"
 
     return handler
 
 
-def _make_compact(app: Application):
+def _make_compact(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         cm = app.context_manager
         cm.update_total(app.session.conversation)
@@ -175,7 +204,7 @@ def _make_compact(app: Application):
     return handler
 
 
-def _make_memory(app: Application):
+def _make_memory(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         from mini_agent.memory.persistent import MemoryEntry, PersistentMemory
 
@@ -212,7 +241,7 @@ def _make_memory(app: Application):
     return handler
 
 
-def _make_session(app: Application):
+def _make_session(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         store = app.session_store
         parts = args.strip().split(maxsplit=1)
@@ -267,7 +296,7 @@ def _make_session(app: Application):
     return handler
 
 
-def _make_tools(app: Application):
+def _make_tools(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         tools = app.tool_registry.list_tools()
         if not tools:
@@ -280,7 +309,7 @@ def _make_tools(app: Application):
     return handler
 
 
-def _make_skill(app: Application):
+def _make_skill(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         sr = app.skill_registry
         parts = args.strip().split(maxsplit=1)
@@ -311,7 +340,7 @@ def _make_skill(app: Application):
     return handler
 
 
-def _make_quit():
+def _make_quit() -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         raise SystemExit(0)
 
