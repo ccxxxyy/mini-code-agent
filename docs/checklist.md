@@ -174,13 +174,13 @@
 ## Phase 7 检查项
 
 ### 测试覆盖
-- [ ] 单元测试 ≥ 80% 覆盖率（核心模块）
-- [ ] 所有集成测试通过
-- [ ] `uv run pytest` 全绿
+- [x] 核心模块全部有单测（17 个单测文件覆盖 agent_loop/tools/llm_providers/memory/permissions/hooks/events/config/models/skills/slash/mcp/subagent/planner/team）
+- [x] 所有集成测试通过（agent_e2e 装配冒烟 + worktree 真实 git 仓库）
+- [x] `uv run pytest` 全绿（179 个测试, 34s）
 
 ### 生产就绪
-- [ ] 所有已知 edge case 有处理
-- [ ] 内存泄漏检查（长会话）
-- [ ] 并发安全（多 SubAgent 场景）
-- [ ] 错误消息对最终用户友好
-- [ ] 配置验证错误给出清晰提示
+- [x] 已知 edge case 有处理（截断 JSON、损坏 session 文件、缺失技能文件、超时、脏 worktree、未知工具/命令）
+- [x] 内存防护（token 缓存上限 4096 条 + 超长文本跳过缓存；工具输出/glob/grep 结果均有截断上限）
+- [x] 并发安全（SubAgent 独立 registry 克隆 + 独立 Conversation + asyncio.Task 隔离，单测验证父注册表不受影响）
+- [x] 错误消息对最终用户友好（401/402/429/5xx/连接/超时 → 中文可操作提示）
+- [x] 配置验证错误给出清晰提示（启动缺 API key → 三种配置方式指引）

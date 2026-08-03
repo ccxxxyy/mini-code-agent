@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
@@ -16,15 +18,20 @@ PROMPT_STYLE = Style.from_dict(
     {
         # Input prompt
         "prompt": "bold #6c71c4",
-        # Completion menu 补全菜单
-        "completion-menu": "bg:#1a1a2e #e0e0e0",
-        "completion-menu.completion": "bg:#1a1a2e #c0c0c0",
-        "completion-menu.completion.current": "bg:#3d5afe #ffffff bold",
-        "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
-        "completion-menu.meta.completion.current": "bg:#3d5afe #cccccc italic",
-        # Scrollbar
-        "scrollbar.background": "bg:#1a1a2e",
-        "scrollbar.button": "bg:#3d5afe",
+        # Completion menu: transparent background (inherit terminal)
+        # 补全菜单：透明背景（继承终端背景色）
+        "completion-menu": "noinherit",
+        "completion-menu.completion": "noinherit #c0c0c0",
+        "completion-menu.completion.current": "noinherit #ffffff bold reverse",
+        "completion-menu.meta.completion": "noinherit #888888 italic",
+        "completion-menu.meta.completion.current": "noinherit #cccccc italic reverse",
+        # Scrollbar: minimal 极简滚动条
+        "scrollbar.background": "noinherit",
+        "scrollbar.button": "noinherit #555555",
+        # Bottom toolbar: dim text, transparent background
+        # 底部工具栏：暗色文字，透明背景
+        "bottom-toolbar": "noinherit #666666",
+        "toolbar": "noinherit #666666",
     }
 )
 
@@ -39,7 +46,7 @@ class SlashCommandCompleter(Completer):
     def set_commands(self, commands: list[tuple[str, str]]) -> None:
         self._commands = commands
 
-    def get_completions(self, document: Document, complete_event):
+    def get_completions(self, document: Document, complete_event) -> Iterator[Completion]:
         text = document.text_before_cursor.lstrip()
         if not text.startswith("/"):
             return
@@ -55,27 +62,53 @@ class SlashCommandCompleter(Completer):
                 )
 
 
+def _make_history() -> FileHistory | InMemoryHistory:
+    """File-backed history (persists across sessions); falls back to memory.
+    基于文件的输入历史（跨会话保留）；失败时退回内存历史。
+    """
+    from pathlib import Path
+
+    try:
+        history_dir = Path.home() / ".mini-agent"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        return FileHistory(str(history_dir / "input_history"))
+    except OSError:
+        return InMemoryHistory()
+
+
 def create_prompt_session(
     completer: SlashCommandCompleter | None = None,
+    toolbar_provider=None,
 ) -> PromptSession:
     """Create a Prompt Toolkit session with multi-line support and completion.
-    创建一个支持多行输入和补全的 Prompt Toolkit session。"""
+    创建一个支持多行输入和补全的 Prompt Toolkit session。
+
+    toolbar_provider: optional callable returning the bottom toolbar text
+    (shown under the input line, e.g. current model name).
+    toolbar_provider：可选的回调，返回输入框下方工具栏的文本
+    （例如当前模型名）。
+    """
     bindings = KeyBindings()
 
     @bindings.add("escape", "enter")
-    def _newline(event):
+    def _newline(event) -> None:
         event.current_buffer.insert_text("\n")
 
     @bindings.add("backspace")
-    def _backspace_with_complete(event):
+    def _backspace_with_complete(event) -> None:
         buf: Buffer = event.current_buffer
         buf.delete_before_cursor(1)
         text = buf.text.lstrip()
         if text.startswith("/"):
             buf.start_completion()
 
+    def _toolbar() -> HTML | None:
+        if toolbar_provider is None:
+            return None
+        return HTML(f"<toolbar> {toolbar_provider()} </toolbar>")
+
     session: PromptSession = PromptSession(
-        history=InMemoryHistory(),
+        history=_make_history(),
         multiline=False,
         key_bindings=bindings,
         completer=completer,
@@ -83,5 +116,6 @@ def create_prompt_session(
         style=PROMPT_STYLE,
         message=HTML("<prompt>&gt; </prompt>"),
         reserve_space_for_menu=12,
+        bottom_toolbar=_toolbar if toolbar_provider else None,
     )
     return session

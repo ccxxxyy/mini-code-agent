@@ -30,15 +30,22 @@ from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 from mini_agent.tools.hooks import HookManager
 from mini_agent.ui.terminal import Terminal
 
-SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal.
+SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal (Mini-Code-Agent).
+You are powered by the LLM model: {model}
 Working directory: {working_dir}
 Platform: {platform}
 Shell: {shell}
+
+When asked what model or LLM you are, answer with the model name above -- \
+do not guess based on your training data.
 
 You have access to tools for reading/writing/editing files, running shell commands, \
 and searching the codebase (glob for file names, grep for file contents).
 
 Guidelines:
+- Only use tools when the task actually requires them (reading/changing files, \
+running commands). For simple questions, conversation, or anything you already \
+know (including your own model name above), answer directly WITHOUT any tool calls.
 - Use tools to accomplish tasks. Don't guess file contents -- read them.
 - Break complex tasks into steps: search, read, then modify.
 - Be concise in your final answers. Use markdown formatting.
@@ -61,6 +68,7 @@ class Application:
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
         shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
         self.session.conversation.system_prompt = SYSTEM_PROMPT.format(
+            model=config.llm.model,
             working_dir=working_dir,
             platform=platform,
             shell=shell,
@@ -129,6 +137,10 @@ class Application:
             [(c.name, c.description) for c in self.slash_commands.list_commands()]
         )
 
+        # Bottom toolbar: show current LLM under the input line
+        # 底部工具栏：在输入框下方显示当前 LLM
+        self.terminal.set_toolbar_provider(self._toolbar_text)
+
         # Wire agent loop callbacks to terminal rendering 将 Agent 循环回调接入终端渲染
         self.agent_loop.on_stream_start = self.terminal.start_stream
         self.agent_loop.on_stream_delta = self.terminal.feed_stream
@@ -139,6 +151,35 @@ class Application:
         self.agent_loop.on_tool_end = lambda tr: self.terminal.show_tool_result(
             tr.name, tr.output, tr.is_error
         )
+
+    def _toolbar_text(self) -> str:
+        """Bottom toolbar content: current model + switchable model count.
+        底部工具栏内容：当前模型 + 可切换模型数量。
+        """
+        text = f"LLM: {self.config.llm.model} ({self.config.llm.provider})"
+        if len(self.config.llm_profiles) > 1:
+            text += f"  |  {len(self.config.llm_profiles)} models, /model to switch"
+        return text
+
+    def switch_llm_profile(self, name: str) -> bool:
+        """Switch the active LLM to a named profile. Returns True on success.
+        切换当前 LLM 到指定命名档案。成功返回 True。
+        """
+        profile = self.config.llm_profiles.get(name)
+        if profile is None:
+            return False
+        old_model = self.config.llm.model
+        self.config.llm = profile
+        self.session.metadata.model = profile.model
+        self._llm = ProviderRegistry.create(profile)
+        self.agent_loop._llm = self._llm
+        # Update model name in system prompt so the LLM self-identifies correctly
+        # 同步更新 system prompt 中的模型名，让 LLM 正确自我认知
+        self.session.conversation.system_prompt = self.session.conversation.system_prompt.replace(
+            f"powered by the LLM model: {old_model}",
+            f"powered by the LLM model: {profile.model}",
+        )
+        return True
 
     async def run(self) -> None:
         self.terminal.show_welcome()
@@ -196,4 +237,28 @@ class Application:
             self.terminal.show_info("Interrupted.")
             self.terminal.console.print()
         except Exception as e:
-            self.terminal.show_error(str(e))
+            self.terminal.show_error(_friendly_error(e))
+
+
+def _friendly_error(e: Exception) -> str:
+    """Convert raw exceptions to actionable user messages.
+    将原始异常转换为可操作的用户提示。
+    """
+    import httpx
+
+    if isinstance(e, httpx.HTTPStatusError):
+        status = e.response.status_code
+        if status == 401:
+            return "API key 无效或未设置 (401)。请检查 .env 中的 OPENAI_API_KEY。"
+        if status == 402:
+            return "账户余额不足 (402)。请检查你的 API 账户。"
+        if status == 429:
+            return "请求过于频繁或配额耗尽 (429)。请稍后重试。"
+        if status >= 500:
+            return f"API 服务端错误 ({status})。请稍后重试。"
+        return f"API 请求失败 ({status}): {e}"
+    if isinstance(e, httpx.ConnectError):
+        return "无法连接到 API 服务器。请检查网络或 OPENAI_BASE_URL 配置。"
+    if isinstance(e, httpx.TimeoutException):
+        return "API 请求超时。请检查网络或稍后重试。"
+    return str(e)

@@ -33,10 +33,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Custom API base URL (for OpenAI-compatible endpoints)",
     )
+    from mini_agent import __version__
+
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {__version__}",
     )
     return parser.parse_args(argv)
 
@@ -58,6 +60,14 @@ def main(argv: list[str] | None = None) -> None:
         cli_overrides["llm.base_url"] = args.base_url
 
     config = ConfigLoader.load(cli_overrides=cli_overrides)
+
+    if not config.llm.api_key:
+        print("错误: 未配置 API key。请通过以下任一方式设置:")
+        print("  1. 复制 .env.example 为 .env 并填入 OPENAI_API_KEY")
+        print("  2. 设置环境变量: OPENAI_API_KEY 或 MINI_AGENT_API_KEY")
+        print("  3. CLI 参数: mini --api-key sk-xxx")
+        sys.exit(1)
+
     app = Application(config)
 
     try:

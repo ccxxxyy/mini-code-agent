@@ -907,7 +907,60 @@ AgentTeam.start(task):
 
 ---
 
-# 附录：贯穿六个阶段的通用设计原则
+# 第七部分：P7 打磨 + 测试
+
+## 7.1 测试补缺：解析层单测 + 装配冒烟
+
+P7 前的测试盲区是 **LLM Provider 的解析层**——P1/P5 的流式解析（`_parse_chunk`/`_parse_event`/`assemble_response`）只被间接覆盖。新增 23 个直接单测：
+
+- **OpenAI 解析**：文本 delta / finish_reason / 工具调用碎片 / usage 提取 / context_window 查表兜底
+- **碎片组装**：跨 3 个 chunk 的 tool_call 参数拼接、多工具并发、截断 JSON 兜底为空字典
+- **Anthropic 解析**：text_delta / tool_use 块 / input_json_delta / stop_reason 映射（end_turn→stop, tool_use→tool_calls）/ 未知事件忽略
+- **格式转换**：system 分离、tool_calls→tool_use 块、tool 消息→tool_result 块、工具 schema 转换
+
+**装配冒烟测试**（`test_agent_e2e.py`）：完整 Application 构造一遍，断言所有层就位、6 工具注册、slash 命令齐全、system prompt 含平台信息——防止装配代码腐化（wiring 错误往往单测查不出）。
+
+## 7.2 错误处理：友好化最后一公里
+
+原则"失败即数据"已贯穿各层（工具异常→ToolResult、截断 JSON→空字典、损坏 session→None），P7 补的是**面向用户的两个出口**：
+
+**1. LLM API 错误翻译**（`app.py` 的 `_friendly_error`）：httpx 异常按状态码映射为中文可操作提示——401→"检查 .env 中的 OPENAI_API_KEY"、402→余额不足、429→稍后重试、5xx→服务端错误、ConnectError→检查网络/BASE_URL、Timeout→超时。用户看到的是"怎么办"而不是 traceback。
+
+**2. 启动前置检查**（`cli.py`）：API key 为空直接给出三种配置方式指引后退出——比启动后第一次对话才报 401 的体验好得多。
+
+## 7.3 性能：token 计数 LRU 缓存
+
+**热点分析**：每次压缩检查（每轮 OBSERVE 都触发）会重算全对话 token——system prompt（~800 token 的长文本）和所有历史消息被反复 tiktoken 编码，而它们的内容根本没变。
+
+**方案**（`token_counter.py`）：
+
+```
+@lru_cache(maxsize=4096)  # 按文本内容缓存
+def _count_cached(text): ...
+
+超过 50K 字符的文本跳过缓存 —— lru_cache 持有字符串引用，
+缓存超大文本会导致内存膨胀
+```
+
+配合 Message.token_count 字段缓存（P4 已有），二级缓存让压缩检查的重复计数开销趋近于零。
+
+## 7.4 UI 打磨
+
+- **主题系统**（`ui/themes.py`）：Theme frozen dataclass 定义 8 个语义色位（primary/success/error/warning/dim/menu 系列），内置 default/dark/light 三套配色，`get_theme(name)` 兜底默认主题。
+- **输入历史持久化**（`ui/input_handler.py`）：InMemoryHistory → FileHistory（`~/.mini-agent/input_history`），上下键历史跨会话保留；目录创建失败时退回内存历史（fail-safe）。
+
+## 7.5 最终测试矩阵
+
+179 个测试（P7 新增 23 个），34 秒跑完：
+
+| 类别 | 文件数 | 覆盖 |
+|---|---|---|
+| 单元测试 | 18 | models/events/config/tools/agent_loop/agent_security/permissions/hooks/context/session_store/persistent_memory/slash/skills/mcp/subagent/planner/team/llm_providers |
+| 集成测试 | 2 | agent_e2e（装配冒烟）、worktree（真实 git 仓库） |
+
+---
+
+# 附录：贯穿七个阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug

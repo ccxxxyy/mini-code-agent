@@ -26,11 +26,59 @@ class ConfigLoader:
         # Apply environment variables
         config = ConfigLoader._apply_env(config)
 
+        # Load named LLM profiles 加载命名 LLM 档案
+        ConfigLoader._load_profiles(config)
+
         # Apply CLI overrides (highest priority)
         if cli_overrides:
             config = ConfigLoader._apply_cli(config, cli_overrides)
 
         return config
+
+    @staticmethod
+    def _load_profiles(config: AgentConfig) -> None:
+        """Parse named switchable models from environment variables.
+        从环境变量解析可切换的命名模型。
+
+        Format 格式:
+          MINI_AGENT_MODELS=fast,smart
+          MODEL_FAST_MODEL=deepseek-chat
+          MODEL_FAST_API_KEY=sk-xxx        (可省略, 继承默认)
+          MODEL_FAST_BASE_URL=https://...   (可省略, 继承默认)
+          MODEL_FAST_PROVIDER=openai        (可省略, 继承默认)
+
+        Legacy MINI_AGENT_PROFILES / PROFILE_X_* names still work.
+        旧的 MINI_AGENT_PROFILES / PROFILE_X_* 命名仍然兼容。
+        """
+        from dataclasses import replace
+
+        names = os.environ.get("MINI_AGENT_MODELS", "") or os.environ.get("MINI_AGENT_PROFILES", "")
+        if not names.strip():
+            return
+
+        for raw_name in names.split(","):
+            name = raw_name.strip()
+            if not name:
+                continue
+            # New MODEL_X_* prefix first, legacy PROFILE_X_* as fallback
+            # 优先新的 MODEL_X_* 前缀，旧的 PROFILE_X_* 兜底
+            new_prefix = f"MODEL_{name.upper()}_"
+            old_prefix = f"PROFILE_{name.upper()}_"
+
+            def get(field: str, np=new_prefix, op=old_prefix) -> str | None:
+                return os.environ.get(np + field) or os.environ.get(op + field)
+
+            model = get("MODEL")
+            if not model:
+                continue  # An entry must at least define a model 至少要定义模型名
+            profile = replace(
+                config.llm,
+                model=model,
+                provider=get("PROVIDER") or config.llm.provider,
+                api_key=get("API_KEY") or config.llm.api_key,
+                base_url=get("BASE_URL") or config.llm.base_url,
+            )
+            config.llm_profiles[name] = profile
 
     @staticmethod
     def _load_dotenv() -> None:

@@ -28,7 +28,7 @@ class MCPServerConnection:
                 "params": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "mini-code-agent", "version": "0.1.0"},
+                    "clientInfo": {"name": "mini-code-agent", "version": "0.2.0"},
                 },
             }
         )

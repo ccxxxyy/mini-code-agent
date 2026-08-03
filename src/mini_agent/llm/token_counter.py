@@ -9,13 +9,14 @@ chars/4 heuristic otherwise (tiktoken is an optional dependency).
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 _encoder = None
 _tiktoken_checked = False
 
 
-def _get_encoder():
+def _get_encoder() -> Any:
     global _encoder, _tiktoken_checked
     if not _tiktoken_checked:
         _tiktoken_checked = True
@@ -28,14 +29,32 @@ def _get_encoder():
     return _encoder
 
 
-def count_tokens(text: str) -> int:
-    """Count tokens in text. Accurate with tiktoken, estimated without.
-    统计文本的 token 数。有 tiktoken 时精确，否则为估算值。
-    """
+@lru_cache(maxsize=4096)
+def _count_cached(text: str) -> int:
     encoder = _get_encoder()
     if encoder is not None:
         return len(encoder.encode(text))
-    return max(1, len(text) // 4) if text else 0
+    return max(1, len(text) // 4)
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text. Accurate with tiktoken, estimated without.
+    统计文本的 token 数。有 tiktoken 时精确，否则为估算值。
+
+    Results are LRU-cached: system prompts and repeated tool outputs
+    are recounted on every compression check, caching avoids rework.
+    结果带 LRU 缓存：system prompt 和重复的工具输出在每次压缩检查时
+    都会被重新计数，缓存避免重复计算。
+    """
+    if not text:
+        return 0
+    # Skip cache for very long texts (memory concern) 超长文本跳过缓存（内存考虑）
+    if len(text) > 50_000:
+        encoder = _get_encoder()
+        if encoder is not None:
+            return len(encoder.encode(text))
+        return max(1, len(text) // 4)
+    return _count_cached(text)
 
 
 def count_message_tokens(message: dict[str, Any]) -> int:
