@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent 核心技术实现原理与方案选型
 
-本文档记录 P1-P3 阶段各核心技术的实现原理、设计权衡与方案选型理由，与 `spec.md`（架构规格）互补：spec 讲"是什么"，本文讲"为什么这么做"。
+本文档记录各阶段各核心技术的实现原理、设计权衡与方案选型理由，与 `spec.md`（架构规格）互补：spec 讲"是什么"，本文讲"为什么这么做"。
 
 ---
 
@@ -445,10 +445,222 @@ Windows: del /s /q、rmdir /s、format c:
 
 ---
 
-# 附录：贯穿三个阶段的通用设计原则
+# 第四部分：P4 记忆 + 上下文管理
 
-1. **接口先行**：LLMProvider / Tool / HookFn 都是先定契约再做实现，Mock 测试与未来扩展（Anthropic Provider、MCP 工具）都吃这个红利
+## 4.1 Token 计数体系
+
+### 要解决的问题
+
+上下文窗口有硬上限（如 128K tokens）。Agent 的工具输出（文件内容、命令输出）会快速膨胀历史，必须在**发送 API 请求之前**预判是否超窗口。API 响应后的 usage 字段只能事后确认，不能用于事前决策。
+
+### 实现原理
+
+`llm/token_counter.py` 提供两层计数：
+
+```
+count_tokens(text)          → 单段文本的 token 数
+count_message_tokens(msg)   → 单条 API 消息（含 role 开销 + 工具调用序列化）
+```
+
+**双路径策略**：
+
+| 路径 | 精度 | 场景 |
+|---|---|---|
+| tiktoken（cl100k_base 编码） | 精确 | 安装了可选依赖 tiktoken 时 |
+| `len(text) // 4` | 估算 | 无 tiktoken 的兜底（英文 ~4 chars/token，中文偏差更大但足够做阈值判断） |
+
+每条消息额外加 4 token 开销（角色标记 + 分隔符），工具调用额外加 3 token/call（函数名 + 参数包裹）。
+
+### 设计权衡
+
+- **为什么 tiktoken 是可选依赖？** 它是编译型包（Rust 实现），在部分环境下载困难（我们的清华镜像就 403 了）。核心功能不应因此无法使用。
+- **为什么不调 API 的 token 计数端点？** 每次发请求前先调一次计数 API 开销太大且增加延迟。本地估算足够触发压缩阈值。
+
+## 4.2 ContextManager 上下文管理器
+
+### 实现原理
+
+`memory/context.py` 是上下文窗口的"仪表盘"：
+
+```
+ContextManager:
+    count_message(msg) → int      # 计数并缓存到 msg.token_count
+    update_total(conv) → int      # 全量重算（system_prompt + 所有消息）
+    usage_ratio → float           # 已用 / 总窗口（0.0~1.0）
+    tokens_remaining → int        # 剩余可用
+    needs_compression → bool      # >= threshold?
+    check_and_compress(conv)      # 检查 + 触发压缩级联
+```
+
+**token_count 缓存机制**：每条消息首次计数后写入 `msg.token_count`，后续读取直接用缓存。压缩后清除缓存（`msg.token_count = None`）强制重算。
+
+**与 AgentLoop 的集成点**：在 OBSERVE 阶段（工具结果追加后）调用 `check_and_compress`——这是上下文增长最快的时刻（一次 read_file 可能加几千 token），恰好在下一轮 THINK（发 API 请求）之前。
+
+### 设计权衡
+
+- **Compressor 通过 `set_compressor()` 延迟注入**而非构造函数参数：ContextManager 在 `memory/` 包，Compressor 也在 `memory/` 包但依赖 `ContextManager` 的 `count_tokens`——用延迟注入打破循环。
+- **阈值默认 0.75**（可配置）：留 25% 给 LLM 输出 + 新一轮工具调用的空间。太高则压缩后马上又触发；太低则浪费窗口。
+
+## 4.3 三级压缩策略级联
+
+### 要解决的问题
+
+简单截断会丢失上下文导致 LLM "失忆"。需要渐进式压缩：先压缩低价值内容，再压缩旧内容，最后才截断。
+
+### 实现原理
+
+`memory/compressor.py` 的 `Compressor` 按级联顺序尝试三个策略，每级执行后检查是否已达目标（`total_tokens <= target`），达标即停：
+
+**Stage 1: DropToolResults（精简工具输出）**
+
+工具输出是历史中最冗余的部分（一个 ReadFile 可能 2000 行）。将 > 200 字符的输出截断为前 200 字符 + 统计摘要。保留工具调用结构（LLM 知道"调了什么工具"），只丢弃原始输出。
+
+```
+Before: read_file → 2000 行文件内容
+After:  read_file → 前 200 字符 + "... (2000 lines, 45000 chars total, truncated)"
+```
+
+跳过已压缩的（`msg.compressed == True`），避免重复处理。
+
+**Stage 2: SummarizeOldest（摘要旧消息）**
+
+保留最近 6 条消息不动（当前工作上下文），将之前所有消息提取为一条摘要。当前实现是**提取式摘要**（每条消息取角色 + 前 300 字符 / 工具名 / 结果状态），不调 LLM：
+
+```
+[Compressed conversation history]
+[user] 帮我读取 README...
+[assistant] called tools: read_file
+[tool] read_file → ok
+[assistant] 这个项目是一个...
+```
+
+设计决策：P4 阶段用提取式而非 LLM 摘要，原因是避免压缩本身消耗 token、避免递归 API 调用的复杂性、以及保持可测性（无网络依赖）。LLM 摘要作为可插拔升级留给未来。
+
+**Stage 3: SlidingWindow（滑动窗口兜底）**
+
+前两级仍然超限时，从后往前按 token 预算保留尽可能多的最近消息。这是"核选项"——会丢失所有早期上下文，但保证系统不会因为 context overflow 崩溃。
+
+### 级联控制
+
+```
+Compressor.compress(conversation, target_tokens):
+    for strategy in [DropToolResults, SummarizeOldest, SlidingWindow]:
+        recount total tokens
+        if total <= target: break
+        strategy.compress(conversation, target)
+```
+
+每级执行后重算（`token_count = None` 的消息会被 recount），确保判断基于最新状态。
+
+## 4.4 会话持久化
+
+### 实现原理
+
+`memory/session_store.py` 将 Session 对象序列化为 JSON 文件存储在 `~/.mini-agent/sessions/{session_id}.json`：
+
+```
+SessionStore:
+    save(session) → Path     # 序列化写入，更新 last_active 时间戳
+    load(session_id) → Session | None
+    list_sessions() → [{id, model, turns, last_active, project_dir}]
+    delete(session_id) → bool
+```
+
+**序列化的关键挑战**：Message 中嵌套了 frozen dataclass（ToolCall/ToolResult）、datetime、Path——全部手动转换为 JSON 兼容类型（isoformat/str），不用 Pydantic 的 `.model_dump()` 以保持零依赖。
+
+**反序列化重建完整对象图**：JSON → `_deserialize_session` → SessionMetadata + Conversation（含重建的 ToolCall/ToolResult 列表）。datetime 用 `fromisoformat` 还原，Role 用枚举构造。
+
+### 设计权衡
+
+- **文件而非数据库**：会话数量通常几十到几百，JSON 文件 I/O 足够。SQLite 引入依赖且对调试不友好（看不到原文）。
+- **list_sessions 只读 metadata 不反序列化全部消息**：列表场景不需要完整对话历史，只解析外层 metadata 即可。
+
+## 4.5 跨会话记忆
+
+### 实现原理
+
+`memory/persistent.py` 实现双层记忆存储：
+
+```
+项目级: {project_dir}/.mini-agent/memory.json    ← 项目特有的约定、配置
+用户级: ~/.mini-agent/memory/user_memory.json     ← 用户偏好、习惯
+```
+
+每条记忆是一个 `MemoryEntry`：
+
+```
+MemoryEntry:
+    id: "mem_a1b2c3"          # UUID 前缀
+    content: "User prefers tabs"
+    source: "user" | "project" | "extracted"
+    created_at: ISO 时间戳
+    tags: ["style", "editor"]
+```
+
+**搜索**是双通道匹配：内容关键词 + 标签关键词，同时搜索项目级和用户级记忆。
+
+### 4.6 记忆提取
+
+`memory/extraction.py` 的 `MemoryExtractor` 从对话中自动提取可持久化的事实：
+
+**触发条件**：用户消息 >= 5 条（短对话无法提取有意义的偏好）。
+
+**提取方式**：正则模式匹配用户消息中的关键句式：
+
+```
+"always/prefer/please/remember + 内容"  → preference 标签
+"this project/we/our team uses/runs"   → convention 标签
+"don't/never/avoid + 内容"              → constraint 标签
+```
+
+**去重**：与已有记忆做精确匹配 + 子串包含检查，避免同一事实重复存储。
+
+### 设计权衡
+
+- **为什么不用 LLM 提取？** 提取发生在每次对话结束时，频率高；LLM 调用增加延迟和成本。正则模式覆盖了最常见的指令句式，误提取的代价低（多存一条无害记忆），漏提取可以未来加模式补救。
+- **项目级 vs 用户级分离的理由**：`uses pytest` 是项目事实，换项目就不适用；`prefers tabs` 是用户偏好，跨项目通用。分层存储让搜索时可以按范围过滤。
+
+## 4.7 AgentLoop 集成
+
+ContextManager 通过构造函数注入 AgentLoop（可选参数，向后兼容不传）。集成点在 OBSERVE 阶段：
+
+```
+# core/agent_loop.py 的 run() 循环中
+OBSERVE:
+    for result in results:
+        conversation.append(tool_result_message)
+    # 新增：上下文压缩检查
+    if self._context:
+        await self._context.check_and_compress(conversation)
+```
+
+压缩发生在工具结果追加后、`_should_continue` 判断前——确保下一轮 THINK 发送的是压缩后的对话。
+
+App 装配层（`app.py`）负责连线：
+
+```
+context_manager = ContextManager(config.memory)
+context_manager.set_compressor(Compressor())
+agent_loop = AgentLoop(..., context_manager=context_manager)
+```
+
+## 4.8 测试验证矩阵
+
+27 个 P4 新测试（总计 110 个）：
+
+| 模块 | 测试要点 |
+|---|---|
+| test_context.py (12) | token 计数缓存 / update_total / usage_ratio / needs_compression 阈值 / 低于阈值不压缩 / 超阈值触发压缩且消息数减少 |
+| test_session_store.py (6) | save+load 完整往返 / 含 tool_calls 往返 / list 多会话 / delete / 删不存在的 / 加载不存在的 |
+| test_persistent_memory.py (9) | 用户级 CRUD / 项目级 CRUD / 关键词搜索 / 标签搜索 / 跨层搜索 / 提取数不足不触发 / 提取偏好 / 去重 / 存储到项目级 |
+
+---
+
+# 附录：贯穿四个阶段的通用设计原则
+
+1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy 都是先定契约再做实现，Mock 测试与未来扩展（Anthropic Provider、MCP 工具、LLM 摘要策略）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常）都转成 `is_error=True` 的 ToolResult 进入对话，LLM 可见可纠错；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式
-4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM 解 API 依赖、tmp_path 解文件系统依赖——81 个测试 30 秒跑完且不出网
+4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层通过延迟注入打破内部循环依赖、依赖方向永远单向向下
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM 解 API 依赖、tmp_path 解文件系统依赖——110 个测试 30 秒跑完且不出网
+6. **渐进式增强**：压缩用提取式→可升级为 LLM 摘要；记忆提取用正则→可升级为 LLM 分析；tiktoken 可选→精度按需提升。每个模块都预留了升级路径但当前实现保持简单可测

@@ -7,6 +7,9 @@ from pathlib import Path
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.registry import ProviderRegistry
+from mini_agent.memory.compressor import Compressor
+from mini_agent.memory.context import ContextManager
+from mini_agent.memory.session_store import SessionStore
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import (
     SessionEndEvent,
@@ -78,6 +81,12 @@ class Application:
         )
         self.hook_manager = HookManager()
 
+        # Memory: context manager + compressor + session store
+        self.context_manager = ContextManager(config.memory)
+        compressor = Compressor()
+        self.context_manager.set_compressor(compressor)
+        self.session_store = SessionStore()
+
         self.agent_loop = AgentLoop(
             llm=self._llm,
             tool_registry=self.tool_registry,
@@ -86,6 +95,7 @@ class Application:
             tool_context=tool_context,
             permission_manager=self.permission_manager,
             hook_manager=self.hook_manager,
+            context_manager=self.context_manager,
         )
 
         # Wire agent loop callbacks to terminal rendering

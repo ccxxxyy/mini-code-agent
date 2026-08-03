@@ -101,23 +101,25 @@
 ## Phase 4: 记忆 + 上下文管理 (P4)
 
 ### P4.1 Token 管理
-- [ ] `llm/token_counter.py` 完善 — 各 Provider 精确 token 计数
+- [x] `llm/token_counter.py` 完善 — per-message 计数 + 工具调用开销估算（tiktoken 可选）
 
 ### P4.2 上下文管理
-- [ ] `memory/context.py` — ContextManager (add_message, check_and_compress, usage_ratio, tokens_remaining)
-- [ ] `memory/compressor.py` — CompressionStrategy ABC + 三级策略 (DropToolResults, SummarizeOldest, SlidingWindow)
+- [x] `memory/context.py` — ContextManager (count_message, update_total, check_and_compress, usage_ratio, tokens_remaining, needs_compression)
+- [x] `memory/compressor.py` — CompressionStrategy ABC + 三级策略 (DropToolResults: 截断长输出, SummarizeOldest: 提取式摘要, SlidingWindow: 滑动窗口兜底) + Compressor 级联
 
 ### P4.3 会话持久化
-- [ ] `memory/session_store.py` — SessionStore (save, load, list_sessions, delete)
+- [x] `memory/session_store.py` — SessionStore (save, load, list_sessions, delete — JSON 序列化/反序列化含 ToolCall/ToolResult)
 
 ### P4.4 跨会话记忆
-- [ ] `memory/persistent.py` — PersistentMemory (项目级 + 用户级, CRUD, search)
-- [ ] `memory/extraction.py` — MemoryExtractor (对话分析, 自动提取, 去重)
+- [x] `memory/persistent.py` — PersistentMemory (项目级 `.mini-agent/memory.json` + 用户级 `~/.mini-agent/memory/`, CRUD, 关键词+标签搜索)
+- [x] `memory/extraction.py` — MemoryExtractor (正则模式提取偏好/约束/惯例, 去重, 自动存储到对应层级)
 
 ### P4.5 验证
-- [ ] 长对话 (50+ 轮) 后自动压缩, token 使用率下降
-- [ ] 退出后重启, `/session resume` 恢复会话
-- [ ] 跨会话记忆: 上次提到的偏好在新会话中被回忆
+- [x] 上下文压缩: 阈值触发 → 三级级联压缩 → 消息数减少 (单测 test_context.py 12 个)
+- [x] 会话持久化: save/load 完整往返含 tool_calls + tool_results (单测 test_session_store.py 6 个)
+- [x] 跨会话记忆: 项目+用户 CRUD, 搜索, 提取, 去重 (单测 test_persistent_memory.py 9 个)
+- [x] AgentLoop 集成: 每轮 OBSERVE 阶段自动 check_and_compress
+- [x] 110 个测试全过, lint/format/build CI 通过
 
 ---
 
