@@ -10,6 +10,7 @@ from mini_agent.core.agent_state import AgentPhase, AgentState
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider, LLMResponse, StreamChunk
 from mini_agent.llm.openai_provider import assemble_response
+from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import (
     AgentPhaseChangeEvent,
@@ -42,6 +43,7 @@ class AgentLoop:
         tool_context: ToolContext,
         permission_manager: PermissionManager | None = None,
         hook_manager: HookManager | None = None,
+        context_manager: ContextManager | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
@@ -50,6 +52,7 @@ class AgentLoop:
         self._tool_context = tool_context
         self._permissions = permission_manager
         self._hooks = hook_manager or HookManager()
+        self._context = context_manager
         self._state = AgentState(max_iterations=config.max_agent_iterations)
         self._cancelled = False
 
@@ -110,6 +113,10 @@ class AgentLoop:
             for result in results:
                 conversation.append(Message(role=Role.TOOL, tool_result=result))
             self._state.last_tool_results = results
+
+            # Context compression check
+            if self._context:
+                await self._context.check_and_compress(conversation)
 
             if not self._should_continue():
                 final_content = response.content or "(stopped: iteration limit or cancellation)"

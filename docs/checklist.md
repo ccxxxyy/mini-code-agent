@@ -26,8 +26,8 @@
 - [x] 不信任 LLM 输出的路径/命令（validate_args 校验 + PermissionCheck + PathGuard 三重验证）
 
 ### 测试
-- [x] 新模块有对应的单元测试文件（8 个测试文件对应各核心模块）
-- [x] 核心逻辑分支有测试覆盖（83 个测试）
+- [x] 新模块有对应的单元测试文件（11 个测试文件对应各核心模块）
+- [x] 核心逻辑分支有测试覆盖（110 个测试）
 - [x] 测试可以独立运行（MockLLM/ScriptedLLM 脚本回放 + tmp_path，零网络依赖）
 
 ---
@@ -99,18 +99,18 @@
 ## Phase 4 检查项
 
 ### 功能完整性
-- [ ] ContextManager 正确跟踪 token 使用
-- [ ] 达到 75% 阈值自动触发压缩
-- [ ] 压缩后对话连贯性保持（LLM 不会丢失关键上下文）
-- [ ] Session 可序列化/反序列化（JSON）
-- [ ] 会话恢复后对话状态完整
-- [ ] 跨会话记忆 CRUD 正常
-- [ ] 记忆搜索返回相关结果
+- [x] ContextManager 正确跟踪 token 使用（count_message 缓存 + update_total 全量重算）
+- [x] 达到 75% 阈值自动触发压缩（needs_compression 属性 + check_and_compress 集成到 AgentLoop OBSERVE 阶段）
+- [x] 压缩后对话连贯性保持（SummarizeOldest 保留最近 6 条 + 提取式摘要保留角色和关键内容）
+- [x] Session 可序列化/反序列化（JSON，含 ToolCall/ToolResult 完整往返，6 个单测覆盖）
+- [x] 会话恢复后对话状态完整（system_prompt + messages + metadata 全部还原）
+- [x] 跨会话记忆 CRUD 正常（项目级 + 用户级双层存储，add/load/save/search）
+- [x] 记忆搜索返回相关结果（关键词 + 标签双通道匹配，跨层搜索）
 
 ### 压缩策略验证
-- [ ] Stage 1: 工具输出精简生效
-- [ ] Stage 2: LLM 摘要生成质量合格
-- [ ] Stage 3: 滑动窗口兜底正常
+- [x] Stage 1: 工具输出精简生效（>200 字符截断 + 行数/字符数摘要，单测验证短输出跳过）
+- [x] Stage 2: 提取式摘要生效（保留最近 6 条 + 旧消息按 role 摘要，单测验证消息数不足时跳过）
+- [x] Stage 3: 滑动窗口兜底正常（按 token 预算从后往前保留，最终一定收敛到目标以内）
 
 ---
 

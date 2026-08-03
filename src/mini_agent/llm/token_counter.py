@@ -6,6 +6,8 @@ chars/4 heuristic otherwise (tiktoken is an optional dependency).
 
 from __future__ import annotations
 
+from typing import Any
+
 _encoder = None
 _tiktoken_checked = False
 
@@ -31,13 +33,30 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
-def count_message_tokens(messages: list[dict]) -> int:
-    """Estimate total tokens for a list of API messages."""
-    total = 0
-    for msg in messages:
-        # ~4 tokens per message overhead (role, separators)
-        total += 4
-        content = msg.get("content")
-        if isinstance(content, str):
-            total += count_tokens(content)
+def count_message_tokens(message: dict[str, Any]) -> int:
+    """Estimate tokens for a single API message.
+
+    Each message has ~4 tokens overhead (role, separators).
+    Tool calls add extra for the function schema.
+    """
+    total = 4  # role + separators overhead
+    content = message.get("content")
+    if isinstance(content, str):
+        total += count_tokens(content)
+
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        for tc in tool_calls:
+            total += 3  # tool call overhead
+            func = tc.get("function", {})
+            if func.get("name"):
+                total += count_tokens(func["name"])
+            if func.get("arguments"):
+                total += count_tokens(func["arguments"])
+
     return total
+
+
+def count_messages_tokens(messages: list[dict[str, Any]]) -> int:
+    """Estimate total tokens for a list of API messages."""
+    return sum(count_message_tokens(m) for m in messages) + 3  # +3 for reply priming
