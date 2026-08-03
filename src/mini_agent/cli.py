@@ -1,4 +1,4 @@
-"""CLI argument parsing and application launch."""
+"""CLI argument parsing and application launch. CLI 参数解析与应用启动。"""
 
 from __future__ import annotations
 

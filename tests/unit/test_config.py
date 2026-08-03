@@ -1,4 +1,4 @@
-"""Tests for configuration loading."""
+"""Tests for configuration loading. 配置加载的测试。"""
 
 import pytest
 
@@ -16,7 +16,9 @@ ENV_VARS = [
 
 @pytest.fixture(autouse=True)
 def isolate_env(monkeypatch, tmp_path):
-    """Clear relevant env vars and prevent .env auto-loading from project root."""
+    """Clear relevant env vars and prevent .env auto-loading from project root.
+    清除相关环境变量，并防止从项目根目录自动加载 .env。
+    """
     for var in ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(tmp_path)

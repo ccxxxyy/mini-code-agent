@@ -1,4 +1,5 @@
-"""MCP tool adapter -- wraps MCP-discovered tools as internal Tool objects."""
+"""MCP tool adapter -- wraps MCP-discovered tools as internal Tool objects.
+MCP 工具适配器——把 MCP 发现的工具包装为内部 Tool 对象。"""
 
 from __future__ import annotations
 
@@ -12,7 +13,8 @@ if TYPE_CHECKING:
 
 
 class MCPToolAdapter(Tool):
-    """Wraps an MCP-discovered tool as an internal Tool."""
+    """Wraps an MCP-discovered tool as an internal Tool.
+    把 MCP 发现的工具包装为内部 Tool。"""
 
     def __init__(
         self,

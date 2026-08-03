@@ -1,4 +1,4 @@
-"""LLM Provider abstraction layer."""
+"""LLM Provider abstraction layer. LLM Provider 抽象层。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from mini_agent.models.message import ToolCall
 
 @dataclass
 class ToolCallDelta:
-    """Incremental tool call data from streaming."""
+    """Incremental tool call data from streaming. 来自 stream 的增量工具调用数据。"""
 
     index: int
     id: str | None = None
@@ -29,7 +29,7 @@ class TokenUsage:
 
 @dataclass
 class StreamChunk:
-    """A single chunk from a streaming LLM response."""
+    """A single chunk from a streaming LLM response. 流式 LLM 响应中的单个 chunk。"""
 
     delta: str = ""
     tool_call_deltas: list[ToolCallDelta] = field(default_factory=list)
@@ -39,7 +39,7 @@ class StreamChunk:
 
 @dataclass
 class LLMResponse:
-    """Completed LLM response."""
+    """Completed LLM response. 完整的 LLM 响应。"""
 
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
@@ -49,7 +49,7 @@ class LLMResponse:
 
 
 class LLMProvider(ABC):
-    """Abstract base for all LLM providers."""
+    """Abstract base for all LLM providers. 所有 LLM Provider 的抽象基类。"""
 
     @abstractmethod
     async def stream(
@@ -58,16 +58,16 @@ class LLMProvider(ABC):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Streaming completion -- yields chunks as they arrive."""
+        """Streaming completion -- yields chunks as they arrive. 流式补全——chunk 到达时逐个产出。"""
         ...
 
     @abstractmethod
     def count_tokens(self, text: str) -> int:
-        """Estimate token count for the given text."""
+        """Estimate token count for the given text. 估算给定文本的 token 数。"""
         ...
 
     @property
     @abstractmethod
     def context_window(self) -> int:
-        """Maximum context window size for the configured model."""
+        """Maximum context window size for the configured model. 所配置模型的最大上下文窗口大小。"""
         ...

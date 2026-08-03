@@ -1,4 +1,5 @@
-"""ReadFile tool -- read file contents with line numbers."""
+"""ReadFile tool -- read file contents with line numbers.
+ReadFile 工具——读取文件内容并附带行号。"""
 
 from __future__ import annotations
 

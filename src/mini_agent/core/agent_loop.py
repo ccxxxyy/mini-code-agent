@@ -25,14 +25,16 @@ from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookStage
 
 # Callback invoked with each streaming text delta (for UI rendering)
+# 每次收到流式文本增量时调用的回调（用于 UI 渲染）
 StreamCallback = Callable[[str], None]
 # Callbacks invoked when a tool starts / finishes (for UI rendering)
+# 工具开始 / 结束时调用的回调（用于 UI 渲染）
 ToolStartCallback = Callable[[ToolCall], None]
 ToolEndCallback = Callable[[ToolResult], None]
 
 
 class AgentLoop:
-    """Orchestrates the think-act-observe ReAct cycle."""
+    """Orchestrates the think-act-observe ReAct cycle. 编排“思考-行动-观察”的 ReAct 循环。"""
 
     def __init__(
         self,
@@ -72,7 +74,9 @@ class AgentLoop:
 
     async def run(self, conversation: Conversation) -> str:
         """Execute the full ReAct loop. Appends messages to the conversation.
-        Returns the final assistant text response."""
+        Returns the final assistant text response.
+        执行完整的 ReAct 循环，将消息追加到会话中，返回助手最终的文本回复。
+        """
         self._cancelled = False
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
         tools_called = 0
@@ -135,7 +139,9 @@ class AgentLoop:
         return final_content
 
     async def _think(self, conversation: Conversation) -> LLMResponse:
-        """Call LLM with streaming; assemble the full response."""
+        """Call LLM with streaming; assemble the full response.
+        以 stream 方式调用 LLM 并组装完整响应。
+        """
         api_messages = conversation.to_api_messages()
         tool_schemas = self._tools.get_schemas()
 
@@ -158,7 +164,9 @@ class AgentLoop:
         return assemble_response(chunks)
 
     async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-        """Execute tool calls sequentially, reporting progress via callbacks."""
+        """Execute tool calls sequentially, reporting progress via callbacks.
+        顺序执行工具调用，并通过回调上报进度。
+        """
         results: list[ToolResult] = []
         for tc in tool_calls:
             if self._cancelled:
@@ -208,8 +216,10 @@ class AgentLoop:
         return result
 
     async def _run_tool_pipeline(self, tc: ToolCall, tool) -> ToolResult:
-        """Full security pipeline: permission -> PRE_TOOL hook -> execute -> POST_TOOL hook."""
-        # 1. Permission check
+        """Full security pipeline: permission -> PRE_TOOL hook -> execute -> POST_TOOL hook.
+        完整安全流水线：权限检查 -> PRE_TOOL hook -> 执行 -> POST_TOOL hook。
+        """
+        # 1. Permission check 权限检查
         if self._permissions is not None:
             decision = await self._check_permission(tc)
             if decision == PermissionDecision.DENIED:
@@ -267,7 +277,7 @@ class AgentLoop:
         return result
 
     async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
-        """Route permission check by tool type."""
+        """Route permission check by tool type. 按工具类型路由权限检查。"""
         assert self._permissions is not None
         if tc.name == "bash":
             command = str(tc.arguments.get("command", ""))
@@ -285,12 +295,13 @@ class AgentLoop:
         return PermissionDecision.GRANTED
 
     def _should_continue(self) -> bool:
-        """Decide whether to continue the ReAct loop."""
+        """Decide whether to continue the ReAct loop. 判断是否继续 ReAct 循环。"""
         if self._state.iteration >= self._state.max_iterations:
             return False
         if self._cancelled:
             return False
         # Infinite loop guard: same tool called 6+ times in a row
+        # 死循环保护：同一工具连续调用 6 次及以上
         recent = self._state.recent_tool_names[-6:]
         if len(recent) >= 6 and len(set(recent)) == 1:
             return False

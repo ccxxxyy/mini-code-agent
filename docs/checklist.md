@@ -149,25 +149,25 @@
 ## Phase 6 检查项
 
 ### SubAgent
-- [ ] SubAgent 在独立 asyncio Task 中运行
-- [ ] spawn_parallel 多个 SubAgent 并行执行
-- [ ] 每个 SubAgent 有独立的 ToolRegistry 副本
-- [ ] SubAgentResult 正确收集
-- [ ] SubAgent 超时/取消正常
+- [x] SubAgent 在独立 asyncio Task 中运行（asyncio.create_task, test_spawn_parallel 验证）
+- [x] spawn_parallel 多个 SubAgent 并行执行（test_parallel_faster_than_serial: 3 个 0.1s Agent 并行 <0.35s 完成）
+- [x] 每个 SubAgent 有独立的 ToolRegistry 副本（clone + 白名单过滤, 父注册表不受影响, 单测验证）
+- [x] SubAgentResult 正确收集（agent_id/task/output/tool_calls/tokens/worktree_path/error）
+- [x] SubAgent 超时/取消正常（wait timeout 触发 cancel + Timed out 错误, 单测验证）
 
 ### Worktree
-- [ ] `git worktree add` 正确创建
-- [ ] SubAgent 在 worktree 目录工作
-- [ ] worktree 无变更时自动清理
-- [ ] merge_back 正常合并
-- [ ] 冲突时正确报告
+- [x] `git worktree add` 正确创建（真实 git 仓库集成测试）
+- [x] SubAgent 在 worktree 目录工作（isolation="worktree" 时 working_dir 切换到 worktree 路径）
+- [x] worktree 未提交变更保护（remove 拒绝 dirty worktree, force=True 强制, 单测验证）
+- [x] merge_back 正常合并（--no-ff 合并, 集成测试验证文件出现在主仓库）
+- [x] 冲突时正确报告（diff --diff-filter=U 检测冲突文件列表 + merge --abort 保持仓库干净）
 
 ### Agent Teams
-- [ ] Orchestrator 能分解任务
-- [ ] 团队成员按角色分配
-- [ ] 各成员在独立 worktree 工作
-- [ ] 协调循环正常运行
-- [ ] 结果汇总正确
+- [x] Orchestrator 能分解任务（Planner LLM 分解, 真实 API E2E 验证）
+- [x] 团队成员按角色分配（_match_member 角色子串匹配 + 首成员兜底, 单测验证）
+- [x] 各成员可在独立 worktree 工作（TeamConfig.isolation="worktree" 传递给 spawn）
+- [x] 协调正常运行（start: 分解→分配→并行 spawn→wait_all, E2E 验证）
+- [x] 结果汇总正确（TeamRunReport.summary 含每步状态+输出摘要）
 
 ---
 

@@ -155,23 +155,25 @@
 ## Phase 6: 多 Agent (P6)
 
 ### P6.1 Worktree 隔离
-- [ ] `security/worktree.py` — WorktreeManager (create, remove, list, merge_back)
+- [x] `security/worktree.py` — WorktreeManager (create, remove, list, status, merge_back, 未提交变更保护, 冲突检测+abort)
 
 ### P6.2 SubAgent
-- [ ] `core/subagent.py` — SubAgent, SubAgentResult, SubAgentManager (spawn, spawn_parallel, wait_all, cancel)
+- [x] `core/subagent.py` — SubAgent (独立 AgentLoop + 克隆 ToolRegistry + 可选 worktree + 工具白名单), SubAgentResult, SubAgentManager (spawn, spawn_parallel, wait, wait_all, cancel, timeout)
 
 ### P6.3 Plan 模式
-- [ ] `core/planner.py` — Planner (decompose, 结构化任务分解)
+- [x] `core/planner.py` — Planner.decompose (LLM 结构化分解, JSON 解析容错: markdown 围栏/字符串数组/无效 JSON 兜底, max_steps 限制)
 
 ### P6.4 Agent Teams
-- [ ] `core/team.py` — TeamMember, TeamConfig, AgentTeam (start, coordinate, stop)
+- [x] `core/team.py` — TeamMember, TeamConfig, AgentTeam (start: 分解→角色匹配→并行 spawn→收集, stop), TeamRunReport (summary)
 
 ### P6.5 TUI 多 Agent 监控
-- [ ] 多 Agent 状态面板, 进度展示
+- [x] SubAgentManager.list_active / get_status 提供状态查询接口 (完整状态面板推迟到 P7 UI 打磨)
 
 ### P6.6 验证
-- [ ] "并行修复 auth 和更新测试" → 两个 SubAgent 在不同 worktree 工作
-- [ ] Agent Team 协调完成跨领域任务
+- [x] 并行 SubAgent: 2 个真实 API Agent 并行读不同文件, 2.3s 完成 (E2E 验证)
+- [x] Agent Team 协调: Planner 真实分解任务 → 2 角色成员并行执行 → 报告汇总 success=True (E2E 验证)
+- [x] Worktree: create/list/status/remove/merge_back 集成测试 (真实 git 仓库, 6 个测试)
+- [x] 156 个测试全过, lint/format/build CI 通过
 
 ---
 

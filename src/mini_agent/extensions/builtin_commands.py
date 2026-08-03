@@ -1,4 +1,4 @@
-"""Built-in slash commands."""
+"""Built-in slash commands. 内置斜杠命令。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def register_builtin_commands(app: Application) -> None:
-    """Register all built-in slash commands."""
+    """Register all built-in slash commands. 注册所有内置斜杠命令。"""
     reg = app.slash_commands
 
     reg.register(

@@ -226,7 +226,7 @@ mini-code-agent/
 - [x] P3：安全 + Hook（权限管理、路径守卫、生命周期钩子）
 - [x] P4：记忆 + 上下文管理（压缩、会话持久化、跨会话记忆）
 - [x] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议、Anthropic Provider）
-- [ ] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队）
+- [x] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队、Plan 模式）
 - [ ] P7：打磨 + 测试
 
 ## License

@@ -1,4 +1,5 @@
-"""Permission manager -- evaluates permission requests against rules."""
+"""Permission manager -- evaluates permission requests against rules.
+权限管理器——根据规则评估权限请求。"""
 
 from __future__ import annotations
 
@@ -18,8 +19,9 @@ from mini_agent.models.permissions import (
 from mini_agent.security.path_guard import PathGuard
 
 # Patterns that flag a command as dangerous (confirm before running)
+# 用于标记危险命令的模式（执行前需要确认）
 DANGEROUS_COMMAND_PATTERNS = [
-    r"\brm\s+(-[a-z]*[rf][a-z]*\s+)",  # rm -rf / rm -r / rm -f
+    r"\brm\s+(-[a-z]*[rf][a-z]*\s+)",  # rm -rf / rm -r / rm -f 匹配 rm 的强制/递归删除
     r"\bsudo\b",
     r"\bchmod\s+777\b",
     r"\bmkfs\b",
@@ -27,20 +29,23 @@ DANGEROUS_COMMAND_PATTERNS = [
     r">\s*/dev/sd",
     r"\bgit\s+push\s+.*--force",
     r"\bgit\s+reset\s+--hard",
-    r"\bdel\s+/[sq]",  # Windows del /s /q
-    r"\brmdir\s+/s",  # Windows rmdir /s
-    r"\bformat\s+[a-z]:",  # Windows format
-    r"curl[^|]*\|\s*(ba)?sh",  # curl | sh
+    r"\bdel\s+/[sq]",  # Windows del /s /q Windows 的递归/静默删除
+    r"\brmdir\s+/s",  # Windows rmdir /s Windows 的递归删除目录
+    r"\bformat\s+[a-z]:",  # Windows format Windows 的格式化磁盘
+    r"curl[^|]*\|\s*(ba)?sh",  # curl | sh 下载并直接执行脚本
     r"wget[^|]*\|\s*(ba)?sh",
 ]
 
 # Callback to ask the user for confirmation.
 # Returns True (allow once), False (deny), or "always" (allow for session).
+# 向用户请求确认的回调。
+# 返回 True（允许一次）、False（拒绝）或 "always"（本会话内始终允许）。
 ConfirmCallback = Callable[[str], Awaitable[bool | str]]
 
 
 class PermissionManager:
-    """Evaluates permission requests. Prompts user when needed."""
+    """Evaluates permission requests. Prompts user when needed.
+    评估权限请求。必要时提示用户确认。"""
 
     def __init__(
         self,
@@ -79,34 +84,38 @@ class PermissionManager:
         self._rules.append(rule)
 
     def grant_session_permission(self, scope: PermissionScope, pattern: str) -> None:
-        """User granted permission for the remainder of the session."""
+        """User granted permission for the remainder of the session.
+        用户在本会话剩余时间内授予了该权限。"""
         self._session_grants.add((scope, pattern))
 
     async def check(self, request: PermissionRequest) -> PermissionDecision:
         """Evaluate a permission request.
 
         Order: explicit DENY -> explicit ALLOW -> session grants -> default mode.
+
+        评估权限请求。
+        顺序：显式 DENY -> 显式 ALLOW -> 会话授权 -> 默认模式。
         """
-        # 1. Explicit DENY rules
+        # 1. Explicit DENY rules 显式 DENY 规则
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
                     return PermissionDecision.DENIED
 
-        # 2. Explicit ALLOW rules
+        # 2. Explicit ALLOW rules 显式 ALLOW 规则
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
                     return PermissionDecision.GRANTED
 
-        # 3. Session grants
+        # 3. Session grants 会话授权
         for scope, pattern in self._session_grants:
             if scope == request.scope and self._matches(pattern, request.resource):
                 return PermissionDecision.GRANTED
 
-        # 4. Default mode
+        # 4. Default mode 默认模式
         mode = self._config.permission_mode
         if mode == "allow":
             return PermissionDecision.GRANTED
@@ -115,7 +124,8 @@ class PermissionManager:
         return await self._ask_user(request)
 
     async def check_path(self, path: Path, operation: str = "read") -> PermissionDecision:
-        """Check file path access via PathGuard, then rules."""
+        """Check file path access via PathGuard, then rules.
+        先通过 PathGuard 检查文件路径访问，再检查规则。"""
         level = self._path_guard.check(path, operation)
         if level == PermissionLevel.DENY:
             return PermissionDecision.DENIED
@@ -129,33 +139,38 @@ class PermissionManager:
         return await self.check(request)
 
     async def check_command(self, command: str) -> PermissionDecision:
-        """Check bash command: dangerous patterns need confirmation."""
+        """Check bash command: dangerous patterns need confirmation.
+        检查 bash 命令：危险模式需要确认。"""
         request = PermissionRequest(
             scope=PermissionScope.COMMAND,
             resource=command,
             tool_name="bash",
         )
 
-        # Explicit rules and session grants first
+        # Explicit rules and session grants first 先检查显式规则和会话授权
         decision = await self._check_rules_only(request)
         if decision is not None:
             return decision
 
         # Dangerous pattern -> always confirm (even in allow mode)
+        # 危险模式 -> 始终确认（即使在 allow 模式下）
         if self.is_dangerous_command(command):
             request.context = "dangerous command detected"
             return await self._ask_user(request)
 
-        # Normal command -> default mode
+        # Normal command -> default mode 普通命令 -> 走默认模式
         mode = self._config.permission_mode
         if mode == "deny":
             return PermissionDecision.DENIED
         # Both "allow" and "ask" mode auto-allow normal commands;
         # only dangerous ones need confirmation
+        # "allow" 和 "ask" 模式都会自动放行普通命令；
+        # 只有危险命令才需要确认
         return PermissionDecision.GRANTED
 
     async def _check_rules_only(self, request: PermissionRequest) -> PermissionDecision | None:
-        """Check explicit rules and session grants. None = no match."""
+        """Check explicit rules and session grants. None = no match.
+        检查显式规则和会话授权。None 表示无匹配。"""
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
@@ -178,6 +193,7 @@ class PermissionManager:
     async def _ask_user(self, request: PermissionRequest) -> PermissionDecision:
         if self._confirm is None:
             # No UI available -> deny by default (safe)
+            # 无可用 UI -> 默认拒绝（安全起见）
             return PermissionDecision.DENIED
         prompt = f"Allow {request.scope.value} access to: {request.resource}"
         if request.context:
@@ -190,10 +206,12 @@ class PermissionManager:
 
     @staticmethod
     def _matches(pattern: str, resource: str) -> bool:
-        """Glob-style matching; 'git *' matches 'git status' but not 'github'."""
+        """Glob-style matching; 'git *' matches 'git status' but not 'github'.
+        glob 风格匹配；'git *' 匹配 'git status' 但不匹配 'github'。"""
         if fnmatch.fnmatch(resource, pattern):
             return True
         # Prefix match: keep the delimiter so 'git *' -> startswith('git ')
+        # 前缀匹配：保留分隔符，使 'git *' -> startswith('git ')
         if pattern.endswith("*"):
             prefix = pattern[:-1]
             return bool(prefix) and resource.startswith(prefix)

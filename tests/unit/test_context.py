@@ -1,4 +1,4 @@
-"""Tests for context manager and compression."""
+"""Tests for context manager and compression. 上下文管理器与压缩的测试。"""
 
 from mini_agent.memory.compressor import Compressor, DropToolResults, SlidingWindow, SummarizeOldest
 from mini_agent.memory.context import ContextManager
@@ -40,7 +40,8 @@ def test_update_total():
     conv = Conversation(system_prompt="sys")
     conv.messages = [make_msg(token_count=100), make_msg(token_count=100)]
     total = cm.update_total(conv)
-    assert total > 200  # 200 message tokens + system prompt tokens
+    # 200 message tokens + system prompt tokens 消息 token 加 system prompt token
+    assert total > 200
 
 
 def test_usage_ratio():
@@ -149,7 +150,7 @@ async def test_sliding_window():
     assert "msg 49" in conv.messages[-1].content
 
 
-# --- Full Compressor cascade ---
+# --- Full Compressor cascade --- 完整的 Compressor 级联
 
 
 async def test_compressor_cascade():

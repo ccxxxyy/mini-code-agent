@@ -1,4 +1,4 @@
-"""Session management types."""
+"""Session management types. 会话管理类型。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,9 @@ class SessionMetadata:
 
 @dataclass
 class Session:
-    """A complete agent session that can be persisted and restored."""
+    """A complete agent session that can be persisted and restored.
+    一个可持久化和恢复的完整 Agent 会话。
+    """
 
     metadata: SessionMetadata = field(default_factory=SessionMetadata)
     conversation: Conversation = field(default_factory=Conversation)

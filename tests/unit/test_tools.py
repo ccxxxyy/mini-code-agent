@@ -1,4 +1,4 @@
-"""Tests for the tool system and builtin tools."""
+"""Tests for the tool system and builtin tools. 工具系统与内置工具的测试。"""
 
 import sys
 

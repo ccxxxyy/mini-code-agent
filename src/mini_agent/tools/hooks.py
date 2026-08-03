@@ -1,4 +1,5 @@
-"""Lifecycle hooks around tool execution and LLM calls."""
+"""Lifecycle hooks around tool execution and LLM calls.
+围绕工具执行和 LLM 调用的生命周期 hook。"""
 
 from __future__ import annotations
 
@@ -47,13 +48,15 @@ HookFn = Callable[[HookContext], Awaitable[HookResult]]
 
 
 class HookManager:
-    """Manages registration and execution of lifecycle hooks."""
+    """Manages registration and execution of lifecycle hooks.
+    管理生命周期 hook 的注册与执行。"""
 
     def __init__(self) -> None:
         self._hooks: dict[HookStage, list[tuple[int, HookFn]]] = {}
 
     def register(self, stage: HookStage, hook: HookFn, priority: int = 0) -> None:
-        """Register a hook. Higher priority runs first."""
+        """Register a hook. Higher priority runs first.
+        注册一个 hook。优先级越高越先执行。"""
         self._hooks.setdefault(stage, []).append((priority, hook))
         self._hooks[stage].sort(key=lambda x: -x[0])
 
@@ -66,6 +69,10 @@ class HookManager:
 
         Short-circuits on BLOCK and CONFIRM. MODIFY updates ctx.tool_args
         and continues down the chain.
+
+        按优先级顺序运行该阶段的所有 hook。
+        遇到 BLOCK 和 CONFIRM 时短路返回。MODIFY 会更新 ctx.tool_args
+        并继续执行链上后续 hook。
         """
         final = HookResult(action=HookAction.CONTINUE)
         for _priority, hook in self._hooks.get(ctx.stage, []):

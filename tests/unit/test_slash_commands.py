@@ -1,4 +1,4 @@
-"""Tests for slash command framework."""
+"""Tests for slash command framework. 斜杠命令框架的测试。"""
 
 from mini_agent.extensions.slash_commands import SlashCommand, SlashCommandRegistry
 

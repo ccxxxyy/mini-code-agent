@@ -1,4 +1,5 @@
-"""Grep tool -- search file contents with regex."""
+"""Grep tool -- search file contents with regex.
+Grep 工具——用正则表达式搜索文件内容。"""
 
 from __future__ import annotations
 

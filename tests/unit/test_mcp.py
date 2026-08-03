@@ -1,11 +1,12 @@
-"""Tests for MCP client -- adapter and registry integration."""
+"""Tests for MCP client -- adapter and registry integration. MCP 客户端测试——适配器与注册表集成。"""
 
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.mcp.adapter import MCPToolAdapter
 
 
 class FakeMCPManager:
-    """Fake manager for testing MCPToolAdapter without real servers."""
+    """Fake manager for testing MCPToolAdapter without real servers.
+    用于在没有真实服务器的情况下测试 MCPToolAdapter 的伪造管理器。"""
 
     def __init__(self, response_output: str = "tool result", is_error: bool = False):
         self._output = response_output

@@ -1,4 +1,5 @@
-"""Tool system foundation: Tool ABC, ToolRegistry, ToolContext."""
+"""Tool system foundation: Tool ABC, ToolRegistry, ToolContext.
+工具系统基础：Tool 抽象基类、ToolRegistry、ToolContext。"""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from mini_agent.models.session import Session
 
 @dataclass
 class ToolParameter:
-    """Schema for a single tool parameter."""
+    """Schema for a single tool parameter. 单个工具参数的 schema。"""
 
     name: str
     type: str
@@ -27,14 +28,14 @@ class ToolParameter:
 
 @dataclass
 class ToolSchema:
-    """JSON Schema-like description of a tool."""
+    """JSON Schema-like description of a tool. 工具的类 JSON Schema 描述。"""
 
     name: str
     description: str
     parameters: list[ToolParameter]
 
     def to_json_schema(self) -> dict[str, Any]:
-        """Convert to OpenAI function calling format."""
+        """Convert to OpenAI function calling format. 转换为 OpenAI function calling 格式。"""
         properties: dict[str, Any] = {}
         required: list[str] = []
         for p in self.parameters:
@@ -63,7 +64,7 @@ class ToolSchema:
 
 @dataclass
 class ToolContext:
-    """Context passed to every tool execution."""
+    """Context passed to every tool execution. 传递给每次工具执行的上下文。"""
 
     working_dir: Path
     session: Session
@@ -72,21 +73,24 @@ class ToolContext:
 
 
 class Tool(ABC):
-    """Base class for all tools (builtin + MCP-adapted)."""
+    """Base class for all tools (builtin + MCP-adapted).
+    所有工具的基类（内置工具 + MCP 适配工具）。"""
 
     @property
     @abstractmethod
     def schema(self) -> ToolSchema:
-        """Return the tool's schema for LLM registration."""
+        """Return the tool's schema for LLM registration. 返回用于 LLM 注册的工具 schema。"""
         ...
 
     @abstractmethod
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
-        """Execute the tool with given arguments. Returns result."""
+        """Execute the tool with given arguments. Returns result.
+        使用给定参数执行工具。返回执行结果。"""
         ...
 
     def validate_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Validate arguments against schema. Fills defaults, raises ValueError."""
+        """Validate arguments against schema. Fills defaults, raises ValueError.
+        根据 schema 校验参数。填充默认值，校验失败时抛出 ValueError。"""
         schema = self.schema
         validated: dict[str, Any] = {}
         for p in schema.parameters:
@@ -99,7 +103,7 @@ class Tool(ABC):
         return validated
 
     def error_result(self, call_id: str, message: str) -> ToolResult:
-        """Helper to build an error ToolResult."""
+        """Helper to build an error ToolResult. 构建错误 ToolResult 的辅助方法。"""
         return ToolResult(
             call_id=call_id,
             name=self.schema.name,
@@ -109,7 +113,7 @@ class Tool(ABC):
 
 
 class ToolRegistry:
-    """Central registry of all available tools."""
+    """Central registry of all available tools. 所有可用工具的中央 registry。"""
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
@@ -127,11 +131,12 @@ class ToolRegistry:
         return list(self._tools.values())
 
     def get_schemas(self) -> list[dict[str, Any]]:
-        """Return all tool schemas in OpenAI function calling format."""
+        """Return all tool schemas in OpenAI function calling format.
+        以 OpenAI function calling 格式返回所有工具 schema。"""
         return [t.schema.to_json_schema() for t in self._tools.values()]
 
     def clone(self) -> ToolRegistry:
-        """Create an independent copy (for sub-agents)."""
+        """Create an independent copy (for sub-agents). 创建独立副本（供子 Agent 使用）。"""
         new = ToolRegistry()
         new._tools = dict(self._tools)
         return new

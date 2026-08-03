@@ -1,4 +1,5 @@
-"""Cross-session memory -- project-level and user-level persistent storage."""
+"""Cross-session memory -- project-level and user-level persistent storage.
+跨 session 记忆——项目级与用户级的持久化存储。"""
 
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ class MemoryEntry:
 
 
 class PersistentMemory:
-    """Stores and retrieves long-term memory across sessions."""
+    """Stores and retrieves long-term memory across sessions. 跨 session 存储和检索长期记忆。"""
 
     def __init__(
         self,
@@ -72,7 +73,7 @@ class PersistentMemory:
     # --- Search ---
 
     async def search(self, query: str, project_dir: Path | None = None) -> list[MemoryEntry]:
-        """Simple keyword search across all memory entries."""
+        """Simple keyword search across all memory entries. 对所有记忆条目做简单的关键词搜索。"""
         results: list[MemoryEntry] = []
         query_lower = query.lower()
 

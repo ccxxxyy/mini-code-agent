@@ -1,4 +1,4 @@
-"""Async publish-subscribe event bus."""
+"""Async publish-subscribe event bus. 异步发布-订阅事件总线。"""
 
 import asyncio
 from collections import defaultdict
@@ -11,7 +11,9 @@ EventHandler = Callable[[Any], Awaitable[None]]
 
 
 class EventBus:
-    """Async publish-subscribe event bus for decoupling components."""
+    """Async publish-subscribe event bus for decoupling components.
+    用于组件解耦的异步发布-订阅事件总线。
+    """
 
     def __init__(self) -> None:
         self._handlers: dict[type, list[EventHandler]] = defaultdict(list)

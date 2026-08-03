@@ -1,4 +1,4 @@
-"""Streaming output renderer using Rich."""
+"""Streaming output renderer using Rich. 使用 Rich 的流式输出渲染器。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from rich.markdown import Markdown
 
 
 class StreamRenderer:
-    """Renders streaming LLM output in real-time with Markdown formatting."""
+    """Renders streaming LLM output in real-time with Markdown formatting.
+    以 Markdown 格式实时渲染 LLM 的流式输出。"""
 
     def __init__(self, console: Console) -> None:
         self._console = console

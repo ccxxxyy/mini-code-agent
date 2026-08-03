@@ -1,4 +1,4 @@
-"""Tests for persistent memory and extraction."""
+"""Tests for persistent memory and extraction. 持久化记忆与记忆提取的测试。"""
 
 from pathlib import Path
 
@@ -84,7 +84,7 @@ async def test_extraction_too_few_turns(tmp_path: Path):
     conv.append(Message(role=Role.USER, content="always use type hints"))
 
     entries = await extractor.maybe_extract(conv)
-    assert entries == []  # too few turns
+    assert entries == []  # too few turns 轮次太少
 
 
 async def test_extraction_finds_preferences(tmp_path: Path):
@@ -115,6 +115,7 @@ async def test_extraction_deduplicates(tmp_path: Path):
 
     entries = await extractor.maybe_extract(conv)
     # Should deduplicate: "use type hints on all functions" already exists
+    # 应去重："use type hints on all functions" 已存在
     assert all("type hints" not in e.content for e in entries)
 
 

@@ -1,4 +1,6 @@
-"""Tests for the ReAct agent loop with a mock LLM provider."""
+"""Tests for the ReAct agent loop with a mock LLM provider.
+使用 mock LLM provider 测试 ReAct Agent 循环。
+"""
 
 import json
 from collections.abc import AsyncIterator
@@ -15,7 +17,7 @@ from mini_agent.tools.builtin import ReadFileTool
 
 
 class MockLLM(LLMProvider):
-    """Mock provider that replays scripted responses."""
+    """Mock provider that replays scripted responses. 按脚本重放响应的 mock provider。"""
 
     def __init__(self, scripts: list[list[StreamChunk]]) -> None:
         self._scripts = scripts
@@ -99,6 +101,7 @@ async def test_tool_call_then_answer(tool_context):
 
     assert "secret content" in result
     # assistant(tool_call) + tool(result) + assistant(answer)
+    # assistant（工具调用）+ tool（结果）+ assistant（回答）
     assert len(conv.messages) == 3
     assert conv.messages[0].tool_calls[0].name == "read_file"
     assert conv.messages[1].role == Role.TOOL
@@ -121,6 +124,7 @@ async def test_unknown_tool_returns_error(tool_context):
 
 async def test_invalid_args_returns_error(tool_context):
     # read_file requires file_path, send empty args
+    # read_file 需要 file_path 参数，这里发送空参数
     scripts = [
         tool_call_response("read_file", {}),
         text_response("done"),
@@ -138,13 +142,13 @@ async def test_infinite_loop_guard(tool_context):
     f = tool_context.working_dir / "x.txt"
     f.write_text("data", encoding="utf-8")
 
-    # LLM keeps calling the same tool forever
+    # LLM keeps calling the same tool forever LLM 一直重复调用同一个工具
     scripts = [tool_call_response("read_file", {"file_path": str(f)})]
     loop = make_loop(scripts, tool_context)
     conv = Conversation()
     await loop.run(conv)
 
-    # Guard kicks in after 6 identical consecutive calls
+    # Guard kicks in after 6 identical consecutive calls 连续 6 次相同调用后保护机制生效
     read_calls = [m for m in conv.messages if m.tool_calls]
     assert len(read_calls) <= 7
 
@@ -158,6 +162,7 @@ async def test_max_iterations_guard(tool_context):
     registry.register(ReadFileTool())
 
     # Alternate between two tools to bypass the same-tool guard
+    # 在两个工具之间交替调用以绕过同一工具的保护机制
     scripts = [tool_call_response("read_file", {"file_path": str(f)})]
     loop = AgentLoop(
         llm=MockLLM(scripts),

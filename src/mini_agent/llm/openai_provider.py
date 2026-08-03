@@ -1,4 +1,4 @@
-"""OpenAI-compatible LLM provider."""
+"""OpenAI-compatible LLM provider. 兼容 OpenAI 的 LLM Provider。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,9 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 
 
 class OpenAIProvider(LLMProvider):
-    """OpenAI-compatible provider (GPT, local servers, Azure, etc.)."""
+    """OpenAI-compatible provider (GPT, local servers, Azure, etc.).
+    兼容 OpenAI 的 Provider（GPT、本地服务、Azure 等）。
+    """
 
     def __init__(self, config: LLMConfig) -> None:
         self._config = config
@@ -117,7 +119,9 @@ class OpenAIProvider(LLMProvider):
 
 
 def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
-    """Assemble a list of stream chunks into a complete LLMResponse."""
+    """Assemble a list of stream chunks into a complete LLMResponse.
+    将 stream chunk 列表组装为完整的 LLMResponse。
+    """
     content_parts: list[str] = []
     tool_call_builders: dict[int, dict[str, Any]] = {}
     usage = TokenUsage()

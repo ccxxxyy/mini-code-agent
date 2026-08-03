@@ -1,4 +1,5 @@
-"""Session persistence -- save/load/list/delete sessions as JSON files."""
+"""Session persistence -- save/load/list/delete sessions as JSON files.
+session 持久化——以 JSON 文件形式保存/加载/列出/删除 session。"""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ DEFAULT_SESSION_DIR = "~/.mini-agent/sessions"
 
 
 class SessionStore:
-    """Manages session persistence on disk."""
+    """Manages session persistence on disk. 管理磁盘上的 session 持久化。"""
 
     def __init__(self, session_dir: str = DEFAULT_SESSION_DIR) -> None:
         self._dir = Path(session_dir).expanduser()
@@ -26,7 +27,7 @@ class SessionStore:
         return self._dir / f"{session_id}.json"
 
     async def save(self, session: Session) -> Path:
-        """Save session to disk. Returns the file path."""
+        """Save session to disk. Returns the file path. 将 session 保存到磁盘。返回文件路径。"""
         self._ensure_dir()
         session.metadata.last_active = datetime.now()
         data = _serialize_session(session)
@@ -35,7 +36,8 @@ class SessionStore:
         return path
 
     async def load(self, session_id: str) -> Session | None:
-        """Load a session by ID. Returns None if not found."""
+        """Load a session by ID. Returns None if not found.
+        按 ID 加载 session。未找到时返回 None。"""
         path = self._path_for(session_id)
         if not path.is_file():
             return None
@@ -46,7 +48,8 @@ class SessionStore:
             return None
 
     async def list_sessions(self) -> list[dict[str, Any]]:
-        """List all saved sessions (metadata only, sorted newest first)."""
+        """List all saved sessions (metadata only, sorted newest first).
+        列出所有已保存的 session（仅元数据，按最新在前排序）。"""
         self._ensure_dir()
         sessions = []
         for f in self._dir.glob("*.json"):
@@ -68,7 +71,8 @@ class SessionStore:
         return sessions
 
     async def delete(self, session_id: str) -> bool:
-        """Delete a session file. Returns True if deleted."""
+        """Delete a session file. Returns True if deleted.
+        删除一个 session 文件。删除成功返回 True。"""
         path = self._path_for(session_id)
         if path.is_file():
             path.unlink()

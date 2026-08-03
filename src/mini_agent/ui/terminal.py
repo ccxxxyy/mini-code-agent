@@ -1,4 +1,5 @@
-"""Main TUI application -- Rich for rendering, Prompt Toolkit for input."""
+"""Main TUI application -- Rich for rendering, Prompt Toolkit for input.
+主 TUI 应用——Rich 负责渲染，Prompt Toolkit 负责输入。"""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from mini_agent.ui.renderer import StreamRenderer
 
 
 class Terminal:
-    """Terminal user interface for the agent."""
+    """Terminal user interface for the agent. Agent 的终端用户界面。"""
 
     def __init__(self) -> None:
         self.console = Console()
@@ -27,7 +28,7 @@ class Terminal:
         self.console.print()
 
     def set_slash_commands(self, commands: list[tuple[str, str]]) -> None:
-        """Update the slash command list for auto-completion."""
+        """Update the slash command list for auto-completion. 更新用于自动补全的斜杠命令列表。"""
         self._completer.set_commands(commands)
 
     def _ensure_prompt_session(self):
@@ -42,6 +43,7 @@ class Terminal:
         """Ask user for confirmation.
 
         Returns True (allow once), False (deny), or "always" (allow for session).
+        返回 True（允许一次）、False（拒绝）或 "always"（本 session 内始终允许）。
         """
         self.console.print()
         self.console.print(
