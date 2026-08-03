@@ -127,21 +127,58 @@ uv run mini-agent
 
 ### 5. 启动
 
+有两种启动方式：
+
+**方式一：在项目目录中运行（开发模式）**
+
 ```bash
-uv run mini-agent
+uv run mini          # 简短版
+uv run mini-agent    # 完整版
 ```
 
-启动后你会看到欢迎界面，直接输入你的问题即可开始对话。输入 `/quit` 或按 `Ctrl+C` 退出。
+无需安装，`uv run` 会自动使用项目虚拟环境。适合开发和调试。
+
+**方式二：全局安装后直接运行（推荐日常使用）**
+
+```bash
+# 一次性安装到系统（在项目目录执行）
+uv tool install .
+
+# 之后在任何目录直接输入即可启动
+mini
+```
+
+全局安装会把 `mini` 和 `mini-agent` 两个命令写入系统 PATH。之后不需要在项目目录，也不需要 `uv run`，任何终端窗口直接输 `mini` 就能用，和 `claude` 命令一样。
+
+更新已安装的版本（改完代码后需要重新安装才能生效）：
+
+```bash
+# 先关掉正在运行的 mini 终端，然后执行：
+uv cache clean mini-code-agent
+uv tool install . --force
+```
+
+> **开发阶段建议用 `uv run mini`**，它直接运行源码，改完即生效，不需要重新安装。全局安装留给日常使用。
+
+卸载：
+
+```bash
+uv tool uninstall mini-code-agent
+```
+
+启动后你会看到欢迎界面，直接输入你的问题即可开始对话。输入 `/exit` 或按 `Ctrl+C` 退出。
 
 ### 6. 常用 CLI 参数
 
 ```bash
-uv run mini-agent --help              # 查看所有可用参数
-uv run mini-agent --model gpt-4o      # 指定模型
-uv run mini-agent --provider openai   # 指定 Provider
-uv run mini-agent --base-url URL      # 自定义 API 地址
-uv run mini-agent --version           # 查看版本
+mini --help              # 查看所有可用参数
+mini --model gpt-4o      # 指定模型
+mini --provider openai   # 指定 Provider
+mini --base-url URL      # 自定义 API 地址
+mini --version           # 查看版本
 ```
+
+> 以下示例中 `mini` 和 `uv run mini-agent` 可互换使用。
 
 ## 支持的环境变量
 
@@ -188,7 +225,7 @@ mini-code-agent/
 - [x] P2：工具系统 + Agent Loop（6 个核心工具、ReAct 循环）
 - [x] P3：安全 + Hook（权限管理、路径守卫、生命周期钩子）
 - [x] P4：记忆 + 上下文管理（压缩、会话持久化、跨会话记忆）
-- [ ] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议）
+- [x] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议、Anthropic Provider）
 - [ ] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队）
 - [ ] P7：打磨 + 测试
 

@@ -19,6 +19,7 @@ dev = [
 
 [project.scripts]
 mini-agent = "mini_agent.cli:main"
+mini = "mini_agent.cli:main"
 
 [build-system]
 requires = ["hatchling"]

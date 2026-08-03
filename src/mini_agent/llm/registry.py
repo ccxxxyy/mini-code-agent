@@ -29,9 +29,11 @@ class ProviderRegistry:
 
 
 def _register_builtins() -> None:
+    from mini_agent.llm.anthropic_provider import AnthropicProvider
     from mini_agent.llm.openai_provider import OpenAIProvider
 
     ProviderRegistry.register("openai", OpenAIProvider)
+    ProviderRegistry.register("anthropic", AnthropicProvider)
 
 
 _register_builtins()

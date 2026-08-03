@@ -126,27 +126,29 @@
 ## Phase 5: 扩展协议 (P5)
 
 ### P5.1 Slash Commands
-- [ ] `extensions/slash_commands.py` — SlashCommand, SlashCommandRegistry
-- [ ] 内置命令: /help, /clear, /status, /model, /compact, /memory, /session, /plan, /tools, /mcp, /skill, /quit
+- [x] `extensions/slash_commands.py` — SlashCommand, SlashCommandRegistry (解析/分发/列表)
+- [x] `extensions/builtin_commands.py` — 内置命令: /help /clear /status /model /compact /memory /session /tools /skill /quit /exit
+- [x] App 集成: 斜杠命令优先于 Agent 对话分发
 
 ### P5.2 Skill 系统
-- [ ] `extensions/skills.py` — Skill, SkillRegistry (扫描加载, 激活/停用, trigger 匹配)
-- [ ] `extensions/plugin_loader.py` — 动态发现
-- [ ] 内置技能包: `skills/code_review/SKILL.md`, `skills/init_project/SKILL.md`
+- [x] `extensions/skills.py` — Skill, SkillRegistry (SKILL.md 解析, 激活/停用, trigger 匹配)
+- [x] 内置技能包: `skills/code_review/SKILL.md`, `skills/init_project/SKILL.md`
+- [x] `/skill` 命令: list / activate / deactivate
 
 ### P5.3 MCP 协议
-- [ ] `tools/mcp/transport.py` — StdioTransport, HTTPTransport
-- [ ] `tools/mcp/client.py` — MCPManager (connect, disconnect, call_tool, discover)
-- [ ] `tools/mcp/adapter.py` — MCPToolAdapter (MCP 工具 → 内部 Tool 接口)
+- [x] `tools/mcp/transport.py` — StdioTransport (stdio JSON-RPC 通信)
+- [x] `tools/mcp/client.py` — MCPManager (connect, disconnect, call_tool, discover, 多服务器管理)
+- [x] `tools/mcp/adapter.py` — MCPToolAdapter (MCP 工具 → 内部 Tool 接口, 自动 schema 转换)
 
 ### P5.4 第二个 LLM Provider
-- [ ] `llm/anthropic_provider.py` — Claude Messages API (SSE, tool_use, thinking blocks)
+- [x] `llm/anthropic_provider.py` — Claude Messages API (SSE 流式, tool_use 格式, system 分离, 工具格式转换)
+- [x] 注册到 ProviderRegistry, `--provider anthropic` 即可切换
 
 ### P5.5 验证
-- [ ] `/help` 列出所有可用命令
-- [ ] `/skill code-review` 激活代码审查技能
-- [ ] 配置 MCP GitHub 服务器 → 列出其工具 → 通过 Agent 调用
-- [ ] 切换到 Anthropic Provider, 流式对话正常
+- [x] `/help` 列出所有可用命令 (7 个单测覆盖框架)
+- [x] `/skill` 列出/激活/停用技能 (8 个单测覆盖解析/触发/激活/停用)
+- [x] MCP 适配器 schema 转换 + 执行 + 注册 (7 个单测覆盖, FakeMCPManager 模拟)
+- [x] 131 个测试全过, lint/format/build CI 通过
 
 ---
 

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 
-from mini_agent.ui.input_handler import create_prompt_session
+from mini_agent.ui.input_handler import SlashCommandCompleter, create_prompt_session
 from mini_agent.ui.renderer import StreamRenderer
 
 
@@ -16,22 +15,28 @@ class Terminal:
     def __init__(self) -> None:
         self.console = Console()
         self.renderer = StreamRenderer(self.console)
+        self._completer = SlashCommandCompleter()
         self._prompt_session = None
 
     def show_welcome(self) -> None:
-        title = Text("Mini-Code-Agent v0.1.0", style="bold cyan")
+        self.console.print()
+        self.console.print("  [bold #6c71c4]Mini-Code-Agent[/bold #6c71c4] [dim]v0.1.0[/dim]")
         self.console.print(
-            Panel(title, subtitle="Type your message. Ctrl+C to exit.", border_style="dim")
+            "  [dim]Type your message to chat. /help for commands. Ctrl+C to exit.[/dim]"
         )
         self.console.print()
 
+    def set_slash_commands(self, commands: list[tuple[str, str]]) -> None:
+        """Update the slash command list for auto-completion."""
+        self._completer.set_commands(commands)
+
     def _ensure_prompt_session(self):
         if self._prompt_session is None:
-            self._prompt_session = create_prompt_session()
+            self._prompt_session = create_prompt_session(completer=self._completer)
 
     async def get_user_input(self) -> str:
         self._ensure_prompt_session()
-        return await self._prompt_session.prompt_async("> ")
+        return await self._prompt_session.prompt_async()
 
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
@@ -59,36 +64,40 @@ class Terminal:
                 return False
 
     def start_stream(self) -> None:
+        self.console.print()
         self.renderer.start()
 
     def feed_stream(self, delta: str) -> None:
         self.renderer.feed(delta)
 
     def finish_stream(self) -> str:
-        return self.renderer.finish()
+        result = self.renderer.finish()
+        self.console.print()
+        return result
 
     def show_error(self, error: str) -> None:
-        self.console.print(f"[bold red]Error:[/bold red] {error}")
+        self.console.print(f"  [bold red]✗[/bold red] {error}")
+        self.console.print()
 
     def show_info(self, message: str) -> None:
-        self.console.print(f"[dim]{message}[/dim]")
+        self.console.print(f"  [dim]{message}[/dim]")
 
     def show_tool_call(self, name: str, args: dict) -> None:
         arg_preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
         self.console.print(
-            f"  [bold yellow]⚙ {name}[/bold yellow][dim]({arg_preview})[/dim]",
+            f"\n  [dim]╭─[/dim] [bold #6c71c4]{name}[/bold #6c71c4] [dim]{arg_preview}[/dim]",
             highlight=False,
         )
 
     def show_tool_result(self, name: str, output: str, is_error: bool = False) -> None:
         if is_error:
             preview = output[:300] + "..." if len(output) > 300 else output
-            self.console.print(f"  [red]✗ {preview}[/red]", highlight=False)
+            self.console.print(f"  [dim]╰─[/dim] [red]✗ {preview}[/red]", highlight=False)
         else:
             lines = output.count("\n") + 1
             chars = len(output)
             self.console.print(
-                f"  [green]✓[/green] [dim]{lines} lines, {chars} chars[/dim]",
+                f"  [dim]╰─[/dim] [green]✓[/green] [dim]{lines} lines, {chars} chars[/dim]",
                 highlight=False,
             )
 

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.events.bus import EventBus
+from mini_agent.extensions.builtin_commands import register_builtin_commands
+from mini_agent.extensions.skills import SkillRegistry
+from mini_agent.extensions.slash_commands import SlashCommandRegistry
 from mini_agent.llm.registry import ProviderRegistry
 from mini_agent.memory.compressor import Compressor
 from mini_agent.memory.context import ContextManager
@@ -25,7 +30,10 @@ from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 from mini_agent.tools.hooks import HookManager
 from mini_agent.ui.terminal import Terminal
 
-SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal, working in {working_dir}.
+SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal.
+Working directory: {working_dir}
+Platform: {platform}
+Shell: {shell}
 
 You have access to tools for reading/writing/editing files, running shell commands, \
 and searching the codebase (glob for file names, grep for file contents).
@@ -35,7 +43,9 @@ Guidelines:
 - Break complex tasks into steps: search, read, then modify.
 - Be concise in your final answers. Use markdown formatting.
 - When editing files, read them first to understand the context.
-- Report errors honestly. If a tool fails, explain what went wrong."""
+- Report errors honestly. If a tool fails, explain what went wrong.
+- IMPORTANT: Use platform-appropriate shell commands. \
+On Windows use dir/type/findstr/where, NOT ls/cat/grep/which."""
 
 
 class Application:
@@ -48,7 +58,13 @@ class Application:
         self.session = Session()
 
         working_dir = Path.cwd()
-        self.session.conversation.system_prompt = SYSTEM_PROMPT.format(working_dir=working_dir)
+        platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
+        shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
+        self.session.conversation.system_prompt = SYSTEM_PROMPT.format(
+            working_dir=working_dir,
+            platform=platform,
+            shell=shell,
+        )
         self.session.metadata.model = config.llm.model
         self.session.metadata.project_dir = working_dir
 
@@ -98,6 +114,19 @@ class Application:
             context_manager=self.context_manager,
         )
 
+        # Skill system
+        self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
+        self.skill_registry.load_all()
+
+        # Slash commands
+        self.slash_commands = SlashCommandRegistry()
+        register_builtin_commands(self)
+
+        # Wire slash command completions to terminal
+        self.terminal.set_slash_commands(
+            [(c.name, c.description) for c in self.slash_commands.list_commands()]
+        )
+
         # Wire agent loop callbacks to terminal rendering
         self.agent_loop.on_stream_start = self.terminal.start_stream
         self.agent_loop.on_stream_delta = self.terminal.feed_stream
@@ -126,8 +155,20 @@ class Application:
                 if not user_input:
                     continue
 
-                if user_input.lower() in ("/quit", "/exit", "exit", "quit"):
+                if user_input.lower() in ("exit", "quit"):
                     break
+
+                # Slash command dispatch
+                if self.slash_commands.is_slash_command(user_input):
+                    try:
+                        result = await self.slash_commands.execute(user_input, self)
+                        if result:
+                            self.terminal.console.print()
+                            self.terminal.console.print(result)
+                            self.terminal.console.print()
+                    except SystemExit:
+                        break
+                    continue
 
                 await self._handle_turn(user_input)
         finally:
@@ -147,8 +188,10 @@ class Application:
             self.terminal.show_info(
                 f"tokens: {turn_tokens} this turn / {self.session.metadata.total_tokens_used} total"
             )
+            self.terminal.console.print()
         except KeyboardInterrupt:
             self.agent_loop.cancel()
             self.terminal.show_info("Interrupted.")
+            self.terminal.console.print()
         except Exception as e:
             self.terminal.show_error(str(e))
