@@ -1,0 +1,121 @@
+"""Tests for skill system."""
+
+from pathlib import Path
+
+from mini_agent.extensions.skills import SkillRegistry
+from mini_agent.models.message import Conversation
+
+
+def make_skill_dir(tmp_path: Path, name: str, front_matter: str, body: str) -> Path:
+    d = tmp_path / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        f"---\n{front_matter}\n---\n{body}",
+        encoding="utf-8",
+    )
+    return d
+
+
+def test_parse_skill_file(tmp_path):
+    fm = (
+        "name: code-review\n"
+        "description: Review code\n"
+        "triggers:\n"
+        '  - "review"\n'
+        '  - "code review"\n'
+        "tools:\n"
+        "  - read_file\n"
+        "  - grep"
+    )
+    make_skill_dir(tmp_path, "review", fm, "You are a reviewer.\n1. Read the diff\n2. Comment")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+
+    skill = reg.get("code-review")
+    assert skill is not None
+    assert skill.name == "code-review"
+    assert skill.description == "Review code"
+    assert "review" in skill.trigger_patterns
+    assert "code review" in skill.trigger_patterns
+    assert "read_file" in skill.tools
+    assert "grep" in skill.tools
+    assert "You are a reviewer" in skill.prompt
+
+
+def test_load_all_multiple(tmp_path):
+    make_skill_dir(tmp_path, "a", "name: skill-a\ndescription: A", "Prompt A")
+    make_skill_dir(tmp_path, "b", "name: skill-b\ndescription: B", "Prompt B")
+
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert len(reg.list_skills()) == 2
+
+
+def test_activate_and_deactivate(tmp_path):
+    make_skill_dir(tmp_path, "x", "name: x\ndescription: X", "Extra prompt")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+
+    conv = Conversation(system_prompt="Base prompt")
+    assert reg.activate("x", conv)
+    assert reg.is_active("x")
+    assert "Extra prompt" in conv.system_prompt
+
+    assert reg.deactivate("x", conv)
+    assert not reg.is_active("x")
+    assert "Extra prompt" not in conv.system_prompt
+
+
+def test_activate_nonexistent(tmp_path):
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    conv = Conversation()
+    assert not reg.activate("nonexistent", conv)
+
+
+def test_match_triggers(tmp_path):
+    make_skill_dir(
+        tmp_path,
+        "rev",
+        'name: review\ndescription: R\ntriggers:\n  - "review"\n  - "code review"',
+        "Review prompt",
+    )
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+
+    matched = reg.match_triggers("please review this code")
+    assert len(matched) == 1
+    assert matched[0].name == "review"
+
+    matched = reg.match_triggers("just a normal question")
+    assert len(matched) == 0
+
+
+def test_no_match_when_active(tmp_path):
+    make_skill_dir(tmp_path, "s", 'name: s\ndescription: S\ntriggers:\n  - "trigger"', "P")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+
+    conv = Conversation()
+    reg.activate("s", conv)
+    matched = reg.match_triggers("trigger this")
+    assert len(matched) == 0
+
+
+def test_invalid_skill_file(tmp_path):
+    d = tmp_path / "bad"
+    d.mkdir()
+    (d / "SKILL.md").write_text("no front matter here", encoding="utf-8")
+
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert len(reg.list_skills()) == 0
+
+
+def test_missing_name_skipped(tmp_path):
+    d = tmp_path / "noname"
+    d.mkdir()
+    (d / "SKILL.md").write_text("---\ndescription: no name field\n---\nbody", encoding="utf-8")
+
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert len(reg.list_skills()) == 0
