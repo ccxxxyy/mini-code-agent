@@ -1,4 +1,4 @@
-"""Tests for session persistence."""
+"""Tests for session persistence. session 持久化的测试。"""
 
 from pathlib import Path
 

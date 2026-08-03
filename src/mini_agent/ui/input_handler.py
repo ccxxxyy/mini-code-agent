@@ -1,4 +1,5 @@
-"""Input handling with Prompt Toolkit -- slash command auto-completion."""
+"""Input handling with Prompt Toolkit -- slash command auto-completion.
+基于 Prompt Toolkit 的输入处理——斜杠命令自动补全。"""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ PROMPT_STYLE = Style.from_dict(
     {
         # Input prompt
         "prompt": "bold #6c71c4",
-        # Completion menu
+        # Completion menu 补全菜单
         "completion-menu": "bg:#1a1a2e #e0e0e0",
         "completion-menu.completion": "bg:#1a1a2e #c0c0c0",
         "completion-menu.completion.current": "bg:#3d5afe #ffffff bold",
@@ -29,7 +30,8 @@ PROMPT_STYLE = Style.from_dict(
 
 
 class SlashCommandCompleter(Completer):
-    """Auto-complete slash commands when input starts with '/'."""
+    """Auto-complete slash commands when input starts with '/'.
+    当输入以 '/' 开头时自动补全斜杠命令。"""
 
     def __init__(self, commands: list[tuple[str, str]] | None = None) -> None:
         self._commands: list[tuple[str, str]] = commands or []
@@ -56,7 +58,8 @@ class SlashCommandCompleter(Completer):
 def create_prompt_session(
     completer: SlashCommandCompleter | None = None,
 ) -> PromptSession:
-    """Create a Prompt Toolkit session with multi-line support and completion."""
+    """Create a Prompt Toolkit session with multi-line support and completion.
+    创建一个支持多行输入和补全的 Prompt Toolkit session。"""
     bindings = KeyBindings()
 
     @bindings.add("escape", "enter")

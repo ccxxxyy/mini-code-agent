@@ -1,4 +1,4 @@
-"""Layered configuration loading."""
+"""Layered configuration loading. 分层配置加载。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from mini_agent.models.config import AgentConfig
 
 
 class ConfigLoader:
-    """Loads and merges configuration from all layers."""
+    """Loads and merges configuration from all layers. 从所有层级加载并合并配置。"""
 
     @staticmethod
     def load(
@@ -20,6 +20,7 @@ class ConfigLoader:
         config = get_defaults()
 
         # Load .env file into os.environ (won't overwrite existing vars)
+        # 将 .env 文件加载到 os.environ（不会覆盖已存在的变量）
         ConfigLoader._load_dotenv()
 
         # Apply environment variables
@@ -34,7 +35,9 @@ class ConfigLoader:
     @staticmethod
     def _load_dotenv() -> None:
         """Read .env file from current directory and set into os.environ.
-        Won't overwrite variables that are already set."""
+        Won't overwrite variables that are already set.
+        从当前目录读取 .env 文件并写入 os.environ。
+        不会覆盖已设置的变量。"""
         env_path = Path.cwd() / ".env"
         if not env_path.is_file():
             return

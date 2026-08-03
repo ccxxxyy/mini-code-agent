@@ -1,4 +1,5 @@
-"""Skill system -- loadable skill packs (prompt + tools + resources)."""
+"""Skill system -- loadable skill packs (prompt + tools + resources).
+技能系统——可加载的技能包（prompt + 工具 + 资源）。"""
 
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ from mini_agent.models.message import Conversation
 
 @dataclass
 class Skill:
-    """A loadable skill pack: prompt + tools + resources."""
+    """A loadable skill pack: prompt + tools + resources.
+    一个可加载的技能包：prompt + 工具 + 资源。"""
 
     name: str
     description: str = ""
@@ -22,7 +24,8 @@ class Skill:
 
 
 class SkillRegistry:
-    """Discovers, loads, and manages skill packs from SKILL.md files."""
+    """Discovers, loads, and manages skill packs from SKILL.md files.
+    从 SKILL.md 文件中发现、加载并管理技能包。"""
 
     def __init__(self, skill_dirs: list[Path] | None = None) -> None:
         self._skills: dict[str, Skill] = {}
@@ -30,7 +33,8 @@ class SkillRegistry:
         self._skill_dirs = skill_dirs or []
 
     def load_all(self) -> None:
-        """Scan skill directories and load all valid skill packs."""
+        """Scan skill directories and load all valid skill packs.
+        扫描技能目录并加载所有有效的技能包。"""
         for skill_dir in self._skill_dirs:
             skill_dir = Path(skill_dir).expanduser()
             if not skill_dir.is_dir():
@@ -50,7 +54,8 @@ class SkillRegistry:
         return list(self._skills.values())
 
     def activate(self, name: str, conversation: Conversation) -> bool:
-        """Activate a skill -- inject its prompt into conversation."""
+        """Activate a skill -- inject its prompt into conversation.
+        激活一个技能——将其 prompt 注入对话。"""
         skill = self._skills.get(name)
         if not skill:
             return False
@@ -62,7 +67,8 @@ class SkillRegistry:
         return True
 
     def deactivate(self, name: str, conversation: Conversation) -> bool:
-        """Deactivate a skill -- remove its prompt from conversation."""
+        """Deactivate a skill -- remove its prompt from conversation.
+        停用一个技能——从对话中移除其 prompt。"""
         skill = self._skills.get(name)
         if not skill or name not in self._active:
             return False
@@ -75,7 +81,8 @@ class SkillRegistry:
         return name in self._active
 
     def match_triggers(self, user_message: str) -> list[Skill]:
-        """Find skills whose trigger patterns match the user message."""
+        """Find skills whose trigger patterns match the user message.
+        查找触发模式与用户消息匹配的技能。"""
         matched: list[Skill] = []
         msg_lower = user_message.lower()
         for skill in self._skills.values():
@@ -89,13 +96,14 @@ class SkillRegistry:
 
     @staticmethod
     def _parse_skill_file(path: Path) -> Skill | None:
-        """Parse a SKILL.md file (YAML front-matter + markdown body)."""
+        """Parse a SKILL.md file (YAML front-matter + markdown body).
+        解析一个 SKILL.md 文件（YAML front-matter + Markdown 正文）。"""
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             return None
 
-        # Split front-matter (between ---) and body
+        # Split front-matter (between ---) and body 拆分 front-matter（位于 --- 之间）和正文
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)", text, re.DOTALL)
         if not fm_match:
             return None
@@ -103,7 +111,7 @@ class SkillRegistry:
         front_matter = fm_match.group(1)
         body = fm_match.group(2).strip()
 
-        # Simple YAML-like parsing (no PyYAML dependency)
+        # Simple YAML-like parsing (no PyYAML dependency) 简单的类 YAML 解析（不依赖 PyYAML）
         meta: dict[str, str | list[str]] = {}
         current_key = ""
         current_list: list[str] = []

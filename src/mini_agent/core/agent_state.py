@@ -1,4 +1,4 @@
-"""Agent state machine types."""
+"""Agent state machine types. Agent 状态机类型。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class AgentPhase(StrEnum):
 
 @dataclass
 class AgentState:
-    """Mutable state of an agent loop instance."""
+    """Mutable state of an agent loop instance. Agent 循环实例的可变状态。"""
 
     phase: AgentPhase = AgentPhase.IDLE
     iteration: int = 0

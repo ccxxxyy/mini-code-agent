@@ -1,4 +1,6 @@
-"""Tests for the security layer: PathGuard + PermissionManager."""
+"""Tests for the security layer: PathGuard + PermissionManager.
+安全层的测试：PathGuard + PermissionManager。
+"""
 
 from pathlib import Path
 
@@ -83,6 +85,7 @@ async def test_check_path_ssh_denied(path_guard):
 
 async def test_check_path_outside_no_ui_denied(path_guard, tmp_path):
     # ask mode without confirm callback -> deny (safe default)
+    # ask 模式下没有 confirm 回调 -> 拒绝（安全的默认行为）
     pm = make_pm(path_guard)
     decision = await pm.check_path(tmp_path / "outside.txt")
     assert decision == PermissionDecision.DENIED
@@ -97,7 +100,7 @@ async def test_check_path_outside_user_approves(path_guard, tmp_path):
     assert decision == PermissionDecision.GRANTED
 
 
-# --- PermissionManager: commands ---
+# --- PermissionManager: commands --- PermissionManager：命令 ---
 
 
 async def test_normal_command_granted(path_guard):
@@ -109,6 +112,7 @@ async def test_normal_command_granted(path_guard):
 async def test_rm_rf_root_denied_by_config(path_guard):
     # "rm -rf /" is in the default denied_commands blacklist -> denied
     # immediately without asking
+    # "rm -rf /" 在默认的 denied_commands 黑名单中 -> 不经询问直接拒绝
     pm = make_pm(path_guard)
     decision = await pm.check_command("rm -rf /")
     assert decision == PermissionDecision.DENIED
@@ -123,6 +127,7 @@ async def test_dangerous_rm_rf_asks(path_guard):
 
     pm = make_pm(path_guard, confirm=confirm)
     # dangerous pattern but not in explicit blacklist -> asks user
+    # 匹配危险模式但不在显式黑名单中 -> 询问用户
     decision = await pm.check_command("rm -rf ./build")
     assert decision == PermissionDecision.DENIED
     assert len(asked) == 1
@@ -138,7 +143,7 @@ async def test_dangerous_sudo_asks(path_guard):
 
 
 async def test_dangerous_command_no_ui_denied(path_guard):
-    pm = make_pm(path_guard)  # no confirm callback
+    pm = make_pm(path_guard)  # no confirm callback 没有 confirm 回调
     assert await pm.check_command("rm -rf /tmp/x") == PermissionDecision.DENIED
 
 
@@ -167,14 +172,14 @@ async def test_session_grant(path_guard):
         return True
 
     pm = make_pm(path_guard, confirm=confirm)
-    # First dangerous call asks
+    # First dangerous call asks 第一次危险调用会询问
     await pm.check_command("rm -rf ./build")
     assert len(calls) == 1
 
-    # Grant session permission -> no more asking
+    # Grant session permission -> no more asking 授予 session 权限 -> 不再询问
     pm.grant_session_permission(PermissionScope.COMMAND, "rm -rf ./build")
     await pm.check_command("rm -rf ./build")
-    assert len(calls) == 1  # still 1, not asked again
+    assert len(calls) == 1  # still 1, not asked again 仍然是 1，没有再次询问
 
 
 async def test_deny_mode_blocks_everything(path_guard):
@@ -191,11 +196,13 @@ async def test_always_allow_answer_grants_session(path_guard):
 
     pm = make_pm(path_guard, confirm=confirm_always)
     # First dangerous call asks, user answers "always"
+    # 第一次危险调用会询问，用户回答 "always"
     decision = await pm.check_command("rm -rf ./dist")
     assert decision == PermissionDecision.GRANTED
     assert len(calls) == 1
 
     # Same command again -> session grant, no asking
+    # 再次执行相同命令 -> 已有 session 授权，不再询问
     decision = await pm.check_command("rm -rf ./dist")
     assert decision == PermissionDecision.GRANTED
     assert len(calls) == 1

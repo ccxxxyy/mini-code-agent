@@ -656,11 +656,263 @@ agent_loop = AgentLoop(..., context_manager=context_manager)
 
 ---
 
-# 附录：贯穿四个阶段的通用设计原则
+# 第五部分：P5 扩展协议
 
-1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy 都是先定契约再做实现，Mock 测试与未来扩展（Anthropic Provider、MCP 工具、LLM 摘要策略）都吃这个红利
-2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常）都转成 `is_error=True` 的 ToolResult 进入对话，LLM 可见可纠错；异常只用于程序性 bug
-3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式
-4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层通过延迟注入打破内部循环依赖、依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM 解 API 依赖、tmp_path 解文件系统依赖——110 个测试 30 秒跑完且不出网
-6. **渐进式增强**：压缩用提取式→可升级为 LLM 摘要；记忆提取用正则→可升级为 LLM 分析；tiktoken 可选→精度按需提升。每个模块都预留了升级路径但当前实现保持简单可测
+## 5.1 Slash Command 命令框架
+
+### 要解决的问题
+
+用户的高频操作（查状态、清历史、存会话）不应该消耗 LLM 调用——它们是确定性的本地操作，应该"一键触发"而不是"对话请求"。
+
+### 实现原理
+
+`extensions/slash_commands.py` 实现极简的命令注册与分发：
+
+```
+SlashCommand:  name + description + handler(args, ctx) + hidden
+SlashCommandRegistry:
+    register / unregister / get / list_commands（过滤 hidden）
+    is_slash_command(text)
+    execute(input, context) → 解析 "/name args" → 分发到 handler
+```
+
+**分发优先级**：App 主循环中斜杠命令**先于** Agent 对话判断——`/` 开头的输入直接走命令分发，不进入 LLM。未知命令返回可用命令列表提示而非报错。
+
+**闭包工厂模式**：内置命令（`builtin_commands.py`）用 `_make_xxx(app)` 闭包工厂生成 handler，让命令持有 Application 引用而不需要全局变量。11 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /quit /exit。
+
+### 补全菜单（输入 / 弹出下拉框）
+
+Prompt Toolkit 的 `Completer` 接口实现：
+
+- `SlashCommandCompleter.get_completions()`：输入以 `/` 开头时按前缀匹配命令，`display_meta` 显示命令说明
+- `complete_while_typing=True`：边输入边过滤
+- **backspace 重触发**：默认删除字符不弹菜单，自定义 backspace 键绑定在删除后检测 `/` 前缀并 `buf.start_completion()` 主动弹出
+- `reserve_space_for_menu=12`：光标在终端底部时预留空间，终端自动上滚保证菜单完整显示（模仿 Claude Code 行为）
+- 补全项 `start_position=-len(text)` 整体替换输入，避免选中后文本拼接错误
+
+## 5.2 Skill 技能包系统
+
+### 要解决的问题
+
+让用户能"装技能"扩展 Agent 能力——把领域专属的 prompt + 工具需求打包为可加载单元，不改核心代码。
+
+### 实现原理
+
+技能包 = 一个目录 + 一个 SKILL.md 文件（YAML front-matter + Markdown 正文）：
+
+```
+---
+name: code-review
+description: Review code changes
+triggers:
+  - "review"
+tools:
+  - read_file
+  - grep
+---
+You are a code reviewer. Follow these steps: ...
+```
+
+`SkillRegistry`（`extensions/skills.py`）核心机制：
+
+- **加载**：`load_all()` 扫描 skill_dirs 下所有子目录的 SKILL.md，解析 front-matter（自研 20 行 YAML 子集解析器：key:value + 列表项，不引入 PyYAML）
+- **激活**：`activate(name, conversation)` 把技能 prompt 以带标记的形式追加到 system prompt（`--- Skill: name ---` 分隔符）
+- **停用**：`deactivate` 按标记精确移除注入的 prompt 段，system prompt 恢复原状
+- **触发匹配**：`match_triggers(user_message)` 检查用户消息是否包含触发词（已激活的技能跳过，避免重复注入）
+
+### 设计权衡
+
+- **为什么 prompt 注入 system prompt 而非独立消息？** system prompt 是 LLM 行为定义的正确位置；作为 user/assistant 消息注入会被后续对话稀释，且可能被上下文压缩掉。
+- **带标记注入 = 可逆操作**：注入用 `--- Skill: name ---` 前缀标记，deactivate 时 `str.replace` 精确移除，多技能可叠加互不干扰。
+
+## 5.3 MCP 协议客户端
+
+### 要解决的问题
+
+让 Agent 能挂载任意符合 MCP（Model Context Protocol）规范的外部工具服务——GitHub、Slack、数据库等——而无需为每个服务写专属集成代码。
+
+### 实现原理
+
+三层结构（`tools/mcp/`）：
+
+**Transport 层**（`transport.py`）：`StdioTransport` 启动 MCP 服务器子进程，通过 stdin/stdout 收发 JSON-RPC 2.0 消息（每行一个 JSON，自动分配递增 request id，30 秒超时）。
+
+**Client 层**（`client.py`）：
+- `MCPServerConnection.initialize()`：MCP 握手三步——initialize 请求（带 protocolVersion + clientInfo）→ initialized 通知 → tools/list 发现工具
+- `MCPManager`：多服务器连接管理（connect/disconnect/call_tool），`call_tool` 解析 MCP 响应的 content 数组提取 text 块拼接为输出
+
+**Adapter 层**（`adapter.py`）：`MCPToolAdapter` 实现内部 Tool ABC——这是关键设计。MCP 工具的 inputSchema（JSON Schema）转换为内部 ToolParameter 列表，工具名加 `mcp_{server}_` 前缀防冲突。适配后 MCP 工具**注册进同一个 ToolRegistry**，AgentLoop 调用它和调用内置工具零区别——权限检查、Hook 链、错误处理全部自动生效。
+
+### 设计权衡
+
+- **为什么不用官方 MCP SDK？** 与 LLM Provider 同样的理由——P5 只需要 stdio transport + 三个方法（initialize/tools list/tools call），自研 JSON-RPC 循环 ~80 行，比引入 SDK 更可控。HTTP transport 预留了 MCPTransport ABC 插槽。
+- **Adapter 模式的红利**：安全层（PermissionCheck/Hook）对 MCP 工具透明生效——因为它们只认 Tool 接口，不关心工具来自哪里。
+
+## 5.4 Anthropic Provider（第二个 LLM 后端）
+
+### 要解决的问题
+
+验证 P1 的 Provider 抽象是否真的"可扩展"——接入一个 API 格式完全不同的后端（Claude Messages API），核心代码零改动。
+
+### 实现原理
+
+`llm/anthropic_provider.py` 实现 LLMProvider ABC，关键是**三个格式转换**：
+
+**1. 消息格式转换**（`_split_system`）：
+
+| OpenAI 格式 | Anthropic 格式 |
+|---|---|
+| messages 里的 system 角色 | 顶层独立 `system` 参数 |
+| assistant.tool_calls 数组 | content 里的 tool_use 块 |
+| tool 角色消息 + tool_call_id | user 角色 content 里的 tool_result 块 |
+
+**2. 工具格式转换**（`_convert_tools`）：OpenAI 的 `{"type":"function","function":{name,parameters}}` → Anthropic 的 `{name, description, input_schema}`。
+
+**3. SSE 事件流转换**（`_parse_event`）：Anthropic 的事件类型体系完全不同——`content_block_start`（tool_use 块携带 id+name）、`content_block_delta`（text_delta 文本增量 / input_json_delta 工具参数增量）、`message_delta`（stop_reason + usage）——全部归一化为内部 StreamChunk，AgentLoop 消费时无感知。
+
+### 验证意义
+
+AnthropicProvider 只用 `ProviderRegistry.register("anthropic", ...)` 一行接入，AgentLoop/工具系统/UI 零改动——证明了 P1 抽象层的正确性。`--provider anthropic` CLI 参数即可切换。
+
+## 5.5 测试验证矩阵
+
+22 个 P5 新测试（总计 131 个）：
+
+| 模块 | 测试要点 |
+|---|---|
+| test_slash_commands.py (7) | 注册+执行 / 未知命令提示 / is_slash_command 判定 / hidden 过滤 / 无参数 / 非斜杠返回 None / 卸载 |
+| test_skills.py (8) | SKILL.md 解析 / 多技能加载 / 激活注入+停用移除 / 触发词匹配 / 已激活不重复 / 无 front-matter 拒绝 / 缺 name 跳过 |
+| test_mcp.py (7) | Adapter schema 转换 / JSON Schema 输出 / 执行代理 / 错误传递 / 注册进 Registry / 可选参数识别（FakeMCPManager 模拟，零真实服务器依赖） |
+
+---
+
+# 第六部分：P6 多 Agent 协作
+
+## 6.1 Git Worktree 隔离
+
+### 要解决的问题
+
+多个 Agent 同时改代码会互相覆盖。git worktree 让同一仓库的多个分支同时检出到不同目录——每个 Agent 在自己的工作树里改代码，互不干扰，完成后合并回主分支。
+
+### 实现原理
+
+`security/worktree.py` 封装 git worktree 命令族（全部通过 asyncio 子进程执行，`_run_git` 统一返回 exit_code/stdout/stderr）：
+
+```
+create(branch)      → git worktree add {base}/{branch} -b {branch}
+remove(path)        → 先 status --porcelain 检查未提交变更，dirty 拒绝（force=True 强制）
+list()              → git worktree list --porcelain 逐行解析（worktree/HEAD/branch 三元组）
+status(path)        → 干净检测 + 当前分支 + HEAD commit
+merge_back(branch)  → git merge --no-ff；失败时 diff --diff-filter=U 列出冲突文件
+                      并自动 merge --abort 保持仓库干净
+```
+
+### 设计权衡
+
+- **未提交变更保护是默认行为**：Agent 的工作树可能有半成品，误删就丢了。remove 先查 status，dirty 必须显式 force。
+- **冲突时 abort 而非留着**：合并冲突留在仓库里会阻塞后续所有操作。检测到冲突 → 记录文件列表 → 立即 abort → 把冲突信息返回给调用方决策。
+- **worktree 放在 `.mini-agent/worktrees/` 下**：集中管理便于清理，且已在 .gitignore 中。
+
+## 6.2 SubAgent 子任务分发
+
+### 要解决的问题
+
+复杂任务（"并行修复 A 和 B"）单 Agent 串行太慢。SubAgent 把子任务委派给独立 Agent 并行执行——每个有自己的对话上下文、工具集、工作目录。
+
+### 实现原理
+
+**SubAgent**（`core/subagent.py`）= 一次性任务执行器：
+
+- **复用 AgentLoop**：SubAgent 内部就是一个标准 AgentLoop + 专属 Conversation（系统提示词强调"专注单任务、自主决策、最终消息即报告"）
+- **隔离三件套**：克隆的 ToolRegistry（`clone()` + 白名单过滤）、独立 Session、可选 worktree 作为 working_dir
+- **结果封装**：SubAgentResult 携带 agent_id/task/success/output/tool_calls_made/tokens_used/worktree_path/error
+
+**SubAgentManager** = 生命周期管理器：
+
+```
+spawn(task, isolation, allowed_tools) → asyncio.create_task 后台启动，返回 agent_id
+spawn_parallel(tasks)                 → 批量 spawn，全部并发运行
+wait(agent_id, timeout)               → await 单个结果；超时则 cancel + 返回 Timed out 错误
+wait_all(ids)                         → asyncio.gather 并发等待全部
+cancel / cancel_all / list_active / get_status
+```
+
+`isolation="worktree"` 时 spawn 自动调 WorktreeManager.create 建独立工作树，SubAgent 的所有文件操作都发生在里面。
+
+### 并行的实现本质
+
+`asyncio.create_task` 让每个 SubAgent 的 run() 立即开始跑（LLM I/O 等待时事件循环切换到其他 Agent）。单测 `test_parallel_faster_than_serial` 锁定该行为：3 个 0.1s 延迟的 Agent 并行完成 <0.35s（串行需 0.3s+）。真实 API 验证：2 个 Agent 并行读不同文件 2.3s 完成。
+
+### 设计权衡
+
+- **失败不抛异常**：SubAgent.run() 捕获所有异常转成 `success=False` 的 SubAgentResult——一个子任务失败不应炸掉整个编排。
+- **超时即取消**：wait 超时后主动 cancel 该 Agent（停止烧 token），返回明确的 Timed out 错误。
+- **工具白名单**：spawn 时可限制子 Agent 能用的工具（如只读任务只给 read_file/glob/grep），最小权限原则。
+
+## 6.3 Plan 模式（结构化任务分解）
+
+### 实现原理
+
+`core/planner.py` 用 LLM 做任务分解——prompt 要求输出纯 JSON 数组，每项含 description + role：
+
+```
+Planner.decompose(task) → Plan(steps=[PlanStep(index, description, role, status)])
+```
+
+**三级解析容错**（LLM 输出不可控，解析必须健壮）：
+
+1. 剥 markdown 代码围栏（```json ... ```）
+2. 正则提取第一个 JSON 数组；数组项支持 dict（取 description/role）和纯字符串两种形态
+3. JSON 解析失败 → 整段文本兜底为单步计划（宁可单步执行也不崩溃）
+
+`max_steps` 截断防止 LLM 过度拆分。
+
+## 6.4 Agent Teams 团队协作
+
+### 实现原理
+
+`core/team.py` 实现 Orchestrator 编排策略，串起 Planner 和 SubAgentManager：
+
+```
+AgentTeam.start(task):
+    1. plan = planner.decompose(task)            # LLM 分解任务
+    2. for step in plan.steps:
+         member = _match_member(step.role)        # 角色匹配（子串双向匹配 + 首成员兜底）
+         spawn(带角色前缀的子任务, member.allowed_tools)
+    3. results = wait_all()                       # 并行等待全部完成
+    4. 状态回写 plan.steps + 生成 TeamRunReport
+```
+
+**角色匹配**：Planner 给每个子任务建议 role（如 "backend"），`_match_member` 用双向子串匹配找团队成员（"test" 匹配 "tester"）；没匹配到用第一个成员兜底，空团队则不带成员配置直接执行。
+
+**TeamRunReport**：每步的状态（OK/FAILED）+ 输出摘要，`success` 属性要求全部子任务成功。
+
+### 设计权衡
+
+- **为什么是 Orchestrator 而非 peer-to-peer？** 编排逻辑集中在一处（分解→分配→收集），数据流单向清晰。Agent 间横向通信会引入复杂的消息路由和死锁风险，收益不明。
+- **复用而非新造**：AgentTeam 没有自己的执行引擎——分解交给 Planner、执行交给 SubAgentManager，它只做匹配和汇总（~100 行）。
+
+## 6.5 测试验证矩阵
+
+25 个 P6 新测试（总计 156 个）：
+
+| 模块 | 测试要点 |
+|---|---|
+| test_subagent.py (8) | 任务完成 / 工具使用 / 并行 spawn / 并行快于串行（计时断言）/ 未知 agent / 超时取消 / 工具白名单 / 注册表隔离 |
+| test_planner.py (6) | JSON 数组解析 / markdown 围栏剥离 / 无效 JSON 兜底 / max_steps 截断 / 字符串项 / is_complete |
+| test_team.py (5) | 完整编排流程 / 报告摘要 / 角色匹配 / 首成员兜底 / 空团队 |
+| test_worktree.py (6, 集成) | 真实 git 仓库: create+list / 重复创建报错 / clean/dirty 状态 / remove / dirty 拒绝+force / merge_back |
+
+**E2E 真实 API 验证**：2 个 SubAgent 并行读不同文件 2.3s 完成各自正确报告；AgentTeam 完整编排（Planner 分解 → 2 角色成员并行执行 → 汇总 success=True）。
+
+---
+
+# 附录：贯穿六个阶段的通用设计原则
+
+1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
+2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
+3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
+4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试——156 个测试 34 秒跑完
+6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
+7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道——新能力尽量是既有组件的组合

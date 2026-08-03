@@ -1,4 +1,4 @@
-"""Event types for the event bus system."""
+"""Event types for the event bus system. 事件总线系统的事件类型。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 @dataclass
 class Event:
-    """Base event. All events carry a timestamp."""
+    """Base event. All events carry a timestamp. 基础事件。所有事件都携带时间戳。"""
 
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)

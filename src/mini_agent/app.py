@@ -1,4 +1,4 @@
-"""Application orchestrator -- wires all layers together."""
+"""Application orchestrator -- wires all layers together. 应用编排器——将所有层级组装在一起。"""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ On Windows use dir/type/findstr/where, NOT ls/cat/grep/which."""
 
 
 class Application:
-    """Main application -- agent conversation loop."""
+    """Main application -- agent conversation loop. 主应用——Agent 对话循环。"""
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
@@ -70,7 +70,7 @@ class Application:
 
         self._llm = ProviderRegistry.create(config.llm)
 
-        # Tool registry with all builtin tools
+        # Tool registry with all builtin tools 包含所有内置工具的工具 registry
         self.tool_registry = ToolRegistry()
         for tool_class in ALL_BUILTIN_TOOLS:
             tool = tool_class()
@@ -85,6 +85,7 @@ class Application:
         )
 
         # Security: path guard + permission manager wired to terminal confirm
+        # 安全：路径守卫 + 权限管理器接入终端确认
         path_guard = PathGuard(
             tool_config=config.tools,
             security_config=config.security,
@@ -98,6 +99,7 @@ class Application:
         self.hook_manager = HookManager()
 
         # Memory: context manager + compressor + session store
+        # 记忆：上下文管理器 + 压缩器 + 会话存储
         self.context_manager = ContextManager(config.memory)
         compressor = Compressor()
         self.context_manager.set_compressor(compressor)
@@ -122,12 +124,12 @@ class Application:
         self.slash_commands = SlashCommandRegistry()
         register_builtin_commands(self)
 
-        # Wire slash command completions to terminal
+        # Wire slash command completions to terminal 将斜杠命令补全接入终端
         self.terminal.set_slash_commands(
             [(c.name, c.description) for c in self.slash_commands.list_commands()]
         )
 
-        # Wire agent loop callbacks to terminal rendering
+        # Wire agent loop callbacks to terminal rendering 将 Agent 循环回调接入终端渲染
         self.agent_loop.on_stream_start = self.terminal.start_stream
         self.agent_loop.on_stream_delta = self.terminal.feed_stream
         self.agent_loop.on_stream_end = lambda: self.terminal.finish_stream()
@@ -158,7 +160,7 @@ class Application:
                 if user_input.lower() in ("exit", "quit"):
                     break
 
-                # Slash command dispatch
+                # Slash command dispatch 斜杠命令分发
                 if self.slash_commands.is_slash_command(user_input):
                     try:
                         result = await self.slash_commands.execute(user_input, self)

@@ -1,4 +1,5 @@
-"""Slash command framework -- built-in + user-defined commands."""
+"""Slash command framework -- built-in + user-defined commands.
+斜杠命令框架——内置命令 + 用户自定义命令。"""
 
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ class SlashCommand:
 
 
 class SlashCommandRegistry:
-    """Registry for slash commands. Handles parsing, dispatch, and listing."""
+    """Registry for slash commands. Handles parsing, dispatch, and listing.
+    斜杠命令注册表。负责解析、分发和列出命令。"""
 
     def __init__(self) -> None:
         self._commands: dict[str, SlashCommand] = {}
@@ -38,8 +40,10 @@ class SlashCommandRegistry:
 
     async def execute(self, input_text: str, context: Any = None) -> str | None:
         """Parse and execute a slash command.
+        解析并执行一条斜杠命令。
 
         Returns the output string, or None if not a slash command.
+        返回输出字符串；如果不是斜杠命令则返回 None。
         """
         text = input_text.strip()
         if not text.startswith("/"):

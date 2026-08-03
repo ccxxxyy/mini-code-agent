@@ -1,4 +1,5 @@
-"""Glob tool -- find files by name pattern."""
+"""Glob tool -- find files by name pattern.
+Glob 工具——按文件名模式查找文件。"""
 
 from __future__ import annotations
 

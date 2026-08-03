@@ -1,4 +1,5 @@
-"""EditFile tool -- exact string replacement in a file."""
+"""EditFile tool -- exact string replacement in a file.
+EditFile 工具——在文件中进行精确字符串替换。"""
 
 from __future__ import annotations
 

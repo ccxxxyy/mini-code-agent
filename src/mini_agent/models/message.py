@@ -1,4 +1,4 @@
-"""Core message types for the conversation system."""
+"""Core message types for the conversation system. 对话系统的核心消息类型。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class Role(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:
-    """A tool invocation requested by the LLM."""
+    """A tool invocation requested by the LLM. LLM 请求的一次工具调用。"""
 
     id: str
     name: str
@@ -28,7 +28,7 @@ class ToolCall:
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-    """Result returned after executing a tool."""
+    """Result returned after executing a tool. 执行工具后返回的结果。"""
 
     call_id: str
     name: str
@@ -39,7 +39,7 @@ class ToolResult:
 
 @dataclass(slots=True)
 class Message:
-    """A single message in a conversation."""
+    """A single message in a conversation. 对话中的一条消息。"""
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     role: Role = Role.USER
@@ -54,7 +54,7 @@ class Message:
 
 @dataclass
 class Conversation:
-    """An ordered sequence of messages with system prompt."""
+    """An ordered sequence of messages with system prompt. 带有 system prompt 的有序消息序列。"""
 
     system_prompt: str = ""
     messages: list[Message] = field(default_factory=list)
@@ -66,7 +66,7 @@ class Conversation:
             self.total_tokens += message.token_count
 
     def to_api_messages(self) -> list[dict[str, Any]]:
-        """Convert to the format expected by LLM APIs."""
+        """Convert to the format expected by LLM APIs. 转换为 LLM API 期望的格式。"""
         result: list[dict[str, Any]] = []
         if self.system_prompt:
             result.append({"role": "system", "content": self.system_prompt})
@@ -102,7 +102,9 @@ class Conversation:
         return result
 
     def slice_window(self, max_tokens: int) -> list[Message]:
-        """Return the most recent messages fitting within max_tokens."""
+        """Return the most recent messages fitting within max_tokens.
+        返回能容纳在 max_tokens 内的最近消息。
+        """
         selected: list[Message] = []
         remaining = max_tokens
         for msg in reversed(self.messages):

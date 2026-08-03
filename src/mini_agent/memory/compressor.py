@@ -1,9 +1,15 @@
 """Compression strategies for managing context window overflow.
+用于处理上下文窗口溢出的压缩策略。
 
 Three-stage cascade:
   Stage 1: DropToolResults — abbreviate verbose tool outputs
   Stage 2: SummarizeOldest — LLM-summarize the oldest messages
   Stage 3: SlidingWindow  — keep only the most recent N messages
+
+三级级联：
+  第 1 级：DropToolResults——缩略冗长的工具输出
+  第 2 级：SummarizeOldest——用 LLM 总结最旧的消息
+  第 3 级：SlidingWindow——只保留最近的 N 条消息
 """
 
 from __future__ import annotations
@@ -17,12 +23,14 @@ from mini_agent.models.message import Conversation, Message, Role
 class CompressionStrategy(ABC):
     @abstractmethod
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
-        """Mutate conversation.messages in-place to reduce token count."""
+        """Mutate conversation.messages in-place to reduce token count.
+        原地修改 conversation.messages 以减少 token 数。"""
         ...
 
 
 class DropToolResults(CompressionStrategy):
-    """Stage 1: Replace verbose tool outputs with short summaries."""
+    """Stage 1: Replace verbose tool outputs with short summaries.
+    第 1 级：用简短摘要替换冗长的工具输出。"""
 
     MAX_TOOL_OUTPUT = 200
 
@@ -51,13 +59,18 @@ class DropToolResults(CompressionStrategy):
 
 class SummarizeOldest(CompressionStrategy):
     """Stage 2: Summarize the oldest portion of messages into one summary message.
+    第 2 级：把最旧的一批消息总结成一条摘要消息。
 
     Uses a simple extractive approach (no LLM call in P4 — keeps it fast
     and avoids recursive API calls). A full LLM-based summary can be
     plugged in later.
+
+    使用简单的抽取式方法（P4 阶段不调用 LLM——保持速度快并避免递归 API 调用）。
+    以后可以接入完整的基于 LLM 的摘要。
     """
 
     KEEP_RECENT = 6  # always keep the most recent N messages untouched
+    # 始终保持最近的 N 条消息不动
 
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         msgs = conversation.messages
@@ -93,7 +106,8 @@ class SummarizeOldest(CompressionStrategy):
 
 
 class SlidingWindow(CompressionStrategy):
-    """Stage 3: Keep only messages that fit within target_tokens (last resort)."""
+    """Stage 3: Keep only messages that fit within target_tokens (last resort).
+    第 3 级：只保留能放进 target_tokens 预算内的消息（最后手段）。"""
 
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         system_cost = count_tokens(conversation.system_prompt) if conversation.system_prompt else 0
@@ -112,7 +126,8 @@ class SlidingWindow(CompressionStrategy):
 
 
 class Compressor:
-    """Runs compression strategies in cascade until target is met."""
+    """Runs compression strategies in cascade until target is met.
+    级联运行各压缩策略，直到达到目标。"""
 
     def __init__(
         self,

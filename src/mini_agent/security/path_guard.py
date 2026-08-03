@@ -1,4 +1,4 @@
-"""Path restriction enforcement."""
+"""Path restriction enforcement. 路径访问限制的强制执行。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,8 @@ SENSITIVE_EXCEPTIONS = [".env.example", ".env.sample", ".env.template"]
 
 
 class PathGuard:
-    """Restricts file system access to allowed paths."""
+    """Restricts file system access to allowed paths.
+    将文件系统访问限制在允许的路径内。"""
 
     def __init__(
         self,
@@ -43,6 +44,10 @@ class PathGuard:
 
         operation: 'read' | 'write'
         Order: denied dirs -> sensitive files -> project dir -> allowed paths -> ask
+
+        检查给定操作是否允许访问该路径。
+        operation: 'read' | 'write'
+        顺序：拒绝目录 -> 敏感文件 -> 项目目录 -> 允许路径 -> 询问
         """
         resolved = path.expanduser().resolve()
 
@@ -64,7 +69,8 @@ class PathGuard:
 
     @staticmethod
     def is_sensitive_file(path: Path) -> bool:
-        """Check if file matches sensitive patterns (.env, credentials, keys)."""
+        """Check if file matches sensitive patterns (.env, credentials, keys).
+        检查文件是否匹配敏感模式（.env、凭据、密钥）。"""
         name = path.name.lower()
         if name in SENSITIVE_EXCEPTIONS:
             return False

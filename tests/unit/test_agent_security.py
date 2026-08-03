@@ -1,4 +1,6 @@
-"""Integration tests: security pipeline inside the agent loop."""
+"""Integration tests: security pipeline inside the agent loop.
+集成测试：Agent 循环内部的安全管线。
+"""
 
 import json
 from collections.abc import AsyncIterator
@@ -127,6 +129,7 @@ async def test_dangerous_bash_approved_by_user(tool_context):
 
     tool_msg = [m for m in conv.messages if m.role == Role.TOOL][0]
     # Approved -> command actually ran (echo works even if rm target missing)
+    # 已批准 -> 命令实际执行了（即使 rm 的目标不存在，echo 也能正常工作）
     assert "Permission denied" not in tool_msg.tool_result.output
 
 

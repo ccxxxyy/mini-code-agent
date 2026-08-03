@@ -1,4 +1,4 @@
-"""Permission types for the security layer."""
+"""Permission types for the security layer. 安全层的权限类型。"""
 
 from __future__ import annotations
 

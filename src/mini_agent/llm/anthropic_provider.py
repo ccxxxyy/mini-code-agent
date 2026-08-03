@@ -1,4 +1,6 @@
-"""Anthropic Claude API provider with tool_use support."""
+"""Anthropic Claude API provider with tool_use support.
+支持 tool_use 的 Anthropic Claude API Provider。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +29,9 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 
 
 class AnthropicProvider(LLMProvider):
-    """Claude API provider via Messages API with SSE streaming."""
+    """Claude API provider via Messages API with SSE streaming.
+    通过 Messages API 和 SSE 流式传输的 Claude API Provider。
+    """
 
     def __init__(self, config: LLMConfig) -> None:
         self._config = config
@@ -143,7 +147,9 @@ class AnthropicProvider(LLMProvider):
     def _split_system(
         messages: list[dict[str, Any]],
     ) -> tuple[str, list[dict[str, Any]]]:
-        """Extract system prompt and convert to Anthropic format."""
+        """Extract system prompt and convert to Anthropic format.
+        提取系统 prompt 并转换为 Anthropic 格式。
+        """
         system = ""
         api_msgs: list[dict[str, Any]] = []
 
@@ -190,7 +196,9 @@ class AnthropicProvider(LLMProvider):
 
     @staticmethod
     def _convert_tools(openai_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert OpenAI function calling format to Anthropic tool format."""
+        """Convert OpenAI function calling format to Anthropic tool format.
+        将 OpenAI 函数调用格式转换为 Anthropic 工具格式。
+        """
         anthropic_tools = []
         for tool in openai_tools:
             func = tool.get("function", tool)

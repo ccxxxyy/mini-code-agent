@@ -1,4 +1,5 @@
-"""MCP client -- manages server connections and tool discovery."""
+"""MCP client -- manages server connections and tool discovery.
+MCP 客户端——管理服务器连接与工具发现。"""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from mini_agent.tools.mcp.transport import MCPTransport, StdioTransport
 
 
 class MCPServerConnection:
-    """A connection to a single MCP server."""
+    """A connection to a single MCP server. 到单个 MCP 服务器的连接。"""
 
     def __init__(self, name: str, transport: MCPTransport) -> None:
         self.name = name
@@ -20,7 +21,7 @@ class MCPServerConnection:
         self.tools: list[dict[str, Any]] = []
 
     async def initialize(self) -> None:
-        """Send initialize request and discover tools."""
+        """Send initialize request and discover tools. 发送 initialize 请求并发现工具。"""
         await self.transport.send(
             {
                 "method": "initialize",
@@ -42,7 +43,7 @@ class MCPServerConnection:
         self.tools = tools_response.get("result", {}).get("tools", [])
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Call a tool on this server."""
+        """Call a tool on this server. 调用此服务器上的工具。"""
         response = await self.transport.send(
             {
                 "method": "tools/call",
@@ -53,7 +54,7 @@ class MCPServerConnection:
 
 
 class MCPManager:
-    """Manages multiple MCP server connections."""
+    """Manages multiple MCP server connections. 管理多个 MCP 服务器连接。"""
 
     def __init__(self) -> None:
         self._connections: dict[str, MCPServerConnection] = {}
@@ -67,6 +68,9 @@ class MCPManager:
         """Connect to an MCP server, discover tools, register them.
 
         Returns the number of tools discovered.
+
+        连接到 MCP 服务器，发现工具并注册它们。
+        返回发现的工具数量。
         """
         if config.transport == "stdio":
             transport = StdioTransport(
@@ -114,7 +118,8 @@ class MCPManager:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> ToolResult:
-        """Proxy a tool call to the appropriate MCP server."""
+        """Proxy a tool call to the appropriate MCP server.
+        将工具调用代理到对应的 MCP 服务器。"""
         conn = self._connections.get(server_name)
         if not conn:
             return ToolResult(
