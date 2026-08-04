@@ -1038,6 +1038,15 @@ positioning.md 方向 3 提出"垂直场景定制"——CC 覆盖不好的场景
 设计选择：
 - **同步写而非异步**：审计日志写入量极小（每次工具调用 2-3 行 JSON），同步 `open+append` 比引入 aiofiles 依赖更简单可靠
 - **EventBus 而非 Hook**：Hook 可以 BLOCK/MODIFY（属于执行路径），审计只需观察（属于旁路监控）。EventBus 的 fire-and-forget 语义更准确，且订阅者异常不影响主流程
+- **哈希链防篡改**：每条记录携带 `prev_hash` 和 `hash = sha256(prev_hash + 规范化内容)`，链式依赖使篡改或删除任何一行后，其后所有哈希全部失配。`/audit verify` 重放校验并定位第一处断裂（区分"内容被改"和"行被删"）。进程重启后从文件尾恢复链尾哈希自动续接。选哈希链不选加密：日志在用户机器上无需防读取，"可验证没改过"才是审计的核心价值；且零依赖（标准库 hashlib）
+- **开关持久化**：`/audit on` 在日志目录写 `.audit_on` 标记文件，重启后 AuditLogger 构造时读取——审计开启后跨会话一直生效，直到显式 `/audit off`（审计的语义本就该持久，内存开关重启即失效违背直觉）
+
+**安全边界**：哈希链提供的是 tamper-evident（篡改留痕）而非 tamper-proof（不可写入）——单机上任何有文件写权限的主体都能修改日志，软件层无法阻止，链只保证"改了必被 verify 检出"。两个已知局限：
+
+1. **不防全链重算**：攻击者若把被改行之后的所有哈希重算一遍（算法开源无秘密），verify 会通过。防御需要 HMAC 密钥（单机存不住）或外部锚定（把链尾哈希定期发到攻击者控制不了的地方：远程日志服务器/时间戳服务），均超出单机工具边界
+2. **发现依赖主动 verify**：篡改瞬间无警报，链不记录"谁在何时改的"
+
+这与 Git 的提交历史是同一信任模型：不阻止改历史，但改了哈希全变。单机条件下这是行业标准做法的上限。
 
 ### 内网离线环境（零代码 Skill 范式）
 
@@ -1062,12 +1071,52 @@ positioning.md 方向 3 提出"垂直场景定制"——CC 覆盖不好的场景
 
 ---
 
+# 第十一部分：P11 机制实验
+
+## 11.1 问题：从"做了个项目"到"做了研究"
+
+positioning.md 方向 4 提出"机制实验床"——拿自己的实现做对照实验，产出用商用产品得不到的数据。两个实验各回答一个具体研究问题。
+
+## 11.2 LLMSummarizeOldest：roadmap 1.1 插槽的兑现
+
+实验 1 需要 LLM 摘要作为第三个对照臂，恰好兑现 roadmap 1.1 预留的升级插槽：
+
+- **策略选择逻辑复用**：把 `SummarizeOldest` 的提取式拼接抽成模块级函数 `_extractive_digest()`，LLM 版和提取式版共用消息选择/替换逻辑
+- **防递归**：摘要调用是一次性直连 `llm.stream()` 请求，不经过 AgentLoop——压缩发生在 OBSERVE 阶段内部，若走 AgentLoop 会再次触发压缩检查造成递归
+- **失败即回退**：LLM 网络异常或空响应时回退提取式摘要——压缩链在任何情况下都必须产出结果，否则对话会因超窗被 API 拒绝
+- **不动默认链**：`Compressor()` 默认策略列表不变，LLM 摘要需显式配置——压缩本身耗 token，是否值得由使用场景决定（这正是实验 1 要回答的问题）
+
+## 11.3 实验设计要点
+
+### 实验 1：压缩策略 A/B（compression_ab.py）
+
+关键设计：**人为压小上下文窗口**（6000 token、阈值 0.6）。benchmark 任务只有几千 token，正常 128k 窗口永远不触发压缩，三臂无差异。压小窗口后压缩被强制触发，三臂的行为差异才可观测。
+
+三臂：none（无压缩基线）/ extractive（提取式级联）/ llm（LLM 摘要级联）。指标：verify 通过率、token、成本、工具调用数、compressed 消息数。
+
+### 实验 2：强弱模型混合编排（model_mix.py）
+
+关键前提：架构原生支持——`Planner(llm)` 和 `SubAgentManager(llm)` 各自接受独立的 LLMProvider，`AgentTeam(config, planner, manager)` 只做编排不关心模型。强弱混合 = 构造两个 Provider 分别注入，零框架改动。
+
+三臂：strong-strong / strong-weak（假设：分解靠智商，执行靠体力）/ weak-weak（成本下限）。任务是可分解复合任务（写 3 个文档），验证方式为产出文件存在且非空。
+
+## 11.4 实验结果与发现
+
+真实 API 全量运行（compression 15 次 + mix 6 次），两个反直觉发现：
+
+1. **压缩的隐性代价是"重复劳动"**：小窗口强制压缩下，压缩臂不但没省 token 反而更贵（none 9.7k → extractive 13.8k → llm 36.1k 平均 token）。摘要丢失细节后 Agent 重新读文件找回信息，工具调用翻 2-5 倍。压缩的正确定位是防溢出兜底，不是省钱手段
+2. **strong-weak 混编是帕累托最优**：强 Planner + 弱 Worker 全通过且成本最低（$0.0016 vs strong-strong $0.0024），而 strong-strong 反而挂了一个任务（失败在执行侧漏产出文件）——分解质量比执行模型档次更能决定结果
+
+完整数据与边界说明见 `experiments/README.md`。4 个新单测（MockLLM：摘要成功/网络失败回退/空响应回退/过少跳过），235 个测试全过。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——217 个测试 35 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——235 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅——新能力尽量是既有组件的组合

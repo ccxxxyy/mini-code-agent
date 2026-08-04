@@ -29,6 +29,10 @@ class ConfigLoader:
         # Load named LLM profiles 加载命名 LLM 档案
         ConfigLoader._load_profiles(config)
 
+        # Strong/weak model mixing 强弱模型混编
+        config.planner_profile = os.environ.get("MINI_AGENT_PLANNER_PROFILE", "").strip()
+        config.worker_profile = os.environ.get("MINI_AGENT_WORKER_PROFILE", "").strip()
+
         # Apply CLI overrides (highest priority)
         if cli_overrides:
             config = ConfigLoader._apply_cli(config, cli_overrides)

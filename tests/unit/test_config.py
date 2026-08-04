@@ -119,3 +119,67 @@ def test_models_without_model_skipped(monkeypatch):
 def test_no_profiles_by_default():
     config = ConfigLoader.load()
     assert config.llm_profiles == {}
+
+
+# --- Strong/weak model mixing 强弱模型混编 ---
+
+
+def test_mixing_profiles_loaded(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.setenv("MINI_AGENT_MODELS", "fast,smart")
+    monkeypatch.setenv("MODEL_FAST_MODEL", "weak-model")
+    monkeypatch.setenv("MODEL_SMART_MODEL", "strong-model")
+    monkeypatch.setenv("MINI_AGENT_PLANNER_PROFILE", "smart")
+    monkeypatch.setenv("MINI_AGENT_WORKER_PROFILE", "fast")
+
+    config = ConfigLoader.load()
+    assert config.planner_profile == "smart"
+    assert config.worker_profile == "fast"
+
+
+def test_mixing_empty_by_default():
+    config = ConfigLoader.load()
+    assert config.planner_profile == ""
+    assert config.worker_profile == ""
+
+
+def test_create_for_role_uses_profile(monkeypatch):
+    from mini_agent.llm.registry import ProviderRegistry
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.setenv("MINI_AGENT_MODELS", "fast,smart")
+    monkeypatch.setenv("MODEL_FAST_MODEL", "weak-model")
+    monkeypatch.setenv("MODEL_SMART_MODEL", "strong-model")
+    monkeypatch.setenv("MINI_AGENT_PLANNER_PROFILE", "smart")
+    monkeypatch.setenv("MINI_AGENT_WORKER_PROFILE", "fast")
+
+    config = ConfigLoader.load()
+    planner_llm = ProviderRegistry.create_for_role(config, "planner")
+    worker_llm = ProviderRegistry.create_for_role(config, "worker")
+    assert planner_llm._config.model == "strong-model"
+    assert worker_llm._config.model == "weak-model"
+
+
+def test_create_for_role_falls_back_to_main(monkeypatch):
+    from mini_agent.llm.registry import ProviderRegistry
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.setenv("MINI_AGENT_MODEL", "main-model")
+
+    config = ConfigLoader.load()
+    # No mixing configured -> both roles use the main llm
+    # 未配置混编 → 两个角色都用主模型
+    planner_llm = ProviderRegistry.create_for_role(config, "planner")
+    assert planner_llm._config.model == "main-model"
+
+
+def test_create_for_role_unknown_profile_falls_back(monkeypatch):
+    from mini_agent.llm.registry import ProviderRegistry
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.setenv("MINI_AGENT_MODEL", "main-model")
+    monkeypatch.setenv("MINI_AGENT_PLANNER_PROFILE", "nonexistent")
+
+    config = ConfigLoader.load()
+    planner_llm = ProviderRegistry.create_for_role(config, "planner")
+    assert planner_llm._config.model == "main-model"

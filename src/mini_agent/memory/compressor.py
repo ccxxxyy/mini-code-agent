@@ -15,9 +15,13 @@ Three-stage cascade:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from mini_agent.llm.token_counter import count_tokens
 from mini_agent.models.message import Conversation, Message, Role
+
+if TYPE_CHECKING:
+    from mini_agent.llm.base import LLMProvider
 
 
 class CompressionStrategy(ABC):
@@ -80,29 +84,91 @@ class SummarizeOldest(CompressionStrategy):
         to_summarize = msgs[: len(msgs) - self.KEEP_RECENT]
         kept = msgs[len(msgs) - self.KEEP_RECENT :]
 
+        summary_text = "[Compressed conversation history]\n" + _extractive_digest(to_summarize)
+        conversation.messages = [_make_summary_message(summary_text)] + kept
+
+
+def _extractive_digest(messages: list[Message]) -> str:
+    """Mechanical digest: role + content snippet per message.
+    机械式摘要：每条消息取角色 + 内容片段。"""
+    parts: list[str] = []
+    for msg in messages:
+        role = msg.role.value
+        if msg.content:
+            text = msg.content[:300]
+            parts.append(f"[{role}] {text}")
+        elif msg.tool_calls:
+            names = ", ".join(tc.name for tc in msg.tool_calls)
+            parts.append(f"[{role}] called tools: {names}")
+        elif msg.tool_result:
+            status = "error" if msg.tool_result.is_error else "ok"
+            parts.append(f"[{role}] {msg.tool_result.name} → {status}")
+    return "\n".join(parts)
+
+
+def _make_summary_message(summary_text: str) -> Message:
+    msg = Message(role=Role.SYSTEM, content=summary_text, compressed=True)
+    msg.token_count = count_tokens(summary_text) + 4
+    return msg
+
+
+_SUMMARY_PROMPT = """Summarize this conversation history between a user and a coding agent.
+Preserve, in compact form:
+1. The task goal(s) the user asked for
+2. Steps already completed (files read/modified, commands run, their outcomes)
+3. Key files, findings, and decisions
+4. Any unresolved issues or pending work
+
+Be factual and dense. Output the summary only, no preamble.
+
+Conversation history:
+{history}"""
+
+
+class LLMSummarizeOldest(CompressionStrategy):
+    """Stage 2 (LLM variant): semantically summarize the oldest messages via LLM.
+    第 2 级（LLM 变体）：用 LLM 对最旧的消息做语义摘要。
+
+    Falls back to the extractive digest if the LLM call fails -- the
+    compression chain must never break on a network error.
+    LLM 调用失败时回退到抽取式摘要——压缩链绝不能因网络错误中断。
+    """
+
+    KEEP_RECENT = 6
+    MAX_HISTORY_CHARS = 24_000  # cap the summarization request size 限制摘要请求的大小
+
+    def __init__(self, llm: LLMProvider) -> None:
+        self._llm = llm
+
+    async def compress(self, conversation: Conversation, target_tokens: int) -> None:
+        msgs = conversation.messages
+        if len(msgs) <= self.KEEP_RECENT:
+            return
+
+        to_summarize = msgs[: len(msgs) - self.KEEP_RECENT]
+        kept = msgs[len(msgs) - self.KEEP_RECENT :]
+
+        digest = _extractive_digest(to_summarize)
+        try:
+            summary = await self._summarize(digest[: self.MAX_HISTORY_CHARS])
+            summary_text = "[Compressed conversation history (LLM summary)]\n" + summary
+        except Exception:
+            summary_text = "[Compressed conversation history]\n" + digest
+
+        conversation.messages = [_make_summary_message(summary_text)] + kept
+
+    async def _summarize(self, history: str) -> str:
+        # One-shot direct LLM call, bypasses AgentLoop -- no recursion risk.
+        # 一次性直连 LLM 调用，不经过 AgentLoop——无递归风险。
+        messages = [{"role": "user", "content": _SUMMARY_PROMPT.format(history=history)}]
         parts: list[str] = []
-        for msg in to_summarize:
-            role = msg.role.value
-            if msg.content:
-                text = msg.content[:300]
-                parts.append(f"[{role}] {text}")
-            elif msg.tool_calls:
-                names = ", ".join(tc.name for tc in msg.tool_calls)
-                parts.append(f"[{role}] called tools: {names}")
-            elif msg.tool_result:
-                status = "error" if msg.tool_result.is_error else "ok"
-                parts.append(f"[{role}] {msg.tool_result.name} → {status}")
-
-        summary_text = "[Compressed conversation history]\n" + "\n".join(parts)
-
-        summary_msg = Message(
-            role=Role.SYSTEM,
-            content=summary_text,
-            compressed=True,
-        )
-        summary_msg.token_count = count_tokens(summary_text) + 4
-
-        conversation.messages = [summary_msg] + kept
+        async for chunk in self._llm.stream(messages):
+            if chunk.delta:
+                parts.append(chunk.delta)
+        summary = "".join(parts).strip()
+        if not summary:
+            raise ValueError("empty summary from LLM")
+        return summary
 
 
 class SlidingWindow(CompressionStrategy):

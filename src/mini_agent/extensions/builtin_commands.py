@@ -98,7 +98,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="audit",
-            description="Toggle audit logging (usage: /audit [on|off])",
+            description="Audit logging (usage: /audit [on|off|verify])",
             handler=_make_audit(app),
         )
     )
@@ -397,17 +397,28 @@ def _make_explain(app: Application) -> HandlerFn:
 
 def _make_audit(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.security.audit import verify_chain
+
         al = app.audit_logger
         arg = args.strip().lower()
 
-        if arg == "on":
-            al.enabled = True
-        elif arg == "off":
-            al.enabled = False
-        else:
-            al.enabled = not al.enabled
+        if arg == "verify":
+            ok, count, detail = verify_chain(al.log_path)
+            if ok:
+                return f"Audit chain VERIFIED 完整性验证通过: {count} entries, no tampering."
+            return (
+                f"Audit chain BROKEN 完整性验证失败: {detail} "
+                f"({count} entries verified before failure)"
+            )
 
-        state = "ON" if al.enabled else "OFF"
+        if arg == "on":
+            al.set_enabled(True)
+        elif arg == "off":
+            al.set_enabled(False)
+        else:
+            al.set_enabled(not al.enabled)
+
+        state = "ON 开启（跨重启持久）" if al.enabled else "OFF 关闭"
         info = f"  Log: {al.log_path}\n  Entries: {al.entry_count}"
         return f"Audit mode: {state}\n{info}"
 

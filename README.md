@@ -190,6 +190,9 @@ mini --version           # 查看版本
 | `MINI_AGENT_PROVIDER` | LLM Provider | `openai` |
 | `MINI_AGENT_API_KEY` | API 密钥（优先级高于 OPENAI_API_KEY） | `sk-xxxx` |
 | `MINI_AGENT_BASE_URL` | API 地址（优先级高于 OPENAI_BASE_URL） | `https://...` |
+| `MINI_AGENT_MODELS` | 命名多模型定义（配合 `MODEL_<名>_MODEL` 等） | `fast,smart` |
+| `MINI_AGENT_PLANNER_PROFILE` | 多 Agent 编排时 Planner 用的模型 profile | `smart` |
+| `MINI_AGENT_WORKER_PROFILE` | 多 Agent 编排时 Worker 用的模型 profile | `fast` |
 
 优先级：CLI 参数 > `MINI_AGENT_*` 环境变量 > `OPENAI_*` 环境变量 > 内置默认值
 
@@ -220,7 +223,7 @@ mini-code-agent/
     ├── capabilities.md         # 能力对照表（18 项需求逐条实现证据）
     ├── tech-notes.md           # 核心技术实现原理与方案选型
     ├── roadmap.md              # 后续演进路线图
-    └── positioning.md          # 项目立意与价值定位（含答辩问答备忘）
+    └── positioning.md          # 项目立意与价值定位
 ```
 
 ## 开发状态
@@ -235,8 +238,9 @@ mini-code-agent/
 - [x] P8：评测框架（benchmarks/ 10 任务 headless 评测，10/10 通过）
 - [x] P9：机制透明度（`/trace` 命令实时展示 ReAct 内部状态）
 - [x] P10：垂直场景定制（`/explain` 教学模式 + `/audit` 合规审计 + 内网离线 Skill）
+- [x] P11：机制实验（`experiments/` 压缩策略 A/B + 强弱模型混合编排对照实验）
 
-**全部阶段已完成，217 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，235 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 机制透明：/trace 模式
 
@@ -271,6 +275,15 @@ trace [15:23:24.369] turn  complete 2 iterations, 1 tools, 2236 tokens
 uv run python benchmarks/runner.py --all    # 跑全部评测
 uv run python benchmarks/report.py          # 生成报告
 ```
+
+## 机制实验
+
+拿自己的实现做对照实验（`experiments/`），两个反直觉发现：
+
+- **压缩策略 A/B**（15 次运行）：小窗口强制压缩下，压缩不省 token 反而更贵——摘要丢失细节导致 Agent 重复读文件，工具调用翻 2-5 倍。压缩是防溢出兜底，不是省钱手段
+- **强弱模型混编**（6 次运行）：强 Planner + 弱 Worker 全通过且成本最低，比全强模型便宜 33% 还多过了一个任务——分解质量比执行模型档次更重要
+
+完整数据和方法见 [experiments/README.md](experiments/README.md)。
 
 ## License
 

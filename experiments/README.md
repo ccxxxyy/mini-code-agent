@@ -1,0 +1,102 @@
+# 机制实验（Mechanism Experiments）
+
+拿自己的 Agent 实现做对照实验，产出"用商用产品得不到"的数据。每个实验回答一个具体的研究问题。
+
+## 实验 1：压缩策略 A/B —— 上下文压缩到底损失了多少智能？
+
+### 方法
+
+复用 `benchmarks/` 的 5 个工具调用密集型任务（multi_step_edit / find_bug / refactor_rename / write_unit_test / grep_and_report），把上下文窗口人为压小到 **6000 token**（阈值 0.6）迫使压缩在短任务上也触发，三个实验臂对照：
+
+| 臂 | 配置 |
+|---|---|
+| `none` | 无压缩（基线，窗口足够放下全部对话） |
+| `extractive` | 三级级联：DropToolResults → SummarizeOldest（提取式）→ SlidingWindow |
+| `llm` | 三级级联：DropToolResults → **LLMSummarizeOldest**（LLM 语义摘要）→ SlidingWindow |
+
+运行：
+
+```bash
+uv run python experiments/compression_ab.py --all          # 5 任务 × 3 臂 = 15 次
+uv run python experiments/compression_ab.py --task find_bug --arm llm
+```
+
+### 结果
+
+模型：deepseek-v4-flash-0731，窗口 6000 token，5 任务 × 3 臂 = 15 次运行：
+
+| 臂 | 通过率 | 平均 token | 总成本 | 平均工具调用 |
+|---|---|---|---|---|
+| none（无压缩） | **5/5** | **9,695** | **$0.0012** | **6.2** |
+| extractive（提取式） | 4/5 | 13,774 | $0.0017 | 13.0 |
+| llm（LLM 摘要） | 4/5 | 36,130 | $0.0045 | 31.2 |
+
+单任务细节（可复核 `results/compression_*.json`）：
+
+- `find_bug[llm]`：63 次工具调用、79,754 token、188 秒——LLM 摘要后 Agent 迷失方向反复重读文件
+- `write_unit_test[extractive]`：4 次压缩后丢失任务上下文，验证失败
+- `grep_and_report`：任务太短未触发压缩，三臂几乎一致（4.3k-6.6k token）
+
+### 结论
+
+**在小窗口（6000 token）强制压缩的条件下，压缩不但没省 token，反而更贵**——这是本实验最反直觉也最有价值的发现：
+
+1. **压缩的隐性代价是"重复劳动"**：摘要丢失细节后，Agent 需要重新读文件、重新 grep 来找回丢掉的信息。extractive 平均工具调用翻倍（6.2→13.0），llm 臂翻 5 倍（6.2→31.2）——重复劳动消耗的 token 远超摘要省下的
+2. **LLM 摘要不比提取式摘要强**：两者通过率相同（4/5），但 LLM 摘要臂 token 消耗高 2.6 倍（摘要调用本身耗 token + 语义摘要更"流畅"反而让 Agent 误以为信息完整，更晚发现缺失）
+3. **压缩是防溢出的兜底手段，不是省钱手段**：它的正确定位是"窗口不够时保住对话不崩"，而非日常优化。这解释了为什么 CC 等商用 Agent 把压缩阈值设得很高（接近窗口上限才触发）
+
+*边界说明：本实验用 6000 token 人为小窗口迫使压缩高频触发，放大了压缩的负面效应。真实 128k 窗口下压缩极少触发，负面影响远小于此。*
+
+## 实验 2：强弱模型混合编排 —— 强弱搭配能否用零头成本达到接近全强的效果？
+
+### 方法
+
+用 AgentTeam（Planner 分解 + SubAgent 并行执行）跑 2 个可分解复合任务（分析代码库并写 3 个文档 / 写测试 + 质量报告），三个编排臂：
+
+| 臂 | Planner | Workers |
+|---|---|---|
+| `strong-strong` | 强模型 | 强模型 |
+| `strong-weak` | 强模型 | 弱模型（假设：分解靠智商，执行靠体力） |
+| `weak-weak` | 弱模型 | 弱模型（成本下限） |
+
+验证方式：检查任务要求的产出文件全部存在且非空。
+
+运行：
+
+```bash
+uv run python experiments/model_mix.py --list                       # 查看可用 profile
+uv run python experiments/model_mix.py --strong default --weak flash
+```
+
+### 结果
+
+Planner=deepseek-v4-flash-0731（strong）/ Workers=deepseek-v4-flash（weak），2 任务 × 3 臂 = 6 次运行：
+
+| 臂 | 通过率 | 总成本 | 平均耗时 |
+|---|---|---|---|
+| strong-strong | 1/2 | $0.0024 | 38.1s |
+| **strong-weak** | **2/2** | **$0.0016**（最低） | 38.8s |
+| weak-weak | 2/2 | $0.0022 | 46.7s |
+
+单任务细节（可复核 `results/mix_*.json`）：
+
+- `test_and_report[strong-strong]` 失败：Planner 分解为 2 步但 worker 漏产出 QUALITY.md——失败源于分解质量而非执行力
+- `strong-weak` 在两个任务上都通过且总成本最低，验证了"分解靠智商、执行靠体力"的假设方向
+
+### 结论
+
+1. **strong-weak 是本轮的帕累托最优**：全通过 + 成本最低——好的分解能让弱模型稳定执行，而强模型全程执行反而可能在细节上翻车（strong-strong 的失败恰好发生在执行侧）
+2. **编排结构比单点模型能力更能决定结果**：三臂的模型档差不大，但结果差异明显——Planner 分解出的子任务描述质量直接决定 worker 的成败
+3. **样本量限制**：2 任务 × 3 臂只是方向性验证。且本轮 strong/weak 实为同代模型的两个变体（价差小、能力差小），换用档差更大的组合（如 deepseek-chat vs flash）预期成本差会显著放大
+
+*运行方式：`uv run python experiments/model_mix.py --strong default --weak flash`（profile 名来自 MINI_AGENT_MODELS 配置）*
+
+## 附：LLM 摘要压缩策略（roadmap 1.1 兑现）
+
+实验 1 的 `llm` 臂用到的 `LLMSummarizeOldest` 是 roadmap 1.1 预留插槽的实现（`src/mini_agent/memory/compressor.py`）：
+
+- 与提取式 `SummarizeOldest` 相同的消息选择逻辑（保留最近 6 条）
+- 差异：旧消息摘要交给 LLM 生成语义摘要（保留任务目标/已完成步骤/关键发现/未决问题）
+- 防递归：摘要调用是一次性直连 LLM 请求，不经过 AgentLoop
+- 失败回退：LLM 调用异常/空响应时退回提取式拼接，压缩链永不中断
+- 未接入默认压缩链（保持向后兼容），显式传入 `Compressor([DropToolResults(), LLMSummarizeOldest(llm), SlidingWindow()])` 启用

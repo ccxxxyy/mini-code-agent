@@ -246,6 +246,8 @@
 - [x] `security/audit.py` — AuditLogger 类，EventBus 订阅者，写 JSONL 审计日志
 - [x] `/audit [on|off]` 命令 — 开关 + 显示日志路径和条目数
 - [x] `app.py` 装配 AuditLogger
+- [x] 哈希链防篡改 — 每条记录 `hash = sha256(prev_hash + 内容)`，改/删任何一行链即断裂
+- [x] `/audit verify` — 重放校验整条链，跨进程重启链自动续接
 
 ### P10.3 内网离线环境
 - [x] `skills/offline-ollama/SKILL.md` — Ollama 配置指引 Skill（零新代码，复用 OpenAI 兼容 API）
@@ -254,3 +256,33 @@
 - [x] 12 个新测试（audit 7 + teach 5），217 个测试全过
 - [x] `/skill list` 显示 teach-mode 和 offline-ollama 两个新 Skill
 - [x] 真实 API E2E：`/explain on` 后每次工具调用前 100% 出现 Teach 面板
+
+---
+
+## Phase 11: 机制实验 (P11)
+
+### P11.1 LLM 摘要压缩策略（roadmap 1.1 兑现）
+- [x] `memory/compressor.py` — LLMSummarizeOldest 策略（LLM 语义摘要 + 失败回退提取式 + 防递归直连调用）
+- [x] 提取公共函数 `_extractive_digest` / `_make_summary_message`（SummarizeOldest 复用）
+- [x] 4 个 MockLLM 单测（摘要成功/网络失败回退/空响应回退/消息过少跳过）
+
+### P11.2 压缩策略 A/B 实验
+- [x] `experiments/compression_ab.py` — 三臂（none/extractive/llm）× 5 个工具密集任务
+- [x] 6000 token 小窗口 + 0.6 阈值迫使短任务触发压缩
+- [x] 指标：success/tokens/cost/tool_calls/compressed_messages
+
+### P11.3 强弱模型混合编排实验
+- [x] `experiments/model_mix.py` — 三臂（strong-strong/strong-weak/weak-weak）× 2 复合任务
+- [x] AgentTeam 装配：Planner(强) + SubAgentManager(弱)，llm_profiles 注入
+- [x] 文件存在性验证 + 强弱分开计费
+
+### P11.4 验证
+- [x] 真实 API 跑实验收集数据，结果表格见 experiments/README.md
+- [x] 发现 1：小窗口强制压缩下压缩不省 token 反而更贵（工具调用翻 2-5 倍的重复劳动）
+- [x] 发现 2：strong-weak 混编帕累托最优（全通过 + 成本最低）
+
+### P11.5 实验结论产品化（roadmap 2.5 配置层）
+- [x] `AgentConfig.planner_profile / worker_profile` 字段 + 环境变量加载
+- [x] `ProviderRegistry.create_for_role(config, role)` 工厂（未配置/未知 profile 回退主模型）
+- [x] `.env.example` 混编配置示例
+- [x] 5 个新测试（配置加载/角色工厂/回退），226 个测试全过

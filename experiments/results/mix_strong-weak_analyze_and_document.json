@@ -1,0 +1,17 @@
+{
+  "experiment": "model_mix",
+  "task": "analyze_and_document",
+  "arm": "strong-weak",
+  "planner_model": "deepseek-v4-flash-0731",
+  "worker_model": "deepseek-v4-flash",
+  "success": true,
+  "team_reported_success": true,
+  "plan_steps": 3,
+  "planner_tokens_est": 800,
+  "worker_tokens": 40834,
+  "total_cost_usd": 0.001041,
+  "missing_files": [],
+  "empty_files": [],
+  "elapsed_seconds": 42.4,
+  "error": ""
+}
