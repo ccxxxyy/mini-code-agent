@@ -58,6 +58,8 @@ class PermissionManager:
         self._confirm = confirm_callback
         self._rules: list[PermissionRule] = []
         self._session_grants: set[tuple[PermissionScope, str]] = set()
+        # Why the last decision was made (for /trace) 最近一次判定的依据（用于 /trace）
+        self.last_decision_reason: str = ""
         self._load_rules_from_config(config)
 
     def _load_rules_from_config(self, config: SecurityConfig) -> None:
@@ -101,6 +103,7 @@ class PermissionManager:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.DENIED
 
         # 2. Explicit ALLOW rules 显式 ALLOW 规则
@@ -108,15 +111,18 @@ class PermissionManager:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.GRANTED
 
         # 3. Session grants 会话授权
         for scope, pattern in self._session_grants:
             if scope == request.scope and self._matches(pattern, request.resource):
+                self.last_decision_reason = "session_grant"
                 return PermissionDecision.GRANTED
 
         # 4. Default mode 默认模式
         mode = self._config.permission_mode
+        self.last_decision_reason = f"mode:{mode}"
         if mode == "allow":
             return PermissionDecision.GRANTED
         if mode == "deny":
@@ -128,8 +134,10 @@ class PermissionManager:
         先通过 PathGuard 检查文件路径访问，再检查规则。"""
         level = self._path_guard.check(path, operation)
         if level == PermissionLevel.DENY:
+            self.last_decision_reason = "path_guard:sensitive"
             return PermissionDecision.DENIED
         if level == PermissionLevel.ALLOW:
+            self.last_decision_reason = "path_guard:project_dir"
             return PermissionDecision.GRANTED
         request = PermissionRequest(
             scope=PermissionScope.PATH,
@@ -156,10 +164,12 @@ class PermissionManager:
         # 危险模式 -> 始终确认（即使在 allow 模式下）
         if self.is_dangerous_command(command):
             request.context = "dangerous command detected"
+            self.last_decision_reason = "dangerous_command"
             return await self._ask_user(request)
 
         # Normal command -> default mode 普通命令 -> 走默认模式
         mode = self._config.permission_mode
+        self.last_decision_reason = f"mode:{mode}"
         if mode == "deny":
             return PermissionDecision.DENIED
         # Both "allow" and "ask" mode auto-allow normal commands;
@@ -175,14 +185,17 @@ class PermissionManager:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.DENIED
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.GRANTED
         for scope, pattern in self._session_grants:
             if scope == request.scope and self._matches(pattern, request.resource):
+                self.last_decision_reason = "session_grant"
                 return PermissionDecision.GRANTED
         return None
 
@@ -194,6 +207,7 @@ class PermissionManager:
         if self._confirm is None:
             # No UI available -> deny by default (safe)
             # 无可用 UI -> 默认拒绝（安全起见）
+            self.last_decision_reason = "no_ui:default_deny"
             return PermissionDecision.DENIED
         prompt = f"Allow {request.scope.value} access to: {request.resource}"
         if request.context:
@@ -201,7 +215,9 @@ class PermissionManager:
         answer = await self._confirm(prompt)
         if answer == "always":
             self.grant_session_permission(request.scope, request.resource)
+            self.last_decision_reason = "user_confirm:always"
             return PermissionDecision.GRANTED
+        self.last_decision_reason = f"user_confirm:{'yes' if answer else 'no'}"
         return PermissionDecision.GRANTED if answer else PermissionDecision.DENIED
 
     @staticmethod

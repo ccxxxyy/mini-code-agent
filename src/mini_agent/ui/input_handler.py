@@ -94,13 +94,28 @@ def create_prompt_session(
     def _newline(event) -> None:
         event.current_buffer.insert_text("\n")
 
+    def _retrigger_completion(buf: Buffer) -> None:
+        """补全菜单只在文本变化时自动刷新，退格/光标移动后需手动重新触发。"""
+        if buf.text.lstrip().startswith("/") and buf.cursor_position > 0:
+            buf.start_completion()
+
     @bindings.add("backspace")
     def _backspace_with_complete(event) -> None:
         buf: Buffer = event.current_buffer
         buf.delete_before_cursor(1)
-        text = buf.text.lstrip()
-        if text.startswith("/"):
-            buf.start_completion()
+        _retrigger_completion(buf)
+
+    @bindings.add("left")
+    def _left_with_complete(event) -> None:
+        buf: Buffer = event.current_buffer
+        buf.cursor_position = max(0, buf.cursor_position - 1)
+        _retrigger_completion(buf)
+
+    @bindings.add("right")
+    def _right_with_complete(event) -> None:
+        buf: Buffer = event.current_buffer
+        buf.cursor_position = min(len(buf.text), buf.cursor_position + 1)
+        _retrigger_completion(buf)
 
     def _toolbar() -> HTML | None:
         if toolbar_provider is None:

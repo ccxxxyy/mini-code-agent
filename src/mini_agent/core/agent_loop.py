@@ -14,6 +14,9 @@ from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import (
     AgentPhaseChangeEvent,
+    LLMRequestEvent,
+    LLMResponseEvent,
+    PermissionCheckEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
     TurnCompleteEvent,
@@ -145,6 +148,10 @@ class AgentLoop:
         api_messages = conversation.to_api_messages()
         tool_schemas = self._tools.get_schemas()
 
+        await self._event_bus.emit(
+            LLMRequestEvent(message_count=len(api_messages), tool_count=len(tool_schemas))
+        )
+
         chunks: list[StreamChunk] = []
         stream_started = False
 
@@ -161,7 +168,15 @@ class AgentLoop:
         if stream_started and self.on_stream_end:
             self.on_stream_end()
 
-        return assemble_response(chunks)
+        response = assemble_response(chunks)
+        await self._event_bus.emit(
+            LLMResponseEvent(
+                content=response.content[:100],
+                has_tool_calls=bool(response.tool_calls),
+                tokens_used=response.usage.total_tokens if response.usage else 0,
+            )
+        )
+        return response
 
     async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
         """Execute tool calls sequentially, reporting progress via callbacks.
@@ -279,20 +294,45 @@ class AgentLoop:
     async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
         """Route permission check by tool type. 按工具类型路由权限检查。"""
         assert self._permissions is not None
+        scope = "tool"
+        resource = tc.name
+
         if tc.name == "bash":
-            command = str(tc.arguments.get("command", ""))
-            return await self._permissions.check_command(command)
-        if tc.name in ("read_file", "glob", "grep"):
+            scope = "command"
+            resource = str(tc.arguments.get("command", ""))
+            decision = await self._permissions.check_command(resource)
+        elif tc.name in ("read_file", "glob", "grep"):
             path_arg = tc.arguments.get("file_path") or tc.arguments.get("path")
             if path_arg:
-                return await self._permissions.check_path(Path(str(path_arg)), "read")
-            return PermissionDecision.GRANTED
-        if tc.name in ("write_file", "edit_file"):
+                scope = "path"
+                resource = str(path_arg)
+                decision = await self._permissions.check_path(Path(resource), "read")
+            else:
+                decision = PermissionDecision.GRANTED
+                self._permissions.last_decision_reason = "no_path_arg"
+        elif tc.name in ("write_file", "edit_file"):
             path_arg = tc.arguments.get("file_path")
             if path_arg:
-                return await self._permissions.check_path(Path(str(path_arg)), "write")
-            return PermissionDecision.GRANTED
-        return PermissionDecision.GRANTED
+                scope = "path"
+                resource = str(path_arg)
+                decision = await self._permissions.check_path(Path(resource), "write")
+            else:
+                decision = PermissionDecision.GRANTED
+                self._permissions.last_decision_reason = "no_path_arg"
+        else:
+            decision = PermissionDecision.GRANTED
+            self._permissions.last_decision_reason = "unrestricted_tool"
+
+        await self._event_bus.emit(
+            PermissionCheckEvent(
+                tool_name=tc.name,
+                scope=scope,
+                resource=resource[:120],
+                decision=decision.value,
+                reason=self._permissions.last_decision_reason,
+            )
+        )
+        return decision
 
     def _should_continue(self) -> bool:
         """Decide whether to continue the ReAct loop. 判断是否继续 ReAct 循环。"""

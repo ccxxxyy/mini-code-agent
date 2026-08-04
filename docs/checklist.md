@@ -201,3 +201,21 @@
 - [x] 10/10 全部通过（两次全量运行确认稳定）
 - [x] 结果 JSON 正确采集 success/tokens/tool_calls/cost/iterations/time
 - [x] 报告表格数据与 JSON 一致
+
+---
+
+## Phase 9 检查项：/trace 机制透明度
+
+### 功能完整性
+- [x] /trace 开关（无参切换、on/off 显式）行为正确（E2E 验证三态）
+- [x] 阶段切换实时显示（iter N old -> new）
+- [x] 权限判定显示决策+依据（GRANTED 绿/DENIED 红 + rule/mode/path_guard 等 reason）
+- [x] 工具生命周期显示（start 参数预览 + done 耗时 + OK/FAIL）
+- [x] LLM 请求/响应元信息（消息数/工具数/token/是否含工具调用）
+- [x] 轮次汇总（iterations/tools/tokens）
+- [x] 关闭时零输出（enabled=False 短路，单测验证）
+
+### 架构合规
+- [x] TraceRenderer 是纯 EventBus 订阅者，AgentLoop 零侵入
+- [x] PermissionManager 只加溯源属性，方法签名不变（183 个既有测试全过证明零破坏）
+- [x] 10 个新测试（trace 9 + 权限事件 1），总计 193 个全过

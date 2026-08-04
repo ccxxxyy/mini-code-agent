@@ -83,6 +83,13 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="trace",
+            description="Toggle agent internals trace (usage: /trace [on|off])",
+            handler=_make_trace(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="quit",
             description="Exit the agent",
             handler=_make_quit(),
@@ -336,6 +343,22 @@ def _make_skill(app: Application) -> HandlerFn:
             active = " [ACTIVE]" if sr.is_active(s.name) else ""
             lines.append(f"  `{s.name}` — {s.description}{active}")
         return "\n".join(lines)
+
+    return handler
+
+
+def _make_trace(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        arg = args.strip().lower()
+        if arg == "on":
+            app.trace_renderer.enabled = True
+        elif arg == "off":
+            app.trace_renderer.enabled = False
+        else:
+            # Toggle 切换
+            app.trace_renderer.enabled = not app.trace_renderer.enabled
+        state = "ON 开启" if app.trace_renderer.enabled else "OFF 关闭"
+        return f"Trace mode: {state}"
 
     return handler
 

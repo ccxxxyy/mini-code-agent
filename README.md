@@ -231,9 +231,27 @@ mini-code-agent/
 - [x] P4：记忆 + 上下文管理（压缩、会话持久化、跨会话记忆）
 - [x] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议、Anthropic Provider）
 - [x] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队、Plan 模式）
-- [x] P7：打磨 + 测试（179 个测试、错误友好提示、token 缓存、主题系统、历史持久化）
+- [x] P7：打磨 + 测试（错误友好提示、token 缓存、主题系统、历史持久化）
+- [x] P8：评测框架（benchmarks/ 10 任务 headless 评测，10/10 通过）
+- [x] P9：机制透明度（`/trace` 命令实时展示 ReAct 内部状态）
 
-**全部 7 个阶段已完成。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，193 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+
+## 机制透明：/trace 模式
+
+商用 Agent 是黑盒，本项目每个内部状态都可观测。`/trace on` 后实时显示：
+
+```
+trace [15:23:21.715] iter  1  idle -> thinking
+trace [15:23:21.719] llm   request  2 msgs, 6 tools
+trace [15:23:22.906] llm   response 1082 tokens, tool_calls=true
+trace [15:23:22.908] tool  read_file start  file_path=README.md
+trace [15:23:22.910] perm  path README.md -> GRANTED (path_guard:project_dir)
+trace [15:23:22.910] tool  read_file done   0ms OK
+trace [15:23:24.369] turn  complete 2 iterations, 1 tools, 2236 tokens
+```
+
+`/trace off` 关闭。每一行都标注了权限判定的**依据**（命中哪条规则/哪种模式）——这是理解 Agent 安全机制的活教材。
 
 ## 评测结果
 
