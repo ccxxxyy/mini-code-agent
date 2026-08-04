@@ -8,7 +8,10 @@ import pytest
 
 from mini_agent.security.worktree import WorktreeError, WorktreeManager
 
-pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+pytestmark = [
+    pytest.mark.skipif(shutil.which("git") is None, reason="git not installed"),
+    pytest.mark.asyncio,
+]
 
 
 @pytest.fixture

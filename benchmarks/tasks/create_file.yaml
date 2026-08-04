@@ -1,0 +1,7 @@
+name: create_file
+category: feature
+description: "在空目录中创建一个 YAML 配置文件"
+workspace: create_file
+prompt: "Create a file called config.yaml in the workspace with the following content: a 'database' section with host (localhost), port (5432), and name (mydb); a 'server' section with host (0.0.0.0) and port (8080); and a 'logging' section with level (INFO) and file (app.log). Use proper YAML syntax."
+verify_command: "test -f config.yaml"
+max_iterations: 20

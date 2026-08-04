@@ -235,6 +235,24 @@ mini-code-agent/
 
 **全部 7 个阶段已完成。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
+## 评测结果
+
+在 10 个标准编程任务（修 bug/加功能/写测试/重构/搜索）上的评测结果：
+
+| 指标 | 数据 |
+|---|---|
+| 通过率 | **10/10 (100%)** |
+| 总 token | 62,040 |
+| 总成本 | **$0.0015**（不到一分钱） |
+| 平均每任务 | 6,204 token / $0.0002 / 4 次工具调用 / 6.2 秒 |
+
+完整评测数据和方法见 [benchmarks/README.md](benchmarks/README.md)。
+
+```bash
+uv run python benchmarks/runner.py --all    # 跑全部评测
+uv run python benchmarks/report.py          # 生成报告
+```
+
 ## License
 
 MIT

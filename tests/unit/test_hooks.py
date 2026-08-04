@@ -1,5 +1,7 @@
 """Tests for the hook lifecycle system."""
 
+import pytest
+
 from mini_agent.tools.hooks import (
     HookAction,
     HookContext,
@@ -7,6 +9,8 @@ from mini_agent.tools.hooks import (
     HookResult,
     HookStage,
 )
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_no_hooks_continues():

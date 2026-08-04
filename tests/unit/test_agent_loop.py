@@ -6,6 +6,8 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
+
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.events.bus import EventBus
@@ -14,6 +16,8 @@ from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import Conversation, Role
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool
+
+pytestmark = pytest.mark.asyncio
 
 
 class MockLLM(LLMProvider):

@@ -6,6 +6,8 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
+
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
@@ -22,6 +24,8 @@ from mini_agent.tools.hooks import (
     HookResult,
     HookStage,
 )
+
+pytestmark = pytest.mark.asyncio
 
 
 class ScriptedLLM(LLMProvider):

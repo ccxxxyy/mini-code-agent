@@ -3,6 +3,8 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
+
 from mini_agent.core.planner import Planner
 from mini_agent.core.subagent import SubAgentManager
 from mini_agent.core.team import AgentTeam, TeamConfig, TeamMember
@@ -11,6 +13,8 @@ from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool
+
+pytestmark = pytest.mark.asyncio
 
 
 class TeamMockLLM(LLMProvider):

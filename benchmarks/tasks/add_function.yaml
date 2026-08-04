@@ -1,0 +1,7 @@
+name: add_function
+category: feature
+description: "在 utils.py 中实现 parse_csv 函数，使测试通过"
+workspace: add_function
+prompt: "The file test_utils.py contains tests for a function called parse_csv that does not exist yet in utils.py. Implement the parse_csv function in utils.py so that all tests in test_utils.py pass. The function should split a comma-separated string into a list of trimmed strings, and return an empty list for empty input."
+verify_command: "python -m pytest test_utils.py -v"
+max_iterations: 20

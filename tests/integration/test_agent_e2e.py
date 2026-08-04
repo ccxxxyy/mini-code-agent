@@ -1,7 +1,11 @@
 """End-to-end smoke tests: full Application assembly. 端到端冒烟测试：完整 Application 装配。"""
 
+import pytest
+
 from mini_agent.app import Application
 from mini_agent.config.loader import ConfigLoader
+
+pytestmark = pytest.mark.asyncio
 
 
 def test_application_assembles(monkeypatch, tmp_path):

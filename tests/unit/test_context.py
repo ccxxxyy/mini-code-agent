@@ -1,9 +1,13 @@
 """Tests for context manager and compression. 上下文管理器与压缩的测试。"""
 
+import pytest
+
 from mini_agent.memory.compressor import Compressor, DropToolResults, SlidingWindow, SummarizeOldest
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message, Role, ToolResult
+
+pytestmark = pytest.mark.asyncio
 
 
 def make_msg(role=Role.USER, content="x" * 100, token_count=25) -> Message:

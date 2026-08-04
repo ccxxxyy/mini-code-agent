@@ -14,6 +14,8 @@ from mini_agent.models.permissions import (
 from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest.fixture
 def project_dir(tmp_path: Path) -> Path:
