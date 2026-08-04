@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from mini_agent.extensions.slash_commands import SlashCommand
+from mini_agent.llm.registry import ProviderRegistry
 
 if TYPE_CHECKING:
     from mini_agent.app import Application
@@ -100,6 +101,20 @@ def register_builtin_commands(app: Application) -> None:
             name="audit",
             description="Audit logging (usage: /audit [on|off|verify])",
             handler=_make_audit(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="spawn",
+            description="SubAgent dispatch (usage: /spawn <task> | /spawn list|wait|cancel)",
+            handler=_make_spawn(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="team",
+            description="Team orchestration (usage: /team <task> [--isolated])",
+            handler=_make_team(app),
         )
     )
     reg.register(
@@ -421,6 +436,145 @@ def _make_audit(app: Application) -> HandlerFn:
         state = "ON 开启（跨重启持久）" if al.enabled else "OFF 关闭"
         info = f"  Log: {al.log_path}\n  Entries: {al.entry_count}"
         return f"Audit mode: {state}\n{info}"
+
+    return handler
+
+
+def _make_spawn(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        mgr = app.subagent_manager
+        raw = args.strip()
+
+        if not raw:
+            return (
+                "Usage:\n"
+                "  `/spawn <task>` — dispatch a single SubAgent\n"
+                "  `/spawn -p <task1> | <task2>` — parallel dispatch\n"
+                "  `/spawn --isolated <task>` — run in git worktree\n"
+                "  `/spawn list` — show active agents\n"
+                "  `/spawn wait [id]` — wait for result\n"
+                "  `/spawn cancel [id]` — cancel agent(s)"
+            )
+
+        # --- Subcommands ---
+        first = raw.split()[0].lower()
+
+        if first == "list":
+            active = mgr.list_active()
+            if not active:
+                return "No active SubAgents."
+            lines = [f"**Active SubAgents ({len(active)}):**"]
+            for aid in active:
+                phase = mgr.get_status(aid)
+                lines.append(f"  `{aid}` — {phase or 'unknown'}")
+            return "\n".join(lines)
+
+        if first == "wait":
+            parts = raw.split(maxsplit=1)
+            agent_id = parts[1].strip() if len(parts) > 1 else ""
+            if agent_id:
+                result = await mgr.wait(agent_id, timeout=300)
+                return _format_agent_result(result)
+            results = await mgr.wait_all(timeout=300)
+            if not results:
+                return "No agents to wait for."
+            return "\n\n".join(_format_agent_result(r) for r in results)
+
+        if first == "cancel":
+            parts = raw.split(maxsplit=1)
+            agent_id = parts[1].strip() if len(parts) > 1 else ""
+            if agent_id:
+                mgr.cancel(agent_id)
+                return f"Cancelled: `{agent_id}`"
+            mgr.cancel_all()
+            return "All SubAgents cancelled."
+
+        # --- Spawn ---
+        isolation = "none"
+        task_text = raw
+        if "--isolated" in task_text:
+            isolation = "worktree"
+            task_text = task_text.replace("--isolated", "").strip()
+
+        if task_text.startswith("-p "):
+            tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
+            if not tasks:
+                return "No tasks provided. Use: `/spawn -p task1 | task2`"
+            ids = await mgr.spawn_parallel(tasks, isolation=isolation)
+            lines = [f"Spawned {len(ids)} SubAgents:"]
+            for aid, task in zip(ids, tasks):
+                lines.append(f"  `{aid}` — {task[:60]}")
+            lines.append("Use `/spawn wait` to collect results.")
+            return "\n".join(lines)
+
+        if not task_text:
+            return "No task provided."
+        agent_id = await mgr.spawn(task_text, isolation=isolation)
+        return (
+            f"SubAgent spawned: `{agent_id}`\n"
+            f"  Task: {task_text[:80]}\n"
+            f"  Isolation: {isolation}\n"
+            "Use `/spawn wait {id}` or `/spawn wait` to collect result."
+        )
+
+    return handler
+
+
+def _format_agent_result(r) -> str:
+    status = "PASS" if r.success else "FAIL"
+    lines = [
+        f"**[{status}] Agent `{r.agent_id}`**",
+        f"  Task: {r.task[:80]}",
+        f"  Tokens: {r.tokens_used} | Tools: {r.tool_calls_made}",
+    ]
+    if r.output:
+        lines.append(f"  Output: {r.output[:200]}")
+    if r.error:
+        lines.append(f"  Error: {r.error}")
+    return "\n".join(lines)
+
+
+def _make_team(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.core.planner import Planner
+        from mini_agent.core.team import AgentTeam, TeamConfig, TeamMember
+
+        raw = args.strip()
+        if not raw:
+            return (
+                "Usage: `/team <task description>` [--isolated]\n"
+                "Decomposes the task via Planner, runs SubAgents in parallel, "
+                "and returns a summary report."
+            )
+
+        isolation = "none"
+        task_text = raw
+        if "--isolated" in task_text:
+            isolation = "worktree"
+            task_text = task_text.replace("--isolated", "").strip()
+
+        planner_llm = ProviderRegistry.create_for_role(app.config, "planner")
+        planner = Planner(llm=planner_llm, max_steps=5)
+
+        team = AgentTeam(
+            config=TeamConfig(
+                name="adhoc",
+                members=[TeamMember(name="worker", role="generalist")],
+                isolation=isolation,
+            ),
+            planner=planner,
+            subagent_manager=app.subagent_manager,
+        )
+
+        try:
+            report = await team.start(task_text, timeout=300)
+        except Exception as e:
+            return f"Team execution failed: {e}"
+
+        status = "SUCCESS" if report.success else "PARTIAL FAILURE"
+        tokens = sum(r.tokens_used for r in report.results)
+        header = f"**Team Run [{status}]** — {len(report.plan.steps)} steps, {tokens} tokens"
+        return f"{header}\n\n{report.summary()}"
 
     return handler
 

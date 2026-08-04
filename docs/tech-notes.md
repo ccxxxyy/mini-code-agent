@@ -1107,7 +1107,53 @@ positioning.md 方向 4 提出"机制实验床"——拿自己的实现做对照
 1. **压缩的隐性代价是"重复劳动"**：小窗口强制压缩下，压缩臂不但没省 token 反而更贵（none 9.7k → extractive 13.8k → llm 36.1k 平均 token）。摘要丢失细节后 Agent 重新读文件找回信息，工具调用翻 2-5 倍。压缩的正确定位是防溢出兜底，不是省钱手段
 2. **strong-weak 混编是帕累托最优**：强 Planner + 弱 Worker 全通过且成本最低（$0.0016 vs strong-strong $0.0024），而 strong-strong 反而挂了一个任务（失败在执行侧漏产出文件）——分解质量比执行模型档次更能决定结果
 
-完整数据与边界说明见 `experiments/README.md`。4 个新单测（MockLLM：摘要成功/网络失败回退/空响应回退/过少跳过），235 个测试全过。
+完整数据与边界说明见 `experiments/README.md`。4 个新单测（MockLLM：摘要成功/网络失败回退/空响应回退/过少跳过）。
+
+---
+
+# 第十二部分：P12 多 Agent 命令入口
+
+## 12.1 问题：多 Agent 能力没有终端入口
+
+P6 实现了完整的 SubAgent/AgentTeam/Planner/Worktree 体系，但只能通过 Python 代码调用——终端用户完全用不上。这让多 Agent 成了"有能力但不可触达"的暗功能。
+
+## 12.2 /spawn 设计：从 SubAgent API 到用户命令
+
+`/spawn` 是 SubAgentManager 的命令行壳。子命令设计参考了 `/session`（save/list/load/delete 模式），核心映射：
+
+| 命令 | 底层 API |
+|---|---|
+| `/spawn <task>` | `subagent_manager.spawn(task)` |
+| `/spawn -p t1 \| t2` | `spawn_parallel(tasks)` |
+| `/spawn --isolated <task>` | `spawn(task, isolation="worktree")` |
+| `/spawn list` | `list_active()` + `get_status()` |
+| `/spawn wait [id]` | `wait(id)` 或 `wait_all()` |
+| `/spawn cancel [id]` | `cancel(id)` 或 `cancel_all()` |
+
+## 12.3 /team 设计：按需装配 + 强弱混编接线
+
+`/team` 在每次调用时按需创建 Planner + AgentTeam（不在 Application.__init__ 预创建，因为大多数会话不用团队编排）：
+
+```python
+planner_llm = ProviderRegistry.create_for_role(config, "planner")  # roadmap 2.5
+planner = Planner(llm=planner_llm)
+team = AgentTeam(TeamConfig(...), planner, app.subagent_manager)
+report = await team.start(task)
+```
+
+`create_for_role` 读取 `config.planner_profile` / `config.worker_profile`，有配置用配置的模型，没配置回退主模型——用户不感知混编细节，但 .env 配了立即生效。
+
+## 12.4 Application 装配变更
+
+`SubAgentManager` 和 `WorktreeManager` 是首次在 Application 中实例化。之前只有 AgentLoop（单 Agent 循环），现在加了多 Agent 基础设施：
+
+- `WorktreeManager(repo_dir=working_dir)` — worktree 隔离能力
+- `SubAgentManager(llm=worker_llm, ...)` — worker LLM 用 `create_for_role(config, "worker")` 创建
+- 两个新事件 `SubAgentSpawnEvent` / `SubAgentCompleteEvent` 在 spawn/wait 时 emit，供未来进度面板（roadmap 2.2）和审计日志使用
+
+## 12.5 验证
+
+8 个新测试（spawn 单任务/并行/list+cancel、事件 emit 2 个、命令 handler 3 个），243 个测试全过。
 
 ---
 
@@ -1117,6 +1163,6 @@ positioning.md 方向 4 提出"机制实验床"——拿自己的实现做对照
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——235 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——243 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
-7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅——新能力尽量是既有组件的组合
+7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

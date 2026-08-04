@@ -239,8 +239,9 @@ mini-code-agent/
 - [x] P9：机制透明度（`/trace` 命令实时展示 ReAct 内部状态）
 - [x] P10：垂直场景定制（`/explain` 教学模式 + `/audit` 合规审计 + 内网离线 Skill）
 - [x] P11：机制实验（`experiments/` 压缩策略 A/B + 强弱模型混合编排对照实验）
+- [x] P12：多 Agent 入口（`/spawn` SubAgent 调度 + `/team` 团队编排 + 强弱混编接线）
 
-**全部阶段已完成，235 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，243 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 机制透明：/trace 模式
 
