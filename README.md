@@ -234,8 +234,9 @@ mini-code-agent/
 - [x] P7：打磨 + 测试（错误友好提示、token 缓存、主题系统、历史持久化）
 - [x] P8：评测框架（benchmarks/ 10 任务 headless 评测，10/10 通过）
 - [x] P9：机制透明度（`/trace` 命令实时展示 ReAct 内部状态）
+- [x] P10：垂直场景定制（`/explain` 教学模式 + `/audit` 合规审计 + 内网离线 Skill）
 
-**全部阶段已完成，193 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，217 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 机制透明：/trace 模式
 

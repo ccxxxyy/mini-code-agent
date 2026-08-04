@@ -219,3 +219,22 @@
 - [x] TraceRenderer 是纯 EventBus 订阅者，AgentLoop 零侵入
 - [x] PermissionManager 只加溯源属性，方法签名不变（183 个既有测试全过证明零破坏）
 - [x] 10 个新测试（trace 9 + 权限事件 1），总计 193 个全过
+
+---
+
+## Phase 10 检查项：垂直场景定制
+
+### 功能完整性
+- [x] `/explain on` 激活教学模式，每次工具调用前确定性出现 Teach 面板（不依赖 LLM 遵从）
+- [x] `/explain off` 关闭教学模式，面板消失，输出干净
+- [x] Teach 面板含 Why this tool / Args / Params guide 三段，6 个内置工具各有专属文案
+- [x] `/audit on` 开启审计日志，工具调用写入 `~/.mini-agent/audit.jsonl`
+- [x] `/audit off` 关闭审计日志
+- [x] 审计日志格式为 JSONL，每行含 ts/event/tool 等字段
+- [x] `/skill list` 显示 teach-mode 和 offline-ollama 两个新 Skill
+- [x] offline-ollama Skill 包含 Ollama 配置步骤和推荐模型
+
+### 架构合规
+- [x] 教学模式 = TeachRenderer（EventBus 订阅者，确定性输出）+ teach-mode Skill（辅助 LLM 推理解释），AgentLoop 零侵入
+- [x] AuditLogger 复用 EventBus 订阅者模式（与 TraceRenderer 同范式）
+- [x] 12 个新测试（audit 7 + teach 5），总计 217 个全过

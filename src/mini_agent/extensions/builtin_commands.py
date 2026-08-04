@@ -90,6 +90,20 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="explain",
+            description="Toggle teaching mode (usage: /explain [on|off])",
+            handler=_make_explain(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="audit",
+            description="Toggle audit logging (usage: /audit [on|off])",
+            handler=_make_audit(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="quit",
             description="Exit the agent",
             handler=_make_quit(),
@@ -359,6 +373,43 @@ def _make_trace(app: Application) -> HandlerFn:
             app.trace_renderer.enabled = not app.trace_renderer.enabled
         state = "ON 开启" if app.trace_renderer.enabled else "OFF 关闭"
         return f"Trace mode: {state}"
+
+    return handler
+
+
+def _make_explain(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        tr = app.teach_renderer
+        arg = args.strip().lower()
+
+        if arg == "on":
+            tr.enabled = True
+        elif arg == "off":
+            tr.enabled = False
+        else:
+            tr.enabled = not tr.enabled
+
+        state = "ON" if tr.enabled else "OFF"
+        return f"Teaching mode: {state}"
+
+    return handler
+
+
+def _make_audit(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        al = app.audit_logger
+        arg = args.strip().lower()
+
+        if arg == "on":
+            al.enabled = True
+        elif arg == "off":
+            al.enabled = False
+        else:
+            al.enabled = not al.enabled
+
+        state = "ON" if al.enabled else "OFF"
+        info = f"  Log: {al.log_path}\n  Entries: {al.entry_count}"
+        return f"Audit mode: {state}\n{info}"
 
     return handler
 

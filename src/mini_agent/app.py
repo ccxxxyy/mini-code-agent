@@ -23,11 +23,13 @@ from mini_agent.models.events import (
 )
 from mini_agent.models.message import Message, Role
 from mini_agent.models.session import Session
+from mini_agent.security.audit import AuditLogger
 from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 from mini_agent.tools.hooks import HookManager
+from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
 
@@ -132,6 +134,17 @@ class Application:
         # Trace 渲染器：/trace 实时展示 Agent 内部状态
         self.trace_renderer = TraceRenderer(self.terminal.console)
         self.trace_renderer.attach(self.event_bus)
+
+        # Teach renderer: /explain shows tool explanations
+        # 教学渲染器：/explain 显示工具解释
+        self.teach_renderer = TeachRenderer(self.terminal.console)
+        self.teach_renderer.attach(self.event_bus)
+
+        # Audit logger: /audit writes tool calls to JSONL
+        # 审计日志：/audit 将工具调用写入 JSONL
+        audit_dir = Path.home() / ".mini-agent"
+        self.audit_logger = AuditLogger(audit_dir)
+        self.audit_logger.attach(self.event_bus)
 
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])

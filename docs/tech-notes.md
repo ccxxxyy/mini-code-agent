@@ -1017,12 +1017,57 @@ LLMRequest / LLMResponse / TurnComplete
 
 ---
 
+# 第十部分：P10 垂直场景定制
+
+## 10.1 问题：如何证明"可改造"不是空话
+
+positioning.md 方向 3 提出"垂直场景定制"——CC 覆盖不好的场景做深度定制，证明拥有源码的实际价值。需要三个不同类型的场景，每个代表一种定制范式。
+
+## 10.2 三个场景与三种范式
+
+### 教学模式（EventBus 订阅者 + Skill 辅助）
+
+`/explain on` 开启 `ui/teach.py` 的 TeachRenderer。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 `ToolCallStartEvent`，在每次工具调用前**确定性打印** Rich Panel 教学面板——包含 "Why this tool"（为什么选这个工具）、"Args"（实际参数）、"Params guide"（参数含义）。6 个内置工具各有专属文案，MCP 等未知工具用默认兜底。
+
+**从 Skill 注入到 EventBus 硬注入的演进**：最初尝试纯 Skill 方案（注入 system prompt 指令让 LLM "自觉"解释），但实测发现小模型对格式指令遵从度低——教学段要么不出现要么挪到末尾。改为 EventBus 订阅者后 100% 确定性输出，不依赖 LLM 能力。`skills/teach-mode/SKILL.md` 保留作为辅助（让 LLM 输出推理 walkthrough），两者互补。
+
+### 合规审计模式（EventBus 订阅者范式）
+
+`/audit on` 开启 `security/audit.py` 的 AuditLogger。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 ToolCallStart/End + PermissionCheck 三种事件，每条写一行 JSON 到 `~/.mini-agent/audit.jsonl`。
+
+设计选择：
+- **同步写而非异步**：审计日志写入量极小（每次工具调用 2-3 行 JSON），同步 `open+append` 比引入 aiofiles 依赖更简单可靠
+- **EventBus 而非 Hook**：Hook 可以 BLOCK/MODIFY（属于执行路径），审计只需观察（属于旁路监控）。EventBus 的 fire-and-forget 语义更准确，且订阅者异常不影响主流程
+
+### 内网离线环境（零代码 Skill 范式）
+
+`skills/offline-ollama/SKILL.md` 提供 Ollama 配置指引——这不需要任何新代码。项目本来就支持任意 OpenAI 兼容 API，Ollama 的 `/v1` 端点完全兼容。Skill 的价值在于**用户发现性**：用户输入"ollama"或"离线"时自动匹配建议，告诉用户怎么配置。
+
+## 10.3 架构投资的兑现
+
+三个场景各用一种定制范式，且每种都复用已有基础设施：
+
+| 场景 | 范式 | 复用组件 |
+|---|---|---|
+| 教学模式 | EventBus 订阅者（确定性）+ Skill 辅助 | TeachRenderer + SkillRegistry |
+| 审计模式 | EventBus 订阅者 | EventBus.on/off + 事件类型 |
+| 离线环境 | 零代码 Skill | SkillRegistry + OpenAI 兼容 Provider |
+
+这证明了 P1 的 EventBus（教学 + 审计两个订阅者）、P5 的 Skill 系统（教学辅助 + 离线指引）、P1 的 Provider 抽象层（Ollama 零代码接入）三项架构投资在垂直场景中的复用价值。
+
+## 10.4 验证
+
+- 12 个新单元测试（AuditLogger 7 + TeachRenderer 5）
+- 217 个测试全过，lint/format 通过
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——193 个测试 35 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——217 个测试 35 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
-7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流——新能力尽量是既有组件的组合
+7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅——新能力尽量是既有组件的组合

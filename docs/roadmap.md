@@ -135,7 +135,7 @@
 |---|---|---|
 | CC 对照评测 | ✅ 已完成 | benchmarks/ 框架 + 10/10 数据 |
 | 机制透明度演示 | ✅ 已完成 | /trace 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息） |
-| 垂直场景定制 | 待做 | 内网离线/教学模式/审计模式（各一个 Hook/Skill 即可） |
+| 垂直场景定制 | ✅ 已完成 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（EventBus JSONL）+ offline-ollama 内网 Skill |
 | 机制实验 | 待做 | 压缩策略 A/B、强弱模型混合编排对照实验 |
 | 开源社区 | 待做 | PyPI 发布 + README 英文化 + "the readable agent" 定位 |
 

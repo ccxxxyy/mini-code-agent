@@ -231,3 +231,26 @@
 ### P9.3 验证
 - [x] 10 个新测试（trace 渲染 9 + 权限事件 1），193 个测试全过
 - [x] 真实 API E2E：trace 完整展示 ReAct 循环（阶段切换→llm 请求/响应→权限判定→工具耗时→轮次汇总）
+
+---
+
+## Phase 10: 垂直场景定制 (P10)
+
+### P10.1 教学模式
+- [x] `ui/teach.py` — TeachRenderer 类，EventBus 订阅者，工具调用前确定性打印教学面板（6 个工具专属文案 + 默认兜底）
+- [x] `skills/teach-mode/SKILL.md` — 辅助 Skill，注入教学指令让 LLM 输出推理解释（与 TeachRenderer 互补）
+- [x] `/explain [on|off]` 命令 — 开关 TeachRenderer.enabled
+- [x] `app.py` 装配 TeachRenderer
+
+### P10.2 合规审计模式
+- [x] `security/audit.py` — AuditLogger 类，EventBus 订阅者，写 JSONL 审计日志
+- [x] `/audit [on|off]` 命令 — 开关 + 显示日志路径和条目数
+- [x] `app.py` 装配 AuditLogger
+
+### P10.3 内网离线环境
+- [x] `skills/offline-ollama/SKILL.md` — Ollama 配置指引 Skill（零新代码，复用 OpenAI 兼容 API）
+
+### P10.4 验证
+- [x] 12 个新测试（audit 7 + teach 5），217 个测试全过
+- [x] `/skill list` 显示 teach-mode 和 offline-ollama 两个新 Skill
+- [x] 真实 API E2E：`/explain on` 后每次工具调用前 100% 出现 Teach 面板
