@@ -60,16 +60,9 @@
 - **插槽位置**：AgentPhase 状态机已有（IDLE/THINKING/TOOL_CALLING/...），EventBus 的 SubAgent 事件可订阅。
 - **工作量**：中（~150 行）
 
-### 2.3 /team 和 /spawn 命令入口
+### 2.3 /team 和 /spawn 命令入口 ✅ 已完成
 
-- **现状**：SubAgent 和 AgentTeam 的能力只能通过 Python 代码调用，终端对话里没有入口。
-- **要做什么**：
-  1. `/spawn <任务>` — 派生单个后台 SubAgent，配合 2.2 的面板显示进度
-  2. `/spawn -p <任务1> | <任务2>` — 并行派生多个
-  3. `/team <大任务>` — 走 Planner 分解 + AgentTeam 编排的完整流程
-  4. worktree 隔离加 `--isolated` 参数
-- **插槽位置**：SlashCommandRegistry.register 直接注册；SubAgentManager/AgentTeam/Planner 全部可复用。
-- **工作量**：中（~200 行 + 测试）
+> 已实现：`/spawn` 完整子命令集（single/parallel/list/wait/cancel/--isolated）+ `/team` 命令（Planner 分解 + 并行 SubAgent + 汇总报告 + --isolated）。Application 装配 SubAgentManager + WorktreeManager。create_for_role 接线完成（Planner 用 planner_profile、Worker 用 worker_profile）。SubAgentSpawn/CompleteEvent 两个新事件。8 个新测试，243 个全过。
 
 ### 2.5 强弱模型混编配置化（机制实验结论的产品化）✅ 配置层已完成
 
@@ -146,8 +139,8 @@
 
 如果按"用户可感知价值 / 工作量"排序，建议实施顺序：
 
-1. **2.3 /spawn + /team 命令**（多 Agent 能力终于有入口，演示效果最好）
-2. ~~2.5 强弱模型混编配置化~~（配置层已完成，/team 落地时一行接线）
+1. ~~2.3 /spawn + /team 命令~~（✅ 已完成）
+2. ~~2.5 强弱模型混编配置化~~（✅ 配置层 + /team 接线已完成）
 3. **2.2 SubAgent 进度面板**（配合 2.3，可见即可信）
 4. **3.3 会话自动保存**（防数据丢失，用户安全感）
 5. **2.1 /theme 命令**（三套主题已画好，就差接线）

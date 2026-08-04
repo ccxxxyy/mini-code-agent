@@ -14,6 +14,7 @@ from mini_agent.core.agent_state import AgentPhase
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider
 from mini_agent.models.config import AgentConfig
+from mini_agent.models.events import SubAgentCompleteEvent, SubAgentSpawnEvent
 from mini_agent.models.message import Conversation, Message, Role
 from mini_agent.models.session import Session
 from mini_agent.tools.base import ToolContext, ToolRegistry
@@ -174,6 +175,7 @@ class SubAgentManager:
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(agent=agent, task_handle=handle)
+        await self._event_bus.emit(SubAgentSpawnEvent(agent_id=agent.agent_id, task=task))
         return agent.agent_id
 
     async def spawn_parallel(
@@ -214,6 +216,13 @@ class SubAgentManager:
             )
         finally:
             self._active.pop(agent_id, None)
+        await self._event_bus.emit(
+            SubAgentCompleteEvent(
+                agent_id=result.agent_id,
+                success=result.success,
+                tokens_used=result.tokens_used,
+            )
+        )
         return result
 
     async def wait_all(

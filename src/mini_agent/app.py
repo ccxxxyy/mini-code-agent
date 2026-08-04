@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from mini_agent.core.agent_loop import AgentLoop
+from mini_agent.core.subagent import SubAgentManager
 from mini_agent.events.bus import EventBus
 from mini_agent.extensions.builtin_commands import register_builtin_commands
 from mini_agent.extensions.skills import SkillRegistry
@@ -26,6 +27,7 @@ from mini_agent.models.session import Session
 from mini_agent.security.audit import AuditLogger
 from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
+from mini_agent.security.worktree import WorktreeManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 from mini_agent.tools.hooks import HookManager
@@ -128,6 +130,19 @@ class Application:
             permission_manager=self.permission_manager,
             hook_manager=self.hook_manager,
             context_manager=self.context_manager,
+        )
+
+        # SubAgent + Worktree: /spawn and /team use these
+        # SubAgent + Worktree：/spawn 和 /team 命令使用
+        self.worktree_manager = WorktreeManager(repo_dir=working_dir)
+        worker_llm = ProviderRegistry.create_for_role(config, "worker")
+        self.subagent_manager = SubAgentManager(
+            llm=worker_llm,
+            tool_registry=self.tool_registry,
+            config=config,
+            event_bus=self.event_bus,
+            working_dir=working_dir,
+            worktree_manager=self.worktree_manager,
         )
 
         # Trace renderer: /trace shows agent internals in real time

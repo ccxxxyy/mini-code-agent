@@ -100,6 +100,22 @@ class TurnCompleteEvent(Event):
     tokens_used: int = 0
 
 
+# --- SubAgent Events ---
+
+
+@dataclass
+class SubAgentSpawnEvent(Event):
+    agent_id: str = ""
+    task: str = ""
+
+
+@dataclass
+class SubAgentCompleteEvent(Event):
+    agent_id: str = ""
+    success: bool = True
+    tokens_used: int = 0
+
+
 # --- Session Events ---
 
 

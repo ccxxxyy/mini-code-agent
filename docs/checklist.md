@@ -265,3 +265,24 @@
 - [x] planner_profile/worker_profile 配置字段 + MINI_AGENT_PLANNER/WORKER_PROFILE 环境变量
 - [x] create_for_role 工厂：profile 命中用 profile，未配置/未知回退主模型（永不报错）
 - [x] 9 个新测试（LLM 摘要 4 + 混编配置 5），总计 226 个全过
+
+---
+
+## Phase 12 检查项：多 Agent 命令入口
+
+### 功能完整性
+- [x] `/spawn <任务>` 派生单个 SubAgent，返回 agent_id
+- [x] `/spawn -p <任务1> | <任务2>` 并行派生多个
+- [x] `/spawn --isolated <任务>` 在 worktree 隔离执行
+- [x] `/spawn list` 列出活跃 agent + 当前阶段
+- [x] `/spawn wait [id]` 等待结果（单个或全部）
+- [x] `/spawn cancel [id]` 取消（单个或全部）
+- [x] `/team <任务>` Planner 分解 + 并行 SubAgent + 汇总报告
+- [x] `/team --isolated <任务>` 团队成员 worktree 隔离
+- [x] SubAgentSpawnEvent / SubAgentCompleteEvent 正确 emit
+
+### 架构合规
+- [x] Application 装配 SubAgentManager + WorktreeManager（之前只有 Python API，无终端入口）
+- [x] /team 使用 create_for_role("planner") + create_for_role("worker") 完成强弱混编接线（roadmap 2.5）
+- [x] 沿用 _make_xxx 工厂 + 子命令分支模式（与 /session /audit 一致）
+- [x] 8 个新测试（spawn/team），总计 243 个全过

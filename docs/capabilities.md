@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 13 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /exit
+- 15 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -252,7 +252,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 235 个测试全部通过（约 36 秒，零网络依赖），单元 21 文件 + 集成 2 文件 |
+| 测试 | 243 个测试全部通过（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
 | 评测 | 10 个标准编程任务 **10/10 通过**，总成本 $0.0015，详见 `benchmarks/README.md` |

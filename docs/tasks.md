@@ -286,3 +286,29 @@
 - [x] `ProviderRegistry.create_for_role(config, role)` 工厂（未配置/未知 profile 回退主模型）
 - [x] `.env.example` 混编配置示例
 - [x] 5 个新测试（配置加载/角色工厂/回退），226 个测试全过
+
+---
+
+## Phase 12: 多 Agent 命令入口 (P12)
+
+### P12.1 SubAgent 事件
+- [x] `models/events.py` — SubAgentSpawnEvent + SubAgentCompleteEvent
+- [x] `core/subagent.py` — spawn() emit SpawnEvent, wait() emit CompleteEvent
+
+### P12.2 Application 装配
+- [x] `app.py` — 新增 WorktreeManager + SubAgentManager 实例化
+- [x] Worker LLM 使用 `ProviderRegistry.create_for_role(config, "worker")`（roadmap 2.5 接线）
+
+### P12.3 /spawn 命令
+- [x] 单任务派生：`/spawn <任务>` → 返回 agent_id
+- [x] 并行派生：`/spawn -p <任务1> | <任务2>`
+- [x] worktree 隔离：`/spawn --isolated <任务>`
+- [x] 子命令：`/spawn list` / `/spawn wait [id]` / `/spawn cancel [id]`
+
+### P12.4 /team 命令
+- [x] 团队编排：`/team <大任务>` → Planner 分解 + SubAgent 并行执行 + 汇总报告
+- [x] worktree 隔离：`/team --isolated <任务>`
+- [x] Planner LLM 使用 `create_for_role(config, "planner")`（强弱混编完整接线）
+
+### P12.5 验证
+- [x] 8 个新测试（spawn 基础 3 + 事件 2 + 命令 handler 3），243 个测试全过
