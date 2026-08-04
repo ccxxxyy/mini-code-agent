@@ -70,6 +70,19 @@ class ToolCallEndEvent(Event):
     duration_ms: float = 0
 
 
+@dataclass
+class PermissionCheckEvent(Event):
+    """Emitted after each permission decision (for /trace).
+    每次权限判定后发射（用于 /trace）。
+    """
+
+    tool_name: str = ""
+    scope: str = ""  # command / path / tool
+    resource: str = ""
+    decision: str = ""  # granted / denied
+    reason: str = ""  # rule / session_grant / mode:xxx / user_confirm / dangerous
+
+
 # --- Agent Events ---
 
 

@@ -214,3 +214,20 @@
 - [x] 总 token: 62,040 / 总成本: $0.0015 / 平均 6,204 token 每任务
 - [x] 平均 4 次工具调用 / 6.2 秒每任务
 - [x] 结果写入 benchmarks/README.md + 项目 README.md
+
+---
+
+## Phase 9: 机制透明度 /trace (P9)
+
+### P9.1 事件补齐
+- [x] PermissionCheckEvent 新增（tool_name/scope/resource/decision/reason）
+- [x] PermissionManager.last_decision_reason 判定溯源（rule/session_grant/mode/user_confirm/dangerous/path_guard 全路径）
+- [x] AgentLoop 补发 LLMRequestEvent/LLMResponseEvent（激活既有"死"事件）+ PermissionCheckEvent
+
+### P9.2 TraceRenderer + 命令
+- [x] `ui/trace.py` — 纯 EventBus 订阅者，订阅 7 种事件，enabled 开关，暗色 trace 行渲染
+- [x] `/trace [on|off]` 命令注册 + app.py 装配
+
+### P9.3 验证
+- [x] 10 个新测试（trace 渲染 9 + 权限事件 1），193 个测试全过
+- [x] 真实 API E2E：trace 完整展示 ReAct 循环（阶段切换→llm 请求/响应→权限判定→工具耗时→轮次汇总）

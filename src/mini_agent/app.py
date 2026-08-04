@@ -29,6 +29,7 @@ from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 from mini_agent.tools.hooks import HookManager
 from mini_agent.ui.terminal import Terminal
+from mini_agent.ui.trace import TraceRenderer
 
 SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal (Mini-Code-Agent).
 You are powered by the LLM model: {model}
@@ -49,6 +50,9 @@ know (including your own model name above), answer directly WITHOUT any tool cal
 - Use tools to accomplish tasks. Don't guess file contents -- read them.
 - Break complex tasks into steps: search, read, then modify.
 - Be concise in your final answers. Use markdown formatting.
+- When quoting file content that itself contains ``` code fences, wrap the \
+quote in a FOUR-backtick fence (````) so the inner fences render correctly. \
+Better yet, prefer summarizing over quoting entire files verbatim.
 - When editing files, read them first to understand the context.
 - Report errors honestly. If a tool fails, explain what went wrong.
 - IMPORTANT: Use platform-appropriate shell commands. \
@@ -123,6 +127,11 @@ class Application:
             hook_manager=self.hook_manager,
             context_manager=self.context_manager,
         )
+
+        # Trace renderer: /trace shows agent internals in real time
+        # Trace 渲染器：/trace 实时展示 Agent 内部状态
+        self.trace_renderer = TraceRenderer(self.terminal.console)
+        self.trace_renderer.attach(self.event_bus)
 
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])

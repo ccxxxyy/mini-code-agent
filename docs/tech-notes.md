@@ -985,12 +985,44 @@ def _count_cached(text): ...
 
 ---
 
+# 第九部分：P9 /trace 机制透明度
+
+## 9.1 要解决的问题
+
+CC 等商用 Agent 是黑盒——用户只能看到工具调用的表面行为，看不到内部决策过程。`/trace` 命令实时展示 ReAct 循环内部状态：阶段切换、权限判定（含依据）、工具生命周期、LLM 请求/响应元信息。这是"理解 Agent"的直接证据。
+
+## 9.2 架构：纯订阅者，零侵入
+
+TraceRenderer（`ui/trace.py`）是一个**纯 EventBus 订阅者**——不改 ReAct 循环任何逻辑，只订阅 7 种事件渲染输出：
+
+```
+AgentPhaseChange / PermissionCheck / ToolCallStart / ToolCallEnd /
+LLMRequest / LLMResponse / TurnComplete
+```
+
+关键设计：
+- **enabled 开关在 handler 内部判断**：attach 只做一次，/trace 切换只翻 bool，不反复订阅/退订
+- **只显示元信息**：工具参数截断 40 字符、只显示 token 数不显示内容——避免刷屏
+- **P1 的 EventBus 投资在这里兑现**：如果当初层间直接调用，做 trace 就要改遍 AgentLoop；事件驱动架构让 trace 变成"加一个订阅者"
+
+## 9.3 补齐的两处事件缺口
+
+1. **权限判定溯源**：PermissionManager 原来只返回 GRANTED/DENIED，不说"为什么"。加 `last_decision_reason` 属性，每条判定路径赋值（rule:<pattern> / session_grant / mode:<x> / user_confirm:<x> / dangerous_command / path_guard:<x> / no_ui:default_deny）——方法签名零改动，183 个既有测试全过证明零破坏。
+2. **LLM 事件激活**：LLMRequestEvent/LLMResponseEvent 在 P1 就定义了但从未发射（死代码），本次在 `_think()` 前后接线激活。
+
+## 9.4 验证
+
+- 10 个新测试（Console(record=True) 捕获渲染输出断言；权限事件字段断言）
+- 真实 API E2E：完整 trace 流 14 行输出全部正确（阶段→llm 请求→响应→权限→工具→汇总）
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试——183 个测试 35 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——193 个测试 35 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
-7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道——新能力尽量是既有组件的组合
+7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流——新能力尽量是既有组件的组合

@@ -200,3 +200,34 @@ async def test_post_tool_hook_observes(tool_context):
     await loop.run(conv)
 
     assert observed == [("read_file", False)]
+
+
+async def test_permission_check_event_emitted(tool_context):
+    """PermissionCheckEvent fires with decision and reason.
+    PermissionCheckEvent 携带判定结果和依据发射。"""
+    from mini_agent.models.events import PermissionCheckEvent
+
+    f = tool_context.working_dir / "evt.txt"
+    f.write_text("x", encoding="utf-8")
+
+    events = []
+
+    loop = make_secured_loop(
+        [tool_call("read_file", {"file_path": str(f)}), text("done")],
+        tool_context,
+    )
+
+    async def collect(e: PermissionCheckEvent) -> None:
+        events.append(e)
+
+    loop._event_bus.on(PermissionCheckEvent, collect)
+
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert len(events) == 1
+    evt = events[0]
+    assert evt.tool_name == "read_file"
+    assert evt.scope == "path"
+    assert evt.decision == "granted"
+    assert evt.reason == "path_guard:project_dir"

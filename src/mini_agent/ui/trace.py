@@ -1,0 +1,119 @@
+"""Trace renderer -- real-time display of agent internals (for /trace).
+Trace 渲染器——实时展示 Agent 内部状态（用于 /trace）。
+
+A pure EventBus subscriber: zero intrusion into the ReAct loop.
+纯 EventBus 订阅者：对 ReAct 循环零侵入。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from rich.console import Console
+
+from mini_agent.events.bus import EventBus
+from mini_agent.models.events import (
+    AgentPhaseChangeEvent,
+    LLMRequestEvent,
+    LLMResponseEvent,
+    PermissionCheckEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
+    TurnCompleteEvent,
+)
+
+
+def _ts() -> str:
+    """Current time as HH:MM:SS.mmm"""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+class TraceRenderer:
+    """Renders agent internal events as dim trace lines.
+    以暗色 trace 行渲染 Agent 内部事件。
+    """
+
+    def __init__(self, console: Console) -> None:
+        self._console = console
+        self.enabled: bool = False
+
+    def attach(self, bus: EventBus) -> None:
+        """Subscribe to all traceable events. 订阅所有可追踪事件。"""
+        bus.on(AgentPhaseChangeEvent, self._on_phase)
+        bus.on(PermissionCheckEvent, self._on_permission)
+        bus.on(ToolCallStartEvent, self._on_tool_start)
+        bus.on(ToolCallEndEvent, self._on_tool_end)
+        bus.on(LLMRequestEvent, self._on_llm_request)
+        bus.on(LLMResponseEvent, self._on_llm_response)
+        bus.on(TurnCompleteEvent, self._on_turn_complete)
+
+    def detach(self, bus: EventBus) -> None:
+        """Unsubscribe all handlers. 取消所有订阅。"""
+        bus.off(AgentPhaseChangeEvent, self._on_phase)
+        bus.off(PermissionCheckEvent, self._on_permission)
+        bus.off(ToolCallStartEvent, self._on_tool_start)
+        bus.off(ToolCallEndEvent, self._on_tool_end)
+        bus.off(LLMRequestEvent, self._on_llm_request)
+        bus.off(LLMResponseEvent, self._on_llm_response)
+        bus.off(TurnCompleteEvent, self._on_turn_complete)
+
+    def _line(self, kind: str, body: str) -> None:
+        """Print one trace line. 输出一行 trace。"""
+        self._console.print(
+            f"  [dim]trace \\[{_ts()}] {kind:5s}[/dim] {body}",
+            highlight=False,
+        )
+
+    async def _on_phase(self, e: AgentPhaseChangeEvent) -> None:
+        if not self.enabled:
+            return
+        self._line(
+            "iter",
+            f"[dim]{e.iteration}[/dim]  [#6c71c4]{e.old_phase}[/#6c71c4] [dim]->[/dim] "
+            f"[#6c71c4]{e.new_phase}[/#6c71c4]",
+        )
+
+    async def _on_permission(self, e: PermissionCheckEvent) -> None:
+        if not self.enabled:
+            return
+        color = "green" if e.decision == "granted" else "red"
+        self._line(
+            "perm",
+            f"{e.scope} [dim]{e.resource[:60]}[/dim] [dim]->[/dim] "
+            f"[{color}]{e.decision.upper()}[/{color}] [dim]({e.reason})[/dim]",
+        )
+
+    async def _on_tool_start(self, e: ToolCallStartEvent) -> None:
+        if not self.enabled:
+            return
+        args_preview = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(e.arguments.items())[:3])
+        self._line("tool", f"[#6c71c4]{e.tool_name}[/#6c71c4] start  [dim]{args_preview}[/dim]")
+
+    async def _on_tool_end(self, e: ToolCallEndEvent) -> None:
+        if not self.enabled:
+            return
+        mark = "[red]FAIL[/red]" if e.is_error else "[green]OK[/green]"
+        self._line(
+            "tool",
+            f"[#6c71c4]{e.tool_name}[/#6c71c4] done   [dim]{e.duration_ms:.0f}ms[/dim] {mark}",
+        )
+
+    async def _on_llm_request(self, e: LLMRequestEvent) -> None:
+        if not self.enabled:
+            return
+        self._line("llm", f"request  [dim]{e.message_count} msgs, {e.tool_count} tools[/dim]")
+
+    async def _on_llm_response(self, e: LLMResponseEvent) -> None:
+        if not self.enabled:
+            return
+        tc = str(e.has_tool_calls).lower()
+        self._line("llm", f"response [dim]{e.tokens_used} tokens, tool_calls={tc}[/dim]")
+
+    async def _on_turn_complete(self, e: TurnCompleteEvent) -> None:
+        if not self.enabled:
+            return
+        self._line(
+            "turn",
+            f"complete [dim]{e.iteration_count} iterations, "
+            f"{e.tools_called} tools, {e.tokens_used} tokens[/dim]",
+        )
