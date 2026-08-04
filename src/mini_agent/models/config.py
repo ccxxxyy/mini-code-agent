@@ -73,6 +73,13 @@ class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     # Named LLM profiles for /model switching 用于 /model 切换的命名 LLM 档案
     llm_profiles: dict[str, LLMConfig] = field(default_factory=dict)
+    # Strong/weak model mixing: profile names for Planner and SubAgent workers.
+    # Empty = use the main llm. Validated by experiments/model_mix.py: strong
+    # planner + weak workers is Pareto-optimal (all pass, lowest cost).
+    # 强弱模型混编：Planner 和 SubAgent worker 的 profile 名。
+    # 空 = 使用主模型。实验验证 strong-weak 编排是帕累托最优。
+    planner_profile: str = ""
+    worker_profile: str = ""
     tools: ToolConfig = field(default_factory=ToolConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)

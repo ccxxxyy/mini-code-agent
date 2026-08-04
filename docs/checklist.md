@@ -231,10 +231,37 @@
 - [x] `/audit on` 开启审计日志，工具调用写入 `~/.mini-agent/audit.jsonl`
 - [x] `/audit off` 关闭审计日志
 - [x] 审计日志格式为 JSONL，每行含 ts/event/tool 等字段
+- [x] 哈希链防篡改：篡改内容/删除行均被 `/audit verify` 检出（单测验证两种攻击）
+- [x] 进程重启后链自动续接（从文件尾恢复 last_hash）
+- [x] `/audit on` 跨重启持久（.audit_on 标记文件），直到显式 `/audit off`
+- [x] 安全边界已文档化：tamper-evident 而非 tamper-proof（不防全链重算/发现依赖主动 verify）
 - [x] `/skill list` 显示 teach-mode 和 offline-ollama 两个新 Skill
 - [x] offline-ollama Skill 包含 Ollama 配置步骤和推荐模型
 
 ### 架构合规
 - [x] 教学模式 = TeachRenderer（EventBus 订阅者，确定性输出）+ teach-mode Skill（辅助 LLM 推理解释），AgentLoop 零侵入
 - [x] AuditLogger 复用 EventBus 订阅者模式（与 TraceRenderer 同范式）
-- [x] 12 个新测试（audit 7 + teach 5），总计 217 个全过
+- [x] 21 个新测试（audit 16 + teach 5），总计 235 个全过
+
+---
+
+## Phase 11 检查项：机制实验
+
+### 功能完整性
+- [x] LLMSummarizeOldest 摘要成功时输出含 "LLM summary" 标记
+- [x] LLM 调用失败/空响应时回退提取式摘要，压缩链不中断
+- [x] 消息数 ≤ KEEP_RECENT 时不调用 LLM（零浪费）
+- [x] compression_ab.py 三臂可独立运行（--arm）、可跑单任务（--task）
+- [x] model_mix.py 从 llm_profiles 读取强弱模型，--strong/--weak 可指定
+- [x] 实验结果 JSON 落盘 experiments/results/
+
+### 架构合规
+- [x] LLMSummarizeOldest 实现 CompressionStrategy ABC，Compressor 策略列表即插即用
+- [x] 摘要调用直连 LLM 不经过 AgentLoop（防递归）
+- [x] 未接入默认压缩链（向后兼容）
+- [x] 实验脚本复用 benchmarks 的任务/workspace/计价，不改 benchmarks 代码
+
+### 实验结论产品化
+- [x] planner_profile/worker_profile 配置字段 + MINI_AGENT_PLANNER/WORKER_PROFILE 环境变量
+- [x] create_for_role 工厂：profile 命中用 profile，未配置/未知回退主模型（永不报错）
+- [x] 9 个新测试（LLM 摘要 4 + 混编配置 5），总计 226 个全过

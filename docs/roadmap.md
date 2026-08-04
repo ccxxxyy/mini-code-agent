@@ -14,13 +14,9 @@
 
 这些是开发时明确"先简后繁"的取舍，接口已就位，实现即插即用。
 
-### 1.1 LLM 摘要压缩（升级 SummarizeOldest 策略）
+### 1.1 LLM 摘要压缩（升级 SummarizeOldest 策略）✅ 已完成
 
-- **现状**：`memory/compressor.py` 的 Stage 2 用提取式摘要——把旧消息按"角色+前300字符"机械拼接，不调 LLM。
-- **要做什么**：新增 `LLMSummarizeOldest(CompressionStrategy)`，把待压缩消息发给 LLM 生成语义摘要，保留推理脉络而非文本碎片。
-- **插槽位置**：`CompressionStrategy` ABC 已定义，`Compressor(strategies=[...])` 支持自定义策略列表，写好类替换进去即可。
-- **注意点**：摘要调用本身消耗 token；防递归（压缩期间不能再触发压缩）；测试用 MockLLM。
-- **工作量**：小（~100 行 + 测试）
+> 已实现 `LLMSummarizeOldest(CompressionStrategy)`：LLM 语义摘要 + 失败回退提取式 + 防递归（一次性直连调用不经过 AgentLoop）。4 个 MockLLM 单测。作为机制实验 1 的第三个对照臂投入使用（见 `experiments/`）。未接入默认压缩链（向后兼容），显式配置启用。
 
 ### 1.2 LLM 记忆提取（升级 MemoryExtractor）
 
@@ -74,6 +70,13 @@
   4. worktree 隔离加 `--isolated` 参数
 - **插槽位置**：SlashCommandRegistry.register 直接注册；SubAgentManager/AgentTeam/Planner 全部可复用。
 - **工作量**：中（~200 行 + 测试）
+
+### 2.5 强弱模型混编配置化（机制实验结论的产品化）✅ 配置层已完成
+
+> 已实现：`AgentConfig.planner_profile / worker_profile` 字段 + `MINI_AGENT_PLANNER_PROFILE / WORKER_PROFILE` 环境变量 + `ProviderRegistry.create_for_role(config, "planner"|"worker")` 工厂（未配置/profile 不存在时回退主模型）。5 个单测。`.env.example` 已附示例。
+> **待 2.3 落地时接线**：`/team` 命令装配 AgentTeam 时改用 `create_for_role` 创建 Planner 和 Worker 的 LLM 即可（各一行）。
+
+- **依据**：机制实验 2 验证 strong-weak 编排是帕累托最优——强 Planner + 弱 Worker 全通过且成本最低，见 `experiments/README.md`。
 
 ### 2.4 双 Esc 中断流式输出
 
@@ -136,7 +139,7 @@
 | CC 对照评测 | ✅ 已完成 | benchmarks/ 框架 + 10/10 数据 |
 | 机制透明度演示 | ✅ 已完成 | /trace 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息） |
 | 垂直场景定制 | ✅ 已完成 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（EventBus JSONL）+ offline-ollama 内网 Skill |
-| 机制实验 | 待做 | 压缩策略 A/B、强弱模型混合编排对照实验 |
+| 机制实验 | ✅ 已完成 | `experiments/` 压缩策略 A/B（none/extractive/llm 三臂）+ 强弱模型混合编排（三臂），数据见 experiments/README.md |
 | 开源社区 | 待做 | PyPI 发布 + README 英文化 + "the readable agent" 定位 |
 
 ## 六、优先级建议
@@ -144,12 +147,14 @@
 如果按"用户可感知价值 / 工作量"排序，建议实施顺序：
 
 1. **2.3 /spawn + /team 命令**（多 Agent 能力终于有入口，演示效果最好）
-2. **2.2 SubAgent 进度面板**（配合 2.3，可见即可信）
-3. **1.1 LLM 摘要压缩**（长对话质量的实质提升）
+2. ~~2.5 强弱模型混编配置化~~（配置层已完成，/team 落地时一行接线）
+3. **2.2 SubAgent 进度面板**（配合 2.3，可见即可信）
 4. **3.3 会话自动保存**（防数据丢失，用户安全感）
 5. **2.1 /theme 命令**（三套主题已画好，就差接线）
 6. **1.4 工具并行**（复杂任务提速）
 7. 其余按需推进
+
+> 1.1 LLM 摘要压缩已在 P11 完成（且实验数据显示默认不开启是正确的）。
 
 ---
 

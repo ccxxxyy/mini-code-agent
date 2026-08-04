@@ -1,8 +1,18 @@
 """Tests for context manager and compression. 上下文管理器与压缩的测试。"""
 
+from collections.abc import AsyncIterator
+from typing import Any
+
 import pytest
 
-from mini_agent.memory.compressor import Compressor, DropToolResults, SlidingWindow, SummarizeOldest
+from mini_agent.llm.base import LLMProvider, StreamChunk
+from mini_agent.memory.compressor import (
+    Compressor,
+    DropToolResults,
+    LLMSummarizeOldest,
+    SlidingWindow,
+    SummarizeOldest,
+)
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message, Role, ToolResult
@@ -137,6 +147,84 @@ async def test_summarize_oldest_too_few():
     original_count = len(conv.messages)
     await strategy.compress(conv, 100)
     assert len(conv.messages) == original_count  # not enough to summarize
+
+
+# --- LLMSummarizeOldest ---
+
+
+class SummaryMockLLM(LLMProvider):
+    """Mock LLM that returns a fixed summary or raises. 返回固定摘要或抛异常的 Mock。"""
+
+    def __init__(self, summary: str = "Semantic summary.", fail: bool = False) -> None:
+        self._summary = summary
+        self._fail = fail
+        self.call_count = 0
+
+    async def stream(
+        self, messages: list[dict[str, Any]], tools=None, **kwargs: Any
+    ) -> AsyncIterator[StreamChunk]:
+        self.call_count += 1
+        if self._fail:
+            raise ConnectionError("network down")
+        yield StreamChunk(delta=self._summary)
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+    @property
+    def context_window(self) -> int:
+        return 128_000
+
+
+async def test_llm_summarize_oldest():
+    llm = SummaryMockLLM(summary="Goal: fix bug. Done: read 3 files.")
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+
+    await strategy.compress(conv, 100)
+    assert len(conv.messages) == 1 + LLMSummarizeOldest.KEEP_RECENT
+    assert conv.messages[0].role == Role.SYSTEM
+    assert conv.messages[0].compressed
+    assert "LLM summary" in conv.messages[0].content
+    assert "Goal: fix bug" in conv.messages[0].content
+    assert llm.call_count == 1
+
+
+async def test_llm_summarize_falls_back_on_error():
+    llm = SummaryMockLLM(fail=True)
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+
+    await strategy.compress(conv, 100)
+    # Fallback to extractive digest, chain not broken 回退到抽取式摘要，压缩链不中断
+    assert len(conv.messages) == 1 + LLMSummarizeOldest.KEEP_RECENT
+    assert "[Compressed conversation history]" in conv.messages[0].content
+    assert "message 0" in conv.messages[0].content
+
+
+async def test_llm_summarize_falls_back_on_empty():
+    llm = SummaryMockLLM(summary="")
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+
+    await strategy.compress(conv, 100)
+    assert "message 0" in conv.messages[0].content  # extractive fallback
+
+
+async def test_llm_summarize_too_few():
+    llm = SummaryMockLLM()
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    conv.messages = [make_msg(token_count=10) for _ in range(3)]
+    await strategy.compress(conv, 100)
+    assert len(conv.messages) == 3
+    assert llm.call_count == 0  # no LLM call when nothing to summarize
 
 
 # --- SlidingWindow ---

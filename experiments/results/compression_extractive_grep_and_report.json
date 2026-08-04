@@ -1,0 +1,16 @@
+{
+  "experiment": "compression_ab",
+  "task": "grep_and_report",
+  "arm": "extractive",
+  "model": "deepseek-v4-flash-0731",
+  "success": true,
+  "tokens": 4279,
+  "cost_usd": 0.000107,
+  "tool_calls": 2,
+  "iterations": 3,
+  "compressed_messages": 0,
+  "final_message_count": 6,
+  "elapsed_seconds": 5.2,
+  "output": "Created `todo_report.txt` with all 4 TODOs found across the Python files.\n\n- config.py:1 - load from environment variables\n- main.py:2 - add logging\n- main.py:6 - graceful shutdown\n- utils.py:2 - support timezone",
+  "verify_output": "OK"
+}
