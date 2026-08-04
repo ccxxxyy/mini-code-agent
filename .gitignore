@@ -26,3 +26,6 @@ Thumbs.db
 
 # Mini-Agent data
 .mini-agent/
+
+# Benchmark results (regenerable) 评测结果（可重新生成）
+benchmarks/results/

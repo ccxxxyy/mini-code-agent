@@ -1,0 +1,7 @@
+name: read_and_summarize
+category: search
+description: "阅读 README.md 并生成项目摘要"
+workspace: read_and_summarize
+prompt: "Read the README.md file in the workspace and write a summary file called summary.txt that includes: the project name, what it does, the key features (as bullet points), and how to install it. The summary should be concise and well-structured."
+verify_command: "echo OK"
+max_iterations: 20

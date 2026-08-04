@@ -3,8 +3,12 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import pytest
+
 from mini_agent.core.planner import Planner
 from mini_agent.llm.base import LLMProvider, StreamChunk
+
+pytestmark = pytest.mark.asyncio
 
 
 class ScriptedLLM(LLMProvider):

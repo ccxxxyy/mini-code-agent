@@ -1,6 +1,10 @@
 """Tests for slash command framework. 斜杠命令框架的测试。"""
 
+import pytest
+
 from mini_agent.extensions.slash_commands import SlashCommand, SlashCommandRegistry
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_register_and_execute():

@@ -960,12 +960,37 @@ def _count_cached(text): ...
 
 ---
 
-# 附录：贯穿七个阶段的通用设计原则
+# 第八部分：P8 评测框架
+
+## 8.1 Headless Runner 设计
+
+评测不能依赖 TUI——需要程序化运行、采集指标、自动验证。`benchmarks/runner.py` 直接调 AgentLoop 而非 Application：
+
+- 构造 headless 上下文：ConfigLoader + ProviderRegistry + ToolRegistry + EventBus + ToolContext，**不创建 Terminal**
+- 工具调用计数：订阅 `ToolCallEndEvent` 累加
+- Token 采集：复用 `AgentLoop.last_turn_tokens`
+- 验证：`subprocess.run(verify_command, cwd=workspace)` 检查 exit code
+- Workspace 隔离：`shutil.copytree` 到临时目录，原始 fixture 不被修改
+
+## 8.2 任务设计原则
+
+10 个任务覆盖五个类别（bugfix/feature/test/refactor/search），每个任务：
+- YAML 定义：name + prompt + verify_command，格式极简
+- Workspace fixture：预置的有 bug 的代码 / 待通过的测试 / 待搜索的文件
+- 验证命令：pytest / import / 文件存在检查，exit 0 = 通过（搜索类用 echo OK 人工判定）
+
+## 8.3 评测结果
+
+10/10 全部通过，总成本 $0.0015。详细数据见 `benchmarks/README.md`。
+
+---
+
+# 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试——156 个测试 34 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试——183 个测试 35 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道——新能力尽量是既有组件的组合

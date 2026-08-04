@@ -176,7 +176,7 @@
 ### 测试覆盖
 - [x] 核心模块全部有单测（17 个单测文件覆盖 agent_loop/tools/llm_providers/memory/permissions/hooks/events/config/models/skills/slash/mcp/subagent/planner/team）
 - [x] 所有集成测试通过（agent_e2e 装配冒烟 + worktree 真实 git 仓库）
-- [x] `uv run pytest` 全绿（179 个测试, 34s）
+- [x] `uv run pytest` 全绿（183 个测试, 35s）
 
 ### 生产就绪
 - [x] 已知 edge case 有处理（截断 JSON、损坏 session 文件、缺失技能文件、超时、脏 worktree、未知工具/命令）
@@ -184,3 +184,20 @@
 - [x] 并发安全（SubAgent 独立 registry 克隆 + 独立 Conversation + asyncio.Task 隔离，单测验证父注册表不受影响）
 - [x] 错误消息对最终用户友好（401/402/429/5xx/连接/超时 → 中文可操作提示）
 - [x] 配置验证错误给出清晰提示（启动缺 API key → 三种配置方式指引）
+
+---
+
+## Phase 8 检查项：评测框架
+
+### 框架完整性
+- [x] runner.py 能 headless 跑单个任务（`--task fix_syntax_error`）
+- [x] runner.py 能批量跑全部（`--all`）
+- [x] report.py 能生成 Markdown 表格（`--output benchmarks/README.md`）
+- [x] 10 个任务涵盖 bugfix/feature/test/refactor/search 五个类别
+- [x] 每个任务有可执行的验证命令（pytest / import / 文件检查）
+- [x] CC 手动结果有模板可填
+
+### 评测结果验证
+- [x] 10/10 全部通过（两次全量运行确认稳定）
+- [x] 结果 JSON 正确采集 success/tokens/tool_calls/cost/iterations/time
+- [x] 报告表格数据与 JSON 一致

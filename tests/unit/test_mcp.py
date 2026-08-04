@@ -1,7 +1,11 @@
 """Tests for MCP client -- adapter and registry integration. MCP 客户端测试——适配器与注册表集成。"""
 
+import pytest
+
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.mcp.adapter import MCPToolAdapter
+
+pytestmark = pytest.mark.asyncio
 
 
 class FakeMCPManager:

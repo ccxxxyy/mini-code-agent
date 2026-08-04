@@ -1,0 +1,7 @@
+name: grep_and_report
+category: search
+description: "在工作区中搜索所有 TODO 注释并生成报告"
+workspace: grep_and_report
+prompt: "Search all Python files in the workspace for TODO comments. Create a file called todo_report.txt listing each TODO with its file name, line number, and the TODO text. Format each entry as: <filename>:<line> - <TODO text>."
+verify_command: "echo OK"
+max_iterations: 20

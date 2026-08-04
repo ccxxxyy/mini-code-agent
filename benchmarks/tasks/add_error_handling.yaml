@@ -1,0 +1,7 @@
+name: add_error_handling
+category: feature
+description: "为 reader.py 的 read_config 函数添加错误处理，使其在文件不存在时返回空字典"
+workspace: add_error_handling
+prompt: "The file reader.py contains a read_config function that crashes when the file does not exist. Add proper error handling so that read_config returns an empty dict {} when the file is not found, instead of raising an exception. All tests in test_reader.py must pass."
+verify_command: "python -m pytest test_reader.py -v"
+max_iterations: 20

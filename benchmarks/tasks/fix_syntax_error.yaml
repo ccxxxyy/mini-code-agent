@@ -1,0 +1,7 @@
+name: fix_syntax_error
+category: bugfix
+description: "修复 Python 文件中的语法错误（缺少冒号）"
+workspace: fix_syntax_error
+prompt: "The file broken.py has a syntax error that prevents it from being imported. Find and fix the syntax error so that it can be imported successfully by Python."
+verify_command: python -c "import broken"
+max_iterations: 20

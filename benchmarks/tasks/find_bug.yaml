@@ -1,0 +1,7 @@
+name: find_bug
+category: bugfix
+description: "找到并修复 calculator.py 中的 off-by-one 逻辑 bug，使测试通过"
+workspace: find_bug
+prompt: "The file calculator.py has a logic bug that causes test_calculator.py to fail. Run the tests, find the bug, and fix it so that all tests in test_calculator.py pass."
+verify_command: "python -m pytest test_calculator.py -v"
+max_iterations: 20

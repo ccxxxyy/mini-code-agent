@@ -196,4 +196,21 @@
 - [x] `ui/themes.py` — 主题系统 (default/dark/light 三套配色, Theme dataclass)
 - [x] `ui/components.py` — Spinner/Status/ToolCallPanel (P2 已建)
 - [x] `ui/input_handler.py` 完善 — 输入历史持久化到 ~/.mini-agent/input_history (跨会话上下键), 斜杠命令自动补全 (P5 已建)
-- [x] 179 个测试全过, lint/format/build CI 通过
+- [x] 183 个测试全过, lint/format/build CI 通过
+
+---
+
+## Phase 8: 评测框架 (P8)
+
+### P8.1 评测基础设施
+- [x] `benchmarks/runner.py` — headless 执行器（程序化调 AgentLoop，采集 token/cost/tools/time）
+- [x] `benchmarks/report.py` — 结果汇总生成器（JSON + YAML → Markdown 对比表格）
+- [x] `benchmarks/tasks/*.yaml` × 10 — 任务定义（bugfix 2 / feature 3 / test 1 / refactor 1 / search 2 / 跨文件 1）
+- [x] `benchmarks/workspaces/*/` — 每个任务的 fixture 文件（含 bug 代码、待通过测试等）
+- [x] `benchmarks/cc_results/_template.yaml` — CC 手动结果模板
+
+### P8.2 评测结果
+- [x] 10/10 全部通过（100% 完成率）
+- [x] 总 token: 62,040 / 总成本: $0.0015 / 平均 6,204 token 每任务
+- [x] 平均 4 次工具调用 / 6.2 秒每任务
+- [x] 结果写入 benchmarks/README.md + 项目 README.md

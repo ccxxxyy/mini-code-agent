@@ -1,0 +1,7 @@
+name: multi_step_edit
+category: feature
+description: "跨多个文件添加 age 字段到 User 类，并更新所有相关引用"
+workspace: multi_step_edit
+prompt: "Add an 'age' field (type int) to the User class in models.py. Update views.py so that get_user_display includes the age in the output format: '{name} <{email}> (age: {age})'. Update routes.py so that handle_profile accepts an age parameter and passes it to the User constructor. The test in test_integration.py must pass."
+verify_command: python -m pytest test_integration.py -v
+max_iterations: 20

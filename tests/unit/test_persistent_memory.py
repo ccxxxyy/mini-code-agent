@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
+import pytest
+
 from mini_agent.memory.extraction import MemoryExtractor
 from mini_agent.memory.persistent import MemoryEntry, PersistentMemory
 from mini_agent.models.message import Conversation, Message, Role
+
+pytestmark = pytest.mark.asyncio
 
 # --- PersistentMemory ---
 

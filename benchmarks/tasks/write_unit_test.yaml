@@ -1,0 +1,7 @@
+name: write_unit_test
+category: test
+description: "为 validator.py 中的 is_valid_email 函数编写全面的单元测试"
+workspace: write_unit_test
+prompt: "The file validator.py contains an is_valid_email function. Write a comprehensive test file called test_validator.py with unit tests covering: valid emails, emails without @, emails with empty local part, emails with empty domain, emails without a dot in domain, empty string input, and None-like edge cases. All tests must pass."
+verify_command: "python -m pytest test_validator.py -v"
+max_iterations: 20

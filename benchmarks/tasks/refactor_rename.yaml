@@ -1,0 +1,7 @@
+name: refactor_rename
+category: refactor
+description: "将 helpers.py 中的 calc_total 重命名为 calculate_total，并更新所有引用处"
+workspace: refactor_rename
+prompt: "Rename the function calc_total to calculate_total in helpers.py, and update all references in app.py so that the import and usage match the new name. All tests in test_app.py must pass after the rename."
+verify_command: "python -m pytest test_app.py -v"
+max_iterations: 20

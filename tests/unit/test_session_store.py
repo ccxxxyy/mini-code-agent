@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
+import pytest
+
 from mini_agent.memory.session_store import SessionStore
 from mini_agent.models.message import Message, Role, ToolCall, ToolResult
 from mini_agent.models.session import Session
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_save_and_load(tmp_path: Path):

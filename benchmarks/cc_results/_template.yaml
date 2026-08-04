@@ -1,0 +1,11 @@
+# Claude Code result template CC 结果模板
+# Copy this file as <task_name>.yaml and fill in after running the task in CC
+# 复制此文件为 <任务名>.yaml，在 CC 中执行任务后填入数据
+#
+# task: fix_syntax_error
+# agent: cc
+# success: true
+# tokens: 2500
+# tool_calls: 3
+# cost_usd: 0.05
+# notes: "One-shot, used read_file + edit + bash"

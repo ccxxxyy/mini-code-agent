@@ -14,6 +14,8 @@ from mini_agent.tools.builtin import (
     WriteFileTool,
 )
 
+pytestmark = pytest.mark.asyncio
+
 # --- ToolRegistry ---
 
 
