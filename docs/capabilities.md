@@ -77,7 +77,7 @@
 - 装载：`load_all()` 扫描技能目录自动发现
 - 激活：prompt 以带标记形式注入 system prompt；停用时精确移除，可逆可叠加
 - 触发：用户消息含触发词时自动匹配建议
-- 内置技能包：`skills/code_review/`（代码审查）、`skills/init_project/`（项目脚手架）
+- 内置技能包：`skills/code_review/`（代码审查）、`skills/init_project/`（项目脚手架）、`skills/teach-mode/`（教学模式辅助）、`skills/offline-ollama/`（内网离线）
 - 界面入口：`/skill` 列出、`/skill activate <名称>` 激活
 
 **验证**：8 个单测（解析/激活/停用/触发/容错）
@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 11 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /exit /quit
+- 13 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -252,11 +252,12 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 193 个测试全部通过（约 35 秒，零网络依赖），单元 19 文件 + 集成 2 文件 |
+| 测试 | 217 个测试全部通过（约 35 秒，零网络依赖），单元 21 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
 | 评测 | 10 个标准编程任务 **10/10 通过**，总成本 $0.0015，详见 `benchmarks/README.md` |
 | 机制透明 | `/trace` 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息）——商用 Agent 给不了的白盒能力 |
+| 垂直场景 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（JSONL 日志）+ offline-ollama 内网离线 Skill——"因为拥有源码所以能做"的三个活证据 |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
 ## 如实说明：四处有意简化

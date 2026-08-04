@@ -130,7 +130,7 @@ def create_prompt_session(
         complete_while_typing=True,
         style=PROMPT_STYLE,
         message=HTML("<prompt>&gt; </prompt>"),
-        reserve_space_for_menu=12,
+        reserve_space_for_menu=15,
         bottom_toolbar=_toolbar if toolbar_provider else None,
     )
     return session
