@@ -245,8 +245,9 @@ mini-code-agent/
 - [x] P15：会话自动保存（每轮自动保存 + 崩溃检测 + 启动恢复提示）
 - [x] P16：/theme 主题切换（default/dark/light 三套主题全面接入 + 持久化）
 - [x] P17：工具并行执行（权限预检串行 → 执行 asyncio.gather 并行 + 审计锁）
+- [x] P18：双 Esc 中断流式输出（流式期间按两次 Esc 优雅中断，不用 Ctrl+C）
 
-**全部阶段已完成，281 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，286 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
