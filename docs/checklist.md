@@ -433,3 +433,18 @@
 - [x] SESSION_END 在 finally 块中异常安全（try/except pass）
 - [x] _register_builtin_hooks 闭包模式注册内置 hook
 - [x] 4 个新测试，总计 290 个全过
+
+---
+
+## Phase 20 检查项：上下文溢写兜底
+
+### 功能完整性
+- [x] 压缩后仍超窗口时 ensure_fits 强制 SlidingWindow 截断
+- [x] 截断目标 85%（留 15% 安全余量给 LLM 响应）
+- [x] 截断后 api_messages 重建（不发旧的超限消息）
+- [x] 无 context_manager 时不做检查（向后兼容）
+
+### 架构合规
+- [x] ensure_fits 复用已有 SlidingWindow 策略（零新压缩逻辑）
+- [x] 预检位置在 PRE_LLM hook 之后、llm.stream() 之前（hook 可能修改 prompt 影响 token 数）
+- [x] 2 个新测试，总计 292 个全过
