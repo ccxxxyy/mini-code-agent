@@ -312,3 +312,50 @@
 
 ### P12.5 验证
 - [x] 8 个新测试（spawn 基础 3 + 事件 2 + 命令 handler 3），243 个测试全过
+
+---
+
+## Phase 13: SubAgent 进度面板 (P13)
+
+### P13.1 快照接口
+- [x] `core/subagent.py` — AgentSnapshot dataclass（agent_id/task/phase/tool_calls/elapsed_seconds）
+- [x] `_ActiveAgent.started_at` 记录启动时间（time.monotonic）
+- [x] `SubAgentManager.active_snapshots()` 公开访问器（面板不触碰私有成员）
+
+### P13.2 进度面板
+- [x] `ui/board.py` — SubAgentBoard 类，Rich Live + Table，4fps 刷新
+- [x] `run_while(awaitable)` 包裹模式：面板伴随等待运行，结束自动收起（transient），结果/异常透传
+- [x] 阶段上色（thinking 紫/tool_calling 蓝/terminated 绿/error 红），任务摘要截断，耗时实时跳动
+
+### P13.3 命令接线
+- [x] `/spawn wait [id]` 阻塞期间显示面板
+- [x] `/team` 执行期间显示面板（Planner 分解后各 worker 进度可见）
+
+### P13.4 验证
+- [x] 7 个新测试（快照 2 + run_while 3 + 渲染 2），250 个测试全过
+
+### P13.5 /team 真实运行暴露的三个缺陷修复
+- [x] SubAgent system prompt 补平台/shell 信息 + 路径约束（修 LLM 写 /tmp 的 Unix 习惯）+ "文件不存在就报告勿重试"
+- [x] 熔断即失败：AgentLoop.stopped_early 标志，SubAgent 熔断终止返回 success=False（此前熔断空转也算 [OK]，SUCCESS 误报）
+- [x] 依赖感知分批执行：PlanStep.depends_on 字段 + Planner prompt 声明依赖 + AgentTeam 分批调度（无依赖并行/有依赖等前置批完成/依赖失败则跳过）+ 依赖产出注入后续步骤 prompt
+- [x] 4 个新测试（依赖分批/依赖上下文传递/失败跳过/熔断失败），254 个测试全过
+
+### P13.6 二轮 E2E 修复：子任务粒度与预算感知
+- [x] Planner prompt 加 SIZE LIMIT：子任务须 ~15 次工具调用内可完成，禁止"读所有源码"式任务，要求限定文件/目录范围、允许抽样
+- [x] SubAgent prompt 加 BUDGET 段：告知轮次预算（max_agent_iterations），要求预算将尽时立即写出已有发现——部分产出优于空手熔断
+
+### P13.7 三轮 E2E 修复：消除中间文件污染
+- [x] Planner prompt 加 NO INTERMEDIATE FILES：分析类子任务只在报告文本输出发现（报告自动传给依赖步骤），仅用户明确要求的文件由最终步骤写出——不再产生 project_overview.md 等垃圾中间文件
+- [x] 依赖报告注入上限 1500 → 4000 字符（报告成为唯一信息通道后不能截太狠）
+- [x] SIZE LIMIT 再收紧：单个子任务最多读 5 个文件
+
+### P13.8 四轮 E2E 修复：从 prompt 说服到代码强制
+- [x] `PlanStep.writes_files` 字段（Planner 输出解析 + 无标记时最后一步兜底）
+- [x] AgentTeam 工具白名单强制：writes_files=false 的步骤剥夺 write_file/edit_file——物理只读，prompt 无法违规（P3 教训复用：能力剥夺优于黑名单说服）
+- [x] Planner 喂真实项目结构：spawn 前两级目录扫描注入 context——不再套用 backend/frontend web 模板盲分解
+- [x] 3 个新测试（writes_files 解析+兜底/非写步骤剥夺写工具/结构扫描），257 个测试全过
+
+### P13.9 六轮 E2E 收官：死循环护栏误杀修复（真正的病根）
+- [x] 根因定位：强模型 worker 也在"读多个文件"步骤熔断 → 排除模型纪律归因 → 死循环检测"同一工具连续 6 次"误杀正常批量读取（连续 read_file 6 个不同文件被判死循环）
+- [x] 修复：死循环签名从"工具名"改为"工具名+参数 JSON"（record_tool_call 加 args_key）——只有完全相同的重复调用才熔断，批量读不同文件不再误杀
+- [x] 成功验证：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md 242 行真实生成，零中间文件，136K token（比首轮 426K 降 68%），进度面板真实场景亮相

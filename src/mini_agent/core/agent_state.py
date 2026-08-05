@@ -38,7 +38,11 @@ class AgentState:
         self.phase = new_phase
         return old
 
-    def record_tool_call(self, name: str) -> None:
-        self.recent_tool_names.append(name)
+    def record_tool_call(self, name: str, args_key: str = "") -> None:
+        # Store name+args signature: same tool on DIFFERENT files is normal
+        # batch work; only identical repeated calls indicate a real loop
+        # 记录 名称+参数 签名：同一工具处理不同文件是正常批量工作，
+        # 只有完全相同的重复调用才是真死循环
+        self.recent_tool_names.append(f"{name}({args_key})" if args_key else name)
         if len(self.recent_tool_names) > 12:
             self.recent_tool_names = self.recent_tool_names[-12:]

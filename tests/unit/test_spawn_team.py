@@ -86,6 +86,56 @@ async def test_spawn_list_and_cancel(tmp_path):
     assert aid in mgr.list_active()
 
 
+# --- Circuit breaker = failure 熔断即失败 ---
+
+
+class LoopingLLM(LLMProvider):
+    """Always emits a tool call -- forces the iteration limit breaker.
+    永远发出工具调用——强制触发迭代上限熔断。"""
+
+    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+        import json as _json
+
+        from mini_agent.llm.base import ToolCallDelta
+
+        yield StreamChunk(
+            tool_call_deltas=[
+                ToolCallDelta(
+                    index=0,
+                    id="c1",
+                    name="read_file",
+                    arguments_delta=_json.dumps({"file_path": "nonexistent.txt"}),
+                )
+            ]
+        )
+        yield StreamChunk(finish_reason="tool_calls")
+
+    def count_tokens(self, text: str) -> int:
+        return 0
+
+    @property
+    def context_window(self) -> int:
+        return 128_000
+
+
+async def test_stopped_early_marks_failure(tmp_path):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    config = AgentConfig()
+    config.max_agent_iterations = 3  # small limit 小上限快速触发
+    mgr = SubAgentManager(
+        llm=LoopingLLM(),
+        tool_registry=registry,
+        config=config,
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+    )
+    aid = await mgr.spawn("loop forever")
+    result = await mgr.wait(aid, timeout=10)
+    assert not result.success
+    assert "Stopped early" in (result.error or "")
+
+
 # --- SubAgent events ---
 
 

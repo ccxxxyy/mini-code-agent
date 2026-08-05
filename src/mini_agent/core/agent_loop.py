@@ -67,6 +67,9 @@ class AgentLoop:
         self.on_tool_start: ToolStartCallback | None = None
         self.on_tool_end: ToolEndCallback | None = None
         self.last_turn_tokens: int = 0
+        # True when the last run() ended via circuit breaker, not a natural answer
+        # 上一次 run() 是否因熔断（而非自然回答）结束
+        self.stopped_early: bool = False
 
     @property
     def state(self) -> AgentState:
@@ -82,6 +85,7 @@ class AgentLoop:
         """
         self._cancelled = False
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
+        self.stopped_early = False
         tools_called = 0
         tokens_used = 0
         final_content = ""
@@ -127,6 +131,7 @@ class AgentLoop:
 
             if not self._should_continue():
                 final_content = response.content or "(stopped: iteration limit or cancellation)"
+                self.stopped_early = True
                 await self._transition(AgentPhase.TERMINATED)
                 break
 
@@ -198,7 +203,13 @@ class AgentLoop:
         return results
 
     async def _execute_single_tool(self, tc: ToolCall) -> ToolResult:
-        self._state.record_tool_call(tc.name)
+        import json as _json
+
+        try:
+            args_key = _json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False)[:200]
+        except (TypeError, ValueError):
+            args_key = str(tc.arguments)[:200]
+        self._state.record_tool_call(tc.name, args_key)
         await self._event_bus.emit(
             ToolCallStartEvent(tool_name=tc.name, arguments=tc.arguments, call_id=tc.id)
         )
