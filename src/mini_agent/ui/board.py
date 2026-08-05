@@ -15,30 +15,37 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 
+from mini_agent.ui.themes import Theme, get_theme
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
     from mini_agent.core.subagent import SubAgentManager
 
-_PHASE_COLORS = {
-    "idle": "dim",
-    "thinking": "#6c71c4",
-    "tool_calling": "blue",
-    "observing": "cyan",
-    "responding": "green",
-    "error": "red",
-    "terminated": "green",
-}
-
 _REFRESH_INTERVAL = 0.25
+
+
+def _phase_colors(theme: Theme) -> dict[str, str]:
+    return {
+        "idle": theme.dim,
+        "thinking": theme.primary,
+        "tool_calling": "blue",
+        "observing": "cyan",
+        "responding": theme.success,
+        "error": theme.error,
+        "terminated": theme.success,
+    }
 
 
 class SubAgentBoard:
     """Live progress table for active sub-agents. 活跃 SubAgent 的实时进度表。"""
 
-    def __init__(self, console: Console, manager: SubAgentManager) -> None:
+    def __init__(
+        self, console: Console, manager: SubAgentManager, theme: Theme | None = None
+    ) -> None:
         self._console = console
         self._manager = manager
+        self._theme = theme or get_theme("default")
 
     async def run_while(self, awaitable: Awaitable[Any]) -> Any:
         """Display the board while `awaitable` runs; return its result.
@@ -60,9 +67,10 @@ class SubAgentBoard:
         return await task
 
     def _render(self) -> Table:
+        p = self._theme.primary
         table = Table(
             title="SubAgent Progress",
-            title_style="bold #6c71c4",
+            title_style=f"bold {p}",
             border_style="dim",
             expand=False,
         )
@@ -77,8 +85,9 @@ class SubAgentBoard:
             table.add_row("-", "[dim]collecting results...[/dim]", "-", "-", "-")
             return table
 
+        colors = _phase_colors(self._theme)
         for s in snapshots:
-            color = _PHASE_COLORS.get(s.phase, "white")
+            color = colors.get(s.phase, "white")
             task_preview = s.task if len(s.task) <= 44 else s.task[:41] + "..."
             table.add_row(
                 s.agent_id,

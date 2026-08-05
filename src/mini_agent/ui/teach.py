@@ -16,6 +16,7 @@ from mini_agent.models.events import (
     ToolCallStartEvent,
     TurnCompleteEvent,
 )
+from mini_agent.ui.themes import Theme, get_theme
 
 if TYPE_CHECKING:
     from mini_agent.events.bus import EventBus
@@ -57,8 +58,9 @@ class TeachRenderer:
     """Prints teaching annotations before tool calls when enabled.
     启用时在工具调用前打印教学注释。"""
 
-    def __init__(self, console: Console) -> None:
+    def __init__(self, console: Console, theme: Theme | None = None) -> None:
         self._console = console
+        self.theme = theme or get_theme("default")
         self.enabled: bool = False
         self._turn_tool_count: int = 0
 
@@ -81,8 +83,9 @@ class TeachRenderer:
             f"[bold]Args[/bold]: {args_str}\n"
             f"[bold]Params guide[/bold]: {params}"
         )
+        p = self.theme.primary
         self._console.print(
-            Panel(body, title=f"[#6c71c4]Teach: {e.tool_name}[/#6c71c4]", border_style="dim"),
+            Panel(body, title=f"[{p}]Teach: {e.tool_name}[/{p}]", border_style="dim"),
         )
 
     async def _on_turn_complete(self, e: TurnCompleteEvent) -> None:

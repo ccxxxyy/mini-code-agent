@@ -21,6 +21,7 @@ from mini_agent.models.events import (
     ToolCallStartEvent,
     TurnCompleteEvent,
 )
+from mini_agent.ui.themes import Theme, get_theme
 
 
 def _ts() -> str:
@@ -33,8 +34,9 @@ class TraceRenderer:
     以暗色 trace 行渲染 Agent 内部事件。
     """
 
-    def __init__(self, console: Console) -> None:
+    def __init__(self, console: Console, theme: Theme | None = None) -> None:
         self._console = console
+        self.theme = theme or get_theme("default")
         self.enabled: bool = False
 
     def attach(self, bus: EventBus) -> None:
@@ -67,16 +69,17 @@ class TraceRenderer:
     async def _on_phase(self, e: AgentPhaseChangeEvent) -> None:
         if not self.enabled:
             return
+        p = self.theme.primary
         self._line(
             "iter",
-            f"[dim]{e.iteration}[/dim]  [#6c71c4]{e.old_phase}[/#6c71c4] [dim]->[/dim] "
-            f"[#6c71c4]{e.new_phase}[/#6c71c4]",
+            f"[dim]{e.iteration}[/dim]  [{p}]{e.old_phase}[/{p}] "
+            f"[dim]->[/dim] [{p}]{e.new_phase}[/{p}]",
         )
 
     async def _on_permission(self, e: PermissionCheckEvent) -> None:
         if not self.enabled:
             return
-        color = "green" if e.decision == "granted" else "red"
+        color = self.theme.success if e.decision == "granted" else self.theme.error
         self._line(
             "perm",
             f"{e.scope} [dim]{e.resource[:60]}[/dim] [dim]->[/dim] "
@@ -86,16 +89,19 @@ class TraceRenderer:
     async def _on_tool_start(self, e: ToolCallStartEvent) -> None:
         if not self.enabled:
             return
-        args_preview = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(e.arguments.items())[:3])
-        self._line("tool", f"[#6c71c4]{e.tool_name}[/#6c71c4] start  [dim]{args_preview}[/dim]")
+        p = self.theme.primary
+        preview = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(e.arguments.items())[:3])
+        self._line("tool", f"[{p}]{e.tool_name}[/{p}] start  [dim]{preview}[/dim]")
 
     async def _on_tool_end(self, e: ToolCallEndEvent) -> None:
         if not self.enabled:
             return
-        mark = "[red]FAIL[/red]" if e.is_error else "[green]OK[/green]"
+        p = self.theme.primary
+        e_c = self.theme.error
+        s_c = self.theme.success
+        mark = f"[{e_c}]FAIL[/{e_c}]" if e.is_error else f"[{s_c}]OK[/{s_c}]"
         self._line(
-            "tool",
-            f"[#6c71c4]{e.tool_name}[/#6c71c4] done   [dim]{e.duration_ms:.0f}ms[/dim] {mark}",
+            "tool", f"[{p}]{e.tool_name}[/{p}] done   [dim]{e.duration_ms:.0f}ms[/dim] {mark}"
         )
 
     async def _on_llm_request(self, e: LLMRequestEvent) -> None:

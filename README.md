@@ -243,8 +243,9 @@ mini-code-agent/
 - [x] P13：SubAgent 进度面板（`/spawn wait` `/team` 期间实时表格展示各 agent 阶段/工具数/耗时）
 - [x] P14：LLM 自主派生 SubAgent（`spawn_agents` 工具，LLM 在对话中自主并行调度子代理）
 - [x] P15：会话自动保存（每轮自动保存 + 崩溃检测 + 启动恢复提示）
+- [x] P16：/theme 主题切换（default/dark/light 三套主题全面接入 + 持久化）
 
-**全部阶段已完成，269 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，276 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

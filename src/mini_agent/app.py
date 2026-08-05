@@ -77,7 +77,19 @@ class Application:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self.event_bus = EventBus()
-        self.terminal = Terminal()
+
+        # Load persisted theme preference 加载持久化的主题偏好
+        from mini_agent.ui.themes import get_theme
+
+        theme_path = Path.home() / ".mini-agent" / ".theme"
+        if theme_path.is_file():
+            try:
+                config.theme = theme_path.read_text(encoding="utf-8").strip() or "default"
+            except OSError:
+                pass
+        active_theme = get_theme(config.theme)
+
+        self.terminal = Terminal(theme=active_theme)
         self.session = Session()
 
         working_dir = Path.cwd()
@@ -161,12 +173,12 @@ class Application:
 
         # Trace renderer: /trace shows agent internals in real time
         # Trace 渲染器：/trace 实时展示 Agent 内部状态
-        self.trace_renderer = TraceRenderer(self.terminal.console)
+        self.trace_renderer = TraceRenderer(self.terminal.console, theme=active_theme)
         self.trace_renderer.attach(self.event_bus)
 
         # Teach renderer: /explain shows tool explanations
         # 教学渲染器：/explain 显示工具解释
-        self.teach_renderer = TeachRenderer(self.terminal.console)
+        self.teach_renderer = TeachRenderer(self.terminal.console, theme=active_theme)
         self.teach_renderer.attach(self.event_bus)
 
         # Audit logger: /audit writes tool calls to JSONL

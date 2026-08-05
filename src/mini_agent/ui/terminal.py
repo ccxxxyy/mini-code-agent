@@ -8,12 +8,14 @@ from rich.panel import Panel
 
 from mini_agent.ui.input_handler import SlashCommandCompleter, create_prompt_session
 from mini_agent.ui.renderer import StreamRenderer
+from mini_agent.ui.themes import Theme, get_theme
 
 
 class Terminal:
     """Terminal user interface for the agent. Agent 的终端用户界面。"""
 
-    def __init__(self) -> None:
+    def __init__(self, theme: Theme | None = None) -> None:
+        self.theme = theme or get_theme("default")
         self.console = Console()
         self.renderer = StreamRenderer(self.console)
         self._completer = SlashCommandCompleter()
@@ -24,9 +26,10 @@ class Terminal:
         self.console.print()
         from mini_agent import __version__
 
-        header = f"  [bold #6c71c4]Mini-Code-Agent[/bold #6c71c4] [dim]v{__version__}[/dim]"
+        p = self.theme.primary
+        header = f"  [bold {p}]Mini-Code-Agent[/bold {p}] [dim]v{__version__}[/dim]"
         if llm_info:
-            header += f" [dim]|[/dim] [#6c71c4]{llm_info}[/#6c71c4]"
+            header += f" [dim]|[/dim] [{p}]{llm_info}[/{p}]"
         self.console.print(header)
         self.console.print(
             "  [dim]Type your message to chat. /help for commands. Ctrl+C to exit.[/dim]"
@@ -34,13 +37,9 @@ class Terminal:
         self.console.print()
 
     def set_slash_commands(self, commands: list[tuple[str, str]]) -> None:
-        """Update the slash command list for auto-completion. 更新用于自动补全的斜杠命令列表。"""
         self._completer.set_commands(commands)
 
     def set_toolbar_provider(self, provider) -> None:
-        """Set a callable that returns the bottom toolbar text (e.g. model name).
-        设置返回底部工具栏文本的回调（例如模型名）。
-        """
         self._toolbar_provider = provider
 
     def _ensure_prompt_session(self) -> None:
@@ -48,6 +47,7 @@ class Terminal:
             self._prompt_session = create_prompt_session(
                 completer=self._completer,
                 toolbar_provider=self._toolbar_provider,
+                theme=self.theme,
             )
 
     async def get_user_input(self) -> str:
@@ -56,17 +56,17 @@ class Terminal:
 
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
-
         Returns True (allow once), False (deny), or "always" (allow for session).
-        返回 True（允许一次）、False（拒绝）或 "always"（本 session 内始终允许）。
         """
+        w = self.theme.warning
+        e = self.theme.error
         self.console.print()
         self.console.print(
             Panel(
-                f"[bold yellow]{prompt}[/bold yellow]\n\n"
+                f"[bold {w}]{prompt}[/bold {w}]\n\n"
                 f"[dim]y = allow once  /  a = always allow (this session)  /  n = deny[/dim]",
-                title="[red]Confirmation Required[/red]",
-                border_style="yellow",
+                title=f"[{e}]Confirmation Required[/{e}]",
+                border_style=w,
                 expand=False,
             )
         )
@@ -81,8 +81,6 @@ class Terminal:
                 return False
 
     async def ask_yes_no(self, prompt: str) -> bool:
-        """Plain yes/no question (no permission-panel styling).
-        朴素的是/否询问（不带权限确认面板样式）。"""
         self._ensure_prompt_session()
         while True:
             answer = (await self._prompt_session.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
@@ -104,32 +102,35 @@ class Terminal:
         return result
 
     def show_error(self, error: str) -> None:
-        self.console.print(f"  [bold red]✗[/bold red] {error}")
+        self.console.print(f"  [bold {self.theme.error}]✗[/bold {self.theme.error}] {error}")
         self.console.print()
 
     def show_info(self, message: str) -> None:
         self.console.print(f"  [dim]{message}[/dim]")
 
     def show_tool_call(self, name: str, args: dict) -> None:
+        p = self.theme.primary
         arg_preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
         self.console.print(
-            f"\n  [dim]╭─[/dim] [bold #6c71c4]{name}[/bold #6c71c4] [dim]{arg_preview}[/dim]",
+            f"\n  [dim]╭─[/dim] [bold {p}]{name}[/bold {p}] [dim]{arg_preview}[/dim]",
             highlight=False,
         )
 
     def show_tool_result(self, name: str, output: str, is_error: bool = False) -> None:
         if is_error:
             preview = output[:300] + "..." if len(output) > 300 else output
-            self.console.print(f"  [dim]╰─[/dim] [red]✗ {preview}[/red]", highlight=False)
+            e = self.theme.error
+            self.console.print(f"  [dim]╰─[/dim] [{e}]✗ {preview}[/{e}]", highlight=False)
         else:
             lines = output.count("\n") + 1
             chars = len(output)
+            s = self.theme.success
             self.console.print(
-                f"  [dim]╰─[/dim] [green]✓[/green] [dim]{lines} lines, {chars} chars[/dim]",
+                f"  [dim]╰─[/dim] [{s}]✓[/{s}] [dim]{lines} lines, {chars} chars[/dim]",
                 highlight=False,
             )
 
     @staticmethod
-    def _truncate_value(value: object, max_len: int = 60) -> str:
-        s = repr(value)
+    def _truncate_value(value, max_len: int = 60) -> str:
+        s = str(value)
         return s[:max_len] + "..." if len(s) > max_len else s
