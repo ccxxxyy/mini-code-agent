@@ -74,9 +74,9 @@
 - **要做什么**：流式期间监听按键，双击 Esc 调 `agent_loop.cancel()` 优雅中断当前轮，回到输入框。
 - **工作量**：小（~50 行，prompt_toolkit 键盘监听）
 
-### 2.6 LLM 自主派生 SubAgent（spawn 作为工具）
+### 2.6 LLM 自主派生 SubAgent（spawn 作为工具）✅ 已完成
 
-- **现状**：/spawn /team 只能用户手动触发（斜杠命令路径，绕过 AgentLoop）。LLM 在主对话中无法自己决定"这个任务我派子代理并行去做"——CC 的 Task 工具形态缺失。
+> 已实现：`spawn_agents` 工具注册到 ToolRegistry，LLM 在 ReAct 循环中可自主派生 SubAgent 并行执行任务。ToolContext 注入 SubAgentManager，递归防护双保险（SubAgent clone 时 unregister + ToolContext.subagent_manager=None），system prompt 补使用指引。5 个新测试，262 个全过。
 - **要做什么**：
   1. `SpawnAgentTool(Tool)` — 新工具注册进 ToolRegistry，schema 含 `tasks: list[str]`（并行任务列表）和可选 `isolated: bool`。execute 调 `subagent_manager.spawn_parallel + wait_all`，结果汇总为 ToolResult 回传 LLM
   2. system prompt 补一条使用指引：多个独立子任务时可用 spawn_agents 并行处理
@@ -152,7 +152,7 @@
 1. ~~2.3 /spawn + /team 命令~~（✅ 已完成）
 2. ~~2.5 强弱模型混编配置化~~（✅ 配置层 + /team 接线已完成）
 3. ~~2.2 SubAgent 进度面板~~（✅ 已完成）
-4. **2.6 LLM 自主派生 SubAgent**（spawn 升级为工具，多 Agent 融入自然对话——CC Task 工具形态）
+4. ~~2.6 LLM 自主派生 SubAgent~~（✅ 已完成）
 5. **3.3 会话自动保存**（防数据丢失，用户安全感）
 6. **2.1 /theme 命令**（三套主题已画好，就差接线）
 7. **1.4 工具并行**（复杂任务提速）

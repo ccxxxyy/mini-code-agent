@@ -84,6 +84,9 @@ class SubAgent:
         # Independent tool registry (clone; optionally filtered)
         # 独立的工具 registry（克隆副本；可按需过滤）
         registry = tool_registry.clone()
+        # Recursion guard: sub-agents cannot spawn further sub-agents
+        # 递归防护：子代理不能再派生子代理
+        registry.unregister("spawn_agents")
         if allowed_tools is not None:
             for tool in registry.list_tools():
                 if tool.schema.name not in allowed_tools:

@@ -27,6 +27,7 @@ class ToolConfig:
             "bash",
             "glob",
             "grep",
+            "spawn_agents",
         ]
     )
     bash_timeout: float = 120.0
