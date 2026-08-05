@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from mini_agent.core.agent_loop import AgentLoop
@@ -34,6 +35,9 @@ from mini_agent.tools.hooks import HookManager
 from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
+
+# Minimum seconds between automatic session saves 两次自动保存之间的最小间隔秒数
+AUTOSAVE_INTERVAL = 30.0
 
 SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal (Mini-Code-Agent).
 You are powered by the LLM model: {model}
@@ -103,6 +107,7 @@ class Application:
             event_bus=self.event_bus,
             config=config,
         )
+        self._tool_context = tool_context
 
         # Security: path guard + permission manager wired to terminal confirm
         # 安全：路径守卫 + 权限管理器接入终端确认
@@ -124,6 +129,7 @@ class Application:
         compressor = Compressor()
         self.context_manager.set_compressor(compressor)
         self.session_store = SessionStore()
+        self._last_autosave: float = 0.0
 
         self.agent_loop = AgentLoop(
             llm=self._llm,
@@ -228,6 +234,7 @@ class Application:
 
     async def run(self) -> None:
         self.terminal.show_welcome()
+        await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
 
         try:
@@ -256,12 +263,86 @@ class Application:
                             self.terminal.console.print()
                     except SystemExit:
                         break
+                    finally:
+                        await self._autosave()
                     continue
 
                 await self._handle_turn(user_input)
+                await self._autosave()
         finally:
             await self.event_bus.emit(SessionEndEvent(session_id=self.session.metadata.session_id))
+            # Graceful exit: mark clean and persist. A hard kill skips this,
+            # leaving closed_cleanly=False on disk -- the crash signal.
+            # 正常退出：标记干净并落盘。硬杀进程会跳过这里，
+            # 磁盘上留下 closed_cleanly=False——即崩溃信号。
+            self.session.metadata.closed_cleanly = True
+            await self._autosave(force=True)
             self.terminal.show_info("Goodbye!")
+
+    async def _autosave(self, force: bool = False) -> None:
+        """Throttled auto-save; failures are silent (retried next turn).
+        节流的自动保存；失败静默（下轮重试）。"""
+        # Don't persist sessions with no conversation yet 无对话内容不落盘
+        if not self.session.conversation.messages:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_autosave < AUTOSAVE_INTERVAL:
+            return
+        try:
+            await self.session_store.save(self.session)
+            self._last_autosave = now
+        except OSError:
+            pass
+
+    def _adopt_session(self, loaded: Session) -> None:
+        """Switch the app to a loaded session (fixes stale ToolContext ref).
+        切换到已加载的会话（同步修复 ToolContext 的过期引用）。"""
+        self.session = loaded
+        self._tool_context.session = loaded
+        self.context_manager.update_total(loaded.conversation)
+
+    async def _maybe_restore_session(self) -> None:
+        """On startup, offer to restore the most recent crashed session.
+        启动时检测最近未正常关闭的会话并提示恢复。"""
+        try:
+            sessions = await self.session_store.list_sessions()
+        except OSError:
+            return
+        cwd = str(Path.cwd())
+        crashed = [
+            s
+            for s in sessions
+            if not s.get("closed_cleanly", True)
+            and str(s.get("project_dir", "")) == cwd
+            and s["session_id"] != self.session.metadata.session_id
+        ]
+        if not crashed:
+            return
+        latest = crashed[0]  # newest first 已按最新在前排序
+        prompt = (
+            f"检测到未正常关闭的会话（{latest['total_turns']} 轮, "
+            f"{str(latest['last_active'])[:19]}）。恢复它吗？"
+        )
+        if await self.terminal.ask_yes_no(prompt):
+            loaded = await self.session_store.load(latest["session_id"])
+            if loaded:
+                loaded.metadata.closed_cleanly = False  # live again 恢复后重新算进行中
+                self._adopt_session(loaded)
+                self.terminal.show_info(
+                    f"会话已恢复: {latest['session_id'][:12]}... "
+                    f"({latest['total_turns']} 轮, {len(loaded.conversation.messages)} 条消息)"
+                )
+                return
+            self.terminal.show_error(f"恢复失败: 无法加载 {latest['session_id']}")
+        # Declined or failed: mark closed so we don't ask again
+        # 拒绝或失败：标记已关闭，避免每次启动重复询问
+        stale = await self.session_store.load(latest["session_id"])
+        if stale:
+            stale.metadata.closed_cleanly = True
+            try:
+                await self.session_store.save(stale)
+            except OSError:
+                pass
 
     async def _handle_turn(self, user_input: str) -> None:
         await self.event_bus.emit(UserMessageEvent(content=user_input))

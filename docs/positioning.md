@@ -32,7 +32,7 @@
 
 ### 支点 3：教学与研究价值
 
-64 个文件、262 个测试、零厂商 SDK 依赖（唯一网络库是 httpx），是一个**能跑、能测、能读完**的 Agent 参考实现。适合作为：Agent 原理的教学材料、新机制（压缩策略/调度算法）的实验床、"我真正理解 Agent"的证明。
+64 个文件、269 个测试、零厂商 SDK 依赖（唯一网络库是 httpx），是一个**能跑、能测、能读完**的 Agent 参考实现。适合作为：Agent 原理的教学材料、新机制（压缩策略/调度算法）的实验床、"我真正理解 Agent"的证明。
 
 ## 二、"市面上有成熟 Agent，为什么还自己造？"
 
@@ -50,7 +50,7 @@
 
 ### 2.3 它已经不只是玩具
 
-262 个测试、CI 门禁、真实 E2E 验证、七阶段 Spec 开发流程——工程完成度本身就是答卷的一部分。
+269 个测试、CI 门禁、真实 E2E 验证、七阶段 Spec 开发流程——工程完成度本身就是答卷的一部分。
 
 ### 2.4 诚实边界
 
@@ -91,7 +91,7 @@ CC 是黑盒，本项目每个内部状态都可观测。`/trace` 模式现场�
 
 ### 方向 3：垂直场景定制（证明"可改造"的价值） ✅ 已完成
 
-> 已实现三个垂直场景：`/explain` 教学模式（TeachRenderer EventBus 订阅者确定性面板 + Skill 辅助）、`/audit` 合规审计模式（AuditLogger EventBus 订阅者写 JSONL）、offline-ollama 内网离线 Skill（零新代码，复用 OpenAI 兼容 API）。262 个测试全过。
+> 已实现三个垂直场景：`/explain` 教学模式（TeachRenderer EventBus 订阅者确定性面板 + Skill 辅助）、`/audit` 合规审计模式（AuditLogger EventBus 订阅者写 JSONL）、offline-ollama 内网离线 Skill（零新代码，复用 OpenAI 兼容 API）。269 个测试全过。
 
 - **内网离线环境**：`skills/offline-ollama/SKILL.md` 提供 Ollama 配置指引 + 推荐模型列表，接本地 Ollama `/v1` 端点全程无外网
 - **教学模式**：`/explain on` 开启 TeachRenderer，每次工具调用前确定性打印教学面板（Why this tool / Args / Params guide），不依赖 LLM 遵从——从 Skill 注入方案演进为 EventBus 硬注入
@@ -126,7 +126,7 @@ A: 不比模型能力，比三样它给不了的：完全本地化（数据主�
 A: 目的就是理解底层。框架把 Agent Loop、工具调度都封装掉了，用框架等于把最有价值的部分外包出去。全项目唯一网络依赖是 httpx，每一行核心逻辑都是自己的。
 
 **Q: 5000 行代码能和商业产品比工程质量吗？**
-A: 规模不比，密度可以：262 个测试零网络依赖 35 秒跑完、CI 双版本门禁、七阶段 Spec 流程、每个设计决策都有文档记录（tech-notes.md）。小而完备优于大而黑盒。
+A: 规模不比，密度可以：269 个测试零网络依赖 35 秒跑完、CI 双版本门禁、七阶段 Spec 流程、每个设计决策都有文档记录（tech-notes.md）。小而完备优于大而黑盒。
 
 **Q: 这个项目接下来往哪走？**
 A: 评测（benchmarks）、机制实验（experiments）、LLM 摘要压缩、/spawn /team 多 Agent 入口、SubAgent 进度面板均已完成；中期按 roadmap.md 补齐 /theme 主题切换、会话自动保存；长期定位开源的"可读 Agent 参考实现"。

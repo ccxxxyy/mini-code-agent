@@ -20,6 +20,10 @@ class SessionMetadata:
     total_turns: int = 0
     total_tokens_used: int = 0
     tags: list[str] = field(default_factory=list)
+    # False while the session is live; flipped True on graceful exit.
+    # A persisted False means the process died unexpectedly (crash/kill).
+    # 会话进行中为 False；正常退出时翻 True。落盘的 False 意味着进程意外死亡。
+    closed_cleanly: bool = False
 
 
 @dataclass

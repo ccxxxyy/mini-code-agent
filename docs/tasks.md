@@ -385,3 +385,29 @@
 - [x] 5 个新测试（基础执行/无 manager 拒绝/空任务/部分失败/SubAgent clone 不含 spawn_agents）+ 1 个 E2E 集成断言修正，262 个测试全过
 - [x] 真实 API E2E：LLM 自主调用 spawn_agents 派生 3 个子代理并行（trace 可见 3 个并行 llm request），6 tools 递归防护生效
 - [x] 递归验证：子代理被要求"再派生"时正确说明限制并用 read_file 直接完成任务
+
+---
+
+## Phase 15: 会话自动保存 (P15)
+
+### P15.1 崩溃信号
+- [x] `models/session.py` — SessionMetadata 新增 `closed_cleanly: bool = False`
+- [x] `memory/session_store.py` — 序列化/反序列化/list_sessions 三处支持；旧文件无字段默认 True（不误报崩溃）
+
+### P15.2 自动保存
+- [x] `app.py` — `_autosave(force)` 方法：30s 节流、空会话跳过、OSError 静默（下轮重试）
+- [x] 接线：`_handle_turn` 后 + 斜杠命令 finally 后自动保存
+- [x] run() finally：`closed_cleanly = True` + force 保存——正常退出标记干净，硬杀进程跳过 finally 留下 False 即崩溃信号
+
+### P15.3 启动恢复
+- [x] `app.py` — `_maybe_restore_session()`：过滤同目录+未干净关闭+非当前会话，取最近一个提示恢复
+- [x] `ui/terminal.py` — `ask_yes_no()` 朴素是/否提示（区别于权限确认红色面板）
+- [x] 拒绝恢复：标记该会话已关闭，避免每次启动重复询问
+- [x] 恢复成功：closed_cleanly 重新翻 False（恢复后的会话仍是进行中）
+
+### P15.4 顺带修复：/session load 的 ToolContext 过期引用
+- [x] `_adopt_session()` 统一恢复逻辑：session + tool_context.session + context_manager 三处同步更新
+- [x] `/session load` 改调 `app._adopt_session(loaded)`（此前 `app.session = loaded` 后工具层仍指向旧 Session）
+
+### P15.5 验证
+- [x] 7 个新测试（closed_cleanly 往返/旧文件默认/list 含标志/节流+force/空会话跳过/OSError 静默/崩溃过滤三类），269 个测试全过
