@@ -61,11 +61,9 @@
 
 - **依据**：机制实验 2 验证 strong-weak 编排是帕累托最优——强 Planner + 弱 Worker 全通过且成本最低，见 `experiments/README.md`。
 
-### 2.4 双 Esc 中断流式输出
+### 2.4 双 Esc 中断流式输出 ✅ 已完成
 
-- **现状**：LLM 输出过程中只能 Ctrl+C（会连整个程序一起打断的风险）。
-- **要做什么**：流式期间监听按键，双击 Esc 调 `agent_loop.cancel()` 优雅中断当前轮，回到输入框。
-- **工作量**：小（~50 行，prompt_toolkit 键盘监听）
+> 已实现：`ui/esc_watcher.py` 守护线程 + `_think` 循环 cancelled 检查。流式期间后台线程轮询 stdin 检测双 Esc（500ms 窗口），触发 `cancel()` → 下一个 chunk 处 break → 部分响应保留在 conversation → 回到输入框。Windows msvcrt + Unix select 跨平台兼容，无 TTY 时静默不可用。5 个新测试，286 个全过。
 
 ### 2.6 LLM 自主派生 SubAgent（spawn 作为工具）✅ 已完成
 

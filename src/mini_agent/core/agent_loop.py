@@ -162,6 +162,8 @@ class AgentLoop:
         stream_started = False
 
         async for chunk in self._llm.stream(api_messages, tools=tool_schemas or None):
+            if self._cancelled:
+                break
             chunks.append(chunk)
             if chunk.delta:
                 if not stream_started:

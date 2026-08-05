@@ -204,10 +204,28 @@ class Application:
         # 底部工具栏：在输入框下方显示当前 LLM
         self.terminal.set_toolbar_provider(self._toolbar_text)
 
+        # Double-Esc interrupt watcher 双 Esc 中断监听器
+        from mini_agent.ui.esc_watcher import EscWatcher
+
+        self._esc_watcher = EscWatcher()
+
         # Wire agent loop callbacks to terminal rendering 将 Agent 循环回调接入终端渲染
-        self.agent_loop.on_stream_start = self.terminal.start_stream
-        self.agent_loop.on_stream_delta = self.terminal.feed_stream
-        self.agent_loop.on_stream_end = lambda: self.terminal.finish_stream()
+        def _on_stream_start() -> None:
+            self._esc_watcher.start()
+            self.terminal.start_stream()
+
+        def _on_stream_delta(delta: str) -> None:
+            if self._esc_watcher.triggered:
+                self.agent_loop.cancel()
+            self.terminal.feed_stream(delta)
+
+        def _on_stream_end() -> None:
+            self._esc_watcher.stop()
+            self.terminal.finish_stream()
+
+        self.agent_loop.on_stream_start = _on_stream_start
+        self.agent_loop.on_stream_delta = _on_stream_delta
+        self.agent_loop.on_stream_end = _on_stream_end
         self.agent_loop.on_tool_start = lambda tc: self.terminal.show_tool_call(
             tc.name, tc.arguments
         )
