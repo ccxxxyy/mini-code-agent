@@ -18,7 +18,7 @@ def test_get_theme_default():
 def test_get_theme_dark():
     t = get_theme("dark")
     assert t.name == "dark"
-    assert t.primary == "#7aa2f7"
+    assert t.primary == "#ff9e64"
 
 
 def test_get_theme_unknown_fallback():
@@ -59,4 +59,4 @@ def test_terminal_accepts_theme():
     dark = get_theme("dark")
     term = Terminal(theme=dark)
     assert term.theme.name == "dark"
-    assert term.theme.primary == "#7aa2f7"
+    assert term.theme.primary == "#ff9e64"

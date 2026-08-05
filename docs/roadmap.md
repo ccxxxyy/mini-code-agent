@@ -32,12 +32,9 @@
 - **插槽位置**：`MCPTransport` ABC（send/close）已定义；`MCPManager.connect_server` 已有 transport 分支判断；`MCPServerConfig.url` 字段已存在。
 - **工作量**：中（~150 行 + 测试）
 
-### 1.4 工具并行执行
+### 1.4 工具并行执行 ✅ 已完成
 
-- **现状**：`core/agent_loop.py` 的 `_act()` 顺序执行多个 tool_calls——有意为之，防止权限确认弹窗交错。
-- **要做什么**：先对所有 tool_calls 做权限预检，无需确认的用 `asyncio.gather` 并行执行，需要确认的逐个排队询问。
-- **插槽位置**：`_act()` 是独立方法，改造范围封闭；spec.md 第 9.3 节已有并行设计参考。
-- **注意点**：并行时 UI 回调（on_tool_start/end）会交错，需要按 call_id 分组渲染。
+> 已实现：`_act()` 两阶段——Phase 1 串行权限预检（确认弹窗不交错）→ Phase 2 全部 GRANTED 的工具 `asyncio.gather` 并行执行。单工具走快速路径不 gather。AuditLogger 三个 handler 加 `asyncio.Lock` 保护 hash chain。5 个新测试（并行计时/单工具/未知工具/取消/顺序保持），281 个全过。
 - **工作量**：中（~100 行改造 + UI 适配 + 测试）
 
 ---
@@ -149,7 +146,7 @@
 4. ~~2.6 LLM 自主派生 SubAgent~~（✅ 已完成）
 5. ~~3.3 会话自动保存~~（✅ 已完成）
 6. ~~2.1 /theme 命令~~（✅ 已完成）
-7. **1.4 工具并行**（复杂任务提速）
+7. ~~1.4 工具并行~~（✅ 已完成）
 8. 其余按需推进
 
 > 1.1 LLM 摘要压缩已在 P11 完成（且实验数据显示默认不开启是正确的）。

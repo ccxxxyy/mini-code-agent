@@ -1226,7 +1226,53 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。276 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。281 个测试全过。
+
+---
+
+# 第十四部分：P14 LLM 自主派生 SubAgent
+
+## 14.1 从命令到工具：多 Agent 的第三层入口
+
+P12 实现了 `/spawn`（用户手动）和 `/team`（Planner LLM 规划）两层入口，但 LLM 在主对话中无法自己决定"这个任务我派子代理并行去做"。`spawn_agents` 工具补齐了第三层——LLM 自主调用，在 ReAct 循环的 ACT 阶段派生 SubAgent。
+
+关键设计：`ToolContext` 加 `subagent_manager` 可选字段（TYPE_CHECKING 避循环导入），app.py 通过 post-hoc mutation 注入（无需重排构造顺序）。递归防护双保险：SubAgent clone registry 时 unregister("spawn_agents") + SubAgent 的 ToolContext.subagent_manager=None。
+
+---
+
+# 第十五部分：P15 会话自动保存
+
+## 15.1 closed_cleanly 崩溃信号
+
+`SessionMetadata.closed_cleanly` 字段：会话进行中每次自动保存都带 False，正常退出（finally 块）翻 True + 强制保存。硬杀进程跳过 finally → 磁盘留 False → 下次启动检测到同目录的 False 会话 → 提示恢复。
+
+## 15.2 ask_yes_no 的 prompt_session 污染 bug
+
+首次实现用 `self._prompt_session.prompt_async(f"{恢复提示} [y/n] > ")`——prompt_toolkit 的 `prompt_async(message=...)` 会永久更新 session 的默认 message，导致后续每轮输入框都显示恢复提示。修复：改用临时 `PromptSession()`，问完即销毁。
+
+---
+
+# 第十六部分：P16 /theme 主题切换
+
+## 16.1 从"画好了"到"接上了"
+
+themes.py 的三套主题从 P1 就存在，但 8 个语义色位从未接入渲染——所有颜色硬编码在 6 个 UI 文件里。本次把每个 UI 组件的构造器加 `theme: Theme` 参数，硬编码替换为 `self.theme.primary` 等引用。`/theme dark` 运行时切换通过 prompt_session 重建（`self._prompt_session = None`）+ 共享 theme 引用实现。
+
+## 16.2 色差问题
+
+首版三套主题色差太小（default/dark 都是紫蓝系，暗底终端几乎看不出差异）。修正：dark 的 primary 改为暖橙 `#ff9e64`、light 改为 GitHub 蓝 `#0550ae`——现在三套主题是三种完全不同的视觉风格。
+
+---
+
+# 第十七部分：P17 工具并行执行
+
+## 17.1 预检分流：串行确认 + 并行执行
+
+`_act()` 从"逐个串行"重写为两阶段：Phase 1 串行权限预检（确认弹窗按顺序弹，不交错）→ Phase 2 所有 GRANTED 的工具 `asyncio.gather` 并行执行。单工具走快速路径不 gather（零开销）。`_run_tool_pipeline` 加 `skip_permission` 参数跳过已在 Phase 1 做过的权限检查。
+
+## 17.2 AuditLogger 并行安全
+
+并行工具同时 emit ToolCallStartEvent → AuditLogger 的 `_on_tool_start` 协程可能在 `_write()` 的 `_last_hash` 读写之间交错（asyncio 单线程但有 await 点让出），破坏 hash chain。修复：三个 handler 加 `asyncio.Lock`，`_write` 的 hash 计算和文件 append 在锁内完成。
 
 ---
 
@@ -1236,6 +1282,6 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——276 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——281 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -8,6 +8,7 @@ deleting any line breaks every hash after it, so integrity is verifiable.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -72,6 +73,9 @@ class AuditLogger:
         self.enabled: bool = self._state_path.is_file()
         self._entry_count: int = 0
         self._last_hash: str | None = None  # lazy: read from file on first write 首写时从文件恢复
+        # Protects hash chain integrity under parallel tool execution
+        # 在并行工具执行时保护哈希链完整性
+        self._write_lock = asyncio.Lock()
 
     def set_enabled(self, value: bool) -> None:
         """Toggle audit and persist the state to disk. 切换审计并持久化状态。"""
@@ -103,44 +107,47 @@ class AuditLogger:
     async def _on_tool_start(self, event: ToolCallStartEvent) -> None:
         if not self.enabled:
             return
-        self._write(
-            {
-                "ts": event.timestamp.isoformat(timespec="milliseconds"),
-                "event": "tool_start",
-                "tool": event.tool_name,
-                "call_id": event.call_id,
-                "args": event.arguments,
-            }
-        )
+        async with self._write_lock:
+            self._write(
+                {
+                    "ts": event.timestamp.isoformat(timespec="milliseconds"),
+                    "event": "tool_start",
+                    "tool": event.tool_name,
+                    "call_id": event.call_id,
+                    "args": event.arguments,
+                }
+            )
 
     async def _on_tool_end(self, event: ToolCallEndEvent) -> None:
         if not self.enabled:
             return
-        self._write(
-            {
-                "ts": event.timestamp.isoformat(timespec="milliseconds"),
-                "event": "tool_end",
-                "tool": event.tool_name,
-                "call_id": event.call_id,
-                "duration_ms": event.duration_ms,
-                "is_error": event.is_error,
-            }
-        )
+        async with self._write_lock:
+            self._write(
+                {
+                    "ts": event.timestamp.isoformat(timespec="milliseconds"),
+                    "event": "tool_end",
+                    "tool": event.tool_name,
+                    "call_id": event.call_id,
+                    "duration_ms": event.duration_ms,
+                    "is_error": event.is_error,
+                }
+            )
 
     async def _on_permission(self, event: PermissionCheckEvent) -> None:
         if not self.enabled:
             return
-        self._write(
-            {
-                "ts": event.timestamp.isoformat(timespec="milliseconds"),
-                "event": "permission",
-                "tool": event.tool_name,
-                "scope": event.scope,
-                "resource": event.resource,
-                "decision": event.decision,
-                "reason": event.reason,
-            }
-        )
+        async with self._write_lock:
+            self._write(
+                {
+                    "ts": event.timestamp.isoformat(timespec="milliseconds"),
+                    "event": "permission",
+                    "tool": event.tool_name,
+                    "scope": event.scope,
+                    "resource": event.resource,
+                    "decision": event.decision,
+                    "reason": event.reason,
+                }
+            )
 
     def _write(self, record: dict) -> None:
         self._log_dir.mkdir(parents=True, exist_ok=True)

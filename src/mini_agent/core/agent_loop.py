@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -184,25 +185,50 @@ class AgentLoop:
         return response
 
     async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-        """Execute tool calls sequentially, reporting progress via callbacks.
-        顺序执行工具调用，并通过回调上报进度。
+        """Execute tool calls with parallel optimization.
+        并行优化的工具调用执行。
+
+        Phase 1: sequential permission pre-check (confirmations must not
+        interleave). Phase 2: all GRANTED tools execute in parallel via
+        asyncio.gather.
+        阶段 1：串行权限预检（确认弹窗不可交错）。
+        阶段 2：所有 GRANTED 的工具通过 asyncio.gather 并行执行。
         """
-        results: list[ToolResult] = []
+        n = len(tool_calls)
+
+        # --- Phase 1: sequential permission pre-check ---
+        decisions: list[PermissionDecision | None] = []
         for tc in tool_calls:
             if self._cancelled:
-                results.append(
-                    ToolResult(
-                        call_id=tc.id,
-                        name=tc.name,
-                        output="Cancelled by user",
-                        is_error=True,
-                    )
-                )
+                decisions.append(None)
                 continue
-            results.append(await self._execute_single_tool(tc))
-        return results
+            if self._permissions is not None:
+                decisions.append(await self._check_permission(tc))
+            else:
+                decisions.append(PermissionDecision.GRANTED)
 
-    async def _execute_single_tool(self, tc: ToolCall) -> ToolResult:
+        # --- Phase 2: parallel execution ---
+        async def _run_one(i: int) -> ToolResult:
+            tc = tool_calls[i]
+            d = decisions[i]
+            if d is None:
+                return ToolResult(
+                    call_id=tc.id, name=tc.name, output="Cancelled by user", is_error=True
+                )
+            if d == PermissionDecision.DENIED:
+                return ToolResult(
+                    call_id=tc.id,
+                    name=tc.name,
+                    output=f"Permission denied for {tc.name}",
+                    is_error=True,
+                )
+            return await self._execute_single_tool(tc, skip_permission=True)
+
+        if n == 1:
+            return [await _run_one(0)]
+        return list(await asyncio.gather(*(_run_one(i) for i in range(n))))
+
+    async def _execute_single_tool(self, tc: ToolCall, skip_permission: bool = False) -> ToolResult:
         import json as _json
 
         try:
@@ -226,7 +252,7 @@ class AgentLoop:
                 is_error=True,
             )
         else:
-            result = await self._run_tool_pipeline(tc, tool)
+            result = await self._run_tool_pipeline(tc, tool, skip_permission=skip_permission)
 
         duration_ms = (time.monotonic() - start) * 1000
         await self._event_bus.emit(
@@ -241,12 +267,14 @@ class AgentLoop:
             self.on_tool_end(result)
         return result
 
-    async def _run_tool_pipeline(self, tc: ToolCall, tool) -> ToolResult:
+    async def _run_tool_pipeline(
+        self, tc: ToolCall, tool, skip_permission: bool = False
+    ) -> ToolResult:
         """Full security pipeline: permission -> PRE_TOOL hook -> execute -> POST_TOOL hook.
         完整安全流水线：权限检查 -> PRE_TOOL hook -> 执行 -> POST_TOOL hook。
         """
-        # 1. Permission check 权限检查
-        if self._permissions is not None:
+        # 1. Permission check 权限检查（skip when pre-checked in _act 预检过时跳过）
+        if not skip_permission and self._permissions is not None:
             decision = await self._check_permission(tc)
             if decision == PermissionDecision.DENIED:
                 return ToolResult(

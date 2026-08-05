@@ -364,3 +364,39 @@
 - [x] _adopt_session 统一恢复路径（修复 /session load 的 ToolContext 过期引用既有缺陷）
 - [x] ask_yes_no 与权限确认 confirm 分离（语义不同：普通询问 vs 安全确认）
 - [x] 7 个新测试，总计 269 个全过
+
+---
+
+## Phase 16 检查项：/theme 主题切换
+
+### 功能完整性
+- [x] `/theme` 列出三套主题 + 标记当前
+- [x] `/theme dark` 切换即时生效（提示符/工具行/trace/teach/board/确认面板全变色）
+- [x] 持久化到 `~/.mini-agent/.theme`，重启保持
+- [x] 三套主题色差明显（default 紫蓝 / dark 暖橙 / light GitHub 蓝）
+- [x] 补全菜单文字颜色跟随主题（透明背景不加框）
+
+### 架构合规
+- [x] 6 个 UI 文件全部从 theme 对象取色，零硬编码
+- [x] PROMPT_STYLE 从模块常量改为 create_prompt_style(theme) 函数
+- [x] 运行时切换通过 prompt_session 重建刷新
+- [x] 7 个新测试，总计 276 个全过
+
+---
+
+## Phase 17 检查项：工具并行执行
+
+### 功能完整性
+- [x] LLM 一次返回多个 tool_call 时并行执行（asyncio.gather）
+- [x] 权限预检串行（确认弹窗不交错）
+- [x] 单工具快速路径（不 gather，零开销）
+- [x] 结果按原始 tool_call 顺序返回
+
+### 安全性
+- [x] AuditLogger 三个 handler 加 asyncio.Lock（并行写入不破坏 hash chain）
+- [x] 权限被拒的工具返回错误且不执行
+- [x] 取消后剩余工具不执行
+
+### 架构合规
+- [x] _run_tool_pipeline 加 skip_permission 参数（Phase 2 跳过已预检权限）
+- [x] 5 个新测试（并行计时/单工具/未知工具/取消/顺序），总计 281 个全过

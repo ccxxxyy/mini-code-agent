@@ -24,12 +24,12 @@ def create_prompt_style(theme: Theme | None = None) -> Style:
         {
             "prompt": f"bold {t.primary}",
             "completion-menu": "noinherit",
-            "completion-menu.completion": "noinherit #c0c0c0",
-            "completion-menu.completion.current": "noinherit #ffffff bold reverse",
-            "completion-menu.meta.completion": "noinherit #888888 italic",
-            "completion-menu.meta.completion.current": "noinherit #cccccc italic reverse",
+            "completion-menu.completion": f"noinherit {t.dim}",
+            "completion-menu.completion.current": f"noinherit {t.primary} bold reverse",
+            "completion-menu.meta.completion": f"noinherit {t.dim} italic",
+            "completion-menu.meta.completion.current": f"noinherit {t.primary} italic reverse",
             "scrollbar.background": "noinherit",
-            "scrollbar.button": "noinherit #555555",
+            "scrollbar.button": f"noinherit {t.dim}",
             "bottom-toolbar": f"noinherit {t.dim}",
             "toolbar": f"noinherit {t.dim}",
         }
