@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。286 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。290 个测试全过。
 
 ---
 
@@ -1276,12 +1276,42 @@ themes.py 的三套主题从 P1 就存在，但 8 个语义色位从未接入渲
 
 ---
 
+# 第十八部分：P18 双 Esc 中断流式输出
+
+## 18.1 问题：Ctrl+C 的粗暴与风险
+
+Ctrl+C 在 Python 中抛 KeyboardInterrupt，可能在任意 await 点打断——文件写到一半、HTTP 连接未关闭、conversation 状态不一致。需要一个优雅的中断方式。
+
+## 18.2 守护线程 + cancelled 标志
+
+EscWatcher 在流式开始时启动守护线程，以 50ms 间隔轮询 stdin（Windows msvcrt.kbhit/getch、Unix select）。检测到 500ms 内两次 Esc 后设 triggered 标志。on_stream_delta 回调检查该标志并调 agent_loop.cancel()，_think 循环在下一个 chunk 处 break——部分响应完整保留在 conversation，LLM 下轮可以看到它上次说到哪里。
+
+关键约束：EscWatcher 只在流式期间活跃（start/stop 生命周期），不和 prompt_toolkit 的 stdin 读取冲突。
+
+---
+
+# 第十九部分：P19 PRE_LLM / SESSION_END Hook 接线
+
+## 19.1 从死枚举到活接线
+
+HookStage 从 P3 就定义了 7 个值，但只有 PRE_TOOL/POST_TOOL 真正接进执行流。PRE_LLM 和 SESSION_END 作为枚举值存在但从未被 run()——属于"有接口没接线"的死代码。本次激活它们并注册了两个内置 hook。
+
+## 19.2 长记忆自动化
+
+P4 实现了记忆系统的全部零件（存/取/提取），但需要用户手动 `/memory add`。本次通过两个内置 hook 把手动变自动：
+- **PRE_LLM 记忆注入**：每轮 LLM 调用前加载 PersistentMemory，首次追加到 system prompt（`--- Relevant memories ---` 标记防重复）
+- **SESSION_END 记忆提取**：退出时 MemoryExtractor 自动从对话中提取偏好写入 PersistentMemory（auto_extract 配置首次生效）
+
+用户无需做任何事——聊天中说的偏好下次启动就会被 LLM 记住。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——286 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——290 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -158,6 +158,16 @@ class AgentLoop:
             LLMRequestEvent(message_count=len(api_messages), tool_count=len(tool_schemas))
         )
 
+        # PRE_LLM hook: can inject memories, block LLM call, etc.
+        # PRE_LLM hook：可注入记忆、阻止 LLM 调用等
+        pre_llm_ctx = HookContext(
+            stage=HookStage.PRE_LLM,
+            metadata={"message_count": len(api_messages), "tool_count": len(tool_schemas)},
+        )
+        pre_llm_result = await self._hooks.run(pre_llm_ctx)
+        if pre_llm_result.action == HookAction.BLOCK:
+            return LLMResponse(content=pre_llm_result.reason or "(blocked by PRE_LLM hook)")
+
         chunks: list[StreamChunk] = []
         stream_started = False
 
