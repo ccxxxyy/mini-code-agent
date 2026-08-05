@@ -44,13 +44,9 @@
 
 ## 二、v0.4.0 候选：UI/交互增强（4 项）
 
-### 2.1 /theme 命令切换主题
+### 2.1 /theme 命令切换主题 ✅ 已完成
 
-- **现状**：`ui/themes.py` 已有 default/dark/light 三套 Theme 数据（8 个语义色位），但没有接入渲染——Terminal 和 PROMPT_STYLE 里的颜色还是硬编码。
-- **要做什么**：
-  1. Terminal/StreamRenderer/PROMPT_STYLE 改为从 Theme 对象取色
-  2. 新增 `/theme` 命令：`/theme` 列出主题、`/theme dark` 切换
-  3. 选择持久化到 `~/.mini-agent/` 下（AgentConfig.theme 字段已存在）
+> 已实现：三套主题（default/dark/light）全面接入 6 个 UI 文件（terminal/input_handler/trace/teach/board/confirm），`/theme` 列出/切换/持久化（`~/.mini-agent/.theme`），运行时切换即时生效（prompt session 重建 + 共享 theme 引用）。7 个新测试，276 个全过。
 - **工作量**：中（改色引用面较广，~200 行）
 
 ### 2.2 SubAgent 进度实时面板 ✅ 已完成
@@ -152,7 +148,7 @@
 3. ~~2.2 SubAgent 进度面板~~（✅ 已完成）
 4. ~~2.6 LLM 自主派生 SubAgent~~（✅ 已完成）
 5. ~~3.3 会话自动保存~~（✅ 已完成）
-6. **2.1 /theme 命令**（三套主题已画好，就差接线）
+6. ~~2.1 /theme 命令~~（✅ 已完成）
 7. **1.4 工具并行**（复杂任务提速）
 8. 其余按需推进
 

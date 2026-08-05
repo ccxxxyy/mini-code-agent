@@ -14,26 +14,26 @@ from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
-PROMPT_STYLE = Style.from_dict(
-    {
-        # Input prompt
-        "prompt": "bold #6c71c4",
-        # Completion menu: transparent background (inherit terminal)
-        # 补全菜单：透明背景（继承终端背景色）
-        "completion-menu": "noinherit",
-        "completion-menu.completion": "noinherit #c0c0c0",
-        "completion-menu.completion.current": "noinherit #ffffff bold reverse",
-        "completion-menu.meta.completion": "noinherit #888888 italic",
-        "completion-menu.meta.completion.current": "noinherit #cccccc italic reverse",
-        # Scrollbar: minimal 极简滚动条
-        "scrollbar.background": "noinherit",
-        "scrollbar.button": "noinherit #555555",
-        # Bottom toolbar: dim text, transparent background
-        # 底部工具栏：暗色文字，透明背景
-        "bottom-toolbar": "noinherit #666666",
-        "toolbar": "noinherit #666666",
-    }
-)
+from mini_agent.ui.themes import Theme, get_theme
+
+
+def create_prompt_style(theme: Theme | None = None) -> Style:
+    """Build prompt_toolkit Style from a Theme. 从 Theme 构建 prompt_toolkit 样式。"""
+    t = theme or get_theme("default")
+    return Style.from_dict(
+        {
+            "prompt": f"bold {t.primary}",
+            "completion-menu": "noinherit",
+            "completion-menu.completion": "noinherit #c0c0c0",
+            "completion-menu.completion.current": "noinherit #ffffff bold reverse",
+            "completion-menu.meta.completion": "noinherit #888888 italic",
+            "completion-menu.meta.completion.current": "noinherit #cccccc italic reverse",
+            "scrollbar.background": "noinherit",
+            "scrollbar.button": "noinherit #555555",
+            "bottom-toolbar": f"noinherit {t.dim}",
+            "toolbar": f"noinherit {t.dim}",
+        }
+    )
 
 
 class SlashCommandCompleter(Completer):
@@ -79,6 +79,7 @@ def _make_history() -> FileHistory | InMemoryHistory:
 def create_prompt_session(
     completer: SlashCommandCompleter | None = None,
     toolbar_provider=None,
+    theme: Theme | None = None,
 ) -> PromptSession:
     """Create a Prompt Toolkit session with multi-line support and completion.
     创建一个支持多行输入和补全的 Prompt Toolkit session。
@@ -128,9 +129,9 @@ def create_prompt_session(
         key_bindings=bindings,
         completer=completer,
         complete_while_typing=True,
-        style=PROMPT_STYLE,
+        style=create_prompt_style(theme),
         message=HTML("<prompt>&gt; </prompt>"),
-        reserve_space_for_menu=17,
+        reserve_space_for_menu=18,
         bottom_toolbar=_toolbar if toolbar_provider else None,
     )
     return session

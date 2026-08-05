@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mini_agent.extensions.slash_commands import SlashCommand
@@ -101,6 +102,13 @@ def register_builtin_commands(app: Application) -> None:
             name="audit",
             description="Audit logging (usage: /audit [on|off|verify])",
             handler=_make_audit(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="theme",
+            description="Switch theme (usage: /theme [default|dark|light])",
+            handler=_make_theme(app),
         )
     )
     reg.register(
@@ -439,6 +447,41 @@ def _make_audit(app: Application) -> HandlerFn:
     return handler
 
 
+def _make_theme(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.ui.themes import THEMES, get_theme
+
+        arg = args.strip().lower()
+
+        if not arg:
+            current = app.terminal.theme.name
+            lines = ["**Available themes 可用主题：**", ""]
+            for name in sorted(THEMES):
+                mark = " ← current" if name == current else ""
+                lines.append(f"  `{name}`{mark}")
+            return "\n".join(lines)
+
+        new_theme = get_theme(arg)
+        if arg not in THEMES:
+            return f"Unknown theme: `{arg}`. Available: {', '.join(sorted(THEMES))}"
+
+        app.terminal.theme = new_theme
+        app.terminal._prompt_session = None
+        app.trace_renderer.theme = new_theme
+        app.teach_renderer.theme = new_theme
+
+        theme_path = Path.home() / ".mini-agent" / ".theme"
+        try:
+            theme_path.parent.mkdir(parents=True, exist_ok=True)
+            theme_path.write_text(arg, encoding="utf-8")
+        except OSError:
+            pass
+
+        return f"Theme switched to: `{arg}` (persisted across restarts)"
+
+    return handler
+
+
 def _make_spawn(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         mgr = app.subagent_manager
@@ -471,7 +514,7 @@ def _make_spawn(app: Application) -> HandlerFn:
         if first == "wait":
             from mini_agent.ui.board import SubAgentBoard
 
-            board = SubAgentBoard(app.terminal.console, mgr)
+            board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
             if agent_id:
@@ -570,7 +613,7 @@ def _make_team(app: Application) -> HandlerFn:
 
         from mini_agent.ui.board import SubAgentBoard
 
-        board = SubAgentBoard(app.terminal.console, app.subagent_manager)
+        board = SubAgentBoard(app.terminal.console, app.subagent_manager, theme=app.terminal.theme)
         try:
             report = await board.run_while(team.start(task_text, timeout=300))
         except Exception as e:
