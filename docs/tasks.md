@@ -411,3 +411,38 @@
 
 ### P15.5 验证
 - [x] 7 个新测试（closed_cleanly 往返/旧文件默认/list 含标志/节流+force/空会话跳过/OSError 静默/崩溃过滤三类），269 个测试全过
+
+---
+
+## Phase 16: /theme 主题切换 (P16)
+
+### P16.1 主题系统接入
+- [x] `ui/themes.py` 三套主题色差拉大（default 紫蓝 / dark 暖橙 #ff9e64 / light GitHub 蓝 #0550ae）
+- [x] `ui/input_handler.py` — PROMPT_STYLE 常量改为 `create_prompt_style(theme)` 函数，补全菜单文字颜色跟随主题
+- [x] `ui/terminal.py` — 构造器加 theme 参数，欢迎标题/工具行/确认面板/错误提示全部从 theme 取色
+- [x] `ui/trace.py` — 构造器加 theme，阶段名/工具名/OK/FAIL 颜色跟随
+- [x] `ui/teach.py` — 构造器加 theme，面板标题颜色跟随
+- [x] `ui/board.py` — 构造器加 theme，_PHASE_COLORS 改为 _phase_colors(theme) 函数
+
+### P16.2 /theme 命令 + 持久化
+- [x] `/theme` 列出可用主题 + 标记当前；`/theme dark` 切换 + 即时生效 + 持久化到 `~/.mini-agent/.theme`
+- [x] 运行时切换刷新：terminal.theme 赋值 + prompt_session 重建 + trace/teach 共享 theme 引用
+
+### P16.3 验证
+- [x] 7 个新测试（get_theme 默认/dark/未知回退/全主题字段/持久化往返/prompt_style/terminal 接受 theme），281 个测试全过
+
+---
+
+## Phase 17: 工具并行执行 (P17)
+
+### P17.1 _act() 两阶段并行
+- [x] Phase 1：串行权限预检（确认弹窗不可交错）
+- [x] Phase 2：全部 GRANTED 的工具 asyncio.gather 并行执行
+- [x] 单工具走快速路径不 gather（零开销）
+- [x] `_run_tool_pipeline` 加 `skip_permission` 参数（Phase 2 跳过已预检的权限）
+
+### P17.2 AuditLogger 并行安全
+- [x] 三个 EventBus handler 加 `asyncio.Lock` 保护 hash chain（并行工具同时 emit 事件时 _last_hash 互斥）
+
+### P17.3 验证
+- [x] 5 个新测试（并行计时 < 0.25s / 单工具不变 / 未知工具错误 / 取消错误 / 顺序保持），281 个测试全过

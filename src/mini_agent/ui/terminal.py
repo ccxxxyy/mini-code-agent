@@ -81,9 +81,13 @@ class Terminal:
                 return False
 
     async def ask_yes_no(self, prompt: str) -> bool:
-        self._ensure_prompt_session()
+        """Plain yes/no using a temporary prompt (does not pollute the main session).
+        使用临时提示的朴素是/否（不污染主输入 session 的默认 message）。"""
+        from prompt_toolkit import PromptSession as _PS
+
+        tmp = _PS()
         while True:
-            answer = (await self._prompt_session.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
+            answer = (await tmp.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
             if answer in ("y", "yes"):
                 return True
             if answer in ("n", "no", ""):
