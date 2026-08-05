@@ -59,6 +59,10 @@ quote in a FOUR-backtick fence (````) so the inner fences render correctly. \
 Better yet, prefer summarizing over quoting entire files verbatim.
 - When editing files, read them first to understand the context.
 - Report errors honestly. If a tool fails, explain what went wrong.
+- For multiple independent subtasks, use the spawn_agents tool to \
+run them in parallel via sub-agents. Each sub-agent has its own \
+tools but cannot spawn further sub-agents. Sub-agent results are \
+returned as a combined report.
 - IMPORTANT: Use platform-appropriate shell commands. \
 On Windows use dir/type/findstr/where, NOT ls/cat/grep/which."""
 
@@ -144,6 +148,10 @@ class Application:
             working_dir=working_dir,
             worktree_manager=self.worktree_manager,
         )
+
+        # Inject SubAgentManager into ToolContext so spawn_agents tool can use it
+        # 注入 SubAgentManager 到 ToolContext，供 spawn_agents 工具使用
+        tool_context.subagent_manager = self.subagent_manager
 
         # Trace renderer: /trace shows agent internals in real time
         # Trace 渲染器：/trace 实时展示 Agent 内部状态

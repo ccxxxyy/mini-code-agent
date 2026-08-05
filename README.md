@@ -241,8 +241,9 @@ mini-code-agent/
 - [x] P11：机制实验（`experiments/` 压缩策略 A/B + 强弱模型混合编排对照实验）
 - [x] P12：多 Agent 入口（`/spawn` SubAgent 调度 + `/team` 团队编排 + 强弱混编接线）
 - [x] P13：SubAgent 进度面板（`/spawn wait` `/team` 期间实时表格展示各 agent 阶段/工具数/耗时）
+- [x] P14：LLM 自主派生 SubAgent（`spawn_agents` 工具，LLM 在对话中自主并行调度子代理）
 
-**全部阶段已完成，257 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，262 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

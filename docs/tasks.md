@@ -359,3 +359,29 @@
 - [x] 根因定位：强模型 worker 也在"读多个文件"步骤熔断 → 排除模型纪律归因 → 死循环检测"同一工具连续 6 次"误杀正常批量读取（连续 read_file 6 个不同文件被判死循环）
 - [x] 修复：死循环签名从"工具名"改为"工具名+参数 JSON"（record_tool_call 加 args_key）——只有完全相同的重复调用才熔断，批量读不同文件不再误杀
 - [x] 成功验证：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md 242 行真实生成，零中间文件，136K token（比首轮 426K 降 68%），进度面板真实场景亮相
+
+---
+
+## Phase 14: LLM 自主派生 SubAgent (P14)
+
+### P14.1 ToolContext 扩展
+- [x] `tools/base.py` — ToolContext 新增 `subagent_manager: SubAgentManager | None = None` 字段（TYPE_CHECKING 避循环导入）
+
+### P14.2 SpawnAgentsTool 实现
+- [x] `tools/builtin/spawn_agents.py` — 新工具（schema: tasks 数组 + isolated 布尔参数）
+- [x] execute：调 SubAgentManager.spawn_parallel + wait_all，汇总结果为 ToolResult 回传 LLM
+- [x] ctx.subagent_manager=None 时返回 error_result（天然递归防护之一）
+
+### P14.3 注册 + 递归防护
+- [x] `tools/builtin/__init__.py` — SpawnAgentsTool 加入 ALL_BUILTIN_TOOLS（7 个内置工具）
+- [x] `models/config.py` — enabled_tools 默认值加 "spawn_agents"
+- [x] `app.py` — SubAgentManager 创建后注入 tool_context.subagent_manager（post-hoc mutation）
+- [x] `core/subagent.py` — SubAgent clone registry 后显式 `unregister("spawn_agents")`（递归防护双保险）
+
+### P14.4 System Prompt 使用指引
+- [x] `app.py` SYSTEM_PROMPT Guidelines 段追加 spawn_agents 使用说明（独立子任务并行 + 子代理不能再派生）
+
+### P14.5 验证
+- [x] 5 个新测试（基础执行/无 manager 拒绝/空任务/部分失败/SubAgent clone 不含 spawn_agents）+ 1 个 E2E 集成断言修正，262 个测试全过
+- [x] 真实 API E2E：LLM 自主调用 spawn_agents 派生 3 个子代理并行（trace 可见 3 个并行 llm request），6 tools 递归防护生效
+- [x] 递归验证：子代理被要求"再派生"时正确说明限制并用 read_file 直接完成任务

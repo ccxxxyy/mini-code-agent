@@ -317,3 +317,26 @@
 - [x] 死循环签名改为 工具名+参数（修复"连续读 6 个不同文件被误杀"的护栏 bug）
 - [x] 最终验证：/team 四步全 OK，su.md 真实生成，零中间文件，token 比首轮降 68%
 - [x] 7 个新测试，总计 257 个全过
+
+---
+
+## Phase 14 检查项：LLM 自主派生 SubAgent
+
+### 功能完整性
+- [x] spawn_agents 工具注册到 ToolRegistry，/tools 显示 7 个内置工具
+- [x] LLM 在 ReAct 循环中自主调用 spawn_agents 派生多个子代理并行执行
+- [x] 子代理结果汇总为 ToolResult 回传 LLM，LLM 据此继续推理给出最终回答
+- [x] 支持 isolated=true 参数（Git worktree 隔离）
+- [x] 空任务列表返回 error_result（参数校验）
+- [x] system prompt 包含 spawn_agents 使用指引
+
+### 递归防护（双保险）
+- [x] SubAgent clone registry 时显式 unregister("spawn_agents")——子代理物理上没有此工具（trace 可见 6 tools vs 主循环 7 tools）
+- [x] SubAgent 的 ToolContext.subagent_manager=None——即使工具存在也执行不了
+- [x] 真实 API 验证：要求子代理"再派生"时，子代理正确说明限制并直接用 read_file 完成任务
+
+### 架构合规
+- [x] ToolContext 加 subagent_manager 字段（TYPE_CHECKING 避循环导入）
+- [x] app.py post-hoc mutation 注入（无需重排构造顺序）
+- [x] SpawnAgentsTool 遵循 Tool ABC 模式（schema + execute），与其他 6 个工具走完全相同的权限/Hook/事件管道
+- [x] 6 个新测试（spawn_agents_tool 5 + e2e 断言修正 1），总计 262 个全过

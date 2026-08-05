@@ -6,12 +6,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mini_agent.events.bus import EventBus
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import ToolResult
 from mini_agent.models.session import Session
+
+if TYPE_CHECKING:
+    from mini_agent.core.subagent import SubAgentManager
 
 
 @dataclass
@@ -70,6 +73,7 @@ class ToolContext:
     session: Session
     event_bus: EventBus
     config: AgentConfig
+    subagent_manager: SubAgentManager | None = None
 
 
 class Tool(ABC):

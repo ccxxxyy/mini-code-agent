@@ -35,7 +35,15 @@ def test_application_tools_registered(monkeypatch, tmp_path):
 
     app = Application(ConfigLoader.load())
     tool_names = {t.schema.name for t in app.tool_registry.list_tools()}
-    assert tool_names == {"read_file", "write_file", "edit_file", "bash", "glob", "grep"}
+    assert tool_names == {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "bash",
+        "glob",
+        "grep",
+        "spawn_agents",
+    }
 
 
 def test_application_slash_commands_registered(monkeypatch, tmp_path):
