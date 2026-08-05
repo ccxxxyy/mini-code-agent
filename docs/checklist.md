@@ -286,3 +286,34 @@
 - [x] /team 使用 create_for_role("planner") + create_for_role("worker") 完成强弱混编接线（roadmap 2.5）
 - [x] 沿用 _make_xxx 工厂 + 子命令分支模式（与 /session /audit 一致）
 - [x] 8 个新测试（spawn/team），总计 243 个全过
+
+---
+
+## Phase 13 检查项：SubAgent 进度面板
+
+### 功能完整性
+- [x] `/spawn wait` 阻塞期间显示实时表格（Agent/Task/Phase/Tools/Time 五列）
+- [x] `/team` 执行期间显示各 worker 进度
+- [x] 阶段实时更新且带颜色区分（thinking/tool_calling/terminated/error）
+- [x] 工具调用数和耗时实时增长
+- [x] 全部完成后面板自动收起（transient Live），命令结果正常显示
+- [x] 无活跃 agent 时显示 "collecting results..."（wait 已 pop 但结果未返回的窗口期）
+- [x] awaitable 异常时面板正常收起且异常透传
+
+### 架构合规
+- [x] active_snapshots() 公开接口——面板不触碰 SubAgentManager 私有成员
+- [x] run_while 包裹模式——面板只在等待期间存在，无常驻订阅，天然避开 StreamRenderer 的 Live 冲突窗口（斜杠命令不经过 AgentLoop）
+- [x] 7 个新测试（board），总计 250 个全过
+
+### 真实运行缺陷修复（/team 六轮 E2E 迭代）
+- [x] SubAgent 不再写 /tmp（prompt 平台信息 + 相对路径约束）
+- [x] 熔断终止返回 success=False + error 标注（报告不再误报 SUCCESS）
+- [x] 依赖步骤等前置批完成后执行（不再并行抢跑找不到文件空转熔断）
+- [x] 依赖失败的步骤跳过并标注原因（不浪费 token）
+- [x] 前置步骤产出注入依赖步骤 prompt（4000 字符）
+- [x] Planner SIZE LIMIT（~15 工具调用/最多读 5 文件）+ SubAgent BUDGET 预算感知
+- [x] NO INTERMEDIATE FILES + writes_files 工具白名单强制（非写步骤物理只读）
+- [x] Planner 分解前注入真实项目结构扫描（不再套 web 模板）
+- [x] 死循环签名改为 工具名+参数（修复"连续读 6 个不同文件被误杀"的护栏 bug）
+- [x] 最终验证：/team 四步全 OK，su.md 真实生成，零中间文件，token 比首轮降 68%
+- [x] 7 个新测试，总计 257 个全过

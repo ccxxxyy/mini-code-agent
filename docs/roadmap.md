@@ -53,12 +53,9 @@
   3. 选择持久化到 `~/.mini-agent/` 下（AgentConfig.theme 字段已存在）
 - **工作量**：中（改色引用面较广，~200 行）
 
-### 2.2 SubAgent 进度实时面板
+### 2.2 SubAgent 进度实时面板 ✅ 已完成
 
-- **现状**：SubAgent 在后台跑时终端没有任何显示，只能等 wait_all 返回。`SubAgentManager.list_active()` / `get_status()` 查询接口已就位。
-- **要做什么**：用 Rich 的 Live + Table 做实时面板——每个活跃 SubAgent 一行（agent_id / 任务摘要 / 当前阶段 / 已调工具数 / 耗时），每秒刷新，全部完成后收起。
-- **插槽位置**：AgentPhase 状态机已有（IDLE/THINKING/TOOL_CALLING/...），EventBus 的 SubAgent 事件可订阅。
-- **工作量**：中（~150 行）
+> 已实现：`ui/board.py` SubAgentBoard（Rich Live + Table，4fps 刷新，transient 收起）+ `SubAgentManager.active_snapshots()` 公开快照接口（agent_id/任务/阶段/工具数/耗时）。`/spawn wait` 和 `/team` 阻塞期间自动显示面板，完成后收起展示结果。7 个新测试，250 个全过。
 
 ### 2.3 /team 和 /spawn 命令入口 ✅ 已完成
 
@@ -76,6 +73,19 @@
 - **现状**：LLM 输出过程中只能 Ctrl+C（会连整个程序一起打断的风险）。
 - **要做什么**：流式期间监听按键，双击 Esc 调 `agent_loop.cancel()` 优雅中断当前轮，回到输入框。
 - **工作量**：小（~50 行，prompt_toolkit 键盘监听）
+
+### 2.6 LLM 自主派生 SubAgent（spawn 作为工具）
+
+- **现状**：/spawn /team 只能用户手动触发（斜杠命令路径，绕过 AgentLoop）。LLM 在主对话中无法自己决定"这个任务我派子代理并行去做"——CC 的 Task 工具形态缺失。
+- **要做什么**：
+  1. `SpawnAgentTool(Tool)` — 新工具注册进 ToolRegistry，schema 含 `tasks: list[str]`（并行任务列表）和可选 `isolated: bool`。execute 调 `subagent_manager.spawn_parallel + wait_all`，结果汇总为 ToolResult 回传 LLM
+  2. system prompt 补一条使用指引：多个独立子任务时可用 spawn_agents 并行处理
+  3. 进度显示降级方案：工具执行发生在 ReAct 循环内，紧邻 StreamRenderer 的流式 Live——SubAgentBoard 的 Live 会撞车（Rich 同一 Console 仅允许一个 Live）。两个选项：
+     - 简单：ACT 阶段不开面板，改用普通打印行（spawn 时打一行、每个完成时打一行）——零冲突
+     - 完整：把面板整合进 StreamRenderer 的 Live 区（单 Live 复合布局），改动大，参考 CC 的做法
+- **插槽位置**：Tool ABC + ToolRegistry 注册即可；SubAgentManager 全部可复用；ToolContext 已携带 event_bus 但需要能访问 subagent_manager（可通过 ToolContext.config 或新增字段注入）。
+- **注意点**：递归防护——SubAgent 内部的 ToolRegistry 是克隆的，必须把 spawn_agents 从克隆表中过滤掉，否则子代理再派生子代理会失控；工具执行有超时（复用 wait_all timeout）。
+- **工作量**：中（工具 ~60 行 + 注入改造 ~30 行 + 进度打印 ~20 行 + 测试）
 
 ---
 
@@ -141,11 +151,12 @@
 
 1. ~~2.3 /spawn + /team 命令~~（✅ 已完成）
 2. ~~2.5 强弱模型混编配置化~~（✅ 配置层 + /team 接线已完成）
-3. **2.2 SubAgent 进度面板**（配合 2.3，可见即可信）
-4. **3.3 会话自动保存**（防数据丢失，用户安全感）
-5. **2.1 /theme 命令**（三套主题已画好，就差接线）
-6. **1.4 工具并行**（复杂任务提速）
-7. 其余按需推进
+3. ~~2.2 SubAgent 进度面板~~（✅ 已完成）
+4. **2.6 LLM 自主派生 SubAgent**（spawn 升级为工具，多 Agent 融入自然对话——CC Task 工具形态）
+5. **3.3 会话自动保存**（防数据丢失，用户安全感）
+6. **2.1 /theme 命令**（三套主题已画好，就差接线）
+7. **1.4 工具并行**（复杂任务提速）
+8. 其余按需推进
 
 > 1.1 LLM 摘要压缩已在 P11 完成（且实验数据显示默认不开启是正确的）。
 

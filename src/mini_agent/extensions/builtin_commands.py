@@ -470,12 +470,15 @@ def _make_spawn(app: Application) -> HandlerFn:
             return "\n".join(lines)
 
         if first == "wait":
+            from mini_agent.ui.board import SubAgentBoard
+
+            board = SubAgentBoard(app.terminal.console, mgr)
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
             if agent_id:
-                result = await mgr.wait(agent_id, timeout=300)
+                result = await board.run_while(mgr.wait(agent_id, timeout=300))
                 return _format_agent_result(result)
-            results = await mgr.wait_all(timeout=300)
+            results = await board.run_while(mgr.wait_all(timeout=300))
             if not results:
                 return "No agents to wait for."
             return "\n\n".join(_format_agent_result(r) for r in results)
@@ -566,8 +569,11 @@ def _make_team(app: Application) -> HandlerFn:
             subagent_manager=app.subagent_manager,
         )
 
+        from mini_agent.ui.board import SubAgentBoard
+
+        board = SubAgentBoard(app.terminal.console, app.subagent_manager)
         try:
-            report = await team.start(task_text, timeout=300)
+            report = await board.run_while(team.start(task_text, timeout=300))
         except Exception as e:
             return f"Team execution failed: {e}"
 

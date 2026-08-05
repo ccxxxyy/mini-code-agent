@@ -240,8 +240,58 @@ mini-code-agent/
 - [x] P10：垂直场景定制（`/explain` 教学模式 + `/audit` 合规审计 + 内网离线 Skill）
 - [x] P11：机制实验（`experiments/` 压缩策略 A/B + 强弱模型混合编排对照实验）
 - [x] P12：多 Agent 入口（`/spawn` SubAgent 调度 + `/team` 团队编排 + 强弱混编接线）
+- [x] P13：SubAgent 进度面板（`/spawn wait` `/team` 期间实时表格展示各 agent 阶段/工具数/耗时）
 
-**全部阶段已完成，243 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，257 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+
+## 多 Agent 并行：/spawn 与 /team
+
+两个命令都在后台派生独立的 SubAgent（各自拥有独立对话上下文和工具副本），区别在**谁来拆任务**：
+
+| | `/spawn` | `/team` |
+|---|---|---|
+| 任务怎么拆 | 你手动拆 | Planner LLM 自动分解 |
+| 依赖处理 | 无（全并行） | 按依赖分批（无依赖并行、有依赖等前置完成） |
+| 结果收集 | 手动 `/spawn wait` | 自动等待 + 汇总报告 |
+| 适用场景 | 你清楚怎么拆的简单并行 | 复杂任务交给 LLM 规划 |
+
+### /spawn —— 手动调度 SubAgent
+
+```
+/spawn 读取README统计总行数          # 派生单个后台 agent，立即返回 agent_id
+/spawn -p 分析src结构 | 分析测试覆盖   # 用 | 分隔并行派生多个
+/spawn --isolated 重构这个模块        # 在独立 Git worktree 中执行（改动隔离）
+/spawn list                          # 查看活跃 agent 及其阶段
+/spawn wait                          # 等待全部完成（期间显示实时进度面板）
+/spawn wait <id>                     # 等待指定 agent
+/spawn cancel [id]                   # 取消指定/全部 agent
+```
+
+注意：`/spawn` 派生后立即返回（不阻塞输入框），结果要用 `/spawn wait` 收集。
+
+### /team —— LLM 规划的团队编排
+
+```
+/team 分析项目生成一份架构摘要到sum.md
+/team --isolated 重构工具层并补充测试
+```
+
+执行流程：Planner LLM 分解任务（含依赖关系）→ SubAgent 按依赖分批并行执行（期间显示进度面板）→ 自动汇总各步骤报告。分析类步骤被强制只读（物理剥夺写文件工具），只有产出交付文件的步骤能写文件——不会留下中间垃圾文件。
+
+### 强弱模型混编（省成本）
+
+`/team` 支持 Planner 和 Worker 用不同模型（机制实验验证：强 Planner + 弱 Worker 是成本效益最优）：
+
+```bash
+# .env
+MINI_AGENT_MODELS=fast,smart
+MODEL_FAST_MODEL=deepseek-v4-flash
+MODEL_SMART_MODEL=deepseek-chat
+MINI_AGENT_PLANNER_PROFILE=smart    # 分解任务用强模型
+MINI_AGENT_WORKER_PROFILE=fast      # 执行子任务用便宜模型
+```
+
+未配置时两者都用主模型。
 
 ## 机制透明：/trace 模式
 

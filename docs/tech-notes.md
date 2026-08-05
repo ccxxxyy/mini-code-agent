@@ -1153,7 +1153,80 @@ report = await team.start(task)
 
 ## 12.5 验证
 
-8 个新测试（spawn 单任务/并行/list+cancel、事件 emit 2 个、命令 handler 3 个），243 个测试全过。
+8 个新测试（spawn 单任务/并行/list+cancel、事件 emit 2 个、命令 handler 3 个）。
+
+---
+
+# 第十三部分：P13 SubAgent 进度面板
+
+## 13.1 问题：多 Agent 执行期间的静默黑箱
+
+`/spawn wait` 和 `/team` 阻塞等待后台 agent 时终端完全静默——用户不知道每个 agent 在做什么、卡在哪个阶段、跑了多久。roadmap 2.2 要求实时面板。
+
+## 13.2 两个关键设计决策
+
+### run_while 包裹模式，而非常驻订阅者
+
+TraceRenderer/AuditLogger 是常驻 EventBus 订阅者（attach 一次，enabled 开关），但进度面板选择了不同的模式：
+
+```python
+board = SubAgentBoard(console, mgr)
+result = await board.run_while(mgr.wait_all(timeout=300))
+```
+
+面板只在被包裹的 awaitable 运行期间存在（Live 用 `transient=True`，结束自动擦除）。原因：
+1. **Live 冲突约束**：Rich 同一 Console 只允许一个 Live。StreamRenderer 的 Live 在 LLM 流式期间活跃；斜杠命令不经过 AgentLoop，`/spawn wait` 阻塞期间 StreamRenderer 必然不活跃——run_while 的生命周期天然落在安全窗口内。常驻订阅者做不到这一点（SubAgent 事件可能在主循环流式期间到达）
+2. **无状态**：面板每 0.25s 轮询 `active_snapshots()` 重画整表，不维护任何跨刷新状态，不存在事件丢失/乱序问题
+
+### 轮询快照，而非事件驱动
+
+共享 EventBus 的 ToolCallStart/End 事件没有 agent_id——多个 SubAgent 并行时无法归属。与其给全部事件加 agent_id（侵入大），不如每次刷新时从各 agent 自己的 conversation 现数：`sum(len(m.tool_calls) for m in agent._conversation.messages)`。为此加了公开接口 `SubAgentManager.active_snapshots()`（AgentSnapshot：agent_id/task/phase/tool_calls/elapsed_seconds），面板不触碰私有成员。
+
+## 13.3 效果
+
+```
+              SubAgent Progress
+┌──────────┬──────────────────────┬─────────────┬───────┬───────┐
+│ Agent    │ Task                 │ Phase       │ Tools │ Time  │
+├──────────┼──────────────────────┼─────────────┼───────┼───────┤
+│ a3f8c2d1 │ 读取 README 统计行数 │ tool_calling  │     2 │  3.2s │
+│ 9b7e4f02 │ 分析 pyproject 依赖  │ thinking     │     1 │  3.1s │
+└──────────┴──────────────────────┴─────────────┴───────┴───────┘
+```
+
+全部完成后表格消失（transient），命令返回的结果正常打印——面板是过程可视化，结果仍由命令输出承载。
+
+## 13.4 验证
+
+7 个新测试（快照字段/空列表、run_while 结果透传/包裹真实 wait/异常透传、渲染含 agent 信息/空表提示）。
+
+## 13.5 真实 /team 运行暴露的三个缺陷（E2E 的价值）
+
+面板上线后第一次真实 `/team` 运行（"分析项目写架构摘要"）报告 SUCCESS，但目标文件根本没生成——单测全绿挡不住的三个系统性缺陷：
+
+1. **SUCCESS 误报**：两个 agent 触发迭代熔断被强停（输出 `(stopped: iteration limit)`），但 `SubAgent.run()` 只要不抛异常就 success=True。修复：`AgentLoop.stopped_early` 标志，熔断终止 = 失败
+2. **并行执行撞上接力依赖**：Planner 分解出"第 4 步读前 3 步的产出文件"，但 AgentTeam 纯并行 spawn——第 4 步启动时文件不存在，反复重试直到熔断（烧掉 40 万 token）。修复：`PlanStep.depends_on` + 分批调度（无依赖并行、有依赖等前置批、依赖失败则跳过）+ 前置产出注入后续 prompt
+3. **LLM 的 Unix 路径习惯**：SubAgent prompt 没有平台信息，LLM 把产出写到 `/tmp/`（Windows 上落到 D:\tmp）。修复：prompt 补平台/shell + 相对路径硬约束 + "文件不存在就报告勿重试"
+
+教训与 P7 一致：**单测验证组件正确，只有真实 E2E 才暴露系统级交互缺陷**——依赖、平台、成功语义都是组件边界之外的问题。
+
+第二轮 E2E（修复后重跑）暴露第 4 个问题：**弱模型 + 重任务 + 迭代上限的三重叠加**——"阅读项目主要源代码"这种任务对 60+ 文件的项目根本不可能在 50 轮内完成，弱 worker 又不会抓重点，读到一半被熔断（这次报告如实显示 FAILED，修复 2 生效）。对策双管齐下：
+- **Planner 端控制粒度**：prompt 加 SIZE LIMIT——子任务须 ~15 次工具调用内可完成，"分析整个代码库"必须改写为限定范围（"读 src/core/ 下 3 个文件"），允许抽样
+- **SubAgent 端预算感知**：prompt 加 BUDGET 段——告知总轮次预算，要求优先做最重要的事、预算将尽立即写出已有发现。部分产出优于空手熔断
+
+第三轮 E2E 暴露第 5 个问题：**中间文件污染**——用户只要一个 sum.md，运行完根目录多出 project_overview.md 等三个中间文件。根因：修复 3 引入"依赖产出注入 prompt"后，信息已可走内存传递，但 Planner prompt 仍要求"每个子任务明确产出文件"，诱导它设计"各写一个文件再合并"的计划。对策：Planner prompt 加 NO INTERMEDIATE FILES（分析类子任务只输出报告文本，仅用户明确要求的文件由最终步骤写出）+ 依赖报告注入上限提到 4000 字符（成为唯一信息通道后不能截太狠）+ 单任务最多读 5 个文件。
+
+第四轮 E2E 证明 **prompt 说服对弱模型不可靠**：NO INTERMEDIATE FILES 规则被无视（中间文件照写），Planner 还在套 backend/frontend 的 web 模板盲分解（第 2 步自己报告"这项目没有前端"）。两个代码级修复：
+- **能力剥夺替代 prompt 约束**：`PlanStep.writes_files` 字段，AgentTeam 对非写步骤直接从工具白名单剔除 write_file/edit_file——物理上没有写文件能力，违规不可能发生。这是 P3 安全层教训的复用：黑名单/说服防不住，能力剥夺才防得住
+- **信息对齐替代盲分解**：team.start() 分解前做两级目录扫描注入 Planner context——看到真实结构（Python CLI、src/mini_agent 分层）就不会套 web 模板
+
+第五轮（换强模型 worker 对照）是**关键的排除实验**：deepseek-chat 也在完全相同的位置熔断——归因瞬间反转，问题不在模型纪律而在框架本身。
+
+第六轮定位到真正的病根：**死循环护栏误杀正常工作**。三重熔断之一"同一工具连续 6 次即死循环"把"连续 read_file 读 6 个不同文件"——分析类任务的标准动作——当成了死循环。这解释了此前所有反常：熔断的总是读多文件的步骤、agent 遗言总是"让我再读几个文件"（它没失控，是被错杀）、模型越强执行越有条理反而死得越快。修复：死循环签名从"工具名"改为"工具名+参数 JSON"（`record_tool_call(name, args_key)`）——只有完全相同的重复调用才熔断（真卡死如反复试 heredoc 仍会被拦），批量处理不同文件不再误伤。
+
+修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
+
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。257 个测试全过。
 
 ---
 
@@ -1163,6 +1236,6 @@ report = await team.start(task)
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——243 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——257 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

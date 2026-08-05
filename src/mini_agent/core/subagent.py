@@ -5,6 +5,9 @@ SubAgent 分发——将任务委派给并行运行的独立 Agent。
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,10 +24,28 @@ from mini_agent.tools.base import ToolContext, ToolRegistry
 
 SUBAGENT_SYSTEM_PROMPT = """You are a focused sub-agent working on a single delegated task.
 Working directory: {working_dir}
+Platform: {platform}
+Shell: {shell}
 
 Complete the task using the available tools, then give a concise final report.
 Do not ask questions -- make reasonable decisions autonomously.
-Your final message is your report back to the orchestrator."""
+Your final message is your report back to the orchestrator.
+
+BUDGET: you have roughly {iteration_budget} think-act rounds before you are \
+force-stopped. Plan your tool usage: prioritize the most important \
+files/actions first, sample instead of reading everything, and when the \
+budget is running low, STOP exploring and write out your findings/deliverables \
+immediately. A partial deliverable is far better than being cut off with \
+nothing written.
+
+Rules:
+- Write ALL output files inside the working directory shown above, using \
+relative paths (e.g. "report.md"). NEVER write to /tmp or other absolute \
+paths outside the working directory.
+- Use platform-appropriate shell commands. On Windows use dir/type/findstr, \
+NOT ls/cat/grep.
+- If a file or resource the task mentions does not exist, report that fact \
+and stop -- do NOT retry in a loop."""
 
 
 @dataclass
@@ -83,8 +104,15 @@ class SubAgent:
             tool_context=tool_context,
         )
 
+        platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
+        shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
         self._conversation = Conversation(
-            system_prompt=SUBAGENT_SYSTEM_PROMPT.format(working_dir=effective_dir)
+            system_prompt=SUBAGENT_SYSTEM_PROMPT.format(
+                working_dir=effective_dir,
+                platform=platform,
+                shell=shell,
+                iteration_budget=config.max_agent_iterations,
+            )
         )
         self._conversation.append(Message(role=Role.USER, content=task))
 
@@ -99,14 +127,18 @@ class SubAgent:
         try:
             output = await self._loop.run(self._conversation)
             tool_calls = sum(len(m.tool_calls) for m in self._conversation.messages)
+            # Circuit-breaker termination is a failure, not a completed task
+            # 熔断终止是失败，不算任务完成
+            stopped = self._loop.stopped_early
             return SubAgentResult(
                 agent_id=self.agent_id,
                 task=self.task,
-                success=True,
+                success=not stopped,
                 output=output,
                 tool_calls_made=tool_calls,
                 tokens_used=self._loop.last_turn_tokens,
                 worktree_path=self._worktree_path,
+                error="Stopped early (iteration limit or cancellation)" if stopped else None,
             )
         except Exception as e:
             return SubAgentResult(
@@ -120,9 +152,22 @@ class SubAgent:
 
 
 @dataclass
+class AgentSnapshot:
+    """Point-in-time view of an active sub-agent (for progress display).
+    活跃 SubAgent 的即时快照（用于进度展示）。"""
+
+    agent_id: str
+    task: str
+    phase: str
+    tool_calls: int
+    elapsed_seconds: float
+
+
+@dataclass
 class _ActiveAgent:
     agent: SubAgent
     task_handle: asyncio.Task = field(repr=False)
+    started_at: float = 0.0
 
 
 class SubAgentManager:
@@ -174,7 +219,9 @@ class SubAgentManager:
             allowed_tools=allowed_tools,
         )
         handle = asyncio.create_task(agent.run())
-        self._active[agent.agent_id] = _ActiveAgent(agent=agent, task_handle=handle)
+        self._active[agent.agent_id] = _ActiveAgent(
+            agent=agent, task_handle=handle, started_at=time.monotonic()
+        )
         await self._event_bus.emit(SubAgentSpawnEvent(agent_id=agent.agent_id, task=task))
         return agent.agent_id
 
@@ -251,3 +298,22 @@ class SubAgentManager:
     def get_status(self, agent_id: str) -> AgentPhase | None:
         entry = self._active.get(agent_id)
         return entry.agent.status if entry else None
+
+    def active_snapshots(self) -> list[AgentSnapshot]:
+        """Point-in-time snapshots of all active agents (for progress board).
+        所有活跃 agent 的即时快照（用于进度面板）。"""
+        now = time.monotonic()
+        snapshots: list[AgentSnapshot] = []
+        for entry in self._active.values():
+            agent = entry.agent
+            tool_calls = sum(len(m.tool_calls) for m in agent._conversation.messages)
+            snapshots.append(
+                AgentSnapshot(
+                    agent_id=agent.agent_id,
+                    task=agent.task,
+                    phase=agent.status.value,
+                    tool_calls=tool_calls,
+                    elapsed_seconds=now - entry.started_at,
+                )
+            )
+        return snapshots
