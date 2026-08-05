@@ -97,12 +97,9 @@
 
 > 已实现：每轮对话/斜杠命令后自动保存（30s 节流 + force 绕过），`SessionMetadata.closed_cleanly` 标志（正常退出 finally 翻 True，硬杀进程留 False 即崩溃信号），启动时检测同目录最近崩溃会话并 ask_yes_no 提示恢复（拒绝则标记已关闭不再重复询问）。顺带修复 `/session load` 的 ToolContext 过期引用缺陷（统一走 `_adopt_session`）。7 个新测试，269 个全过。
 
-### 3.4 上下文溢写（Context Overflow 兜底）
+### 3.4 上下文溢写（Context Overflow 兜底）✅ 已完成
 
-- **现状**：压缩后仍超窗口时只是继续发送，可能被 API 拒绝。
-- **要做什么**：发送前用 count_messages_tokens 预检，超限时强制走 SlidingWindow 截到安全水位，并向用户显示警告。
-- **插槽位置**：ContextManager.tokens_remaining 已有；agent_loop._think 是接线点。
-- **工作量**：小（~50 行）
+> 已实现：`ContextManager.ensure_fits(conversation, max_tokens)` 最终兜底——超窗口时强制 SlidingWindow 截断到 85% 水位。`_think()` 在 LLM 调用前预检，截断后重建 api_messages。2 个新测试，292 个全过。
 
 ---
 

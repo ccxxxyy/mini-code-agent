@@ -477,3 +477,19 @@
 
 ### P19.3 验证
 - [x] 4 个新测试（PRE_LLM 触发/BLOCK 阻止 LLM/SESSION_END 触发/metadata 传递），290 个测试全过
+
+---
+
+## Phase 20: 上下文溢写兜底 (P20)
+
+### P20.1 ensure_fits 兜底方法
+- [x] `memory/context.py` — `ContextManager.ensure_fits(conversation, max_tokens)` 最终兜底
+- [x] 超窗口时强制 SlidingWindow 截断到 85% 水位（留 15% 给响应）
+- [x] 返回 True 表示发生截断
+
+### P20.2 _think 溢出预检
+- [x] `agent_loop.py` _think 在 LLM 调用前调 ensure_fits，截断后重建 api_messages
+- [x] 无 context_manager 时跳过（benchmark runner 等行为不变）
+
+### P20.3 验证
+- [x] 2 个新测试（未超限不截断/超限截断后 total_tokens ≤ max_tokens），292 个测试全过

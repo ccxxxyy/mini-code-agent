@@ -255,3 +255,30 @@ async def test_compressor_cascade():
     await compressor.compress(conv, 500)
     total = sum(m.token_count or 25 for m in conv.messages)
     assert total <= 500 or len(conv.messages) < 60
+
+
+# --- ensure_fits overflow guard 溢出兜底 ---
+
+
+async def test_ensure_fits_no_truncation():
+    config = MemoryConfig(context_window=10000)
+    cm = ContextManager(config)
+    conv = Conversation(system_prompt="sys")
+    conv.messages = [make_msg(token_count=10) for _ in range(5)]
+
+    truncated = await cm.ensure_fits(conv, 10000)
+    assert not truncated
+    assert len(conv.messages) == 5
+
+
+async def test_ensure_fits_truncates():
+    config = MemoryConfig(context_window=200)
+    cm = ContextManager(config)
+    conv = Conversation(system_prompt="sys")
+    for i in range(50):
+        conv.messages.append(make_msg(content=f"msg {i}", token_count=50))
+
+    truncated = await cm.ensure_fits(conv, 200)
+    assert truncated
+    assert len(conv.messages) < 50
+    assert cm.total_tokens <= 200

@@ -247,8 +247,9 @@ mini-code-agent/
 - [x] P17：工具并行执行（权限预检串行 → 执行 asyncio.gather 并行 + 审计锁）
 - [x] P18：双 Esc 中断流式输出（流式期间按两次 Esc 优雅中断，不用 Ctrl+C）
 - [x] P19：PRE_LLM / SESSION_END Hook 接线（LLM 调用前注入记忆 + 会话结束自动提取偏好）
+- [x] P20：上下文溢写兜底（发送前 token 预检 + 超限强制截断，防 API 400）
 
-**全部阶段已完成，290 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，292 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

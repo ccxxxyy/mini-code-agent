@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from mini_agent.llm.token_counter import count_tokens
+from mini_agent.memory.compressor import SlidingWindow
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message
 
@@ -85,5 +86,19 @@ class ContextManager:
 
         target = int(self._max_tokens * 0.5)
         await self._compressor.compress(conversation, target)
+        self.update_total(conversation)
+        return True
+
+    async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
+        """Last-resort guard: force-truncate if conversation exceeds max_tokens.
+        最终兜底：超窗口时强制截断（SlidingWindow），防 API 400。
+
+        Returns True if truncation was performed.
+        """
+        self.update_total(conversation)
+        if self._total_tokens <= max_tokens:
+            return False
+        target = int(max_tokens * 0.85)
+        await SlidingWindow().compress(conversation, target)
         self.update_total(conversation)
         return True

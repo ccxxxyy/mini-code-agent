@@ -168,6 +168,13 @@ class AgentLoop:
         if pre_llm_result.action == HookAction.BLOCK:
             return LLMResponse(content=pre_llm_result.reason or "(blocked by PRE_LLM hook)")
 
+        # Context overflow guard: force-truncate if still over window
+        # 上下文溢出兜底：超窗口时强制截断，防 API 400
+        if self._context:
+            truncated = await self._context.ensure_fits(conversation, self._llm.context_window)
+            if truncated:
+                api_messages = conversation.to_api_messages()
+
         chunks: list[StreamChunk] = []
         stream_started = False
 
