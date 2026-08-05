@@ -80,6 +80,17 @@ class Terminal:
             if answer in ("n", "no"):
                 return False
 
+    async def ask_yes_no(self, prompt: str) -> bool:
+        """Plain yes/no question (no permission-panel styling).
+        朴素的是/否询问（不带权限确认面板样式）。"""
+        self._ensure_prompt_session()
+        while True:
+            answer = (await self._prompt_session.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
+            if answer in ("y", "yes"):
+                return True
+            if answer in ("n", "no", ""):
+                return False
+
     def start_stream(self) -> None:
         self.console.print()
         self.renderer.start()

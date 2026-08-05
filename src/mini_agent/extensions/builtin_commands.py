@@ -313,8 +313,7 @@ def _make_session(app: Application) -> HandlerFn:
             loaded = await store.load(match)
             if not loaded:
                 return f"Failed to load session: {match}"
-            app.session = loaded
-            app.context_manager.update_total(loaded.conversation)
+            app._adopt_session(loaded)
             return (
                 f"Session loaded: {match[:12]}... "
                 f"({loaded.metadata.total_turns} turns, "

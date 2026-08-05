@@ -340,3 +340,27 @@
 - [x] app.py post-hoc mutation 注入（无需重排构造顺序）
 - [x] SpawnAgentsTool 遵循 Tool ABC 模式（schema + execute），与其他 6 个工具走完全相同的权限/Hook/事件管道
 - [x] 6 个新测试（spawn_agents_tool 5 + e2e 断言修正 1），总计 262 个全过
+
+---
+
+## Phase 15 检查项：会话自动保存
+
+### 功能完整性
+- [x] 每轮对话后自动保存（30s 节流，同一文件覆盖写幂等）
+- [x] 斜杠命令后也触发（/model /clear 等改状态的命令不丢）
+- [x] 正常退出（/exit、Ctrl+C、EOF）时 closed_cleanly=True + 强制保存
+- [x] 硬杀进程跳过 finally → 磁盘留 closed_cleanly=False → 下次启动检出
+- [x] 启动提示只针对：同项目目录 + 未干净关闭 + 非当前会话，取最近一个
+- [x] 拒绝恢复后该会话被标记关闭，不再重复询问
+- [x] 恢复成功后上下文完整（对话消息 + token 统计 + 工具层引用全部同步）
+
+### 健壮性
+- [x] 空会话（无消息）不落盘——不产生垃圾文件
+- [x] 保存失败（OSError）静默吞掉，不打断对话，下轮重试
+- [x] 旧版本 session 文件（无 closed_cleanly 字段）默认视为已关闭——升级不误报
+
+### 架构合规
+- [x] 复用 SessionStore.save 幂等覆盖特性，零新存储逻辑
+- [x] _adopt_session 统一恢复路径（修复 /session load 的 ToolContext 过期引用既有缺陷）
+- [x] ask_yes_no 与权限确认 confirm 分离（语义不同：普通询问 vs 安全确认）
+- [x] 7 个新测试，总计 269 个全过

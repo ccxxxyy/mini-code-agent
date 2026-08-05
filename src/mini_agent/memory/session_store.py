@@ -63,6 +63,7 @@ class SessionStore:
                         "total_turns": meta.get("total_turns", 0),
                         "last_active": meta.get("last_active", ""),
                         "project_dir": meta.get("project_dir", ""),
+                        "closed_cleanly": meta.get("closed_cleanly", True),
                     }
                 )
             except (json.JSONDecodeError, KeyError):
@@ -92,6 +93,7 @@ def _serialize_session(session: Session) -> dict[str, Any]:
             "total_turns": meta.total_turns,
             "total_tokens_used": meta.total_tokens_used,
             "tags": meta.tags,
+            "closed_cleanly": meta.closed_cleanly,
         },
         "conversation": {
             "system_prompt": session.conversation.system_prompt,
@@ -134,6 +136,9 @@ def _deserialize_session(data: dict[str, Any]) -> Session:
         total_turns=meta_data.get("total_turns", 0),
         total_tokens_used=meta_data.get("total_tokens_used", 0),
         tags=meta_data.get("tags", []),
+        # Old files without the flag default to True (no false crash alarm)
+        # 旧文件无此字段时默认 True（不误报崩溃）
+        closed_cleanly=meta_data.get("closed_cleanly", True),
     )
 
     conv_data = data.get("conversation", {})
