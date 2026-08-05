@@ -446,3 +446,34 @@
 
 ### P17.3 验证
 - [x] 5 个新测试（并行计时 < 0.25s / 单工具不变 / 未知工具错误 / 取消错误 / 顺序保持），281 个测试全过
+
+---
+
+## Phase 18: 双 Esc 中断流式输出 (P18)
+
+### P18.1 EscWatcher 键盘监听
+- [x] `ui/esc_watcher.py` — 守护线程 + 500ms 窗口双 Esc 检测
+- [x] Windows msvcrt.kbhit/getch + Unix select 跨平台兼容
+- [x] 无 TTY 环境静默不可用（不崩溃）
+
+### P18.2 流式中断接线
+- [x] `agent_loop.py` _think 循环每个 chunk 检查 `self._cancelled`，cancelled 时 break
+- [x] `app.py` 回调接线：stream_start 启动 EscWatcher → stream_delta 检测 triggered 调 cancel() → stream_end 停止 EscWatcher
+
+### P18.3 验证
+- [x] 5 个新测试（默认未触发/手动触发/start-stop/cancel 中断 _think/中断后 conversation 保留），286 个测试全过
+
+---
+
+## Phase 19: PRE_LLM / SESSION_END Hook 接线 (P19)
+
+### P19.1 Hook 接线
+- [x] `agent_loop.py` _think：PRE_LLM hook 在 LLM 调用前触发（含 BLOCK 能力——阻止 LLM 调用并返回 reason）
+- [x] `app.py` run() finally：SESSION_END hook 在会话结束时触发（异常安全）
+
+### P19.2 内置 Hook
+- [x] PRE_LLM 记忆注入：加载 PersistentMemory（项目级+用户级）→ 首次追加到 system prompt（标记去重）
+- [x] SESSION_END 记忆提取：auto_extract=True 时调 MemoryExtractor 从对话提取偏好写入 PersistentMemory（配置首次生效）
+
+### P19.3 验证
+- [x] 4 个新测试（PRE_LLM 触发/BLOCK 阻止 LLM/SESSION_END 触发/metadata 传递），290 个测试全过

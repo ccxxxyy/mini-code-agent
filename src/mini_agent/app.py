@@ -31,7 +31,7 @@ from mini_agent.security.permission import PermissionManager
 from mini_agent.security.worktree import WorktreeManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
-from mini_agent.tools.hooks import HookManager
+from mini_agent.tools.hooks import HookContext, HookManager, HookResult, HookStage
 from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
@@ -134,6 +134,7 @@ class Application:
             confirm_callback=self.terminal.confirm,
         )
         self.hook_manager = HookManager()
+        self._register_builtin_hooks()
 
         # Memory: context manager + compressor + session store
         # 记忆：上下文管理器 + 压缩器 + 会话存储
@@ -301,10 +302,17 @@ class Application:
                 await self._autosave()
         finally:
             await self.event_bus.emit(SessionEndEvent(session_id=self.session.metadata.session_id))
-            # Graceful exit: mark clean and persist. A hard kill skips this,
-            # leaving closed_cleanly=False on disk -- the crash signal.
-            # 正常退出：标记干净并落盘。硬杀进程会跳过这里，
-            # 磁盘上留下 closed_cleanly=False——即崩溃信号。
+            # SESSION_END hook: auto-extract memories, cleanup, etc.
+            # SESSION_END hook：自动提取记忆、清理等
+            try:
+                await self.hook_manager.run(
+                    HookContext(
+                        stage=HookStage.SESSION_END,
+                        metadata={"session_id": self.session.metadata.session_id},
+                    )
+                )
+            except Exception:
+                pass
             self.session.metadata.closed_cleanly = True
             await self._autosave(force=True)
             self.terminal.show_info("Goodbye!")
@@ -323,6 +331,49 @@ class Application:
             self._last_autosave = now
         except OSError:
             pass
+
+    def _register_builtin_hooks(self) -> None:
+        """Register default lifecycle hooks. 注册默认生命周期 hook。"""
+        from mini_agent.memory.extraction import MemoryExtractor
+        from mini_agent.memory.persistent import PersistentMemory
+
+        app = self  # closure capture 闭包捕获
+
+        async def _pre_llm_inject_memory(ctx: HookContext) -> HookResult:
+            pm = PersistentMemory()
+            entries: list = []
+            if app.session.metadata.project_dir:
+                entries += await pm.load_project_memory(app.session.metadata.project_dir)
+            entries += await pm.load_user_memory()
+            if entries and app.session.conversation.messages:
+                memory_text = "\n".join(f"- {e.content}" for e in entries[:10])
+                marker = "\n\n--- Relevant memories ---\n"
+                sp = app.session.conversation.system_prompt
+                if marker not in sp:
+                    app.session.conversation.system_prompt = sp + marker + memory_text
+            return HookResult()
+
+        async def _session_end_extract_memory(ctx: HookContext) -> HookResult:
+            if not app.config.memory.auto_extract:
+                return HookResult()
+            try:
+                extractor = MemoryExtractor()
+                new_entries = await extractor.maybe_extract(
+                    app.session.conversation, app.session.metadata.project_dir
+                )
+                if new_entries:
+                    pm = PersistentMemory()
+                    for entry in new_entries:
+                        if app.session.metadata.project_dir:
+                            await pm.add_project_memory(app.session.metadata.project_dir, entry)
+                        else:
+                            await pm.add_user_memory(entry)
+            except Exception:
+                pass
+            return HookResult()
+
+        self.hook_manager.register(HookStage.PRE_LLM, _pre_llm_inject_memory)
+        self.hook_manager.register(HookStage.SESSION_END, _session_end_extract_memory)
 
     def _adopt_session(self, loaded: Session) -> None:
         """Switch the app to a loaded session (fixes stale ToolContext ref).

@@ -400,3 +400,36 @@
 ### 架构合规
 - [x] _run_tool_pipeline 加 skip_permission 参数（Phase 2 跳过已预检权限）
 - [x] 5 个新测试（并行计时/单工具/未知工具/取消/顺序），总计 281 个全过
+
+---
+
+## Phase 18 检查项：双 Esc 中断流式输出
+
+### 功能完整性
+- [x] 流式输出期间快速按两次 Esc 触发优雅中断
+- [x] 中断后部分响应保留在 conversation（LLM 可继续）
+- [x] 回到输入框可继续对话
+- [x] 单次 Esc 不触发（防误触）
+- [x] 无 TTY 环境静默降级（不崩溃）
+
+### 架构合规
+- [x] EscWatcher 守护线程只在流式期间活跃，不和 prompt_toolkit 的 stdin 冲突
+- [x] _think 循环通过 _cancelled 标志中断（与 Ctrl+C cancel 同一机制）
+- [x] 5 个新测试，总计 286 个全过
+
+---
+
+## Phase 19 检查项：PRE_LLM / SESSION_END Hook 接线
+
+### 功能完整性
+- [x] PRE_LLM hook 在每次 LLM 调用前触发
+- [x] PRE_LLM BLOCK 能力：hook 返回 BLOCK 时 LLM 不被调用，reason 作为响应返回
+- [x] SESSION_END hook 在正常退出 finally 块触发
+- [x] 内置 PRE_LLM hook 自动注入 PersistentMemory 到 system prompt（标记去重不重复追加）
+- [x] 内置 SESSION_END hook 自动提取对话偏好写入 PersistentMemory（auto_extract 首次生效）
+
+### 架构合规
+- [x] PRE_LLM 接线在 LLMRequestEvent 之后、llm.stream() 之前
+- [x] SESSION_END 在 finally 块中异常安全（try/except pass）
+- [x] _register_builtin_hooks 闭包模式注册内置 hook
+- [x] 4 个新测试，总计 290 个全过

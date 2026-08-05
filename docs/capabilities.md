@@ -109,6 +109,7 @@
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
+- 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
 
 **验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）
 
@@ -252,7 +253,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 286 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
+| 测试 | 290 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
 | 工具 | 7 个内置工具（read_file / write_file / edit_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -260,6 +261,8 @@
 | 机制透明 | `/trace` 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息）——商用 Agent 给不了的白盒能力 |
 | 垂直场景 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（哈希链防篡改 JSONL + `/audit verify` 完整性校验）+ offline-ollama 内网离线 Skill——"因为拥有源码所以能做"的三个活证据 |
 | 机制实验 | `experiments/` 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）+ 强弱模型混编（发现：strong-weak 帕累托最优）——从"做了个项目"到"做了研究" |
+| 流式中断 | 双 Esc 优雅中断流式输出（守护线程 + cancelled 标志），不用 Ctrl+C 冒险杀进程 |
+| 长记忆自动化 | PRE_LLM hook 自动注入记忆 + SESSION_END hook 自动提取偏好——用户无感知的跨会话记忆 |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
 ## 如实说明：四处有意简化

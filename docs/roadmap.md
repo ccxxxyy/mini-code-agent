@@ -89,14 +89,9 @@
 - **插槽位置**：`_apply_cli` 的 dict 覆盖机制可复用；spec.md 第 13.3 节有完整格式设计。
 - **工作量**：中（~150 行 + 测试）
 
-### 3.2 PRE_LLM / SESSION_END Hook 接线
+### 3.2 PRE_LLM / SESSION_END Hook 接线 ✅ 已完成
 
-- **现状**：HookStage 枚举定义了 7 个阶段，但只有 PRE_TOOL / POST_TOOL 真正接进了执行流。
-- **要做什么**：
-  1. PRE_LLM：LLM 调用前触发——可用于注入相关记忆（搜索 PersistentMemory 把相关条目附到 system prompt）
-  2. SESSION_END：会话结束触发——自动执行 MemoryExtractor.maybe_extract + SessionStore.save
-- **插槽位置**：HookManager.run 已支持任意 stage；agent_loop._think 和 app.run 的 finally 是接线点。
-- **工作量**：小（~60 行）
+> 已实现：PRE_LLM 在 _think() LLM 调用前触发（含 BLOCK 能力阻止调用），SESSION_END 在 run() finally 触发。两个内置 hook：PRE_LLM 自动注入 PersistentMemory 记忆到 system prompt，SESSION_END 自动调 MemoryExtractor 提取偏好（auto_extract 配置首次生效）。4 个新测试，290 个全过。
 
 ### 3.3 会话自动保存 ✅ 已完成
 
