@@ -227,12 +227,40 @@ class Application:
         self.agent_loop.on_stream_start = _on_stream_start
         self.agent_loop.on_stream_delta = _on_stream_delta
         self.agent_loop.on_stream_end = _on_stream_end
-        self.agent_loop.on_tool_start = lambda tc: self.terminal.show_tool_call(
-            tc.name, tc.arguments
-        )
-        self.agent_loop.on_tool_end = lambda tr: self.terminal.show_tool_result(
-            tr.name, tr.output, tr.is_error
-        )
+
+        # Streaming tool call assembly: show tool name as soon as LLM starts
+        # generating its arguments, before the full JSON is assembled.
+        # 流式工具调用组装：LLM 开始生成参数时立即显示工具名，无需等 JSON 组装完。
+        _assembling_shown: set[str] = set()
+
+        def _on_tool_assembling(name: str) -> None:
+            if name not in _assembling_shown:
+                _assembling_shown.add(name)
+                p = self.terminal.theme.primary
+                self.terminal.console.print(
+                    f"\n  [dim]╭─[/dim] [{p}]{name}[/{p}] [dim]...[/dim]",
+                    highlight=False,
+                )
+
+        def _on_tool_start(tc) -> None:
+            if tc.name in _assembling_shown:
+                # Already shown during assembly — just print args summary
+                # 组装期间已显示工具名——只补充参数摘要
+                arg_preview = ", ".join(
+                    f"{k}={self.terminal._truncate_value(v)}" for k, v in tc.arguments.items()
+                )
+                if arg_preview:
+                    self.terminal.console.print(f"  [dim]│  {arg_preview}[/dim]", highlight=False)
+            else:
+                self.terminal.show_tool_call(tc.name, tc.arguments)
+
+        def _on_tool_end(tr) -> None:
+            _assembling_shown.discard(tr.name)
+            self.terminal.show_tool_result(tr.name, tr.output, tr.is_error, tr.metadata)
+
+        self.agent_loop.on_tool_call_assembling = _on_tool_assembling
+        self.agent_loop.on_tool_start = _on_tool_start
+        self.agent_loop.on_tool_end = _on_tool_end
 
     def _toolbar_text(self) -> str:
         """Bottom toolbar content: current model + switchable model count.

@@ -250,8 +250,9 @@ mini-code-agent/
 - [x] P20：上下文溢写兜底（发送前 token 预检 + 超限强制截断，防 API 400）
 - [x] P21：TOML 配置文件（用户级 + 项目级 config.toml，Python 3.11 tomllib 零依赖）
 - [x] P22：接口冻结 + 覆盖率门禁（v1.0.0 ABC 签名定稿 + pytest-cov 81.62% / fail_under=80）
+- [x] P23：Diff 预览 + Streaming 扩展点（edit_file 彩色 diff 渲染 + on_tool_call_assembling 回调）
 
-**全部阶段已完成，298 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，299 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -344,6 +345,31 @@ uv run python benchmarks/report.py          # 生成报告
 - **强弱模型混编**（6 次运行）：强 Planner + 弱 Worker 全通过且成本最低，比全强模型便宜 33% 还多过了一个任务——分解质量比执行模型档次更重要
 
 完整数据和方法见 [experiments/README.md](experiments/README.md)。
+
+## 全部命令一览
+
+输入 `/help` 可在终端内查看。
+
+| 命令 | 用途 |
+|---|---|
+| `/help` | 列出所有命令 |
+| `/status` | 当前模型/token/轮次/上下文 |
+| `/model [名称]` | 查看或切换模型 |
+| `/clear` | 清空当前对话 |
+| `/compact` | 手动压缩对话历史 |
+| `/memory [add <内容>]` | 查看或添加持久记忆 |
+| `/session save\|list\|load\|delete` | 会话管理（自动保存已默认开启） |
+| `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
+| `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
+| `/audit [on\|off\|verify]` | 审计日志开关 + 哈希链完整性验证 |
+| `/theme [dark\|light\|default]` | 切换颜色主题（持久化） |
+| `/spawn <任务>` | 派生后台 SubAgent（详见上方多 Agent 章节） |
+| `/team <任务>` | LLM 规划 + 并行执行（详见上方多 Agent 章节） |
+| `/tools` | 列出已注册工具 |
+| `/skill [activate\|deactivate <名称>]` | 技能包管理 |
+| `/exit` | 退出 |
+
+> 终端输出的详细来源和开关说明见 [docs/output-guide.md](docs/output-guide.md)。
 
 ## License
 

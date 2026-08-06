@@ -67,6 +67,7 @@ class AgentLoop:
         self.on_stream_end: Callable[[], None] | None = None
         self.on_tool_start: ToolStartCallback | None = None
         self.on_tool_end: ToolEndCallback | None = None
+        self.on_tool_call_assembling: Callable[[str], None] | None = None
         self.last_turn_tokens: int = 0
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
@@ -189,6 +190,10 @@ class AgentLoop:
                         self.on_stream_start()
                 if self.on_stream_delta:
                     self.on_stream_delta(chunk.delta)
+            if chunk.tool_call_deltas and self.on_tool_call_assembling:
+                for tcd in chunk.tool_call_deltas:
+                    if tcd.name:
+                        self.on_tool_call_assembling(tcd.name)
 
         if stream_started and self.on_stream_end:
             self.on_stream_end()

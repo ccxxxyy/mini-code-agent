@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。298 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。299 个测试全过。
 
 ---
 
@@ -1351,12 +1351,28 @@ TOML 解析后是嵌套 dict（如 `{"llm": {"model": "x"}}`），需要映射�
 
 ---
 
+# 第二十三部分：P23 Diff 预览 + Streaming 中间态
+
+## 23.1 Diff 预览的实现选择
+
+edit_file 执行后同时拥有旧内容和新内容，用 difflib.unified_diff 生成 diff 存入 ToolResult.metadata["diff"]——不改 output（output 是给 LLM 看的操作结果文本，加 diff 会浪费 token），diff 只在 UI 层渲染。
+
+渲染用 Rich 的 Text 对象 + pad(terminal_width) + stylize("color on bg_color")——背景色从左到右铺满整行，视觉上形成色条块（删除行深红 #3d0000、新增行深绿 #002d00），比只高亮文字更醒目。跳过 ---/+++/@@ 头部只显示变更内容。
+
+一个踩坑：无换行符的文件（如 `hello world` 没有 `\n` 结尾），splitlines(keepends=True) 最后一个元素不带 `\n`，导致 difflib 生成的删除行和新增行粘在一起（`-hello world+goodbye world`）。修复：改用 splitlines() 后手动给每行加 `\n`。
+
+## 23.2 Streaming 工具调用组装提示
+
+LLM 返回纯 tool_call（无 text delta）时，流式期间用户看到空白——因为 on_stream_start 只在有 text delta 时触发。on_tool_call_assembling 回调在 _think 循环中检测 tool_call_delta 的 name 字段（首次出现时触发），app.py 接线后立即打印 `╭─ tool_name ...`，让用户知道 LLM 在生成哪个工具的调用。on_tool_start 检查是否已显示过，避免重复 ╭─ 行——已显示的只补充参数摘要行 `│ args...`。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——298 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——299 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
