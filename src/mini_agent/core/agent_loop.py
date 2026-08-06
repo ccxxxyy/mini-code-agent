@@ -69,6 +69,9 @@ class AgentLoop:
         self.on_tool_end: ToolEndCallback | None = None
         self.on_tool_call_assembling: Callable[[str], None] | None = None
         self.last_turn_tokens: int = 0
+        # Files created/modified during the last run() 上一轮新建/修改的文件
+        self.last_turn_file_changes: list[tuple[str, str]] = []
+        self._file_changes: dict[str, str] = {}
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
@@ -88,6 +91,7 @@ class AgentLoop:
         self._cancelled = False
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
         self.stopped_early = False
+        self._file_changes = {}
         tools_called = 0
         tokens_used = 0
         final_content = ""
@@ -139,6 +143,7 @@ class AgentLoop:
 
         await self._transition(AgentPhase.IDLE)
         self.last_turn_tokens = tokens_used
+        self.last_turn_file_changes = [(t, p) for p, t in self._file_changes.items()]
         await self._event_bus.emit(
             TurnCompleteEvent(
                 iteration_count=self._state.iteration,
@@ -287,9 +292,33 @@ class AgentLoop:
                 duration_ms=duration_ms,
             )
         )
+        if not result.is_error:
+            self._record_file_change(tc.name, tc.arguments, result)
         if self.on_tool_end:
             self.on_tool_end(result)
         return result
+
+    def _record_file_change(self, tool_name: str, args: dict, result: ToolResult) -> None:
+        """Track files created/modified/deleted by file tools.
+        跟踪文件工具的新建/修改/删除。"""
+        if tool_name not in ("write_file", "edit_file", "delete_file"):
+            return
+        path = str(args.get("file_path", ""))
+        if not path:
+            return
+        if tool_name == "delete_file":
+            # delete wins: whatever happened before, the file is gone now
+            # 删除覆盖一切——不管之前怎么改，文件现在没了
+            self._file_changes[path] = "deleted"
+            return
+        if tool_name == "write_file" and not result.metadata.get("existed", True):
+            change = "created"
+        else:
+            change = "modified"
+        # created sticks: create-then-edit still counts as created
+        # 先建后改仍算新建
+        if self._file_changes.get(path) != "created":
+            self._file_changes[path] = change
 
     async def _run_tool_pipeline(
         self, tc: ToolCall, tool, skip_permission: bool = False

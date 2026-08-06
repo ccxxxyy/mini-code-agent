@@ -29,6 +29,9 @@
 
 已把 a.txt 中的 hello 改为 goodbye。       ← ⑧ LLM 流式回复（Markdown 渲染）
 
+  files changed this turn:                  ← ⑩ 文件变更汇总
+    ~ a.txt                                 ← ⑩
+
   tokens: 3307 this turn / 3307 total       ← ⑨ Token 统计行
 ```
 
@@ -118,6 +121,15 @@
 | 来源 | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
 | 触发 | 每轮对话完成后（agent_loop.run 返回后） |
 | 关闭方法 | `app.py` `_handle_turn` 中注释掉 `self.terminal.show_info(...)` 那行 |
+
+### ⑩ 文件变更汇总
+
+| 项 | 说明 |
+|---|---|
+| 来源 | `ui/terminal.py` `show_file_changes`（`app.py` `_handle_turn` 在 token 统计前调用） |
+| 触发 | 本轮有 write_file/edit_file/delete_file 成功执行时（bash 的文件变更不跟踪） |
+| 内容 | `files changed this turn:` + 每个文件一行（`+ 路径` 绿=新建，`~ 路径` 黄=修改，`- 路径` 红=删除） |
+| 关闭方法 | `app.py` `_handle_turn` 中删除 `show_file_changes` 调用行 |
 
 ---
 

@@ -154,16 +154,19 @@ class Terminal:
         added: list[str] = []
 
         def flush() -> None:
+            # Standard color names work on all terminals (truecolor hex may
+            # silently fail on legacy Windows consoles)
+            # 标准色名全终端兼容（truecolor 十六进制在旧 Windows 控制台可能无效）
             for r in removed:
                 t = Text(f"  - {r[1:]}")
-                t.pad(w)
-                t.stylize(f"{self.theme.error} on #3d0000")
+                t.pad_right(max(0, w - t.cell_len))
+                t.stylize("white on dark_red")
                 self.console.print(t, highlight=False)
             removed.clear()
             for a in added:
                 t = Text(f"  + {a[1:]}")
-                t.pad(w)
-                t.stylize(f"{self.theme.success} on #002d00")
+                t.pad_right(max(0, w - t.cell_len))
+                t.stylize("white on dark_green")
                 self.console.print(t, highlight=False)
             added.clear()
 
@@ -178,6 +181,22 @@ class Terminal:
                 flush()
                 self.console.print(f"    [dim] {line}[/dim]", highlight=False)
         flush()
+
+    def show_file_changes(self, changes: list[tuple[str, str]]) -> None:
+        """Show files created/modified/deleted this turn.
+        显示本轮新建/修改/删除的文件。"""
+        if not changes:
+            return
+        self.console.print()
+        self.console.print("  [dim]files changed this turn:[/dim]")
+        for change_type, path in changes:
+            if change_type == "created":
+                mark, color = "+", self.theme.success
+            elif change_type == "deleted":
+                mark, color = "-", self.theme.error
+            else:
+                mark, color = "~", self.theme.warning
+            self.console.print(f"    [{color}]{mark} {path}[/{color}]", highlight=False)
 
     @staticmethod
     def _truncate_value(value, max_len: int = 60) -> str:

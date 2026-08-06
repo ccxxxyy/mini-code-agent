@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。299 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。309 个测试全过。
 
 ---
 
@@ -1367,12 +1367,30 @@ LLM 返回纯 tool_call（无 text delta）时，流式期间用户看到空白�
 
 ---
 
+# 第二十四部分：P24 文件变更汇总
+
+## 24.1 集中跟踪 vs 逐工具跟踪
+
+两个选择：每个文件工具在 execute 里上报，或在 agent_loop 的工具执行处统一判定。选后者——_execute_single_tool 处工具名/参数/结果全部可用，一个 `_record_file_change()` 方法覆盖所有情况，工具本身零改动。write_file 已有的 metadata["existed"]（P2 就存在）恰好能区分新建和覆写，无需新增字段。
+
+去重策略：dict 按路径去重，"created 优先"——一轮里先 write_file 新建再 edit_file 修改，对用户来说这个文件就是"这轮新建的"，显示 created 比 modified 更准确。
+
+## 24.2 delete_file 专用工具
+
+删除原本只能走 bash（rm/del），不可跟踪。新增 `delete_file` 工具（第 8 个内置工具）：删除单个文件、拒绝删除目录，schema description 写明 "Prefer this over shell rm/del" 引导 LLM 优先选它。`_record_file_change` 对 deleted 的合并规则是"删除覆盖一切"——先建后删显示 deleted（文件最终没了），与 created 优先的规则相反但语义一致：都以用户视角的最终状态为准。UI 显示红色 `- 路径`。
+
+## 24.3 已知局限
+
+bash 的文件变更（echo x > file、rm、mv）无法跟踪——bash 输出只有 exit_code，跟踪需要文件系统快照对比，成本远超收益。delete_file 提供后 LLM 会优先用可跟踪的删除方式，但 bash 直删仍是盲区。SubAgent 的变更也不计入（独立 AgentLoop 实例）。这些局限在输出上的表现是：汇总清单可能不完整，但列出来的一定是真的。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——299 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——309 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

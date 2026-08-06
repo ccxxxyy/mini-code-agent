@@ -39,6 +39,7 @@ def test_application_tools_registered(monkeypatch, tmp_path):
         "read_file",
         "write_file",
         "edit_file",
+        "delete_file",
         "bash",
         "glob",
         "grep",
