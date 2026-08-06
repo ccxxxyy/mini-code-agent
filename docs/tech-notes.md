@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。331 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。344 个测试全过。
 
 ---
 
@@ -1415,12 +1415,24 @@ CC 的对话历史由 Anthropic 服务端管理，客户端无法截断或复制
 
 ---
 
+# 第二十七部分：P27 操作级撤销
+
+## 27.1 快照的三态设计
+
+工具执行前拦截 write_file/edit_file/delete_file，按目标文件当时的状态记录三种情况：文件存在且 ≤30MB → 复制内容（saved）；不存在 → 记 missing（undo 语义 = 删除该轮新建的文件）；>30MB → 记 too_large（undo 时提示手动恢复而非静默跳过——用户必须知道哪些没恢复）。同轮同文件只存第一次：一轮内改三次，undo 恢复到轮前状态而非中间态。
+
+## 27.2 恢复顺序与容量控制
+
+/undo N 按轮次倒序恢复（先恢复最新轮再恢复更早轮）——同一文件跨轮被改时，更早轮的快照最后写入，最终回到最早状态。容量三重控制：只保留最近 5 轮（begin_turn 时清理）、单文件 30MB 上限、会话结束 clear() 全清——最坏情况磁盘临时占用几十 MB，会话结束归零。bash 的文件变更仍是盲区（无法预知 shell 改什么），与 P24 文件变更汇总同样的既有局限。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——331 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——344 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

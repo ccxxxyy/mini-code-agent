@@ -256,8 +256,9 @@ mini-code-agent/
 - [x] P24：文件变更汇总 + delete_file 工具（轮次结束显示本轮文件清单：+绿新建/~黄修改/-红删除）
 - [x] P25：上下文感知（启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令）
 - [x] P26：对话分叉/回滚（`/undo` 回滚 N 轮重新问 + `/fork` 分叉新会话保留原线——CC 没有的差异化能力）
+- [x] P27：操作级撤销（`/undo` 连文件一起恢复——每轮快照被改文件，新建删掉/修改还原/删除找回）
 
-**全部阶段已完成，331 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，344 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -319,16 +320,24 @@ LLM 回答不满意时，不用继续追问（对话越来越乱）也不用 `/c
 /undo 3      # 一次撤销最后 3 轮
 ```
 
-回滚后 LLM 完全"忘记"被撤销的内容——重新问会得到不受之前回答影响的全新答案。执行后显示被撤销的消息预览和回滚后的 token 数：
+回滚后 LLM 完全"忘记"被撤销的内容——重新问会得到不受之前回答影响的全新答案。**文件操作也会一并撤销**（P27 操作级撤销）：该轮新建的文件删掉、修改的还原、删除的找回：
 
 ```
 > /undo
 Rolled back 1 turn(s), removed 3 message(s).
-Undone: "帮我写一个排序函数"
+Undone: "创建 test.txt 写入 hello"
+Files restored 文件已恢复:
+  - test.txt (deleted -- did not exist before)
 Context is now 1240 tokens.
 ```
 
-**适用场景**：换个问法重试、提问后发现给错了信息、清掉一轮跑偏的探索以免污染后续上下文。
+**适用场景**：换个问法重试、提问后发现给错了信息、撤销一轮误操作的文件修改、清掉一轮跑偏的探索。
+
+**操作级撤销的边界**：
+- 快照只保留**最近 5 轮**——更早的轮次只回滚对话不恢复文件
+- 单文件超过 **30MB** 不快照（undo 时提示手动恢复）
+- **bash 命令**改的文件不快照（无法预知 shell 会改什么）
+- 快照存 `.mini-agent/undo_snapshots/`（磁盘临时目录），会话结束自动清空
 
 ### /fork —— 分叉探索
 

@@ -616,3 +616,26 @@
 
 ### P26.3 验证
 - [x] `tests/unit/test_undo_fork.py` 新建 10 个测试（单轮/多轮回滚/超界/空对话/tool 消息清理/token 重算/分叉隔离/深拷贝验证/带回滚分叉/回滚超界），331 个测试全过
+
+---
+
+## Phase 27: 操作级撤销 (P27)
+
+### P27.1 文件快照
+- [x] `memory/file_snapshots.py` 新建——FileSnapshotStore：每轮一个目录（turn_N/manifest.json + files/*.snap）
+- [x] 三种状态：saved（存了旧内容）/ missing（原本不存在，undo=删除）/ too_large（>30MB 跳过，提示手动恢复）
+- [x] 同轮同文件只快照第一次（保留轮开始时状态）
+- [x] begin_turn 自动清理超过 5 轮的旧快照；clear() 会话结束清空整个目录
+
+### P27.2 接线
+- [x] `agent_loop.py` — snapshot_store 注入点 + current_turn_id 计数 + _execute_single_tool 中 write/edit/delete_file 执行前快照
+- [x] `app.py` — 创建 FileSnapshotStore（.mini-agent/undo_snapshots/）+ 会话结束 clear()
+- [x] `builtin_commands.py` /undo — 截断消息后按轮倒序恢复文件 + turn 计数回退 + 恢复报告追加到输出
+
+### P27.3 验证
+- [x] `tests/unit/test_file_snapshots.py` 新建 10 个测试（保存/missing 删除/too_large 跳过/首次快照优先/旧轮清理/多轮倒序恢复/clear + 三个 /undo 集成：新建删掉/修改还原/删除找回），344 个测试全过
+
+### 边界（文档已注明）
+- bash 命令的文件变更不快照
+- 只保留最近 5 轮；单文件 30MB 上限
+- 会话结束快照清空（undo 是会话内操作）

@@ -179,6 +179,13 @@ class Application:
             context_manager=self.context_manager,
         )
 
+        # File snapshots for operation-level /undo 文件快照——操作级撤销
+        from mini_agent.memory.file_snapshots import FileSnapshotStore
+
+        self.agent_loop.snapshot_store = FileSnapshotStore(
+            working_dir / ".mini-agent" / "undo_snapshots"
+        )
+
         # SubAgent + Worktree: /spawn and /team use these
         # SubAgent + Worktree：/spawn 和 /team 命令使用
         self.worktree_manager = WorktreeManager(repo_dir=working_dir)
@@ -375,6 +382,8 @@ class Application:
                 pass
             self.session.metadata.closed_cleanly = True
             await self._autosave(force=True)
+            if self.agent_loop.snapshot_store:
+                self.agent_loop.snapshot_store.clear()
             self.terminal.show_info("Goodbye!")
 
     async def _autosave(self, force: bool = False) -> None:

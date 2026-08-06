@@ -186,12 +186,26 @@ def _make_undo(app: Application) -> HandlerFn:
         del conv.messages[cut:]
         app.context_manager.update_total(conv)
         app.session.metadata.total_turns = max(0, app.session.metadata.total_turns - n)
+
+        # Restore files modified in the undone turns 恢复被撤销轮次修改的文件
+        file_report: list[str] = []
+        store = getattr(app.agent_loop, "snapshot_store", None)
+        if store:
+            turn_id = app.agent_loop.current_turn_id
+            undo_ids = [t for t in range(turn_id - n + 1, turn_id + 1) if t > 0]
+            file_report = store.restore_turns(undo_ids)
+            app.agent_loop.current_turn_id = max(0, turn_id - n)
+
         preview = (undone.content or "")[:60]
-        return (
-            f"Rolled back {n} turn(s), removed {removed} message(s).\n"
-            f'Undone: "{preview}"\n'
-            f"Context is now {app.context_manager.total_tokens} tokens."
-        )
+        lines = [
+            f"Rolled back {n} turn(s), removed {removed} message(s).",
+            f'Undone: "{preview}"',
+        ]
+        if file_report:
+            lines.append("Files restored 文件已恢复:")
+            lines.extend(f"  - {r}" for r in file_report)
+        lines.append(f"Context is now {app.context_manager.total_tokens} tokens.")
+        return "\n".join(lines)
 
     return handler
 
