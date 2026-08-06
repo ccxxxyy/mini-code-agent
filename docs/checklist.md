@@ -467,3 +467,18 @@
 - [x] _apply_cli 泛化支持所有子配置
 - [x] 优先级栈：defaults → user TOML → project TOML → .env → env → profiles → CLI
 - [x] 6 个新测试，总计 298 个全过
+
+---
+
+## Phase 22 检查项：接口冻结 + 覆盖率门禁
+
+### 接口冻结
+- [x] CHANGELOG.md 列出 Tool/LLMProvider/HookFn/CompressionStrategy 四个 ABC 完整签名
+- [x] 支撑类型（ToolSchema/StreamChunk/HookContext 等 14 个 dataclass）列入稳定接口
+- [x] "冻结"含义明确定义（签名不变/可加可选参数/可加新方法/破坏性变更需 major bump）
+
+### 覆盖率门禁
+- [x] pytest-cov 集成，fail_under=80
+- [x] 排除 TTY 交互层和 MCP 子进程层（CI 无法测试）
+- [x] 当前覆盖率 81.62%，门禁通过
+- [x] 版本升级到 v1.0.0

@@ -104,8 +104,8 @@
 
 | 项 | 说明 |
 |---|---|
-| 接口冻结 | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿，承诺向后兼容 |
-| 覆盖率门禁 | CI 加 pytest-cov，核心模块 ≥80% 覆盖率作为合并条件 |
+| 接口冻结 ✅ | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿（CHANGELOG.md），v1.0.0 语义版本承诺向后兼容 |
+| 覆盖率门禁 ✅ | pytest-cov 81.62%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
 | PyPI 发布 | `pip install mini-code-agent` 直接安装，不再需要克隆源码 |
 | 插件生态 | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能 |
 | Streaming 中间态 | 工具调用参数流式显示（现在要等 JSON 组装完才显示工具行） |

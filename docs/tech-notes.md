@@ -1330,6 +1330,27 @@ TOML 解析后是嵌套 dict（如 `{"llm": {"model": "x"}}`），需要映射�
 
 ---
 
+# 第二十二部分：P22 接口冻结 + 覆盖率门禁
+
+## 22.1 接口冻结的含义
+
+四个 ABC（Tool/LLMProvider/HookFn/CompressionStrategy）的方法签名从 v1.0.0 起承诺稳定——这不是"不再改"，而是"改了就必须升 major 版本"。新增可选参数（有默认值）和新增方法不算破坏，修改/删除已有签名算。
+
+这个承诺的实际作用：如果有人写了一个自定义 Tool 或 LLMProvider，升级 mini-code-agent 的 patch/minor 版本不会让他的代码坏掉。对自己来说：改接口前必须三思——是改了真的更好，还是可以通过加可选参数向后兼容。
+
+## 22.2 覆盖率门禁的排除策略
+
+总覆盖率 77%，排除 TTY/MCP 层后 81.62%。排除的理由：
+
+- `ui/terminal.py`（36%）、`ui/input_handler.py`（34%）：prompt_toolkit 的输入循环需要真实 TTY，CI 环境无 TTY。这些代码只能手动验证
+- `ui/esc_watcher.py`（48%）：后台线程 + stdin 轮询，同样需要 TTY
+- `ui/components.py`（0%）：Rich spinner/status 等 UI 组件，纯展示代码
+- `mcp/client.py`（32%）、`mcp/transport.py`（32%）：需要真实 MCP 服务器子进程，FakeMCPManager 只覆盖 adapter 层
+
+排除这些后，core/tools/security/memory/models/events/config/llm 的覆盖率 >80%——这些是逻辑密集、最容易出 bug 的代码。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

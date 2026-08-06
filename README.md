@@ -249,6 +249,7 @@ mini-code-agent/
 - [x] P19：PRE_LLM / SESSION_END Hook 接线（LLM 调用前注入记忆 + 会话结束自动提取偏好）
 - [x] P20：上下文溢写兜底（发送前 token 预检 + 超限强制截断，防 API 400）
 - [x] P21：TOML 配置文件（用户级 + 项目级 config.toml，Python 3.11 tomllib 零依赖）
+- [x] P22：接口冻结 + 覆盖率门禁（v1.0.0 ABC 签名定稿 + pytest-cov 81.62% / fail_under=80）
 
 **全部阶段已完成，298 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
