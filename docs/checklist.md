@@ -518,3 +518,22 @@
 - [x] 复用 write_file 已有的 metadata["existed"] 区分新建/覆写
 - [x] last_turn_file_changes 属性暴露（与 last_turn_tokens 同模式）
 - [x] 6 个新测试，总计 305 个全过
+
+---
+
+## Phase 25 检查项：上下文感知
+
+### 功能完整性
+- [x] 启动自动发现 AGENT.md / CLAUDE.md / .mini-agent/instructions.md（优先级递减，第一个命中即用）
+- [x] 用户级 ~/.mini-agent/instructions.md 全局指令支持
+- [x] 超长文件截断 8000 字符（防挤爆上下文）
+- [x] 启动提示 `context: loaded <文件名>`
+- [x] marker 去重（会话恢复/模型切换不重复注入）
+- [x] [context] 配置段：文件名/优先级/用户指令路径/截断长度均可通过 config.toml 修改，不配置行为不变
+
+### 架构合规
+- [x] 独立模块 memory/project_context.py（纯函数，无状态）
+- [x] 注入模式与记忆注入一致（marker 去重先例：--- Relevant memories ---）
+- [x] ContextConfig dataclass 复用 P21 TOML 通用 _merge（零胶水代码）
+- [x] 12 个新测试，总计 321 个全过
+- [x] docs/config-guide.md 新建（三类文件区分 + 全清单 + 修改方法）

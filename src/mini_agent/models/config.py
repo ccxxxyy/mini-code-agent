@@ -71,6 +71,19 @@ class SecurityConfig:
 
 
 @dataclass
+class ContextConfig:
+    """Context awareness: project instruction file injection (P25).
+    上下文感知：项目指令文件注入。"""
+
+    # Priority order, first match wins 优先级顺序，第一个命中即用
+    instruction_files: list[str] = field(
+        default_factory=lambda: ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
+    )
+    user_instructions_file: str = "~/.mini-agent/instructions.md"
+    max_chars: int = 8000
+
+
+@dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     # Named LLM profiles for /model switching 用于 /model 切换的命名 LLM 档案
@@ -86,6 +99,7 @@ class AgentConfig:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
     max_agent_iterations: int = 50
     enable_plan_mode: bool = True
     skill_dirs: list[str] = field(default_factory=lambda: ["./skills", "~/.mini-agent/skills"])

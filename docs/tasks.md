@@ -573,3 +573,27 @@
 - bash 命令造成的文件变更无法跟踪（如 echo x > file）
 - delete_file 专用工具已提供——LLM 优先用它删除文件（可跟踪），bash rm/del 仍不可跟踪
 - SubAgent 的文件变更不计入主轮汇总（独立 AgentLoop）
+
+---
+
+## Phase 25: 上下文感知 (P25)
+
+### P25.1 指令文件发现与加载
+- [x] `memory/project_context.py` 新建——`load_project_instructions()` 按优先级查找 AGENT.md → CLAUDE.md → .mini-agent/instructions.md，找到第一个就停
+- [x] `load_user_instructions()` 读取 `~/.mini-agent/instructions.md`（所有项目共用的全局指令）
+- [x] 单文件截断 8000 字符 + "(truncated)" 提示；空文件跳过找下一个
+
+### P25.2 启动注入
+- [x] `app.py` __init__ 中 system_prompt 构建后注入，marker `--- Project instructions ---` 去重（会话恢复不重复注入）
+- [x] 启动时显示 `context: loaded CLAUDE.md` 提示
+
+### P25.3 [context] 配置化
+- [x] `models/config.py` 新增 `ContextConfig` dataclass（instruction_files/user_instructions_file/max_chars），挂到 AgentConfig.context
+- [x] `project_context.py` 函数改为接受参数，原写死值降级为默认值——不配置行为不变
+- [x] `config.toml.example` 加 [context] 注释示例；文件名/优先级/截断长度均可通过 config.toml 修改
+
+### P25.4 验证
+- [x] `tests/unit/test_project_context.py` 新建 12 个测试（优先级/回退/截断/空文件/用户指令/自定义文件名/自定义截断/Application 集成注入），321 个测试全过
+
+### P25.5 文档
+- [x] `docs/config-guide.md` 新建——配置文件/上下文文件/数据文件三类区分、全部文件清单、优先级链、修改方法、常见问题

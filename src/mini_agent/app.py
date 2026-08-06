@@ -104,6 +104,30 @@ class Application:
         self.session.metadata.model = config.llm.model
         self.session.metadata.project_dir = working_dir
 
+        # Context awareness: auto-inject project/user instruction files
+        # 上下文感知：自动注入项目/用户指令文件
+        from mini_agent.memory.project_context import (
+            load_project_instructions,
+            load_user_instructions,
+        )
+
+        self._context_file_loaded: str | None = None
+        _marker = "\n\n--- Project instructions ---\n"
+        _parts: list[str] = []
+        _user_inst = load_user_instructions(
+            config.context.user_instructions_file, config.context.max_chars
+        )
+        if _user_inst:
+            _parts.append("[user instructions]\n" + _user_inst)
+        _proj = load_project_instructions(
+            working_dir, config.context.instruction_files, config.context.max_chars
+        )
+        if _proj:
+            self._context_file_loaded = _proj[0]
+            _parts.append(f"[{_proj[0]}]\n{_proj[1]}")
+        if _parts and _marker not in self.session.conversation.system_prompt:
+            self.session.conversation.system_prompt += _marker + "\n\n".join(_parts)
+
         self._llm = ProviderRegistry.create(config.llm)
 
         # Tool registry with all builtin tools 包含所有内置工具的工具 registry
@@ -293,6 +317,8 @@ class Application:
 
     async def run(self) -> None:
         self.terminal.show_welcome()
+        if self._context_file_loaded:
+            self.terminal.show_info(f"context: loaded {self._context_file_loaded}")
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
 

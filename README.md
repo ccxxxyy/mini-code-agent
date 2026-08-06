@@ -223,7 +223,9 @@ mini-code-agent/
     ├── capabilities.md         # 能力对照表（18 项需求逐条实现证据）
     ├── tech-notes.md           # 核心技术实现原理与方案选型
     ├── roadmap.md              # 后续演进路线图
-    └── positioning.md          # 项目立意与价值定位
+    ├── positioning.md          # 项目立意与价值定位
+    ├── output-guide.md         # 终端输出来源与配置指南
+    └── config-guide.md         # 配置文件与上下文文件完全指南
 ```
 
 ## 开发状态
@@ -252,8 +254,9 @@ mini-code-agent/
 - [x] P22：接口冻结 + 覆盖率门禁（v1.0.0 ABC 签名定稿 + pytest-cov 81.62% / fail_under=80）
 - [x] P23：Diff 预览 + Streaming 扩展点（edit_file 彩色 diff 渲染 + on_tool_call_assembling 回调）
 - [x] P24：文件变更汇总 + delete_file 工具（轮次结束显示本轮文件清单：+绿新建/~黄修改/-红删除）
+- [x] P25：上下文感知（启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令）
 
-**全部阶段已完成，309 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，321 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -346,6 +349,12 @@ uv run python benchmarks/report.py          # 生成报告
 - **强弱模型混编**（6 次运行）：强 Planner + 弱 Worker 全通过且成本最低，比全强模型便宜 33% 还多过了一个任务——分解质量比执行模型档次更重要
 
 完整数据和方法见 [experiments/README.md](experiments/README.md)。
+
+## 配置与上下文文件
+
+三类文件，性质不同：**配置文件**（config.toml/.env，给程序读的参数）、**上下文文件**（AGENT.md/CLAUDE.md/instructions.md，给 LLM 读的项目约定）、**数据文件**（memory.json/sessions，程序自动管理）。均分用户级（`~/.mini-agent/`，所有项目共用）和项目级（项目目录内，覆盖或叠加用户级）。
+
+完整清单、优先级链、修改方法见 [docs/config-guide.md](docs/config-guide.md)。
 
 ## 全部命令一览
 
