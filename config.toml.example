@@ -1,0 +1,36 @@
+# Mini-Code-Agent 配置文件示例
+# 复制到 ~/.mini-agent/config.toml（用户级）或 .mini-agent/config.toml（项目级）
+# 项目级配置覆盖用户级；环境变量覆盖 TOML；CLI 参数覆盖一切
+# 未设置的字段使用内置默认值
+
+[llm]
+# provider = "openai"
+# model = "deepseek-chat"
+# temperature = 0.0
+# max_tokens = 4096
+# timeout = 120.0
+
+[tools]
+# bash_timeout = 120.0
+# max_file_size = 10000000
+# enabled_tools = ["read_file", "write_file", "edit_file", "bash", "glob", "grep", "spawn_agents"]
+# denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]
+
+[memory]
+# context_window = 128000
+# compression_threshold = 0.75
+# auto_extract = true
+
+[security]
+# permission_mode = "ask"    # "allow" | "ask" | "deny"
+# allowed_commands = ["git *", "npm *", "python *", "uv *"]
+
+# 顶级配置
+# max_agent_iterations = 50
+# theme = "default"          # "default" | "dark" | "light"
+
+# MCP 服务器配置
+# [mcp.servers.github]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-github"]
+# transport = "stdio"

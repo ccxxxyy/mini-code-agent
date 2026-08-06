@@ -82,12 +82,9 @@
 
 ## 三、v0.5.0 候选：工程深化（4 项）
 
-### 3.1 TOML 配置文件支持
+### 3.1 TOML 配置文件支持 ✅ 已完成
 
-- **现状**：配置只有 .env + 环境变量 + CLI 三层；spec 设计的项目级/用户级 TOML 配置（`.mini-agent/config.toml`）未实现。
-- **要做什么**：ConfigLoader 增加 TOML 解析层（Python 3.11 自带 tomllib，零依赖），优先级插在 env 之下：defaults → user toml → project toml → .env → env → CLI。
-- **插槽位置**：`_apply_cli` 的 dict 覆盖机制可复用；spec.md 第 13.3 节有完整格式设计。
-- **工作量**：中（~150 行 + 测试）
+> 已实现：`ConfigLoader._load_toml()` + `_merge()` 深度合并 + `_merge_mcp()` MCP 服务器处理。优先级栈：defaults → user `~/.mini-agent/config.toml` → project `.mini-agent/config.toml` → .env → env → profiles → CLI。`_apply_cli` 泛化支持所有子配置（不限于 llm.*）。`config.toml.example` 示例。6 个新测试，298 个全过。
 
 ### 3.2 PRE_LLM / SESSION_END Hook 接线 ✅ 已完成
 

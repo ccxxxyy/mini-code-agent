@@ -253,7 +253,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 292 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
+| 测试 | 298 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
 | 工具 | 7 个内置工具（read_file / write_file / edit_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -263,7 +263,8 @@
 | 机制实验 | `experiments/` 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）+ 强弱模型混编（发现：strong-weak 帕累托最优）——从"做了个项目"到"做了研究" |
 | 流式中断 | 双 Esc 优雅中断流式输出（守护线程 + cancelled 标志），不用 Ctrl+C 冒险杀进程 |
 | 长记忆自动化 | PRE_LLM hook 自动注入记忆 + SESSION_END hook 自动提取偏好——用户无感知的跨会话记忆 |
-| 溢出兜底 | 发送前 token 预检 + 超限强制 SlidingWindow 截断——三级压缩走完仍超窗时的最终防线，杜绝 API 400 |
+| 溢出兜底 | 发送前 token 预检（P20）+ 超限强制 SlidingWindow 截断——三级压缩走完仍超窗时的最终防线，杜绝 API 400 |
+| TOML 配置 | 用户级 + 项目级 `config.toml`（P21），Python 3.11 tomllib 零依赖，七层优先级栈（spec.md 13.3 设计的完整落地） |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
 ## 如实说明：四处有意简化

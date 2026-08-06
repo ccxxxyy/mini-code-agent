@@ -248,8 +248,9 @@ mini-code-agent/
 - [x] P18：双 Esc 中断流式输出（流式期间按两次 Esc 优雅中断，不用 Ctrl+C）
 - [x] P19：PRE_LLM / SESSION_END Hook 接线（LLM 调用前注入记忆 + 会话结束自动提取偏好）
 - [x] P20：上下文溢写兜底（发送前 token 预检 + 超限强制截断，防 API 400）
+- [x] P21：TOML 配置文件（用户级 + 项目级 config.toml，Python 3.11 tomllib 零依赖）
 
-**全部阶段已完成，292 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，298 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

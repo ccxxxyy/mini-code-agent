@@ -183,3 +183,94 @@ def test_create_for_role_unknown_profile_falls_back(monkeypatch):
     config = ConfigLoader.load()
     planner_llm = ProviderRegistry.create_for_role(config, "planner")
     assert planner_llm._config.model == "main-model"
+
+
+# --- TOML configuration TOML 配置 ---
+
+
+def test_load_user_toml(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text('[llm]\nmodel = "toml-model"\n', encoding="utf-8")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    config = ConfigLoader.load()
+    assert config.llm.model == "toml-model"
+
+
+def test_project_toml_overrides_user(monkeypatch, tmp_path):
+    user_dir = tmp_path / "home" / ".mini-agent"
+    user_dir.mkdir(parents=True)
+    (user_dir / "config.toml").write_text('[llm]\nmodel = "user-model"\n', encoding="utf-8")
+
+    proj_dir = tmp_path / "project" / ".mini-agent"
+    proj_dir.mkdir(parents=True)
+    (proj_dir / "config.toml").write_text('[llm]\nmodel = "project-model"\n', encoding="utf-8")
+
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    monkeypatch.chdir(tmp_path / "project")
+
+    config = ConfigLoader.load()
+    assert config.llm.model == "project-model"
+
+
+def test_env_overrides_toml(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text('[llm]\nmodel = "toml-model"\n', encoding="utf-8")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINI_AGENT_MODEL", "env-model")
+
+    config = ConfigLoader.load()
+    assert config.llm.model == "env-model"
+
+
+def test_merge_partial(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text(
+        '[llm]\nmodel = "custom"\n\n[memory]\nauto_extract = false\n', encoding="utf-8"
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    config = ConfigLoader.load()
+    assert config.llm.model == "custom"
+    assert config.llm.provider == "openai"
+    assert config.memory.auto_extract is False
+    assert config.memory.context_window == 128_000
+
+
+def test_merge_mcp_servers(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    toml_content = (
+        "[mcp.servers.github]\n"
+        'command = "npx"\n'
+        'args = ["-y", "@mcp/server-github"]\n'
+        'transport = "stdio"\n'
+    )
+    (toml_dir / "config.toml").write_text(toml_content, encoding="utf-8")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    config = ConfigLoader.load()
+    assert "github" in config.mcp.servers
+    assert config.mcp.servers["github"].command == "npx"
+    assert config.mcp.servers["github"].transport == "stdio"
+
+
+def test_merge_top_level_scalars(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text(
+        'theme = "dark"\nmax_agent_iterations = 30\n', encoding="utf-8"
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    config = ConfigLoader.load()
+    assert config.theme == "dark"
+    assert config.max_agent_iterations == 30
