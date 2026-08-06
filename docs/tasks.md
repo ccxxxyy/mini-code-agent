@@ -509,3 +509,21 @@
 
 ### P21.3 验证
 - [x] 6 个新测试（user TOML/project 覆盖 user/env 覆盖 TOML/部分合并/MCP 服务器/顶级标量），298 个测试全过
+
+---
+
+## Phase 22: 接口冻结 + 覆盖率门禁 (P22)
+
+### P22.1 接口冻结
+- [x] `CHANGELOG.md` 新建——四个 ABC 的完整方法签名（Tool/LLMProvider/HookFn/CompressionStrategy）+ 支撑类型列表
+- [x] 冻结承诺定义：签名不变、可加可选参数、可加新方法、破坏性变更需 2.0.0
+
+### P22.2 覆盖率门禁
+- [x] `pyproject.toml` — pytest-cov>=5.0 加入 dev 依赖
+- [x] `[tool.coverage.run]` 排除无法在 CI 测试的模块（terminal/input_handler/esc_watcher/components/mcp client+transport/cli/__main__）
+- [x] `[tool.coverage.report]` fail_under=80——低于 80% CI 自动失败
+- [x] 当前覆盖率 81.62%（排除 TTY/MCP 层后），门禁通过
+
+### P22.3 版本升级
+- [x] `pyproject.toml` version 0.2.0 → 1.0.0（配合接口冻结的语义版本含义）
+- [x] build 产出 mini_code_agent-1.0.0-py3-none-any.whl
