@@ -493,3 +493,19 @@
 
 ### P20.3 验证
 - [x] 2 个新测试（未超限不截断/超限截断后 total_tokens ≤ max_tokens），292 个测试全过
+
+---
+
+## Phase 21: TOML 配置文件 (P21)
+
+### P21.1 TOML 加载与合并
+- [x] `config/loader.py` — `_load_toml()` 用 Python 3.11 stdlib tomllib 解析（零依赖）
+- [x] `_merge()` 深度合并：顶级标量 setattr + `[section]` 子字段遍历 + `[mcp.servers.<name>]` MCPServerConfig 构造
+- [x] `load()` 插入两层：user `~/.mini-agent/config.toml` → project `.mini-agent/config.toml`（在 .env 之前）
+- [x] `_apply_cli()` 泛化：支持所有子配置（tools.*/memory.*/security.*/顶级标量），不限于 llm.*
+
+### P21.2 示例与文档
+- [x] `config.toml.example` 完整注释示例（[llm]/[tools]/[memory]/[security]/[mcp.servers.*]/顶级标量）
+
+### P21.3 验证
+- [x] 6 个新测试（user TOML/project 覆盖 user/env 覆盖 TOML/部分合并/MCP 服务器/顶级标量），298 个测试全过

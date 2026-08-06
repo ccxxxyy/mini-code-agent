@@ -448,3 +448,22 @@
 - [x] ensure_fits 复用已有 SlidingWindow 策略（零新压缩逻辑）
 - [x] 预检位置在 PRE_LLM hook 之后、llm.stream() 之前（hook 可能修改 prompt 影响 token 数）
 - [x] 2 个新测试，总计 292 个全过
+
+---
+
+## Phase 21 检查项：TOML 配置文件
+
+### 功能完整性
+- [x] 用户级 `~/.mini-agent/config.toml` 正确加载
+- [x] 项目级 `.mini-agent/config.toml` 覆盖用户级
+- [x] 环境变量覆盖 TOML（优先级高）
+- [x] 部分配置（只设 [llm] model）不影响其他字段默认值
+- [x] MCP 服务器 `[mcp.servers.<name>]` 正确解析为 MCPServerConfig
+- [x] 顶级标量（theme/max_agent_iterations）正确合并
+- [x] 未知字段静默忽略（向后兼容）
+
+### 架构合规
+- [x] Python 3.11 stdlib tomllib，零外部依赖
+- [x] _apply_cli 泛化支持所有子配置
+- [x] 优先级栈：defaults → user TOML → project TOML → .env → env → profiles → CLI
+- [x] 6 个新测试，总计 298 个全过

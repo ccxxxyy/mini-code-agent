@@ -1,4 +1,8 @@
-"""Layered configuration loading. 分层配置加载。"""
+"""Layered configuration loading. 分层配置加载。
+
+Priority stack (highest to lowest) 优先级栈（从高到低）:
+  CLI arguments > env vars > .env file > project TOML > user TOML > defaults
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from mini_agent.config.defaults import get_defaults
-from mini_agent.models.config import AgentConfig
+from mini_agent.models.config import AgentConfig, MCPServerConfig
 
 
 class ConfigLoader:
@@ -19,41 +23,76 @@ class ConfigLoader:
     ) -> AgentConfig:
         config = get_defaults()
 
-        # Load .env file into os.environ (won't overwrite existing vars)
-        # 将 .env 文件加载到 os.environ（不会覆盖已存在的变量）
+        # 1. Merge user TOML (~/.mini-agent/config.toml) 合并用户级 TOML
+        user_toml = Path.home() / ".mini-agent" / "config.toml"
+        if user_toml.is_file():
+            ConfigLoader._merge(config, ConfigLoader._load_toml(user_toml))
+
+        # 2. Merge project TOML (.mini-agent/config.toml) 合并项目级 TOML
+        project_toml = Path.cwd() / ".mini-agent" / "config.toml"
+        if project_toml.is_file():
+            ConfigLoader._merge(config, ConfigLoader._load_toml(project_toml))
+
+        # 3. Load .env file into os.environ (won't overwrite existing vars)
         ConfigLoader._load_dotenv()
 
-        # Apply environment variables
+        # 4. Apply environment variables 应用环境变量
         config = ConfigLoader._apply_env(config)
 
-        # Load named LLM profiles 加载命名 LLM 档案
+        # 5. Load named LLM profiles 加载命名 LLM 档案
         ConfigLoader._load_profiles(config)
 
-        # Strong/weak model mixing 强弱模型混编
+        # 6. Strong/weak model mixing 强弱模型混编
         config.planner_profile = os.environ.get("MINI_AGENT_PLANNER_PROFILE", "").strip()
         config.worker_profile = os.environ.get("MINI_AGENT_WORKER_PROFILE", "").strip()
 
-        # Apply CLI overrides (highest priority)
+        # 7. Apply CLI overrides (highest priority) 应用 CLI 覆盖（最高优先级）
         if cli_overrides:
             config = ConfigLoader._apply_cli(config, cli_overrides)
 
         return config
 
     @staticmethod
+    def _load_toml(path: Path) -> dict[str, Any]:
+        """Parse a TOML file. 解析 TOML 文件。"""
+        import tomllib
+
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+
+    @staticmethod
+    def _merge(config: AgentConfig, overlay: dict[str, Any]) -> AgentConfig:
+        """Deep-merge a TOML dict onto the config dataclass.
+        将 TOML 字典深度合并到配置 dataclass。"""
+        for section_name, section_data in overlay.items():
+            if not isinstance(section_data, dict):
+                if hasattr(config, section_name):
+                    setattr(config, section_name, section_data)
+                continue
+            if section_name == "mcp":
+                ConfigLoader._merge_mcp(config, section_data)
+                continue
+            sub = getattr(config, section_name, None)
+            if sub is None:
+                continue
+            for key, value in section_data.items():
+                if hasattr(sub, key):
+                    setattr(sub, key, value)
+        return config
+
+    @staticmethod
+    def _merge_mcp(config: AgentConfig, mcp_data: dict[str, Any]) -> None:
+        """Merge [mcp.servers.<name>] sections into config.mcp.servers.
+        将 [mcp.servers.<名称>] 部分合并到 config.mcp.servers。"""
+        servers = mcp_data.get("servers", {})
+        for name, srv_data in servers.items():
+            if isinstance(srv_data, dict):
+                config.mcp.servers[name] = MCPServerConfig(**srv_data)
+
+    @staticmethod
     def _load_profiles(config: AgentConfig) -> None:
         """Parse named switchable models from environment variables.
-        从环境变量解析可切换的命名模型。
-
-        Format 格式:
-          MINI_AGENT_MODELS=fast,smart
-          MODEL_FAST_MODEL=deepseek-chat
-          MODEL_FAST_API_KEY=sk-xxx        (可省略, 继承默认)
-          MODEL_FAST_BASE_URL=https://...   (可省略, 继承默认)
-          MODEL_FAST_PROVIDER=openai        (可省略, 继承默认)
-
-        Legacy MINI_AGENT_PROFILES / PROFILE_X_* names still work.
-        旧的 MINI_AGENT_PROFILES / PROFILE_X_* 命名仍然兼容。
-        """
+        从环境变量解析可切换的命名模型。"""
         from dataclasses import replace
 
         names = os.environ.get("MINI_AGENT_MODELS", "") or os.environ.get("MINI_AGENT_PROFILES", "")
@@ -64,8 +103,6 @@ class ConfigLoader:
             name = raw_name.strip()
             if not name:
                 continue
-            # New MODEL_X_* prefix first, legacy PROFILE_X_* as fallback
-            # 优先新的 MODEL_X_* 前缀，旧的 PROFILE_X_* 兜底
             new_prefix = f"MODEL_{name.upper()}_"
             old_prefix = f"PROFILE_{name.upper()}_"
 
@@ -74,7 +111,7 @@ class ConfigLoader:
 
             model = get("MODEL")
             if not model:
-                continue  # An entry must at least define a model 至少要定义模型名
+                continue
             profile = replace(
                 config.llm,
                 model=model,
@@ -87,9 +124,7 @@ class ConfigLoader:
     @staticmethod
     def _load_dotenv() -> None:
         """Read .env file from current directory and set into os.environ.
-        Won't overwrite variables that are already set.
-        从当前目录读取 .env 文件并写入 os.environ。
-        不会覆盖已设置的变量。"""
+        从当前目录读取 .env 文件并写入 os.environ。"""
         env_path = Path.cwd() / ".env"
         if not env_path.is_file():
             return
@@ -103,7 +138,6 @@ class ConfigLoader:
                 key, _, value = line.partition("=")
                 key = key.strip()
                 value = value.strip().strip("\"'")
-                # Inline comment removal
                 if "  #" in value:
                     value = value[: value.index("  #")].strip()
                 if key and key not in os.environ:
@@ -111,14 +145,11 @@ class ConfigLoader:
 
     @staticmethod
     def _apply_env(config: AgentConfig) -> AgentConfig:
-        # Lower priority first, higher priority later (overwrites)
         env_layers = [
-            # Low priority: OPENAI_* vars
             {
                 "OPENAI_API_KEY": "llm.api_key",
                 "OPENAI_BASE_URL": "llm.base_url",
             },
-            # High priority: MINI_AGENT_* vars
             {
                 "MINI_AGENT_PROVIDER": "llm.provider",
                 "MINI_AGENT_MODEL": "llm.model",
@@ -138,10 +169,14 @@ class ConfigLoader:
 
     @staticmethod
     def _apply_cli(config: AgentConfig, overrides: dict[str, Any]) -> AgentConfig:
+        """Apply dotted-key overrides (e.g. "llm.model", "tools.bash_timeout").
+        应用点分键覆盖（如 "llm.model"、"tools.bash_timeout"）。"""
         for key, value in overrides.items():
             parts = key.split(".")
-            if len(parts) == 2 and parts[0] == "llm":
-                attr = parts[1]
-                if hasattr(config.llm, attr):
-                    setattr(config.llm, attr, value)
+            if len(parts) == 2:
+                section = getattr(config, parts[0], None)
+                if section and hasattr(section, parts[1]):
+                    setattr(section, parts[1], value)
+            elif len(parts) == 1 and hasattr(config, key):
+                setattr(config, key, value)
         return config
