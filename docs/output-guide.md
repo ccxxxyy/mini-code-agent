@@ -138,6 +138,7 @@
 | 输出 | 来源 | 触发 |
 |---|---|---|
 | 欢迎标题 `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | 启动时 |
+| 上下文提示 `context: loaded CLAUDE.md` | `app.py` `run()`（P25 上下文感知） | 启动时发现项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md） |
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |

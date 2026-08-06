@@ -110,6 +110,7 @@
 | 插件生态 | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
 | 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具） |
+| 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
 | Windows 终端适配 | CMD/PowerShell/Windows Terminal 的颜色与按键差异全面测试 |
 
 ---

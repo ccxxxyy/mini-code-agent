@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。309 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。321 个测试全过。
 
 ---
 
@@ -1385,12 +1385,28 @@ bash 的文件变更（echo x > file、rm、mv）无法跟踪——bash 输出�
 
 ---
 
+# 第二十五部分：P25 上下文感知
+
+## 25.1 启动注入 vs PRE_LLM hook 注入
+
+已有的记忆注入走 PRE_LLM hook（每次 LLM 调用前检查），但指令文件选择在 __init__ 启动注入——两者内容性质不同：记忆会随会话增长（SESSION_END 自动提取新条目），需要每次调用前重新加载；指令文件是静态的（改了要重启才生效，这是有意设计），启动读一次就够。两者都用 marker 去重（"--- Project instructions ---" / "--- Relevant memories ---"），防止会话恢复时重复拼接。
+
+## 25.2 文件优先级设计
+
+AGENT.md > CLAUDE.md > .mini-agent/instructions.md。AGENT.md 放最前是因为它是社区中立标准（多工具通用）；CLAUDE.md 兼容 CC 生态（大量项目已有现成文件，mini-agent 直接受益）；.mini-agent/instructions.md 是本项目专属命名空间，适合不想让其他工具读到的指令。找到第一个就停（不合并）——避免多文件内容冲突时 LLM 无所适从。
+
+## 25.3 从写死到可配置：[context] 段
+
+文件名列表、优先级、截断长度初版写死在模块常量里。后按"约定优于配置"改造：`models/config.py` 加 `ContextConfig` dataclass（instruction_files / user_instructions_file / max_chars），`project_context.py` 的函数改为接受参数、原写死值降级为参数默认值。P21 的 TOML `_merge` 是通用的（按 section 名自动映射到 AgentConfig 同名字段），所以 config.toml 里写 `[context]` 段零胶水代码即生效。不配置时行为与写死版完全一致——可配置性是纯增量。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——309 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——321 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
