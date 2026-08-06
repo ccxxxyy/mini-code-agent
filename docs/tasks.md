@@ -597,3 +597,45 @@
 
 ### P25.5 文档
 - [x] `docs/config-guide.md` 新建——配置文件/上下文文件/数据文件三类区分、全部文件清单、优先级链、修改方法、常见问题
+
+---
+
+## Phase 26: 对话分叉/回滚 (P26)
+
+### P26.1 /undo 回滚
+- [x] `extensions/builtin_commands.py` — `_make_undo`：扫描 Role.USER 消息定界轮次，截断最后 N 轮（默认 1）
+- [x] 状态一致性：context_manager.update_total 重算 token + metadata.total_turns 递减
+- [x] 显示被撤销的用户消息预览 + 回滚后 token 数
+- [x] 边界处理：空对话/轮数不足报错不动
+
+### P26.2 /fork 分叉
+- [x] `_make_fork`：先存盘原线 → copy.deepcopy 对话 → 新 Session（新 session_id）→ _adopt_session 切换 → 存盘新分支
+- [x] `/fork N` 支持分叉前先回滚 N 轮（从历史某点分叉）
+- [x] 显示新旧 session_id，原线可 /session load 回去
+- [x] 轮数不足时报错且不切换会话
+
+### P26.3 验证
+- [x] `tests/unit/test_undo_fork.py` 新建 10 个测试（单轮/多轮回滚/超界/空对话/tool 消息清理/token 重算/分叉隔离/深拷贝验证/带回滚分叉/回滚超界），331 个测试全过
+
+---
+
+## Phase 27: 操作级撤销 (P27)
+
+### P27.1 文件快照
+- [x] `memory/file_snapshots.py` 新建——FileSnapshotStore：每轮一个目录（turn_N/manifest.json + files/*.snap）
+- [x] 三种状态：saved（存了旧内容）/ missing（原本不存在，undo=删除）/ too_large（>30MB 跳过，提示手动恢复）
+- [x] 同轮同文件只快照第一次（保留轮开始时状态）
+- [x] begin_turn 自动清理超过 5 轮的旧快照；clear() 会话结束清空整个目录
+
+### P27.2 接线
+- [x] `agent_loop.py` — snapshot_store 注入点 + current_turn_id 计数 + _execute_single_tool 中 write/edit/delete_file 执行前快照
+- [x] `app.py` — 创建 FileSnapshotStore（.mini-agent/undo_snapshots/）+ 会话结束 clear()
+- [x] `builtin_commands.py` /undo — 截断消息后按轮倒序恢复文件 + turn 计数回退 + 恢复报告追加到输出
+
+### P27.3 验证
+- [x] `tests/unit/test_file_snapshots.py` 新建 10 个测试（保存/missing 删除/too_large 跳过/首次快照优先/旧轮清理/多轮倒序恢复/clear + 三个 /undo 集成：新建删掉/修改还原/删除找回），344 个测试全过
+
+### 边界（文档已注明）
+- bash 命令的文件变更不快照
+- 只保留最近 5 轮；单文件 30MB 上限
+- 会话结束快照清空（undo 是会话内操作）

@@ -72,6 +72,10 @@ class AgentLoop:
         # Files created/modified during the last run() 上一轮新建/修改的文件
         self.last_turn_file_changes: list[tuple[str, str]] = []
         self._file_changes: dict[str, str] = {}
+        # Optional per-turn file snapshots for operation-level undo (app injects)
+        # 可选的每轮文件快照——操作级撤销（app.py 注入）
+        self.snapshot_store = None
+        self.current_turn_id: int = 0
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
@@ -92,6 +96,9 @@ class AgentLoop:
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
         self.stopped_early = False
         self._file_changes = {}
+        if self.snapshot_store:
+            self.current_turn_id += 1
+            self.snapshot_store.begin_turn(self.current_turn_id)
         tools_called = 0
         tokens_used = 0
         final_content = ""
@@ -281,6 +288,15 @@ class AgentLoop:
                 is_error=True,
             )
         else:
+            # Snapshot pre-modification state for /undo file restore
+            # 快照修改前状态——供 /undo 恢复文件
+            if self.snapshot_store and tc.name in ("write_file", "edit_file", "delete_file"):
+                raw_path = tc.arguments.get("file_path")
+                if raw_path:
+                    p = Path(raw_path)
+                    if not p.is_absolute():
+                        p = self._tool_context.working_dir / p
+                    self.snapshot_store.snapshot(self.current_turn_id, p)
             result = await self._run_tool_pipeline(tc, tool, skip_permission=skip_permission)
 
         duration_ms = (time.monotonic() - start) * 1000

@@ -255,8 +255,10 @@ mini-code-agent/
 - [x] P23：Diff 预览 + Streaming 扩展点（edit_file 彩色 diff 渲染 + on_tool_call_assembling 回调）
 - [x] P24：文件变更汇总 + delete_file 工具（轮次结束显示本轮文件清单：+绿新建/~黄修改/-红删除）
 - [x] P25：上下文感知（启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令）
+- [x] P26：对话分叉/回滚（`/undo` 回滚 N 轮重新问 + `/fork` 分叉新会话保留原线——CC 没有的差异化能力）
+- [x] P27：操作级撤销（`/undo` 连文件一起恢复——每轮快照被改文件，新建删掉/修改还原/删除找回）
 
-**全部阶段已完成，321 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，344 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -306,6 +308,59 @@ MINI_AGENT_WORKER_PROFILE=fast      # 执行子任务用便宜模型
 ```
 
 未配置时两者都用主模型。
+
+## 对话分叉与回滚：/undo 与 /fork
+
+LLM 回答不满意时，不用继续追问（对话越来越乱）也不用 `/clear` 全清（丢失全部上下文）：
+
+### /undo —— 回滚重来
+
+```
+/undo        # 撤销最后一轮（你的问题 + LLM 的回答 + 工具调用记录全部删除）
+/undo 3      # 一次撤销最后 3 轮
+```
+
+回滚后 LLM 完全"忘记"被撤销的内容——重新问会得到不受之前回答影响的全新答案。**文件操作也会一并撤销**（P27 操作级撤销）：该轮新建的文件删掉、修改的还原、删除的找回：
+
+```
+> /undo
+Rolled back 1 turn(s), removed 3 message(s).
+Undone: "创建 test.txt 写入 hello"
+Files restored 文件已恢复:
+  - test.txt (deleted -- did not exist before)
+Context is now 1240 tokens.
+```
+
+**适用场景**：换个问法重试、提问后发现给错了信息、撤销一轮误操作的文件修改、清掉一轮跑偏的探索。
+
+**操作级撤销的边界**：
+- 快照只保留**最近 5 轮**——更早的轮次只回滚对话不恢复文件
+- 单文件超过 **30MB** 不快照（undo 时提示手动恢复）
+- **bash 命令**改的文件不快照（无法预知 shell 会改什么）
+- 快照存 `.mini-agent/undo_snapshots/`（磁盘临时目录），会话结束自动清空
+
+### /fork —— 分叉探索
+
+```
+/fork        # 从当前状态分叉一个新会话，在分支里继续对话
+/fork 2      # 从 2 轮之前的状态分叉（分叉前先回滚 2 轮）
+```
+
+分叉后进入新会话（新 session_id），原会话完整存盘。两条线完全隔离——分支里的任何操作不影响原线：
+
+```
+> /fork
+Forked to new session 3f8a2c1b9e4d5a76.
+Original session a1b2c3d4 saved -- return with /session load a1b2c3d4
+```
+
+**适用场景**：想尝试另一个方向但不想丢掉当前进展、对同一问题试两种方案对比、在关键决策点留个"存档点"。
+
+**两条线之间切换**：`/session list` 查看所有会话，`/session load <id前缀>` 切换。
+
+**/undo vs /fork 怎么选**：确定这轮没用 → `/undo` 删掉；不确定、想两边都保留 → `/fork` 分叉。
+
+> 这是 Claude Code 没有的能力——CC 的对话历史在服务端不可操作，本项目的对话是本地自持有的数据结构，回滚和分叉天然可行。
 
 ## 机制透明：/trace 模式
 
@@ -369,6 +424,8 @@ uv run python benchmarks/report.py          # 生成报告
 | `/compact` | 手动压缩对话历史 |
 | `/memory [add <内容>]` | 查看或添加持久记忆 |
 | `/session save\|list\|load\|delete` | 会话管理（自动保存已默认开启） |
+| `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
+| `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
 | `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
 | `/audit [on\|off\|verify]` | 审计日志开关 + 哈希链完整性验证 |
