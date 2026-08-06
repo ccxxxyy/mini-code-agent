@@ -210,7 +210,7 @@ mini-code-agent/
 │       ├── config/             # 分层配置加载
 │       ├── llm/                # LLM Provider 抽象层
 │       ├── ui/                 # TUI 终端界面（主题、补全、流式渲染）
-│       ├── tools/              # 工具系统（6 内置工具 + MCP + Hook）
+│       ├── tools/              # 工具系统（8 内置工具 + MCP + Hook）
 │       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
 │       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
 │       ├── security/           # 安全层（权限、路径守卫、worktree）
@@ -251,8 +251,9 @@ mini-code-agent/
 - [x] P21：TOML 配置文件（用户级 + 项目级 config.toml，Python 3.11 tomllib 零依赖）
 - [x] P22：接口冻结 + 覆盖率门禁（v1.0.0 ABC 签名定稿 + pytest-cov 81.62% / fail_under=80）
 - [x] P23：Diff 预览 + Streaming 扩展点（edit_file 彩色 diff 渲染 + on_tool_call_assembling 回调）
+- [x] P24：文件变更汇总 + delete_file 工具（轮次结束显示本轮文件清单：+绿新建/~黄修改/-红删除）
 
-**全部阶段已完成，299 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，309 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

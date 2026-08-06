@@ -499,3 +499,22 @@
 - [x] on_tool_call_assembling 是可选回调（未接线时行为不变——向后兼容）
 - [x] Rich Text.pad(width) 实现整行背景色（不依赖 ANSI 转义码）
 - [x] 1 个新测试，总计 299 个全过
+
+---
+
+## Phase 24 检查项：文件变更汇总
+
+### 功能完整性
+- [x] 轮次结束后显示本轮新建/修改的文件清单
+- [x] 新建文件 `+` 绿色标记、修改文件 `~` 黄色标记
+- [x] 同一文件多次操作只显示一次（created 优先）
+- [x] 工具执行失败不计入
+- [x] 每轮开始重置（不累积跨轮）
+- [x] 无变更时不显示（不打空标题）
+- [x] delete_file 工具：删除文件红色 `-` 标记进入汇总，拒绝删除目录
+
+### 架构合规
+- [x] 集中跟踪在 agent_loop._record_file_change（不改每个工具）
+- [x] 复用 write_file 已有的 metadata["existed"] 区分新建/覆写
+- [x] last_turn_file_changes 属性暴露（与 last_turn_tokens 同模式）
+- [x] 6 个新测试，总计 305 个全过

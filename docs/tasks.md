@@ -544,3 +544,32 @@
 
 ### P23.3 验证
 - [x] 1 个新测试（edit_file diff in metadata），299 个测试全过
+
+---
+
+## Phase 24: 文件变更汇总 (P24)
+
+### P24.1 变更跟踪
+- [x] `core/agent_loop.py` — `_record_file_change()`：_execute_single_tool 中工具成功后集中跟踪（不改每个工具）
+- [x] 判定规则：write_file + metadata["existed"]=False → created；write_file 覆写/edit_file → modified
+- [x] 去重：dict 按路径去重，created 优先（先建后改仍算新建）
+- [x] `last_turn_file_changes` 属性暴露（仿照 last_turn_tokens），run() 开始时重置
+
+### P24.2 UI 显示
+- [x] `ui/terminal.py` — `show_file_changes()`：新建 `+ 路径`（绿）、修改 `~ 路径`（黄）
+- [x] `app.py` — _handle_turn 在 token 统计行前调用
+
+### P24.3 验证
+- [x] `tests/unit/test_file_changes.py` 新建 6 个测试（新建/修改/去重/每轮重置/失败不记录/覆写算修改），305 个测试全过
+
+### P24.4 delete_file 工具
+- [x] `tools/builtin/delete_file.py` 新建——删除单个文件，拒绝删除目录，专用工具替代 bash rm/del
+- [x] 注册到 ALL_BUILTIN_TOOLS + config 默认 enabled_tools（现共 8 个内置工具）
+- [x] `_record_file_change` 支持 deleted 类型（delete 覆盖一切——先建后删显示 deleted）
+- [x] `show_file_changes` 红色 `- 路径` 标记删除
+- [x] 4 个新测试（删除跟踪/删除覆盖新建/文件不存在报错/拒绝删目录），309 个测试全过
+
+### 已知局限
+- bash 命令造成的文件变更无法跟踪（如 echo x > file）
+- delete_file 专用工具已提供——LLM 优先用它删除文件（可跟踪），bash rm/del 仍不可跟踪
+- SubAgent 的文件变更不计入主轮汇总（独立 AgentLoop）

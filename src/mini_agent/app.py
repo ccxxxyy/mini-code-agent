@@ -461,6 +461,7 @@ class Application:
 
         try:
             await self.agent_loop.run(self.session.conversation)
+            self.terminal.show_file_changes(self.agent_loop.last_turn_file_changes)
             turn_tokens = self.agent_loop.last_turn_tokens
             self.session.metadata.total_tokens_used += turn_tokens
             self.terminal.show_info(

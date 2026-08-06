@@ -24,6 +24,7 @@ class ToolConfig:
             "read_file",
             "write_file",
             "edit_file",
+            "delete_file",
             "bash",
             "glob",
             "grep",

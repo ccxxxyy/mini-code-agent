@@ -71,9 +71,11 @@ These dataclasses are part of the stable interface:
 
 ### Features 功能
 
-- P1-P21: 21 development phases completed (see README.md for full list)
-- 298 tests, zero external dependencies for testing
-- 7 built-in tools (read/write/edit/bash/glob/grep/spawn_agents)
+- P1-P24: 24 development phases completed (see README.md for full list)
+- 309 tests, zero external dependencies for testing
+- Per-turn file change summary (+created / ~modified / -deleted)
+- Colored diff preview for edit_file (full-width background highlight)
+- 8 built-in tools (read/write/edit/delete/bash/glob/grep/spawn_agents)
 - Multi-agent orchestration (/spawn, /team, spawn_agents tool)
 - Mechanism experiments (compression A/B, strong/weak model mixing)
 - Session auto-save with crash recovery

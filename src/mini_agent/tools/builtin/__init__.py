@@ -1,4 +1,5 @@
 from mini_agent.tools.builtin.bash import BashTool
+from mini_agent.tools.builtin.delete_file import DeleteFileTool
 from mini_agent.tools.builtin.edit_file import EditFileTool
 from mini_agent.tools.builtin.glob_tool import GlobTool
 from mini_agent.tools.builtin.grep import GrepTool
@@ -10,6 +11,7 @@ ALL_BUILTIN_TOOLS = [
     ReadFileTool,
     WriteFileTool,
     EditFileTool,
+    DeleteFileTool,
     BashTool,
     GlobTool,
     GrepTool,
@@ -20,6 +22,7 @@ __all__ = [
     "ReadFileTool",
     "WriteFileTool",
     "EditFileTool",
+    "DeleteFileTool",
     "BashTool",
     "GlobTool",
     "GrepTool",
