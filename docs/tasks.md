@@ -597,3 +597,22 @@
 
 ### P25.5 文档
 - [x] `docs/config-guide.md` 新建——配置文件/上下文文件/数据文件三类区分、全部文件清单、优先级链、修改方法、常见问题
+
+---
+
+## Phase 26: 对话分叉/回滚 (P26)
+
+### P26.1 /undo 回滚
+- [x] `extensions/builtin_commands.py` — `_make_undo`：扫描 Role.USER 消息定界轮次，截断最后 N 轮（默认 1）
+- [x] 状态一致性：context_manager.update_total 重算 token + metadata.total_turns 递减
+- [x] 显示被撤销的用户消息预览 + 回滚后 token 数
+- [x] 边界处理：空对话/轮数不足报错不动
+
+### P26.2 /fork 分叉
+- [x] `_make_fork`：先存盘原线 → copy.deepcopy 对话 → 新 Session（新 session_id）→ _adopt_session 切换 → 存盘新分支
+- [x] `/fork N` 支持分叉前先回滚 N 轮（从历史某点分叉）
+- [x] 显示新旧 session_id，原线可 /session load 回去
+- [x] 轮数不足时报错且不切换会话
+
+### P26.3 验证
+- [x] `tests/unit/test_undo_fork.py` 新建 10 个测试（单轮/多轮回滚/超界/空对话/tool 消息清理/token 重算/分叉隔离/深拷贝验证/带回滚分叉/回滚超界），331 个测试全过

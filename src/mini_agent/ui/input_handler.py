@@ -46,6 +46,10 @@ class SlashCommandCompleter(Completer):
     def set_commands(self, commands: list[tuple[str, str]]) -> None:
         self._commands = commands
 
+    @property
+    def command_count(self) -> int:
+        return len(self._commands)
+
     def get_completions(self, document: Document, complete_event) -> Iterator[Completion]:
         text = document.text_before_cursor.lstrip()
         if not text.startswith("/"):
@@ -123,6 +127,18 @@ def create_prompt_session(
             return None
         return HTML(f"<toolbar> {toolbar_provider()} </toolbar>")
 
+    # Reserve enough rows for the FULL command menu so no entry is cut off.
+    # The prompt scrolls prior conversation up to make room when '/' opens
+    # the menu. +2 covers the meta row and rounding; capped for tiny terminals.
+    # 为完整命令菜单预留足够行数，不截断任何条目。输入 '/' 弹菜单时会把
+    # 上方会话内容顶上去腾出空间。+2 容纳边距；小终端下限制上限。
+    # +4: bottom toolbar row + input row + margins eat into the reserved
+    # space, so reserving exactly count+2 still clipped two entries.
+    # +4：底部工具栏行 + 输入行 + 边距会占用预留空间，只留 count+2 仍会截掉两条。
+    menu_rows = 18
+    if completer is not None and completer.command_count > 0:
+        menu_rows = min(completer.command_count + 4, 32)
+
     session: PromptSession = PromptSession(
         history=_make_history(),
         multiline=False,
@@ -131,7 +147,26 @@ def create_prompt_session(
         complete_while_typing=True,
         style=create_prompt_style(theme),
         message=HTML("<prompt>&gt; </prompt>"),
-        reserve_space_for_menu=18,
+        reserve_space_for_menu=menu_rows,
         bottom_toolbar=_toolbar if toolbar_provider else None,
     )
+    _raise_menu_height_cap(session, menu_rows)
     return session
+
+
+def _raise_menu_height_cap(session: PromptSession, menu_rows: int) -> None:
+    """prompt_toolkit's CompletionsMenu has a hard-coded max_height=16 inside
+    PromptSession's layout -- reserve_space_for_menu alone cannot exceed it.
+    Walk the layout and lift the cap on the completions-menu window.
+    prompt_toolkit 的 CompletionsMenu 在 PromptSession 布局里写死 max_height=16，
+    单靠 reserve_space_for_menu 突破不了。遍历布局找到补全菜单窗口改掉上限。
+    """
+    try:
+        from prompt_toolkit.layout.dimension import Dimension
+        from prompt_toolkit.layout.menus import CompletionsMenuControl
+
+        for window in session.app.layout.find_all_windows():
+            if isinstance(window.content, CompletionsMenuControl):
+                window.height = Dimension(min=1, max=menu_rows)
+    except Exception:
+        pass  # layout internals changed in a future version -- keep default 布局内部变了就保持默认

@@ -353,7 +353,13 @@ class Application:
                     continue
 
                 await self._handle_turn(user_input)
-                await self._autosave()
+                # Force save after every completed turn: conversation data is
+                # tiny (KBs) and the 30s throttle window would lose the last
+                # turn on a hard kill. Throttling still applies to slash
+                # commands above.
+                # 每轮对话后强制存盘：对话数据只有几 KB，30 秒节流窗口会让
+                # 硬杀进程丢掉最后一轮。斜杠命令仍走节流。
+                await self._autosave(force=True)
         finally:
             await self.event_bus.emit(SessionEndEvent(session_id=self.session.metadata.session_id))
             # SESSION_END hook: auto-extract memories, cleanup, etc.

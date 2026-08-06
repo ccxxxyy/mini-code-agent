@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。321 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。331 个测试全过。
 
 ---
 
@@ -1401,12 +1401,26 @@ AGENT.md > CLAUDE.md > .mini-agent/instructions.md。AGENT.md 放最前是因为
 
 ---
 
+# 第二十六部分：P26 对话分叉/回滚
+
+## 26.1 为什么 CC 做不到而这里可以
+
+CC 的对话历史由 Anthropic 服务端管理，客户端无法截断或复制。mini-code-agent 的 Conversation 是本地自持有的 dataclass（messages 列表），回滚 = 列表截断，分叉 = deepcopy + 新 session_id。数据结构的所有权决定了能力边界——这是"可读参考实现"的一个直接好处。
+
+## 26.2 轮次定界与状态一致性
+
+无显式 turn 标记，扫描 Role.USER 消息定界：一轮 = 一条 USER 消息 + 其后所有 ASSISTANT/TOOL 消息。/undo 找倒数第 N 条 USER 索引截断列表尾部。截断后两处状态要同步：context_manager.update_total() 重算 token（同 /compact 和 _adopt_session 的先例），metadata.total_turns 递减。metadata.total_tokens_used 不回退——它是累计消费（历史开销），不是当前状态。
+
+/fork 的关键顺序：先把原线存盘（防止切换后丢失未保存的消息），再 deepcopy + 切换 + 存盘新分支。deepcopy 是必要的——Message 是可变 dataclass，浅拷贝会让两个会话共享消息对象，改一边脏另一边。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——321 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——331 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -127,6 +127,20 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="undo",
+            description="Roll back the last N turns (usage: /undo [N], default 1)",
+            handler=_make_undo(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="fork",
+            description="Branch into a new session (usage: /fork [N] to roll back N turns first)",
+            handler=_make_fork(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="quit",
             description="Exit the agent",
             handler=_make_quit(),
@@ -149,6 +163,79 @@ def _make_help(app: Application) -> HandlerFn:
         for c in sorted(cmds, key=lambda x: x.name):
             lines.append(f"  `/{c.name}` — {c.description}")
         return "\n".join(lines)
+
+    return handler
+
+
+def _make_undo(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.models.message import Role
+
+        n = int(args.strip()) if args.strip().isdigit() else 1
+        if n < 1:
+            return "Usage: /undo [N] (N >= 1)"
+        conv = app.session.conversation
+        user_idxs = [i for i, m in enumerate(conv.messages) if m.role == Role.USER]
+        if not user_idxs:
+            return "Nothing to undo: conversation is empty."
+        if len(user_idxs) < n:
+            return f"Cannot undo {n} turn(s): only {len(user_idxs)} turn(s) in history."
+        cut = user_idxs[-n]
+        undone = conv.messages[cut]
+        removed = len(conv.messages) - cut
+        del conv.messages[cut:]
+        app.context_manager.update_total(conv)
+        app.session.metadata.total_turns = max(0, app.session.metadata.total_turns - n)
+        preview = (undone.content or "")[:60]
+        return (
+            f"Rolled back {n} turn(s), removed {removed} message(s).\n"
+            f'Undone: "{preview}"\n'
+            f"Context is now {app.context_manager.total_tokens} tokens."
+        )
+
+    return handler
+
+
+def _make_fork(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        import copy
+
+        from mini_agent.models.message import Role
+        from mini_agent.models.session import Session
+
+        n = int(args.strip()) if args.strip().isdigit() else 0
+        old_id = app.session.metadata.session_id
+
+        new_conv = copy.deepcopy(app.session.conversation)
+        rolled = 0
+        if n > 0:
+            user_idxs = [i for i, m in enumerate(new_conv.messages) if m.role == Role.USER]
+            if len(user_idxs) < n:
+                return f"Cannot fork with rollback {n}: only {len(user_idxs)} turn(s) in history."
+            del new_conv.messages[user_idxs[-n] :]
+            rolled = n
+
+        # Save the original line as cleanly closed -- we are deliberately
+        # leaving it, so it must not trigger crash detection on next startup.
+        # 原线标记为正常关闭再存盘——是主动离开，不能触发下次启动的崩溃检测。
+        app.session.metadata.closed_cleanly = True
+        await app.session_store.save(app.session)
+
+        new_session = Session(conversation=new_conv)
+        new_session.metadata.model = app.session.metadata.model
+        new_session.metadata.project_dir = app.session.metadata.project_dir
+        new_session.metadata.total_turns = sum(1 for m in new_conv.messages if m.role == Role.USER)
+        # Inherit cumulative token spend: the branch carries the history it copied
+        # 继承累计 token 消费——分支带走了对话历史，账单也应一起带走
+        new_session.metadata.total_tokens_used = app.session.metadata.total_tokens_used
+        app._adopt_session(new_session)
+        await app.session_store.save(new_session)
+
+        note = f" (rolled back {rolled} turn(s))" if rolled else ""
+        return (
+            f"Forked to new session {new_session.metadata.session_id}{note}.\n"
+            f"Original session {old_id} saved -- return with /session load {old_id[:8]}"
+        )
 
     return handler
 
@@ -321,6 +408,16 @@ def _make_session(app: Application) -> HandlerFn:
             loaded = await store.load(match)
             if not loaded:
                 return f"Failed to load session: {match}"
+            # Leaving the current session deliberately -- mark it cleanly
+            # closed so it won't trigger crash detection on next startup.
+            # 主动离开当前会话——标记正常关闭，避免下次启动误报崩溃。
+            if app.session.conversation.messages:
+                app.session.metadata.closed_cleanly = True
+                try:
+                    await store.save(app.session)
+                except OSError:
+                    pass
+            loaded.metadata.closed_cleanly = False  # live again 恢复后重新算进行中
             app._adopt_session(loaded)
             return (
                 f"Session loaded: {match[:12]}... "
