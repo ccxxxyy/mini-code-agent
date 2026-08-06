@@ -3,6 +3,7 @@ EditFile 工具——在文件中进行精确字符串替换。"""
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Any
 
@@ -86,9 +87,22 @@ class EditFileTool(Tool):
         except OSError as e:
             return self.error_result("", f"Failed to write {file_path}: {e}")
 
+        old_lines = [line + "\n" for line in content.splitlines()]
+        new_lines = [line + "\n" for line in new_content.splitlines()]
+        diff_lines = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile=f"a/{file_path.name}",
+                tofile=f"b/{file_path.name}",
+                n=3,
+            )
+        )
+        diff_text = "".join(diff_lines)
+
         return ToolResult(
             call_id="",
             name="edit_file",
             output=f"Replaced {replaced} occurrence(s) in {file_path}",
-            metadata={"replacements": replaced},
+            metadata={"replacements": replaced, "diff": diff_text},
         )

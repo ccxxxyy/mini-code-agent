@@ -120,7 +120,9 @@ class Terminal:
             highlight=False,
         )
 
-    def show_tool_result(self, name: str, output: str, is_error: bool = False) -> None:
+    def show_tool_result(
+        self, name: str, output: str, is_error: bool = False, metadata: dict | None = None
+    ) -> None:
         if is_error:
             preview = output[:300] + "..." if len(output) > 300 else output
             e = self.theme.error
@@ -133,6 +135,49 @@ class Terminal:
                 f"  [dim]╰─[/dim] [{s}]✓[/{s}] [dim]{lines} lines, {chars} chars[/dim]",
                 highlight=False,
             )
+            # Diff preview for edit_file edit_file 的 diff 预览
+            if metadata and metadata.get("diff"):
+                self._render_diff(metadata["diff"])
+
+    def _render_diff(self, diff_text: str) -> None:
+        """Render a colored unified diff with full-width background.
+        渲染整行背景色高亮的彩色 unified diff。"""
+        from rich.text import Text
+
+        lines = diff_text.splitlines()
+        body = [ln for ln in lines if not ln.startswith(("---", "+++", "@@"))]
+        if not body:
+            return
+
+        w = self.console.width
+        removed: list[str] = []
+        added: list[str] = []
+
+        def flush() -> None:
+            for r in removed:
+                t = Text(f"  - {r[1:]}")
+                t.pad(w)
+                t.stylize(f"{self.theme.error} on #3d0000")
+                self.console.print(t, highlight=False)
+            removed.clear()
+            for a in added:
+                t = Text(f"  + {a[1:]}")
+                t.pad(w)
+                t.stylize(f"{self.theme.success} on #002d00")
+                self.console.print(t, highlight=False)
+            added.clear()
+
+        for line in body:
+            if line.startswith("-"):
+                if added:
+                    flush()
+                removed.append(line)
+            elif line.startswith("+"):
+                added.append(line)
+            else:
+                flush()
+                self.console.print(f"    [dim] {line}[/dim]", highlight=False)
+        flush()
 
     @staticmethod
     def _truncate_value(value, max_len: int = 60) -> str:

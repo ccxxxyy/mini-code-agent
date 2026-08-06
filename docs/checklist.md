@@ -482,3 +482,20 @@
 - [x] 排除 TTY 交互层和 MCP 子进程层（CI 无法测试）
 - [x] 当前覆盖率 81.62%，门禁通过
 - [x] 版本升级到 v1.0.0
+
+---
+
+## Phase 23 检查项：Diff 预览 + Streaming 扩展点
+
+### 功能完整性
+- [x] edit_file 成功后显示整行背景色的彩色 diff（删除行深红底、新增行深绿底）
+- [x] diff 只显示变更内容（跳过 ---/+++/@@ 头部，更干净）
+- [x] 无换行符文件的 diff 行正确分离（不粘连）
+- [x] 流式期间 LLM 开始生成工具调用参数时立即显示工具名（不等 JSON 组装完）
+- [x] on_tool_start 不与 assembling 提示重复（已显示过的工具只补参数摘要）
+
+### 架构合规
+- [x] diff 通过 ToolResult.metadata 传递（不改 output——output 给 LLM 看，diff 给用户看）
+- [x] on_tool_call_assembling 是可选回调（未接线时行为不变——向后兼容）
+- [x] Rich Text.pad(width) 实现整行背景色（不依赖 ANSI 转义码）
+- [x] 1 个新测试，总计 299 个全过

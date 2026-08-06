@@ -108,7 +108,7 @@
 | 覆盖率门禁 ✅ | pytest-cov 81.62%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
 | PyPI 发布 | `pip install mini-code-agent` 直接安装，不再需要克隆源码 |
 | 插件生态 | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能 |
-| Streaming 中间态 | 工具调用参数流式显示（现在要等 JSON 组装完才显示工具行） |
+| Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
 | Windows 终端适配 | CMD/PowerShell/Windows Terminal 的颜色与按键差异全面测试 |
 
 ---

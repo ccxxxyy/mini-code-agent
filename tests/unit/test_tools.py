@@ -166,6 +166,21 @@ async def test_edit_file_not_found_text(tool_context):
     assert result.is_error
 
 
+async def test_edit_file_returns_diff_in_metadata(tool_context):
+    f = tool_context.working_dir / "diff_test.py"
+    f.write_text("x = 1\ny = 2\nz = 3\n", encoding="utf-8")
+
+    result = await EditFileTool().execute(
+        tool_context, file_path=str(f), old_text="y = 2", new_text="y = 42"
+    )
+    assert not result.is_error
+    assert "diff" in result.metadata
+    diff = result.metadata["diff"]
+    assert "-y = 2" in diff
+    assert "+y = 42" in diff
+    assert "@@" in diff
+
+
 # --- Bash ---
 
 

@@ -527,3 +527,20 @@
 ### P22.3 版本升级
 - [x] `pyproject.toml` version 0.2.0 → 1.0.0（配合接口冻结的语义版本含义）
 - [x] build 产出 mini_code_agent-1.0.0-py3-none-any.whl
+
+---
+
+## Phase 23: Diff 预览 + Streaming 扩展点 (P23)
+
+### P23.1 Diff 预览
+- [x] `tools/builtin/edit_file.py` — difflib.unified_diff 生成 diff 存入 ToolResult.metadata["diff"]（不改 output，diff 给用户看）
+- [x] `ui/terminal.py` — show_tool_result 加 metadata 参数，edit_file 成功时 _render_diff 渲染整行背景色 diff（Rich Text.pad 填满终端宽度，删除行深红底、新增行深绿底）
+- [x] `app.py` — on_tool_end 回调传完整 ToolResult（含 metadata）
+- [x] 修复 diff 行粘连 bug（无换行符文件 splitlines(keepends=True) 不补 \n → 改为手动 +"\n"）
+
+### P23.2 Streaming 中间态
+- [x] `agent_loop.py` — on_tool_call_assembling 回调：流式期间 tool_call_delta 携带工具名时触发
+- [x] `app.py` — 接线：首次收到工具名时打印 `╭─ tool_name ...`，on_tool_start 改为只补充参数摘要（不重复 ╭─），on_tool_end 清除标记
+
+### P23.3 验证
+- [x] 1 个新测试（edit_file diff in metadata），299 个测试全过
