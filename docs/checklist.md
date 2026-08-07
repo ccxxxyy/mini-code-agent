@@ -642,3 +642,20 @@
 - [x] httpx 零新增依赖（已是核心依赖）
 - [x] MCPTransport ABC 加 start() 不破坏冻结接口（默认空实现）
 - [x] 5 个新测试，总计 396 个全过
+
+---
+
+## Phase 32 检查项：持久化任务系统 S12
+
+### 功能完整性
+- [x] 任务 CRUD（add/get/update/remove）+ ID 前缀匹配
+- [x] 磁盘持久化（JSON 单文件，跨会话保留）
+- [x] blockedBy 依赖追踪
+- [x] done 解锁提示 + start 阻塞警告（不阻断，只提醒）
+- [x] clear 批量清除已完成/失败任务
+- [x] 列表按状态分组显示
+
+### 架构合规
+- [x] 与 PlanStep/team 分离（/todo = 用户手动管理，/team = LLM 自动执行）
+- [x] TaskStore 仿 SessionStore 存盘模式
+- [x] 16 个新测试（含 6 个 /todo 命令集成），总计 412 个全过

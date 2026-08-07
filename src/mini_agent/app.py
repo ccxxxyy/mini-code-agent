@@ -226,6 +226,11 @@ class Application:
         from mini_agent.tools.mcp.client import MCPManager
 
         self.mcp_manager = MCPManager()
+
+        # Persistent task system (S12): /todo command 持久化任务系统
+        from mini_agent.core.task_store import TaskStore
+
+        self.task_store = TaskStore(working_dir)
         self.audit_logger.attach(self.event_bus)
 
         # Tool recorder: /record captures tool calls, /replay re-runs them

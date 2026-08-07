@@ -741,3 +741,26 @@
 
 ### P31.4 验证
 - [x] 5 个新 MCP 测试（HTTP send/error/lifecycle/missing url/selects http），396 个测试全过
+
+---
+
+## Phase 32: 持久化任务系统 S12 (P32)
+
+### S12 分析（实现前的缺口诊断）
+- S01-S20 对照审计发现 S12 是唯一有实际价值的缺口
+- 现状：PlanStep 有依赖图但用完即弃（/team 内存对象），无用户界面、不持久化
+- 目标：TaskRecord + blockedBy + 磁盘持久化 + /todo 用户界面
+
+### P32.1 TaskStore
+- [x] `core/task_store.py` 新建——TaskRecord dataclass（id/description/status/blocked_by/tags）+ TaskStore（load/save/add/update/remove/get/clear_done/find_unblocked_by）
+- [x] 存储 `<project>/.mini-agent/tasks.json`（JSON 单文件，方便手编辑）
+- [x] ID 前缀匹配（/todo done task_a1 即可匹配完整 ID）
+
+### P32.2 /todo 命令
+- [x] add/done/start/fail/delete/clear 子命令 + 默认 list
+- [x] `--after <id>` 设依赖（blocked_by）
+- [x] done 时提示 unblocked 的下游任务；start 时警告未完成的上游依赖
+- [x] 列表按状态分组（pending/in_progress/completed/failed）
+
+### P32.3 验证
+- [x] 16 个新测试（CRUD + 持久化往返 + 依赖解锁 + /todo 命令各子命令），412 个测试全过

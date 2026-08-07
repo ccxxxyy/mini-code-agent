@@ -261,8 +261,9 @@ mini-code-agent/
 - [x] P29：成本仪表盘（`/cost` 按模型分账 input/output 计价 + 会话预算 80%/100% 警告）
 - [x] P30：LLM 记忆提取（MemoryExtractor 从 regex → LLM 结构化提取 + 词重叠去重 + SESSION_END hook 修复）
 - [x] P31：MCP HTTP Transport（HTTPTransport + app 启动自动连接 MCP 服务器 + 关闭断连 + HTTP headers 认证）
+- [x] P32：持久化任务系统（`/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪——S12 补全）
 
-**全部阶段已完成，396 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，412 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -635,6 +636,7 @@ uv run python benchmarks/report.py          # 生成报告
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |
 | `/replay <名称>` | 零 LLM 确定性重放已录制的工具序列 |
+| `/todo [add\|done\|start\|fail\|delete\|clear]` | 持久化任务列表（带依赖追踪，跨会话保留） |
 | `/cost` | 成本仪表盘：按模型分账的 token 用量与金额 |
 | `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
 | `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
