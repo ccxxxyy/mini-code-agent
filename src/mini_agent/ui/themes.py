@@ -19,6 +19,7 @@ class Theme:
     dim: str  # Secondary text 次要文本
     menu_bg: str  # Completion menu background 补全菜单背景
     menu_select: str  # Completion menu selection 补全菜单选中项
+    heading: str = ""  # Markdown headings (empty = use success) 标题色（空 = 用 success）
 
 
 THEMES: dict[str, Theme] = {
@@ -31,6 +32,7 @@ THEMES: dict[str, Theme] = {
         dim="#666666",
         menu_bg="#1a1a2e",
         menu_select="#3d5afe",
+        heading="#2ecc71",
     ),
     "dark": Theme(
         name="dark",
@@ -41,6 +43,7 @@ THEMES: dict[str, Theme] = {
         dim="#565f89",
         menu_bg="#16161e",
         menu_select="#ff9e64",
+        heading="#ff9e64",  # same as prompt 与提示符同色（橙）
     ),
     "light": Theme(
         name="light",
@@ -51,6 +54,7 @@ THEMES: dict[str, Theme] = {
         dim="#57606a",
         menu_bg="#f6f8fa",
         menu_select="#0550ae",
+        heading="#9ece6a",  # dark theme's yellow-green 用 dark 的黄绿
     ),
 }
 

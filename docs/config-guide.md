@@ -58,6 +58,7 @@
 | `~/.mini-agent/sessions/` | 用户级 | 会话持久化（自动保存/崩溃恢复） |
 | `~/.mini-agent/audit.jsonl` | 用户级 | 审计日志（`/audit on` 开启后） |
 | `~/.mini-agent/recordings/` | 用户级 | 工具链录制（`/record` 保存，`/replay` 读取） |
+| `~/.mini-agent/cost_ledger.json` | 用户级 | 成本累计总账（每轮自动写入；`/cost reset` 确认后清零并重置起始日期，删文件等效） |
 | `<项目>/.mini-agent/undo_snapshots/` | 项目级 | undo 文件快照（**临时**——会话结束自动清空） |
 
 ### 组件生命周期一览
@@ -131,6 +132,14 @@ instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
 user_instructions_file = "~/.mini-agent/instructions.md"   # 用户级全局指令路径
 max_chars = 8000             # 单文件截断长度（字符）
 
+[cost]                       # 成本仪表盘（P29）
+budget = 5.0                 # 会话预算上限（元），0 = 不限
+total_budget = 50.0          # 累计总账预算上限（元），0 = 不限
+currency = "¥"
+[cost.pricing.deepseek-chat] # 每模型价格（元/百万 token）
+input = 2.0
+output = 8.0
+
 # 顶级配置（不属于任何段）
 max_agent_iterations = 50    # ReAct 循环最大迭代数
 theme = "default"            # "default" | "dark" | "light"
@@ -145,6 +154,29 @@ transport = "stdio"
 ### 修改后生效方式
 
 改完 config.toml **重启 `mini` 生效**（启动时读取一次，无热重载）。
+
+### 成本预算详解（[cost] 段）
+
+两套预算独立工作，都在**每轮对话结束时**检查：
+
+| 配置项 | 统计范围 | 清零方式 |
+|---|---|---|
+| `budget` | 本次会话（mini 启动 → /exit 或关窗口） | 重启自动清零 |
+| `total_budget` | 累计总账（首次使用至今，跨会话跨项目） | `/cost reset` 手动清零 |
+
+**警告阈值**（两种预算相同，写死不可配）：
+
+| 已用比例 | 表现 |
+|---|---|
+| < 80% | 静默，无任何提示 |
+| ≥ 80% | 黄色警告行：`会话预算警告: ¥4.12 / ¥5.00 (82%)` |
+| ≥ 100% | 红色警告行：`⚠ 累计总预算超支: ¥51.30 / ¥50.00` |
+
+只提醒不阻断——超支后 LLM 照常工作，是否停手由你决定。两种预算同时越线会各出一条警告。
+
+**怎么修改预算**：编辑 `~/.mini-agent/config.toml` 的 `[cost]` 段（没有该文件先从 `config.toml.example` 复制），改 `budget` / `total_budget` 数值，重启 `mini` 生效。设为 0 或删掉该行 = 不限。
+
+**注意**：预算基于金额计算，所以**必须先配置 `[cost.pricing.<模型名>]` 价格**——没有价格时成本恒为 0，预算永远不会触发。
 
 ---
 

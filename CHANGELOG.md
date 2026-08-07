@@ -71,8 +71,8 @@ These dataclasses are part of the stable interface:
 
 ### Features 功能
 
-- P1-P28: 28 development phases completed (see README.md for full list)
-- 360 tests, zero external dependencies for testing
+- P1-P29: 29 development phases completed (see README.md for full list)
+- 386 tests, zero external dependencies for testing
 - Per-turn file change summary (+created / ~modified / -deleted)
 - Colored diff preview for edit_file (full-width background highlight)
 - 8 built-in tools (read/write/edit/delete/bash/glob/grep/spawn_agents)
@@ -82,3 +82,4 @@ These dataclasses are part of the stable interface:
 - Theme system (default/dark/light)
 - TOML configuration (user-level + project-level)
 - Audit logging with hash-chain tamper detection
+- Cost dashboard: per-model pricing, session + all-time ledger, dual budgets with 80%/100% warnings (/cost, /cost turns, /cost reset)

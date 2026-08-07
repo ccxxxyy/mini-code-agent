@@ -588,3 +588,25 @@
 - [x] EventBus 订阅者模式（与 AuditLogger/TraceRenderer 同款——零侵入 agent_loop）
 - [x] 回放复用 _execute_single_tool（不绕过任何安全层）
 - [x] 10 个新测试，总计 354 个全过
+
+---
+
+## Phase 29 检查项：成本仪表盘
+
+### 功能完整性
+- [x] input/output token 分开计价（TokenUsage 拆分数据不再被丢弃）
+- [x] 按模型分账（/model 切换、强弱混编 worker、SubAgent 均正确归属）
+- [x] /cost 面板：每模型明细 + 总额 + 预算占比
+- [x] /status 含 Cost 行
+- [x] 预算警告：80% 黄 /100% 红，提醒不阻断
+- [x] 未配置价格的模型只计 token 不算钱，且提示如何配置
+- [x] 累计总账跨会话持久（cost_ledger.json），每轮幂等 flush
+- [x] /cost reset 确认后清零；/cost turns 逐轮明细
+- [x] total_budget 总账预算独立检查（同 80%/100% 阈值，文案区分会话/总账）
+- [x] 表格宽度感知对齐（CJK 2格），表头行 + 请求数说明
+
+### 架构合规
+- [x] EventBus 订阅者模式（第 5 个纯订阅者：Trace/Teach/Audit/Recorder/Cost）
+- [x] LLMResponseEvent 扩展字段带默认值（向后兼容，接口冻结不受影响）
+- [x] [cost] 配置段复用 TOML 通用 _merge（零胶水）
+- [x] 13 个新测试，总计 373 个全过

@@ -71,6 +71,18 @@ class SecurityConfig:
 
 
 @dataclass
+class CostConfig:
+    """Cost tracking: per-model pricing and session budget (P29).
+    成本跟踪：每模型价格与会话预算。"""
+
+    # model name -> {"input": price per 1M tokens, "output": ...} 元/百万 token
+    pricing: dict = field(default_factory=dict)
+    budget: float = 0.0  # per-session cap; 0 = unlimited 会话预算，0 不限
+    total_budget: float = 0.0  # all-time ledger cap; 0 = unlimited 总账预算，0 不限
+    currency: str = "¥"
+
+
+@dataclass
 class ContextConfig:
     """Context awareness: project instruction file injection (P25).
     上下文感知：项目指令文件注入。"""
@@ -100,6 +112,7 @@ class AgentConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 50
     enable_plan_mode: bool = True
     skill_dirs: list[str] = field(default_factory=lambda: ["./skills", "~/.mini-agent/skills"])

@@ -190,6 +190,8 @@ class Application:
         # SubAgent + Worktree：/spawn 和 /team 命令使用
         self.worktree_manager = WorktreeManager(repo_dir=working_dir)
         worker_llm = ProviderRegistry.create_for_role(config, "worker")
+        worker_profile = config.llm_profiles.get(config.worker_profile)
+        worker_model = worker_profile.model if worker_profile else config.llm.model
         self.subagent_manager = SubAgentManager(
             llm=worker_llm,
             tool_registry=self.tool_registry,
@@ -197,6 +199,7 @@ class Application:
             event_bus=self.event_bus,
             working_dir=working_dir,
             worktree_manager=self.worktree_manager,
+            model_name=worker_model,
         )
 
         # Inject SubAgentManager into ToolContext so spawn_agents tool can use it
@@ -225,6 +228,16 @@ class Application:
 
         self.tool_recorder = ToolRecorder(Path.home() / ".mini-agent" / "recordings")
         self.tool_recorder.attach(self.event_bus)
+
+        # Cost tracker: per-model token usage priced via [cost] config
+        # 成本跟踪器：按模型计价 token 用量
+        from mini_agent.core.cost_tracker import CostTracker
+
+        self.cost_tracker = CostTracker(
+            config.cost, ledger_path=Path.home() / ".mini-agent" / "cost_ledger.json"
+        )
+        self.cost_tracker.attach(self.event_bus)
+        self.agent_loop.model_name = config.llm.model
 
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
@@ -321,6 +334,7 @@ class Application:
         self.session.metadata.model = profile.model
         self._llm = ProviderRegistry.create(profile)
         self.agent_loop._llm = self._llm
+        self.agent_loop.model_name = profile.model  # cost attribution 成本归属
         # Update model name in system prompt so the LLM self-identifies correctly
         # 同步更新 system prompt 中的模型名，让 LLM 正确自我认知
         self.session.conversation.system_prompt = self.session.conversation.system_prompt.replace(
@@ -331,8 +345,6 @@ class Application:
 
     async def run(self) -> None:
         self.terminal.show_welcome()
-        if self._context_file_loaded:
-            self.terminal.show_info(f"context: loaded {self._context_file_loaded}")
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
 
@@ -392,6 +404,35 @@ class Application:
             if self.agent_loop.snapshot_store:
                 self.agent_loop.snapshot_store.clear()
             self.terminal.show_info("Goodbye!")
+
+    def _show_budget_warning(self) -> None:
+        """Show budget warning lines when spend crosses 80%/100%.
+        成本超过预算 80%/100% 时显示警告行（会话预算和总账预算分别检查）。"""
+        cur = self.cost_tracker.currency
+        e = self.terminal.theme.error
+        w = self.terminal.theme.warning
+
+        ratio, level = self.cost_tracker.budget_status()
+        if level != "ok":
+            spent = f"{cur}{self.cost_tracker.total_cost:.4f}"
+            cap = f"{cur}{self.cost_tracker.budget:.2f}"
+            if level == "over":
+                msg = f"⚠ 会话预算超支: {spent} / {cap}"
+                self.terminal.console.print(f"  [bold {e}]{msg}[/bold {e}]")
+            else:
+                msg = f"会话预算警告: {spent} / {cap} ({ratio * 100:.0f}%)"
+                self.terminal.console.print(f"  [{w}]{msg}[/{w}]")
+
+        t_ratio, t_level = self.cost_tracker.total_budget_status()
+        if t_level != "ok":
+            spent = f"{cur}{self.cost_tracker.all_time_cost:.4f}"
+            cap = f"{cur}{self.cost_tracker.total_budget:.2f}"
+            if t_level == "over":
+                msg = f"⚠ 累计总预算超支: {spent} / {cap}"
+                self.terminal.console.print(f"  [bold {e}]{msg}[/bold {e}]")
+            else:
+                msg = f"累计总预算警告: {spent} / {cap} ({t_ratio * 100:.0f}%)"
+                self.terminal.console.print(f"  [{w}]{msg}[/{w}]")
 
     async def _autosave(self, force: bool = False) -> None:
         """Throttled auto-save; failures are silent (retried next turn).
@@ -512,9 +553,20 @@ class Application:
             self.terminal.show_file_changes(self.agent_loop.last_turn_file_changes)
             turn_tokens = self.agent_loop.last_turn_tokens
             self.session.metadata.total_tokens_used += turn_tokens
-            self.terminal.show_info(
-                f"tokens: {turn_tokens} this turn / {self.session.metadata.total_tokens_used} total"
+            turn_cost, _ = self.cost_tracker.end_turn()
+            cur = self.cost_tracker.currency
+            cost_part = f" ({cur}{turn_cost:.4f})" if turn_cost else ""
+            total_part = (
+                f" ({cur}{self.cost_tracker.total_cost:.4f})"
+                if self.cost_tracker.has_pricing
+                else ""
             )
+            self.terminal.show_info(
+                f"tokens: {turn_tokens} this turn{cost_part}"
+                f" / {self.session.metadata.total_tokens_used} total{total_part}"
+            )
+            self._show_budget_warning()
+            self.cost_tracker.flush_to_ledger()
             self.terminal.console.print()
         except KeyboardInterrupt:
             self.agent_loop.cancel()

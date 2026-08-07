@@ -5,10 +5,32 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.theme import Theme as RichTheme
 
 from mini_agent.ui.input_handler import SlashCommandCompleter, create_prompt_session
 from mini_agent.ui.renderer import StreamRenderer
 from mini_agent.ui.themes import Theme, get_theme
+
+
+def _markdown_styles(theme: Theme) -> RichTheme:
+    """Override Rich's default markdown colors (purple headings are hard to
+    read on dark terminals) with theme-aware colors.
+    覆盖 Rich 默认的 markdown 配色（紫色标题在深色终端很难看），改用主题色。"""
+    h = theme.heading or theme.success
+    return RichTheme(
+        {
+            "markdown.h1": f"bold {h}",
+            "markdown.h2": f"bold {h}",
+            "markdown.h3": f"bold {h}",
+            "markdown.h4": f"bold {h}",
+            "markdown.h1.border": theme.dim,
+            "markdown.item.bullet": theme.warning,
+            "markdown.item.number": theme.warning,
+            "markdown.hr": theme.dim,
+            "markdown.link": f"underline {theme.primary}",
+            "markdown.link_url": f"underline {theme.dim}",
+        }
+    )
 
 
 class Terminal:
@@ -16,11 +38,18 @@ class Terminal:
 
     def __init__(self, theme: Theme | None = None) -> None:
         self.theme = theme or get_theme("default")
-        self.console = Console()
+        self.console = Console(theme=_markdown_styles(self.theme))
         self.renderer = StreamRenderer(self.console)
         self._completer = SlashCommandCompleter()
         self._prompt_session = None
         self._toolbar_provider = None
+
+    def set_theme(self, theme: Theme) -> None:
+        """Switch theme, including the console's markdown styles.
+        切换主题——包括 Console 的 markdown 配色（标题/列表颜色）。"""
+        self.theme = theme
+        self.console.push_theme(_markdown_styles(theme))
+        self._prompt_session = None  # rebuilt with new prompt style 用新样式重建
 
     def show_welcome(self, llm_info: str = "") -> None:
         self.console.print()
@@ -52,6 +81,9 @@ class Terminal:
 
     async def get_user_input(self) -> str:
         self._ensure_prompt_session()
+        # Top rule marking the input area (bottom toolbar is the lower bound)
+        # 输入区上边界线（下边界由底部工具栏承担）
+        self.console.print(f"[{self.theme.dim}]{'─' * self.console.width}[/{self.theme.dim}]")
         return await self._prompt_session.prompt_async()
 
     async def confirm(self, prompt: str) -> bool | str:

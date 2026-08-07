@@ -120,6 +120,7 @@
 |---|---|
 | 来源 | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
 | 触发 | 每轮对话完成后（agent_loop.run 返回后） |
+| 内容 | 配置价格后带金额 `tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)` |
 | 关闭方法 | `app.py` `_handle_turn` 中注释掉 `self.terminal.show_info(...)` 那行 |
 
 ### ⑩ 文件变更汇总
@@ -131,6 +132,15 @@
 | 内容 | `files changed this turn:` + 每个文件一行（`+ 路径` 绿=新建，`~ 路径` 黄=修改，`- 路径` 红=删除） |
 | 关闭方法 | `app.py` `_handle_turn` 中删除 `show_file_changes` 调用行 |
 
+### ⑪ 预算警告行
+
+| 项 | 说明 |
+|---|---|
+| 来源 | `app.py` `_show_budget_warning`（每轮结束、token 统计行之后） |
+| 触发 | 会话预算（budget）或累计总预算（total_budget）已用 ≥80% |
+| 内容 | ≥80% 黄色 `会话预算警告: ¥4.12 / ¥5.00 (82%)`；≥100% 红色 `⚠ 累计总预算超支: ...`；两种预算独立检查可能各出一条 |
+| 关闭方法 | config.toml [cost] 段删掉 budget/total_budget 或设 0 |
+
 ---
 
 ## 三、非对话轮次的输出
@@ -138,7 +148,6 @@
 | 输出 | 来源 | 触发 |
 |---|---|---|
 | 欢迎标题 `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | 启动时 |
-| 上下文提示 `context: loaded CLAUDE.md` | `app.py` `run()`（P25 上下文感知） | 启动时发现项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md） |
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
