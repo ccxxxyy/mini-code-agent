@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。391 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。396 个测试全过。
 
 ---
 
@@ -1473,12 +1473,28 @@ P4 的 regex 匹配靠关键词（always/prefer/don't），用户不用这些词
 
 精确匹配 + substring 去重只能挡完全相同的重复。"always use type hints on functions" 和 "use type hints on all functions always" 内容等价但字面不同——substring 过不掉。词重叠（60% 交集）用最小集合分母衡量：5 个词里有 3 个一样 → 60% → 视为重复。60% 阈值在测试中验证过：太低（40%）会误杀不相关条目，太高（80%）形同虚设。不做 embedding 语义相似——需要额外模型，与 flash 级提取的成本定位矛盾。
 
+---
+
+# 第三十一部分：P31 MCP HTTP Transport
+
+## 31.1 两步激活：传输层 + 应用接线
+
+MCP 在 P5 就做了完整的 client/adapter/transport 三层架构和 config 解析，但从未接入 app.py——config.toml 里写了 [mcp.servers.github] 也不会有任何效果（没人调 connect_server）。P31 做两件事：加 HTTPTransport（约 30 行），以及在 app.py 的 run() 里遍历 config.mcp.servers 逐个连接（约 15 行）。大部分"工作"早就做完了——这次只是把线接上。
+
+## 31.2 为什么不做 SSE
+
+MCP 协议定义了 Streamable HTTP（POST + SSE 推送），但 SSE 是可选优化：它让服务器能主动推送进度/部分结果。工具调用（tools/list + tools/call）是请求-响应模式，POST 已完全覆盖。SSE 需要长连接管理、重连逻辑、事件解析——复杂度翻倍但本项目没有需要主动推送的 MCP 服务器场景。如果以后要对接需要 SSE 的服务器，只需加一个 SSETransport 实现 MCPTransport ABC。
+
+## 31.3 认证 headers
+
+HTTPTransport 构造时已接受 headers 参数（计划阶段预留），P31 收尾时补上了 MCPServerConfig.headers 字段和 connect_server 传递——3 行代码把认证链路接通。config.toml 里 `headers = { Authorization = "Bearer xxx" }` 经 TOML 解析为 dict，`_merge` 按字段 setattr 直通，HTTPTransport 在每次 POST 里带上。不做独立的 auth_token/auth_type 配置——headers 是最通用的形式（Basic/Bearer/自定义头都能表达），用户已经熟悉 HTTP headers 概念。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——391 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——396 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

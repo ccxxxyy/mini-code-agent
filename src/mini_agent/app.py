@@ -220,6 +220,12 @@ class Application:
         # 审计日志：/audit 将工具调用写入 JSONL
         audit_dir = Path.home() / ".mini-agent"
         self.audit_logger = AuditLogger(audit_dir)
+
+        # MCP manager: connects remote tool servers at startup
+        # MCP 管理器：启动时连接远程工具服务器
+        from mini_agent.tools.mcp.client import MCPManager
+
+        self.mcp_manager = MCPManager()
         self.audit_logger.attach(self.event_bus)
 
         # Tool recorder: /record captures tool calls, /replay re-runs them
@@ -345,6 +351,7 @@ class Application:
 
     async def run(self) -> None:
         self.terminal.show_welcome()
+        await self._connect_mcp_servers()
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
 
@@ -403,7 +410,20 @@ class Application:
             await self._autosave(force=True)
             if self.agent_loop.snapshot_store:
                 self.agent_loop.snapshot_store.clear()
+            await self.mcp_manager.disconnect_all()
             self.terminal.show_info("Goodbye!")
+
+    async def _connect_mcp_servers(self) -> None:
+        """Connect MCP servers listed in config (async — needs event loop).
+        连接 config 中列出的 MCP 服务器（异步——需要事件循环）。"""
+        if not self.config.mcp.servers:
+            return
+        for name, srv_cfg in self.config.mcp.servers.items():
+            try:
+                count = await self.mcp_manager.connect_server(name, srv_cfg, self.tool_registry)
+                self.terminal.show_info(f"MCP: {name} connected ({count} tools)")
+            except Exception as e:
+                self.terminal.show_error(f"MCP: {name} failed: {e}")
 
     def _show_budget_warning(self) -> None:
         """Show budget warning lines when spend crosses 80%/100%.

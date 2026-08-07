@@ -22,12 +22,9 @@
 
 > P30 实现：regex → LLM 结构化提取（EXTRACTION_PROMPT + JSON 解析 + 词重叠去重 60%），SESSION_END hook 修复。9 个新测试，391 个全过。
 
-### 1.3 MCP HTTP Transport
+### 1.3 MCP HTTP Transport ✅ 已完成
 
-- **现状**：`tools/mcp/transport.py` 只有 `StdioTransport`（子进程），接不了远程 MCP 服务器。
-- **要做什么**：新增 `HTTPTransport(MCPTransport)`，用 httpx 实现 MCP Streamable HTTP 传输。
-- **插槽位置**：`MCPTransport` ABC（send/close）已定义；`MCPManager.connect_server` 已有 transport 分支判断；`MCPServerConfig.url` 字段已存在。
-- **工作量**：中（~150 行 + 测试）
+> P31 实现：HTTPTransport（httpx POST JSON-RPC）+ MCPManager http 分支 + app.py 启动接线/退出断连。5 个新测试，396 个全过。
 
 ### 1.4 工具并行执行 ✅ 已完成
 

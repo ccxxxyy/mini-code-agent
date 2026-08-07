@@ -253,7 +253,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 391 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
+| 测试 | 396 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
 | 工具 | 7 个内置工具（read_file / write_file / edit_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -273,6 +273,7 @@
 | 工具链录制/回放 | `/record` 录制工具调用序列 + `/replay` 零 LLM 确定性重放（P28）——例行操作录一次永久复用，CC 无此能力 |
 | 成本仪表盘 | `/cost` 按模型分账 input/output 计价 + 会话预算警告（P29）——按量付费用户的刚需，CC 订阅制无此功能 |
 | LLM 记忆提取 | MemoryExtractor 从 regex 升级为 LLM 结构化提取（P30）——理解语义不依赖关键词，覆盖率质变 |
+| MCP HTTP Transport | HTTPTransport 远程 MCP 服务器连接 + app 启动自动发现（P31）——P5 预留的 MCP 架构终于接通，支持 headers 认证 |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
 ## 如实说明：四处有意简化

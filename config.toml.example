@@ -50,8 +50,15 @@
 # max_agent_iterations = 50
 # theme = "default"          # "default" | "dark" | "light"
 
-# MCP 服务器配置
+# MCP 服务器配置（启动时自动连接，工具注册为 mcp_<服务器名>_<工具名>）
+# stdio 传输（子进程）
 # [mcp.servers.github]
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-github"]
 # transport = "stdio"
+#
+# HTTP 传输（远程服务器）
+# [mcp.servers.remote-api]
+# url = "http://localhost:8080/mcp"
+# transport = "http"
+# headers = { Authorization = "Bearer your-token-here" }   # 可选认证头

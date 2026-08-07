@@ -43,6 +43,7 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)
     url: str = ""
     env: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"
 
 
