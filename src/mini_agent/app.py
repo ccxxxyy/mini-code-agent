@@ -219,6 +219,13 @@ class Application:
         self.audit_logger = AuditLogger(audit_dir)
         self.audit_logger.attach(self.event_bus)
 
+        # Tool recorder: /record captures tool calls, /replay re-runs them
+        # 工具录制器：/record 捕获工具调用，/replay 重放
+        from mini_agent.core.tool_recorder import ToolRecorder
+
+        self.tool_recorder = ToolRecorder(Path.home() / ".mini-agent" / "recordings")
+        self.tool_recorder.attach(self.event_bus)
+
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
         self.skill_registry.load_all()

@@ -639,3 +639,32 @@
 - bash 命令的文件变更不快照
 - 只保留最近 5 轮；单文件 30MB 上限
 - 会话结束快照清空（undo 是会话内操作）
+
+---
+
+## Phase 28: 工具链录制/回放 (P28)
+
+### P28.1 ToolRecorder
+- [x] `core/tool_recorder.py` 新建——EventBus 订阅者（仿 AuditLogger 模式）：ToolCallStartEvent 捕获 name+args，ToolCallEndEvent 按 call_id 关联成功状态
+- [x] 只录成功调用（is_error 的丢弃）；suspended 标志防回放自录
+- [x] 存储 `~/.mini-agent/recordings/<name>.json`（含 name/created_at/steps）
+- [x] start/stop/cancel/save/list_recordings/load/delete 完整生命周期
+
+### P28.2 命令
+- [x] `/record start <name>|stop|cancel|list|delete <name>` 五个子命令
+- [x] `/replay <name>`——逐条构造 ToolCall 调 agent_loop._execute_single_tool（权限/hook/快照全走），逐步显示进度，失败即停
+
+### P28.3 验证
+- [x] `tests/unit/test_tool_recorder.py` 新建 10 个测试（保存/只录成功/cancel 丢弃/suspended 不录/未录制忽略/list-load-delete 往返 + 4 个命令集成：完整周期/回放真实执行/失败即停/录制不存在），354 个测试全过
+
+### P28.4 参数模板化
+- [x] render_template：递归替换 args 中的 {{变量}} 占位符（str/dict/list 全遍历）
+- [x] 内置自动变量：{{date}}/{{time}}/{{datetime}}（回放时填当前值）
+- [x] /replay <name> k=v 传自定义变量；缺变量时明确提示 Missing template variable(s)
+- [x] find_placeholders 预扫描步骤中的占位符（回放前校验完整性）
+- [x] 6 个新测试（替换/嵌套/内置变量/占位符发现/带变量回放/缺变量提示），360 个测试全过
+
+### 局限（文档已注明）
+- SubAgent 内部工具调用不录（独立 loop 不经主 EventBus）
+- 回放结果不进对话历史（LLM 认知可能脱节，必要时提醒重读文件）
+- 录制状态只在内存——中途崩溃丢失未保存的录制（已保存文件跨会话永久有效）
