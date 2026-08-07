@@ -610,3 +610,19 @@
 - [x] LLMResponseEvent 扩展字段带默认值（向后兼容，接口冻结不受影响）
 - [x] [cost] 配置段复用 TOML 通用 _merge（零胶水）
 - [x] 13 个新测试，总计 373 个全过
+
+---
+
+## Phase 30 检查项：LLM 记忆提取
+
+### 功能完整性
+- [x] LLM 结构化提取替代 regex（覆盖率从"只匹配 always/prefer/don't"升级为"LLM 理解对话语义"）
+- [x] 三类提取：preference（用户偏好）/ convention（项目约定）/ fact（技术事实）
+- [x] JSON 解析容错：markdown 围栏自动剥离、畸形 JSON 静默降级
+- [x] 词重叠去重（60% 阈值）避免"换个说法重复记"
+- [x] SESSION_END hook 修复（P19 遗留 bug 消除）
+
+### 架构合规
+- [x] 接口不变（maybe_extract 签名兼容）
+- [x] LLM 调用失败绝不阻断会话退出（try/except + 空列表降级）
+- [x] 9 个新测试（全面覆盖 LLM 响应变体），总计 391 个全过

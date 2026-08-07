@@ -703,3 +703,22 @@
 ### 局限（文档已注明）
 - 成本会话级（结束清零）——长期账单以供应商后台为准
 - 价格表手工维护
+
+---
+
+## Phase 30: LLM 记忆提取 (P30)
+
+### P30.1 LLM 提取替换 regex
+- [x] `memory/extraction.py` 重写——regex 全删，改为 LLM 结构化提取：构造 EXTRACTION_PROMPT（3类：preference/convention/fact，JSON 数组输出）+ 调 stream + assemble_response + JSON 解析
+- [x] 取最近 20 条消息（MAX_RECENT_MESSAGES），ASSISTANT 内容截断 200 字（控制 token 消耗）
+- [x] 降级：LLM 调用失败/JSON 解析失败/markdown 围栏 → 静默返回空列表（绝不阻断退出）
+
+### P30.2 去重升级
+- [x] 保留原有的完全匹配 + substring 去重
+- [x] 新增词重叠度检查（_is_similar）：60% 词交集 → 视为重复（丢弃新的保留旧的）
+
+### P30.3 SESSION_END hook 修复
+- [x] `app.py` — 修复 P19 遗留 bug：MemoryExtractor() 无参数构造（与签名冲突）→ 改为传入 PersistentMemory + LLM Provider
+
+### P30.4 验证
+- [x] `tests/unit/test_persistent_memory.py` 重写 extraction 部分——9 个 LLM 提取测试（JSON 解析/空响应/畸形 JSON/markdown 围栏/精确去重/词重叠去重/项目级存储/无 LLM 降级/轮次不足跳过），391 个测试全过

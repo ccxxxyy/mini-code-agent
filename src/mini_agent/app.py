@@ -474,17 +474,11 @@ class Application:
             if not app.config.memory.auto_extract:
                 return HookResult()
             try:
-                extractor = MemoryExtractor()
-                new_entries = await extractor.maybe_extract(
+                pm = PersistentMemory()
+                extractor = MemoryExtractor(pm, app._llm)
+                await extractor.maybe_extract(
                     app.session.conversation, app.session.metadata.project_dir
                 )
-                if new_entries:
-                    pm = PersistentMemory()
-                    for entry in new_entries:
-                        if app.session.metadata.project_dir:
-                            await pm.add_project_memory(app.session.metadata.project_dir, entry)
-                        else:
-                            await pm.add_user_memory(entry)
             except Exception:
                 pass
             return HookResult()

@@ -77,50 +77,113 @@ async def test_search_across_project_and_user(tmp_path: Path):
     assert len(results) == 2
 
 
-# --- MemoryExtractor ---
+# --- MemoryExtractor (LLM-based, P30) ---
+
+
+class _MockExtractionLLM:
+    """MockLLM that returns a configurable JSON string for extraction.
+    返回可配置 JSON 字符串的 MockLLM。"""
+
+    def __init__(self, response_text: str):
+        self._response = response_text
+
+    async def stream(self, messages, **kwargs):
+        from mini_agent.llm.base import StreamChunk
+
+        yield StreamChunk(delta=self._response)
+        yield StreamChunk(finish_reason="stop")
+
+
+def _make_conv(turns: int = 6) -> Conversation:
+    conv = Conversation()
+    for i in range(turns):
+        conv.append(Message(role=Role.USER, content=f"question {i}"))
+        conv.append(Message(role=Role.ASSISTANT, content=f"answer {i}"))
+    return conv
 
 
 async def test_extraction_too_few_turns(tmp_path: Path):
     pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
-    extractor = MemoryExtractor(pm)
+    llm = _MockExtractionLLM("[]")
+    extractor = MemoryExtractor(pm, llm)
 
     conv = Conversation()
-    conv.append(Message(role=Role.USER, content="always use type hints"))
-
+    conv.append(Message(role=Role.USER, content="hello"))
     entries = await extractor.maybe_extract(conv)
-    assert entries == []  # too few turns 轮次太少
+    assert entries == []
 
 
-async def test_extraction_finds_preferences(tmp_path: Path):
+async def test_llm_extraction_parses_json(tmp_path: Path):
     pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
-    extractor = MemoryExtractor(pm)
+    json_resp = (
+        '[{"content": "User prefers type hints", "category": "preference", "tags": ["coding"]}]'
+    )
+    llm = _MockExtractionLLM(json_resp)
+    extractor = MemoryExtractor(pm, llm)
 
-    conv = Conversation()
-    for i in range(6):
-        conv.append(Message(role=Role.USER, content=f"question {i}"))
-        conv.append(Message(role=Role.ASSISTANT, content=f"answer {i}"))
-    conv.append(Message(role=Role.USER, content="please always use type hints on all functions"))
-
+    conv = _make_conv()
     entries = await extractor.maybe_extract(conv)
-    assert len(entries) >= 1
-    assert any("type hints" in e.content for e in entries)
+    assert len(entries) == 1
+    assert "type hints" in entries[0].content
+    assert "preference" in entries[0].tags
 
 
-async def test_extraction_deduplicates(tmp_path: Path):
+async def test_llm_extraction_empty_response(tmp_path: Path):
     pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
-    await pm.add_user_memory(MemoryEntry(content="use type hints on all functions"))
+    llm = _MockExtractionLLM("[]")
+    extractor = MemoryExtractor(pm, llm)
 
-    extractor = MemoryExtractor(pm)
-    conv = Conversation()
-    for i in range(6):
-        conv.append(Message(role=Role.USER, content=f"msg {i}"))
-        conv.append(Message(role=Role.ASSISTANT, content=f"ans {i}"))
-    conv.append(Message(role=Role.USER, content="always use type hints on all functions"))
-
+    conv = _make_conv()
     entries = await extractor.maybe_extract(conv)
-    # Should deduplicate: "use type hints on all functions" already exists
-    # 应去重："use type hints on all functions" 已存在
-    assert all("type hints" not in e.content for e in entries)
+    assert entries == []
+
+
+async def test_llm_extraction_malformed_json(tmp_path: Path):
+    pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
+    llm = _MockExtractionLLM("this is not json at all {{{")
+    extractor = MemoryExtractor(pm, llm)
+
+    conv = _make_conv()
+    entries = await extractor.maybe_extract(conv)
+    assert entries == []
+
+
+async def test_llm_extraction_markdown_fenced(tmp_path: Path):
+    pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
+    fenced = '```json\n[{"content": "uses uv", "category": "convention"}]\n```'
+    llm = _MockExtractionLLM(fenced)
+    extractor = MemoryExtractor(pm, llm)
+
+    conv = _make_conv()
+    entries = await extractor.maybe_extract(conv)
+    assert len(entries) == 1
+    assert "uv" in entries[0].content
+
+
+async def test_exact_dedup_still_works(tmp_path: Path):
+    pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
+    await pm.add_user_memory(MemoryEntry(content="User prefers type hints"))
+
+    json_resp = '[{"content": "User prefers type hints", "category": "preference"}]'
+    llm = _MockExtractionLLM(json_resp)
+    extractor = MemoryExtractor(pm, llm)
+
+    conv = _make_conv()
+    entries = await extractor.maybe_extract(conv)
+    assert entries == []
+
+
+async def test_similarity_dedup(tmp_path: Path):
+    pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
+    await pm.add_user_memory(MemoryEntry(content="always use type hints on functions"))
+
+    json_resp = '[{"content": "use type hints on all functions always"}]'
+    llm = _MockExtractionLLM(json_resp)
+    extractor = MemoryExtractor(pm, llm)
+
+    conv = _make_conv()
+    entries = await extractor.maybe_extract(conv)
+    assert entries == []
 
 
 async def test_extraction_stores_to_project(tmp_path: Path):
@@ -130,16 +193,20 @@ async def test_extraction_stores_to_project(tmp_path: Path):
         user_memory_dir=str(tmp_path / "mem"),
         project_memory_file=".mini-agent/memory.json",
     )
-    extractor = MemoryExtractor(pm)
+    json_resp = '[{"content": "project uses pytest", "category": "convention"}]'
+    llm = _MockExtractionLLM(json_resp)
+    extractor = MemoryExtractor(pm, llm)
 
-    conv = Conversation()
-    for i in range(6):
-        conv.append(Message(role=Role.USER, content=f"msg {i}"))
-        conv.append(Message(role=Role.ASSISTANT, content=f"ans {i}"))
-    conv.append(
-        Message(role=Role.USER, content="this project uses pytest with --tb=short for all tests")
-    )
-
+    conv = _make_conv()
     await extractor.maybe_extract(conv, project_dir=project_dir)
     stored = await pm.load_project_memory(project_dir)
     assert len(stored) >= 1
+
+
+async def test_no_llm_returns_empty(tmp_path: Path):
+    pm = PersistentMemory(user_memory_dir=str(tmp_path / "mem"))
+    extractor = MemoryExtractor(pm, llm=None)
+
+    conv = _make_conv()
+    entries = await extractor.maybe_extract(conv)
+    assert entries == []
