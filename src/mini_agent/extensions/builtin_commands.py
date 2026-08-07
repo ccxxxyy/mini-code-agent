@@ -127,6 +127,13 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="todo",
+            description="Task list with dependencies (usage: /todo [add|done|start|delete|clear])",
+            handler=_make_todo(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="cost",
             description="Cost dashboard: session + all-time spend (usage: /cost [turns|reset])",
             handler=_make_cost(app),
@@ -183,6 +190,100 @@ def _make_help(app: Application) -> HandlerFn:
         lines = ["**Available Commands 可用命令：**", ""]
         for c in sorted(cmds, key=lambda x: x.name):
             lines.append(f"  `/{c.name}` — {c.description}")
+        return "\n".join(lines)
+
+    return handler
+
+
+def _make_todo(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.core.task_store import TaskRecord
+
+        store = app.task_store
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+
+        if sub == "add":
+            if len(parts) < 2 or not parts[1].strip():
+                return "Usage: /todo add <description> [--after <id>]"
+            desc_raw = parts[1].strip()
+            blocked: list[str] = []
+            if "--after" in desc_raw:
+                desc_part, _, after_part = desc_raw.partition("--after")
+                desc_raw = desc_part.strip()
+                for raw_id in after_part.split(","):
+                    aid = raw_id.strip()
+                    if not aid:
+                        continue
+                    match = store.get(aid)
+                    if match:
+                        blocked.append(match.id)
+                    else:
+                        return f"Task not found: {aid}"
+            task = TaskRecord(description=desc_raw, blocked_by=blocked)
+            store.add(task)
+            dep_note = ""
+            if blocked:
+                dep_note = " [blocked by: " + ", ".join(b[:12] for b in blocked) + "]"
+            return f"Added: {task.id[:12]} {task.description}{dep_note}"
+
+        if sub in ("done", "start", "fail"):
+            if len(parts) < 2:
+                return f"Usage: /todo {sub} <id>"
+            tid = parts[1].strip()
+            status_map = {"done": "completed", "start": "in_progress", "fail": "failed"}
+            new_status = status_map[sub]
+            updated = store.update(tid, status=new_status)
+            if not updated:
+                return f"Task not found: {tid}"
+            lines = [f"{updated.id[:12]} → {new_status}"]
+            if sub == "done":
+                unblocked = store.find_unblocked_by(updated.id)
+                for u in unblocked:
+                    lines.append(f"  unblocked: {u.id[:12]} {u.description[:40]}")
+            if sub == "start" and updated.blocked_by:
+                tasks = store.load()
+                done_ids = {t.id for t in tasks if t.status in ("completed", "failed")}
+                pending_deps = [b for b in updated.blocked_by if b not in done_ids]
+                if pending_deps:
+                    lines.append(f"  ⚠ still blocked by: {', '.join(b[:12] for b in pending_deps)}")
+            return "\n".join(lines)
+
+        if sub == "delete":
+            if len(parts) < 2:
+                return "Usage: /todo delete <id>"
+            tid = parts[1].strip()
+            return "Deleted." if store.remove(tid) else f"Task not found: {tid}"
+
+        if sub == "clear":
+            removed = store.clear_done()
+            return f"Cleared {removed} completed/failed task(s)."
+
+        # default: list 默认列出
+        tasks = store.load()
+        if not tasks:
+            return "No tasks. /todo add <description> to create one."
+        groups = {"pending": [], "in_progress": [], "completed": [], "failed": []}
+        for t in tasks:
+            groups.get(t.status, groups["pending"]).append(t)
+        labels = {
+            "pending": "⏳ pending",
+            "in_progress": "🔄 in_progress",
+            "completed": "✅ completed",
+            "failed": "❌ failed",
+        }
+        lines = ["**Tasks 任务列表：**"]
+        for status in ("pending", "in_progress", "completed", "failed"):
+            items = groups[status]
+            if not items:
+                continue
+            lines.append(f"\n  {labels[status]}:")
+            for t in items:
+                dep = ""
+                if t.blocked_by:
+                    dep = f" [blocked by: {', '.join(b[:12] for b in t.blocked_by)}]"
+                tag = f" #{' #'.join(t.tags)}" if t.tags else ""
+                lines.append(f"    {t.id[:12]}  {t.description}{dep}{tag}")
         return "\n".join(lines)
 
     return handler

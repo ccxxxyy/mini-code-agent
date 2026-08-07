@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。396 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。412 个测试全过。
 
 ---
 
@@ -1489,12 +1489,26 @@ MCP 协议定义了 Streamable HTTP（POST + SSE 推送），但 SSE 是可选�
 
 HTTPTransport 构造时已接受 headers 参数（计划阶段预留），P31 收尾时补上了 MCPServerConfig.headers 字段和 connect_server 传递——3 行代码把认证链路接通。config.toml 里 `headers = { Authorization = "Bearer xxx" }` 经 TOML 解析为 dict，`_merge` 按字段 setattr 直通，HTTPTransport 在每次 POST 里带上。不做独立的 auth_token/auth_type 配置——headers 是最通用的形式（Basic/Bearer/自定义头都能表达），用户已经熟悉 HTTP headers 概念。
 
+---
+
+# 第三十二部分：P32 持久化任务系统（S12）
+
+## 32.1 S12 缺口分析
+
+S01-S20 对照审计中 S12 是唯一有实际价值的缺口。PlanStep 已有依赖图（depends_on）和四种状态（pending/in_progress/completed/failed），但它是 /team 执行引擎的内部数据结构——用完即弃，用户看不到改不了。S12 要求的是用户可管理、跨会话持久的任务列表。
+
+解法不是改 PlanStep——两者粒度不同（LLM 一步可能对应用户好几个 task）。新建 TaskRecord + TaskStore，/todo 是纯用户界面，/team 是 LLM 执行引擎，两者独立互不干扰。
+
+## 32.2 设计选择
+
+单文件 `tasks.json` 而非按任务一个文件——任务量不会大到需要分文件（不是 sessions 的几百个），JSON 方便用编辑器直接改。ID 用 `task_<uuid8>` 而非整数（PlanStep 用整数 index 在 /team 内部自增，跨会话不唯一）。ID 前缀匹配（`/todo done task_a1` 匹配完整 ID）是用户体验细节——16 位全输太长。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——396 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——412 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -71,8 +71,8 @@ These dataclasses are part of the stable interface:
 
 ### Features 功能
 
-- P1-P31: 31 development phases completed (see README.md for full list)
-- 396 tests, zero external dependencies for testing
+- P1-P32: 32 development phases completed (see README.md for full list)
+- 412 tests, zero external dependencies for testing
 - Per-turn file change summary (+created / ~modified / -deleted)
 - Colored diff preview for edit_file (full-width background highlight)
 - 8 built-in tools (read/write/edit/delete/bash/glob/grep/spawn_agents)

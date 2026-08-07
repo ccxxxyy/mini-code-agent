@@ -59,6 +59,7 @@
 | `~/.mini-agent/audit.jsonl` | 用户级 | 审计日志（`/audit on` 开启后） |
 | `~/.mini-agent/recordings/` | 用户级 | 工具链录制（`/record` 保存，`/replay` 读取） |
 | `~/.mini-agent/cost_ledger.json` | 用户级 | 成本累计总账（每轮自动写入；`/cost reset` 确认后清零并重置起始日期，删文件等效） |
+| `<项目>/.mini-agent/tasks.json` | 项目级 | 持久化任务列表（`/todo` 管理，跨会话保留，手编辑 JSON 也可） |
 | `<项目>/.mini-agent/undo_snapshots/` | 项目级 | undo 文件快照（**临时**——会话结束自动清空） |
 
 ### 组件生命周期一览
