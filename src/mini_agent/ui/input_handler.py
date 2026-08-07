@@ -128,23 +128,32 @@ def create_prompt_session(
         return HTML(f"<toolbar> {toolbar_provider()} </toolbar>")
 
     # Reserve enough rows for the FULL command menu so no entry is cut off.
-    # The prompt scrolls prior conversation up to make room when '/' opens
-    # the menu. +2 covers the meta row and rounding; capped for tiny terminals.
-    # 为完整命令菜单预留足够行数，不截断任何条目。输入 '/' 弹菜单时会把
-    # 上方会话内容顶上去腾出空间。+2 容纳边距；小终端下限制上限。
-    # +4: bottom toolbar row + input row + margins eat into the reserved
-    # space, so reserving exactly count+2 still clipped two entries.
-    # +4：底部工具栏行 + 输入行 + 边距会占用预留空间，只留 count+2 仍会截掉两条。
+    # +4: bottom toolbar row + input row + margins eat into the reserved space.
+    # 为完整命令菜单预留足够行数，不截断任何条目。+4 容纳工具栏/输入行/边距。
     menu_rows = 18
     if completer is not None and completer.command_count > 0:
         menu_rows = min(completer.command_count + 4, 32)
+
+    # Only reserve menu space (which scrolls the conversation up) while the
+    # input actually starts with '/'. Normal typing keeps the layout compact.
+    # 只在输入以 '/' 开头时才预留菜单空间（预留会把会话顶上去）——
+    # 普通输入保持紧凑布局，不留大片空白。
+    from prompt_toolkit.application import get_app
+    from prompt_toolkit.filters import Condition
+
+    @Condition
+    def _slash_typing() -> bool:
+        try:
+            return get_app().current_buffer.text.lstrip().startswith("/")
+        except Exception:
+            return False
 
     session: PromptSession = PromptSession(
         history=_make_history(),
         multiline=False,
         key_bindings=bindings,
         completer=completer,
-        complete_while_typing=True,
+        complete_while_typing=_slash_typing,
         style=create_prompt_style(theme),
         message=HTML("<prompt>&gt; </prompt>"),
         reserve_space_for_menu=menu_rows,

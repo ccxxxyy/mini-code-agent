@@ -668,3 +668,38 @@
 - SubAgent 内部工具调用不录（独立 loop 不经主 EventBus）
 - 回放结果不进对话历史（LLM 认知可能脱节，必要时提醒重读文件）
 - 录制状态只在内存——中途崩溃丢失未保存的录制（已保存文件跨会话永久有效）
+
+---
+
+## Phase 29: 成本仪表盘 (P29)
+
+### P29.1 数据管道
+- [x] `models/events.py` — LLMResponseEvent 加 prompt_tokens/completion_tokens/model 三字段（带默认值向后兼容）
+- [x] `agent_loop.py` — emit 时从 response.usage 填充（TokenUsage 的拆分数据原本被丢弃，现在接上）+ model_name 属性
+- [x] `subagent.py` — SubAgent/SubAgentManager 传 model_name（强弱混编的 worker 便宜模型正确归属）
+- [x] app.py — 模型切换（switch_llm_profile + /model 裸名兜底）同步 model_name
+
+### P29.2 计价与预算
+- [x] `models/config.py` — CostConfig（pricing dict + budget + currency），[cost] 段经 TOML 通用 _merge 自动生效
+- [x] `core/cost_tracker.py` 新建——EventBus 订阅者（第 5 个纯订阅者）：按模型累计 prompt/completion/calls，input/output 分开计价（元/百万 token）
+- [x] budget_status 三档：ok（<80%）/warn（80-100%）/over（≥100%）
+- [x] app.py _show_budget_warning——每轮结束超 80% 黄色/超 100% 红色警告（提醒不阻断）
+
+### P29.3 展示
+- [x] `/cost` 命令——每模型 调用数/input/output/金额 + 总额 + 预算占比；未配置价格时提示如何配置
+- [x] `/status` 加 Cost 行
+
+### P29.4 验证
+- [x] `tests/unit/test_cost_tracker.py` 新建 13 个测试（累计/unknown 归置/零用量忽略/计价公式/无价格 None/混合计价/预算三档/无预算恒 ok/摘要格式 + 4 集成：轮次记录模型用量/cost 命令/status 行/TOML [cost] 合并），373 个测试全过
+
+### P29.5 累计总账与逐轮明细
+- [x] `cost_ledger.json` 持久总账——存 token 非金额（价格调整后金额视图自动跟随），每轮幂等 flush，硬杀不丢
+- [x] /cost 两区块面板（本次会话 + 累计总账）；/cost reset 确认后清零并重置起始日期
+- [x] /cost turns 逐轮明细（会话级，end_turn 增量记录）
+- [x] 轮末 token 行带金额：tokens: 6373 this turn (¥0.0089) / ... total (¥0.0182)
+- [x] total_budget 总账预算——与会话 budget 独立检查，同 80%/100% 阈值，警告文案区分来源
+- [x] 排版：宽度感知 CJK 填充（中文占2格）对齐表格 + 表头行 + "请求数=API调用次数"说明行
+
+### 局限（文档已注明）
+- 成本会话级（结束清零）——长期账单以供应商后台为准
+- 价格表手工维护

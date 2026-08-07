@@ -33,6 +33,19 @@
 # 单文件截断长度（字符）
 # max_chars = 8000
 
+[cost]
+# 成本仪表盘：/cost 查看，每轮结束超预算时警告
+# budget = 5.0                   # 本会话预算上限（元），0 或不设 = 不限
+# total_budget = 50.0            # 累计总账预算上限（元），/cost reset 后重新计
+# currency = "¥"
+# 每模型价格（元/百万 token，input/output 分开——按 API 供应商定价填写）
+# [cost.pricing.deepseek-chat]
+# input = 2.0
+# output = 8.0
+# [cost.pricing.deepseek-v4-flash-0731]
+# input = 0.15
+# output = 1.5
+
 # 顶级配置
 # max_agent_iterations = 50
 # theme = "default"          # "default" | "dark" | "light"

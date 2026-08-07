@@ -127,6 +127,13 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="cost",
+            description="Cost dashboard: session + all-time spend (usage: /cost [turns|reset])",
+            handler=_make_cost(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="record",
             description="Record tool calls (usage: /record start <name>|stop|cancel|list|delete)",
             handler=_make_record(app),
@@ -176,6 +183,35 @@ def _make_help(app: Application) -> HandlerFn:
         lines = ["**Available Commands 可用命令：**", ""]
         for c in sorted(cmds, key=lambda x: x.name):
             lines.append(f"  `/{c.name}` — {c.description}")
+        return "\n".join(lines)
+
+    return handler
+
+
+def _make_cost(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        tracker = app.cost_tracker
+        sub = args.strip().lower()
+
+        if sub == "reset":
+            if await app.terminal.ask_yes_no("重置从始至终的成本总账？(会话内统计不受影响)"):
+                tracker.reset_ledger()
+                return "All-time cost ledger reset. 总账已清零。"
+            return "Cancelled."
+
+        if sub == "turns":
+            lines = ["**Per-turn Cost 逐轮成本（本会话）：**", ""]
+            lines.extend(tracker.turn_lines())
+            return "\n".join(lines)
+
+        lines = ["**Cost Dashboard 成本仪表盘：**", ""]
+        lines.extend(tracker.summary_lines())
+        if not tracker.has_pricing:
+            lines.append("")
+            lines.append(
+                "  (no pricing configured -- add a [cost] section to config.toml "
+                "to see money amounts; see config.toml.example)"
+            )
         return "\n".join(lines)
 
     return handler
@@ -389,6 +425,18 @@ def _make_clear(app: Application) -> HandlerFn:
     return handler
 
 
+def _cost_status_line(app: Application) -> str:
+    """One-line cost summary for /status. /status 里的单行成本摘要。"""
+    tracker = app.cost_tracker
+    if not tracker.has_pricing:
+        return "  Cost: (no pricing configured -- see /cost)"
+    cur = tracker.currency
+    line = f"  Cost: {cur}{tracker.total_cost:.4f}"
+    if tracker.budget > 0:
+        line += f" / budget {cur}{tracker.budget:.2f}"
+    return line
+
+
 def _make_status(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         import sys
@@ -404,6 +452,7 @@ def _make_status(app: Application) -> HandlerFn:
             f"  Platform: {platform}",
             f"  Turns: {meta.total_turns}",
             f"  Tokens used: {meta.total_tokens_used}",
+            _cost_status_line(app),
             f"  Context: {cm.total_tokens}/{cm.max_tokens} ({cm.usage_ratio:.0%})",
             f"  Messages: {len(app.session.conversation.messages)}",
             f"  Session ID: {meta.session_id}",
@@ -447,6 +496,7 @@ def _make_model(app: Application) -> HandlerFn:
 
         app._llm = ProviderRegistry.create(app.config.llm)
         app.agent_loop._llm = app._llm
+        app.agent_loop.model_name = arg  # cost attribution 成本归属
         return f"模型已切换为: {arg}"
 
     return handler
@@ -700,8 +750,7 @@ def _make_theme(app: Application) -> HandlerFn:
         if arg not in THEMES:
             return f"Unknown theme: `{arg}`. Available: {', '.join(sorted(THEMES))}"
 
-        app.terminal.theme = new_theme
-        app.terminal._prompt_session = None
+        app.terminal.set_theme(new_theme)
         app.trace_renderer.theme = new_theme
         app.teach_renderer.theme = new_theme
 

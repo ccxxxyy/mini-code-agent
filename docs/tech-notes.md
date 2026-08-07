@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。360 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。386 个测试全过。
 
 ---
 
@@ -1443,12 +1443,28 @@ Skill 是手写的自然语言指令，LLM 读了照做——仍要推理，弱�
 
 ---
 
+# 第二十九部分：P29 成本仪表盘
+
+## 29.1 被丢弃的数据
+
+openai_provider 一直在解析 usage chunk 的 prompt_tokens/completion_tokens（stream_options.include_usage），但 agent_loop 只把 total_tokens 加进计数——拆分数据在 emit LLMResponseEvent 时被丢弃。成本跟踪的第一步就是把这条已有的数据通路接完：事件加三个带默认值的字段（向后兼容，不碰冻结接口），emit 时填充。教训：做新功能前先查数据是不是已经有了——这次 80% 的"数据管道"原本就存在。
+
+## 29.2 模型归属的三个来源
+
+成本按模型分账，但 LLMProvider ABC 没有 model 属性（接口已冻结不能加）。解法：AgentLoop 加 model_name 普通属性，三处赋值——app 初始化（主模型）、switch_llm_profile 和 /model 裸名兜底（切换）、SubAgentManager 构造（worker 模型，从 llm_profiles[worker_profile] 解析）。SubAgent 的 LLM 调用 emit 到共享 EventBus，所以强弱混编下 Planner 用贵模型、Worker 用便宜模型，/cost 里各算各的——这正是验证混编省钱效果的直接工具。
+
+## 29.3 预算不阻断的设计选择
+
+超预算只警告（80% 黄/100% 红）不拦截 LLM 调用。理由：工具不该替用户做花钱决定——用户可能正在关键任务中途，强行阻断的代价（半途而废）通常高于超支本身。预算是提醒线不是熔断线；真要止损，用户看到红色警告后 Ctrl+C 或 /exit 即可。
+
+---
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——360 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——386 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

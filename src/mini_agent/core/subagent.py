@@ -75,6 +75,7 @@ class SubAgent:
         working_dir: Path,
         worktree_path: Path | None = None,
         allowed_tools: list[str] | None = None,
+        model_name: str = "",
     ) -> None:
         self.agent_id = uuid.uuid4().hex[:8]
         self.task = task
@@ -106,6 +107,7 @@ class SubAgent:
             config=config,
             tool_context=tool_context,
         )
+        self._loop.model_name = model_name  # cost attribution 成本归属
 
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
         shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
@@ -186,6 +188,7 @@ class SubAgentManager:
         event_bus: EventBus,
         working_dir: Path,
         worktree_manager=None,
+        model_name: str = "",
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
@@ -193,6 +196,7 @@ class SubAgentManager:
         self._event_bus = event_bus
         self._working_dir = working_dir
         self._worktree_manager = worktree_manager
+        self._model_name = model_name
         self._active: dict[str, _ActiveAgent] = {}
 
     async def spawn(
@@ -220,6 +224,7 @@ class SubAgentManager:
             working_dir=self._working_dir,
             worktree_path=worktree_path,
             allowed_tools=allowed_tools,
+            model_name=self._model_name,
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(

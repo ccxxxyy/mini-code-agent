@@ -76,6 +76,9 @@ class AgentLoop:
         # 可选的每轮文件快照——操作级撤销（app.py 注入）
         self.snapshot_store = None
         self.current_turn_id: int = 0
+        # Model name for cost attribution (app/subagent manager sets it)
+        # 模型名——供成本归属（app/subagent manager 设置）
+        self.model_name: str = ""
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
@@ -211,11 +214,15 @@ class AgentLoop:
             self.on_stream_end()
 
         response = assemble_response(chunks)
+        usage = response.usage
         await self._event_bus.emit(
             LLMResponseEvent(
                 content=response.content[:100],
                 has_tool_calls=bool(response.tool_calls),
-                tokens_used=response.usage.total_tokens if response.usage else 0,
+                tokens_used=usage.total_tokens if usage else 0,
+                prompt_tokens=usage.prompt_tokens if usage else 0,
+                completion_tokens=usage.completion_tokens if usage else 0,
+                model=self.model_name,
             )
         )
         return response

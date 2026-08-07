@@ -258,8 +258,9 @@ mini-code-agent/
 - [x] P26：对话分叉/回滚（`/undo` 回滚 N 轮重新问 + `/fork` 分叉新会话保留原线——CC 没有的差异化能力）
 - [x] P27：操作级撤销（`/undo` 连文件一起恢复——每轮快照被改文件，新建删掉/修改还原/删除找回）
 - [x] P28：工具链录制/回放（`/record` 录制工具调用序列 + `/replay` 零 LLM 确定性重放）
+- [x] P29：成本仪表盘（`/cost` 按模型分账 input/output 计价 + 会话预算 80%/100% 警告）
 
-**全部阶段已完成，360 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，386 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -512,6 +513,60 @@ tools:               # 该技能建议使用的工具（可省略）
 
 项目自带 4 个示例技能（`skills/` 目录）：code_review / init_project / offline-ollama / teach-mode，可直接参考格式。
 
+## 成本仪表盘：/cost 与预算警告
+
+按 token 付费的用户（DeepSeek 等 API）需要知道自己花了多少钱——CC 订阅制没有这个问题，本项目专门做了成本可观测：
+
+### 配置价格（一次性）
+
+在 `~/.mini-agent/config.toml` 加 `[cost]` 段，按你的 API 供应商定价填写：
+
+```toml
+[cost]
+budget = 5.0                     # 本会话预算上限（元），不设 = 不限
+total_budget = 50.0              # 累计总账预算上限（元），/cost reset 后重新计
+[cost.pricing.deepseek-chat]
+input = 2.0                      # 元/百万 input token
+output = 8.0
+[cost.pricing.deepseek-v4-flash-0731]
+input = 0.15
+output = 1.5
+```
+
+### 查看
+
+```
+/cost        # 详细面板：本次会话 + 累计总账两个区块
+/cost turns  # 逐轮明细：本会话每一轮的 token 和金额
+/cost reset  # 清零累计总账（会话内统计不受影响，需确认）
+/status      # 含一行 Cost: ¥0.2207 / budget ¥5.00
+```
+
+```
+**Cost Dashboard 成本仪表盘：**
+  deepseek-chat            12 calls   in  45,230 tok   out  8,120 tok   ¥0.1554
+  deepseek-v4-flash-0731   38 calls   in 182,400 tok   out 25,300 tok   ¥0.0653
+  ----------------------------------------------------------------------------
+  Total: ¥0.2207    Budget: ¥5.00 (4.4%)
+```
+
+### 特性
+
+- **input/output 分开计价**（两者价差可达 4-10 倍，合并算会失真）
+- **按模型分账**——`/model` 切换模型后各算各的；`/team` 强弱混编时 Planner（贵）和 Worker（便宜）也分开计
+- **SubAgent 计入**——子代理的 LLM 调用同样被跟踪
+- **每轮即时显示**——配置价格后，轮末的 token 行带金额：`tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)`
+- **双层预算警告**——会话预算（`budget`）和累计总预算（`total_budget`）各自独立检查，每轮对话结束时触发：
+  - 已用 **< 80%**：不显示任何提示
+  - 已用 **≥ 80%**：黄色警告 `会话预算警告: ¥4.12 / ¥5.00 (82%)`
+  - 已用 **≥ 100%**：红色警告 `⚠ 会话预算超支: ¥5.31 / ¥5.00`
+  - 只提醒不阻断——花钱决定权在你；两种预算同时越线会各出一条
+- 未配置价格的模型只累计 token 不算钱，`/cost` 会提示怎么配
+- **请求数是 LLM API 调用次数**，不是提问次数——一轮对话里 LLM 每次思考/调工具都是一次请求（ReAct 迭代），问一个复杂问题产生 4-6 次请求是正常的
+- **累计总账怎么清零**：`/cost reset` → 确认 y → 总账归零、起始日期重置为今天（数据存 `~/.mini-agent/cost_ledger.json`，删这个文件效果等同）
+
+**局限**：总账（All-time）按当前价格表现算历史 token——供应商调价后历史金额会跟着变（token 数是事实，金额是视图）；精确对账以 API 供应商后台为准。
+
 ## 机制透明：/trace 模式
 
 商用 Agent 是黑盒，本项目每个内部状态都可观测。`/trace on` 后实时显示：
@@ -578,6 +633,7 @@ uv run python benchmarks/report.py          # 生成报告
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |
 | `/replay <名称>` | 零 LLM 确定性重放已录制的工具序列 |
+| `/cost` | 成本仪表盘：按模型分账的 token 用量与金额 |
 | `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
 | `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
 | `/audit [on\|off\|verify]` | 审计日志开关 + 哈希链完整性验证 |
