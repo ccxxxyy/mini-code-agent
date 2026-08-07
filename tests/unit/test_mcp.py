@@ -121,3 +121,91 @@ def test_adapter_optional_params():
     limit_param = next(p for p in schema.parameters if p.name == "limit")
     assert query_param.required is True
     assert limit_param.required is False
+
+
+# --- HTTPTransport + MCPManager HTTP branch ---
+
+
+async def test_http_transport_send(monkeypatch):
+    import httpx
+
+    from mini_agent.tools.mcp.transport import HTTPTransport
+
+    t = HTTPTransport("http://fake/mcp")
+
+    async def mock_post(self, url, **kwargs):
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    await t.start()
+    resp = await t.send({"method": "tools/list"})
+    assert resp["result"]["tools"] == []
+    await t.close()
+
+
+async def test_http_transport_error(monkeypatch):
+    import httpx
+
+    from mini_agent.tools.mcp.transport import HTTPTransport
+
+    t = HTTPTransport("http://fake/mcp")
+
+    async def mock_post(self, url, **kwargs):
+        return httpx.Response(500, text="Internal Server Error", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    await t.start()
+    with pytest.raises(httpx.HTTPStatusError):
+        await t.send({"method": "tools/list"})
+    await t.close()
+
+
+async def test_http_transport_lifecycle():
+    from mini_agent.tools.mcp.transport import HTTPTransport
+
+    t = HTTPTransport("http://fake/mcp")
+    await t.start()
+    assert t._client is not None
+    await t.close()
+    assert t._client is None
+
+
+async def test_connect_server_http_missing_url():
+    from mini_agent.models.config import MCPServerConfig
+    from mini_agent.tools.mcp.client import MCPManager
+
+    mgr = MCPManager()
+    cfg = MCPServerConfig(transport="http", url="")
+    with pytest.raises(ValueError, match="needs a url"):
+        await mgr.connect_server("bad", cfg, ToolRegistry())
+
+
+async def test_connect_server_selects_http(monkeypatch):
+    import httpx
+
+    from mini_agent.models.config import MCPServerConfig
+    from mini_agent.tools.mcp.client import MCPManager
+
+    init_response = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05"}}
+    tools_response = {"jsonrpc": "2.0", "id": 3, "result": {"tools": []}}
+    call_count = 0
+
+    async def mock_post(self, url, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return httpx.Response(200, json=init_response, request=httpx.Request("POST", url))
+        return httpx.Response(200, json=tools_response, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    mgr = MCPManager()
+    cfg = MCPServerConfig(transport="http", url="http://fake/mcp")
+    count = await mgr.connect_server("test", cfg, ToolRegistry())
+    assert count == 0  # no tools discovered 没有工具
+    assert "test" in mgr._connections
+    await mgr.disconnect_all()

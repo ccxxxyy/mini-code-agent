@@ -149,6 +149,11 @@ theme = "default"            # "default" | "dark" | "light"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"
+
+# [mcp.servers.remote-api]
+# url = "http://localhost:8080/mcp"
+# transport = "http"
+# headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
 ```
 
 ### 修改后生效方式

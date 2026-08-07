@@ -73,14 +73,20 @@ class MCPManager:
         返回发现的工具数量。
         """
         if config.transport == "stdio":
-            transport = StdioTransport(
+            transport: MCPTransport = StdioTransport(
                 command=config.command,
                 args=config.args,
                 env=config.env or None,
             )
-            await transport.start()
+        elif config.transport in ("http", "sse"):
+            if not config.url:
+                raise ValueError(f"MCP server '{name}' needs a url for HTTP transport")
+            from mini_agent.tools.mcp.transport import HTTPTransport
+
+            transport = HTTPTransport(config.url, headers=config.headers or None)
         else:
             raise ValueError(f"Unsupported transport: {config.transport}")
+        await transport.start()
 
         conn = MCPServerConnection(name, transport)
         await conn.initialize()

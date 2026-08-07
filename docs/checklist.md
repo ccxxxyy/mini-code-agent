@@ -626,3 +626,19 @@
 - [x] 接口不变（maybe_extract 签名兼容）
 - [x] LLM 调用失败绝不阻断会话退出（try/except + 空列表降级）
 - [x] 9 个新测试（全面覆盖 LLM 响应变体），总计 391 个全过
+
+---
+
+## Phase 31 检查项：MCP HTTP Transport
+
+### 功能完整性
+- [x] HTTPTransport 实现 send（POST JSON-RPC）+ close（aclose httpx）
+- [x] MCPManager 按 config.transport 选择 stdio/http 传输层
+- [x] config.toml [mcp.servers.*] 的 url 和 transport 字段激活（P5 预留的插槽终于接通）
+- [x] 启动自动连接 + 退出断连
+- [x] HTTP headers 认证支持（config.toml headers = { Authorization = "Bearer ..." }）
+
+### 架构合规
+- [x] httpx 零新增依赖（已是核心依赖）
+- [x] MCPTransport ABC 加 start() 不破坏冻结接口（默认空实现）
+- [x] 5 个新测试，总计 396 个全过

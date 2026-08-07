@@ -722,3 +722,22 @@
 
 ### P30.4 验证
 - [x] `tests/unit/test_persistent_memory.py` 重写 extraction 部分——9 个 LLM 提取测试（JSON 解析/空响应/畸形 JSON/markdown 围栏/精确去重/词重叠去重/项目级存储/无 LLM 降级/轮次不足跳过），391 个测试全过
+
+---
+
+## Phase 31: MCP HTTP Transport (P31)
+
+### P31.1 HTTPTransport
+- [x] `tools/mcp/transport.py` — HTTPTransport(MCPTransport)：httpx.AsyncClient POST JSON-RPC 2.0，30 秒超时，自动 id 递增
+- [x] MCPTransport ABC 加 start() 非抽象方法（默认空操作），StdioTransport 和 HTTPTransport 都覆盖——不破坏接口冻结（加新方法含默认实现在 v1.0.0 承诺范围内）
+
+### P31.2 MCPManager 分支
+- [x] `tools/mcp/client.py` connect_server——transport=="http"/"sse" 时创建 HTTPTransport（需要 url，无 url 抛 ValueError）
+- [x] MCPServerConfig 加 headers 字段——HTTP 认证（Bearer token / API key）经 config.toml 传入 HTTPTransport
+
+### P31.3 app.py MCP 接线
+- [x] 启动时 _connect_mcp_servers()：遍历 config.mcp.servers，connect_server 并显示 "MCP: name connected (N tools)"；连接失败显示错误不阻断启动
+- [x] 退出时 mcp_manager.disconnect_all()
+
+### P31.4 验证
+- [x] 5 个新 MCP 测试（HTTP send/error/lifecycle/missing url/selects http），396 个测试全过

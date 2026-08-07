@@ -8,14 +8,21 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
+import httpx
+
 
 class MCPTransport(ABC):
     """Abstract transport for MCP server communication.
     用于 MCP 服务器通信的抽象 transport。"""
 
+    async def start(self) -> None:
+        """Optional setup (e.g. spawn process, create HTTP client).
+        可选初始化（如启动进程、创建 HTTP 客户端）。"""
+
     @abstractmethod
     async def send(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON-RPC message and return the response. 发送 JSON-RPC 消息并返回响应。"""
+        """Send a JSON-RPC message and return the response.
+        发送 JSON-RPC 消息并返回响应。"""
         ...
 
     @abstractmethod
@@ -87,3 +94,38 @@ class StdioTransport(MCPTransport):
             except TimeoutError:
                 self._proc.kill()
             self._proc = None
+
+
+class HTTPTransport(MCPTransport):
+    """Communicate with an MCP server via HTTP POST (JSON-RPC 2.0).
+    通过 HTTP POST（JSON-RPC 2.0）与 MCP 服务器通信。"""
+
+    def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
+        self._url = url
+        self._headers = headers or {}
+        self._client: httpx.AsyncClient | None = None
+        self._request_id = 0
+
+    async def start(self) -> None:
+        self._client = httpx.AsyncClient(timeout=30.0)
+
+    async def send(self, message: dict[str, Any]) -> dict[str, Any]:
+        if self._client is None:
+            raise RuntimeError("Transport not started")
+
+        self._request_id += 1
+        message.setdefault("jsonrpc", "2.0")
+        message.setdefault("id", self._request_id)
+
+        resp = await self._client.post(
+            self._url,
+            json=message,
+            headers={"Content-Type": "application/json", **self._headers},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def close(self) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
