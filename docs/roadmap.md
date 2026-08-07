@@ -18,12 +18,9 @@
 
 > 已实现 `LLMSummarizeOldest(CompressionStrategy)`：LLM 语义摘要 + 失败回退提取式 + 防递归（一次性直连调用不经过 AgentLoop）。4 个 MockLLM 单测。作为机制实验 1 的第三个对照臂投入使用（见 `experiments/`）。未接入默认压缩链（向后兼容），显式配置启用。
 
-### 1.2 LLM 记忆提取（升级 MemoryExtractor）
+### 1.2 LLM 记忆提取（升级 MemoryExtractor）✅ 已完成
 
-- **现状**：`memory/extraction.py` 用正则匹配 "always/prefer/don't" 等固定句式，覆盖面有限。
-- **要做什么**：会话结束时把对话发给 LLM，用结构化 prompt 提取"项目约定/用户偏好/技术事实"三类记忆（JSON 输出）。
-- **插槽位置**：`MemoryExtractor.maybe_extract()` 接口不变，替换内部 `_extract_candidates`；去重逻辑可复用；`auto_extract` 配置开关已存在。
-- **工作量**：小（~80 行 + 测试）
+> P30 实现：regex → LLM 结构化提取（EXTRACTION_PROMPT + JSON 解析 + 词重叠去重 60%），SESSION_END hook 修复。9 个新测试，391 个全过。
 
 ### 1.3 MCP HTTP Transport
 

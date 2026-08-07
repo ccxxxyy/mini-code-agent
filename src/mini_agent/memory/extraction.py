@@ -1,39 +1,45 @@
-"""Memory extraction -- pull learnings from conversations.
-记忆提取——从对话中提取学到的内容。
+"""Memory extraction -- LLM-based structured extraction from conversations.
+记忆提取——用 LLM 从对话中结构化提取值得跨会话记住的事实。
 
-Extracts key facts, preferences, and conventions mentioned in the
-conversation and stores them as MemoryEntry objects. Uses simple
-heuristic extraction (keyword/pattern-based) in P4 to avoid recursive
-LLM calls. A full LLM-based extractor can be plugged in later.
-
-提取对话中提到的关键事实、偏好和约定，并将其存储为 MemoryEntry 对象。
-P4 阶段使用简单的启发式提取（基于关键词/模式）以避免递归的 LLM 调用。
-以后可以接入完整的基于 LLM 的提取器。
+P30 upgrade: replaces the P4 regex heuristic with an LLM call that outputs
+JSON. Falls back silently on any failure (extraction must never block exit).
+P30 升级：用 LLM 调用（JSON 输出）替代 P4 的正则启发式。
+失败时静默降级（提取绝不阻断退出）。
 """
 
 from __future__ import annotations
 
-import re
+import json
 from pathlib import Path
+from typing import Any
 
 from mini_agent.memory.persistent import MemoryEntry, PersistentMemory
 from mini_agent.models.message import Conversation, Role
 
-# Patterns that suggest extractable facts 暗示存在可提取事实的模式
-EXTRACT_PATTERNS = [
-    (r"(?:always|prefer|please|make sure|remember)\s+(.{10,80})", "preference"),
-    (r"(?:this project|we|our team)\s+(?:uses?|runs?|requires?)\s+(.{10,80})", "convention"),
-    (r"(?:don'?t|never|avoid)\s+(.{10,60})", "constraint"),
-]
-
 MIN_TURNS_FOR_EXTRACTION = 5
+MAX_RECENT_MESSAGES = 20
+
+EXTRACTION_PROMPT = """\
+You are a memory extractor. From the conversation below, extract facts worth
+remembering for future sessions. Output ONLY a JSON array (no markdown fences):
+[{"content": "...", "category": "preference|convention|fact", "tags": ["..."]}]
+
+Rules:
+- Only extract things the USER explicitly stated or confirmed
+- Skip greetings, transient questions, and task-specific details
+- Each entry must be self-contained (understandable without the conversation)
+- Prefer concise entries (1-2 sentences max)
+- If nothing worth remembering, return []
+"""
 
 
 class MemoryExtractor:
-    """Extracts learnings from conversations and persists them. 从对话中提取学到的内容并持久化。"""
+    """Extracts learnings from conversations via LLM and persists them.
+    通过 LLM 从对话中提取学习内容并持久化。"""
 
-    def __init__(self, persistent_memory: PersistentMemory) -> None:
+    def __init__(self, persistent_memory: PersistentMemory, llm: Any = None) -> None:
         self._memory = persistent_memory
+        self._llm = llm
 
     async def maybe_extract(
         self,
@@ -41,19 +47,12 @@ class MemoryExtractor:
         project_dir: Path | None = None,
     ) -> list[MemoryEntry]:
         """Analyze conversation for extractable learnings.
-        分析对话中可提取的学习内容。
-
-        Only triggers after MIN_TURNS_FOR_EXTRACTION turns.
-        Deduplicates against existing memories.
-
-        仅在达到 MIN_TURNS_FOR_EXTRACTION 轮之后触发。
-        会与已有记忆去重。
-        """
+        分析对话中可提取的学习内容。"""
         user_messages = [m for m in conversation.messages if m.role == Role.USER]
         if len(user_messages) < MIN_TURNS_FOR_EXTRACTION:
             return []
 
-        candidates = self._extract_candidates(conversation)
+        candidates = await self._extract_candidates(conversation)
         if not candidates:
             return []
 
@@ -71,45 +70,97 @@ class MemoryExtractor:
 
         return new_entries
 
-    def _extract_candidates(self, conversation: Conversation) -> list[MemoryEntry]:
-        """Extract candidate memories from user messages using patterns.
-        使用模式从用户消息中提取候选记忆。"""
-        candidates: list[MemoryEntry] = []
-        seen_content: set[str] = set()
+    async def _extract_candidates(self, conversation: Conversation) -> list[MemoryEntry]:
+        """Call LLM to extract structured memories from recent messages.
+        调 LLM 从最近消息中结构化提取记忆。"""
+        if self._llm is None:
+            return []
 
-        for msg in conversation.messages:
-            if msg.role != Role.USER:
-                continue
-            text = msg.content
-            for pattern, tag in EXTRACT_PATTERNS:
-                for match in re.finditer(pattern, text, re.IGNORECASE):
-                    content = match.group(1).strip().rstrip(".,;:!")
-                    content_key = content.lower()
-                    if content_key not in seen_content and len(content) > 10:
-                        seen_content.add(content_key)
-                        candidates.append(
-                            MemoryEntry(
-                                content=content,
-                                source="extracted",
-                                tags=[tag],
-                            )
-                        )
-        return candidates
+        recent = conversation.messages[-MAX_RECENT_MESSAGES:]
+        lines = []
+        for msg in recent:
+            if msg.role == Role.USER and msg.content:
+                lines.append(f"USER: {msg.content}")
+            elif msg.role == Role.ASSISTANT and msg.content:
+                lines.append(f"ASSISTANT: {msg.content[:200]}")
+        if not lines:
+            return []
+
+        messages = [
+            {"role": "system", "content": EXTRACTION_PROMPT},
+            {"role": "user", "content": "\n".join(lines)},
+        ]
+
+        try:
+            from mini_agent.llm.openai_provider import assemble_response
+
+            chunks = []
+            async for chunk in self._llm.stream(messages):
+                chunks.append(chunk)
+            response = assemble_response(chunks)
+            return self._parse_response(response.content)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _parse_response(text: str) -> list[MemoryEntry]:
+        """Parse LLM JSON response into MemoryEntry list.
+        解析 LLM JSON 响应为 MemoryEntry 列表。"""
+        try:
+            clean = text.strip()
+            if clean.startswith("```"):
+                clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+                if clean.endswith("```"):
+                    clean = clean[:-3]
+                clean = clean.strip()
+            items = json.loads(clean)
+            if not isinstance(items, list):
+                return []
+            entries = []
+            for item in items:
+                if not isinstance(item, dict) or "content" not in item:
+                    continue
+                content = str(item["content"]).strip()
+                if len(content) < 5:
+                    continue
+                tags = item.get("tags", [])
+                category = item.get("category", "")
+                if category and category not in tags:
+                    tags = [category] + list(tags)
+                entries.append(MemoryEntry(content=content, source="extracted", tags=tags))
+            return entries
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return []
+
+    @staticmethod
+    def _is_similar(a: str, b: str, threshold: float = 0.6) -> bool:
+        """Word-overlap similarity check. 基于词重叠的相似度检查。"""
+        words_a = set(a.lower().split())
+        words_b = set(b.lower().split())
+        if not words_a or not words_b:
+            return False
+        overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
+        return overlap >= threshold
 
     @staticmethod
     def _deduplicate(
         candidates: list[MemoryEntry],
         existing: list[MemoryEntry],
     ) -> list[MemoryEntry]:
-        """Remove candidates that are too similar to existing entries.
+        """Remove candidates too similar to existing entries.
         移除与已有条目过于相似的候选项。"""
-        existing_contents = {e.content.lower() for e in existing}
+        existing_contents = [e.content for e in existing]
+        existing_lower = {c.lower() for c in existing_contents}
         new: list[MemoryEntry] = []
         for c in candidates:
             c_lower = c.content.lower()
-            if c_lower not in existing_contents:
-                is_substring = any(c_lower in ex for ex in existing_contents)
-                if not is_substring:
-                    new.append(c)
-                    existing_contents.add(c_lower)
+            if c_lower in existing_lower:
+                continue
+            if any(c_lower in ex for ex in existing_lower):
+                continue
+            if any(MemoryExtractor._is_similar(c.content, ex) for ex in existing_contents):
+                continue
+            new.append(c)
+            existing_contents.append(c.content)
+            existing_lower.add(c_lower)
         return new

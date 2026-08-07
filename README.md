@@ -259,8 +259,9 @@ mini-code-agent/
 - [x] P27：操作级撤销（`/undo` 连文件一起恢复——每轮快照被改文件，新建删掉/修改还原/删除找回）
 - [x] P28：工具链录制/回放（`/record` 录制工具调用序列 + `/replay` 零 LLM 确定性重放）
 - [x] P29：成本仪表盘（`/cost` 按模型分账 input/output 计价 + 会话预算 80%/100% 警告）
+- [x] P30：LLM 记忆提取（MemoryExtractor 从 regex → LLM 结构化提取 + 词重叠去重 + SESSION_END hook 修复）
 
-**全部阶段已完成，386 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，391 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
