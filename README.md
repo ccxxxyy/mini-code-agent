@@ -257,8 +257,9 @@ mini-code-agent/
 - [x] P25：上下文感知（启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令）
 - [x] P26：对话分叉/回滚（`/undo` 回滚 N 轮重新问 + `/fork` 分叉新会话保留原线——CC 没有的差异化能力）
 - [x] P27：操作级撤销（`/undo` 连文件一起恢复——每轮快照被改文件，新建删掉/修改还原/删除找回）
+- [x] P28：工具链录制/回放（`/record` 录制工具调用序列 + `/replay` 零 LLM 确定性重放）
 
-**全部阶段已完成，344 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，360 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -362,6 +363,155 @@ Original session a1b2c3d4 saved -- return with /session load a1b2c3d4
 
 > 这是 Claude Code 没有的能力——CC 的对话历史在服务端不可操作，本项目的对话是本地自持有的数据结构，回滚和分叉天然可行。
 
+## 工具链录制/回放：/record 与 /replay
+
+有一类"固定流程"操作（例行检查、整理产物、部署步骤）每次让 LLM 重新推理既费 token 又不稳定。录一次，之后零 token 重复执行：
+
+### /record —— 录制
+
+```
+/record start cleanup    # 开始录制——之后所有轮次的成功工具调用都被记录
+（正常对话让 LLM 干活，比如"跑测试然后把结果写入 report.txt"）
+/record stop             # 停止并保存（显示录了几步）
+/record                  # 列出已保存的录制
+/record cancel           # 放弃当前录制
+/record delete cleanup   # 删除
+```
+
+只录**成功**的调用（失败的不该被重放）。录制内容存 `~/.mini-agent/recordings/<名称>.json`，可直接用编辑器修改。
+
+### /replay —— 零 LLM 重放
+
+```
+/replay cleanup
+```
+
+逐条重新执行录制的工具序列——**不调用 LLM，零 token 消耗**，逐步显示进度，任何一步失败立即停止：
+
+```
+Replaying 'cleanup' (2 steps):
+  [1/2] bash ... ok
+  [2/2] write_file ... ok
+```
+
+**安全性与真实执行一致**：回放走完整的权限管线——危险命令照样弹确认，PRE_TOOL hook 照样生效，文件操作照样进快照（`/undo` 能撤销一次回放）。
+
+**适用场景**：例行操作固化（每天跑一样的检查序列）、把一次成功的操作变成可重复脚本、弱模型不稳定时锁定"上次做对了的步骤"。
+
+### 参数模板化——让录制适应变化
+
+**为什么需要**：录制默认是字面重放——录的时候写了 `report_0807.txt`，以后每次回放都写这同一个文件（覆盖上次的）。这只适用于"每次结果完全相同"的操作，而现实中的例行任务几乎都有变化的部分：
+
+| 例行任务 | 不变的部分（录制固化） | 变化的部分（模板参数化） |
+|---|---|---|
+| 每日报告 | 跑检查 → 写报告 的步骤 | 文件名里的日期 |
+| 发布准备 | 改版本 → 构建 → 归档 的步骤 | 版本号 |
+| 项目脚手架 | 建目录 → 写模板文件 的步骤 | 项目名 |
+
+录制固化"步骤"，模板化把"数据"从步骤里抽成参数——两者合起来，录制才从"重放一次性操作"升级为"可复用脚本"。
+
+**怎么用**：编辑录制的 JSON 文件（`~/.mini-agent/recordings/<名称>.json`），把想变化的部分改成 `{{变量}}` 占位符：
+
+```json
+{"tool": "write_file", "args": {"file_path": "report_{{date}}.txt", "content": "负责人 {{owner}}"}}
+```
+
+回放时：`{{date}}`/`{{time}}`/`{{datetime}}` **自动填充**当前日期时间；自定义变量用 `k=v` 传入：
+
+```
+/replay daily owner=张三          # {{owner}} → 张三，{{date}} → 今天
+/replay daily                     # 缺 {{owner}} 会明确提示：Missing template variable(s): owner
+/replay daily owner=李四          # 同一份录制，换参数产出不同结果
+```
+
+**完整示例——从录制到模板化回放**：
+
+① 录一次真实操作：
+
+```
+> /record start daily
+> 跑一遍测试，把结果摘要写到 report.txt
+（LLM 执行 bash + write_file）
+> /record stop
+Saved recording 'daily': 2 step(s) -> ~/.mini-agent/recordings/daily.json
+```
+
+② 打开 `daily.json`，此时内容是字面值：
+
+```json
+{"name": "daily", "steps": [
+  {"tool": "bash", "args": {"command": "uv run pytest tests/ -q"}},
+  {"tool": "write_file", "args": {"file_path": "report.txt", "content": "360 passed ..."}}
+]}
+```
+
+③ 把想变化的部分改成占位符（bash 那步不用动）：
+
+```json
+  {"tool": "write_file", "args": {"file_path": "report_{{date}}.txt", "content": "{{summary}}"}}
+```
+
+④ 以后每天：
+
+```
+> /replay daily summary=全绿无异常
+Replaying 'daily' (2 steps):
+  [1/2] bash ... ok
+  [2/2] write_file ... ok
+```
+
+生成 `report_2026-08-07.txt`（日期自动变）——零 LLM 调用，token 统计不动。
+
+### 什么时候用哪个
+
+| 你的操作是… | 用什么 |
+|---|---|
+| 每次完全一样（固定检查序列） | `/record` + `/replay`，不用改 JSON |
+| 步骤固定但有变化的数据（日期/版本号/名字） | 录制后把变化处改成 `{{变量}}` |
+| 步骤本身每次都不同、需要现场判断 | 别用录制——写 Skill 或直接让 LLM 做 |
+| 只做一次的操作 | 都不用，直接让 LLM 做 |
+
+**与 Skill 的区别**：Skill 是手写的自然语言指令（LLM 读了照做，仍要推理，弱模型可能理解偏差）；录制是从实际操作自动生成的确定性脚本（不经 LLM，逐字重放，零 token）。固定流程用录制，需要判断的流程用 Skill。
+
+**局限**：bash 之外的环境变化不感知；SubAgent 内部的工具调用不录；回放结果不进对话历史——LLM 不知道 `/replay` 改了什么文件（与 `/undo` 后的脱节同理），回放后让 LLM 操作相关文件时它可能基于过时认知，必要时提醒它重新读文件；录制状态只在内存——录制中途会话崩溃（硬关窗口等），未 `/record stop` 的录制会丢失，需要重录（已保存的录制文件不受影响——它们在磁盘上跨会话永久有效）。
+
+### 附：怎么写一个 Skill（上表"做法 3"的完整步骤）
+
+Skill 是一个目录 + 一个 `SKILL.md` 文件，放在项目的 `./skills/` 或全局的 `~/.mini-agent/skills/` 下：
+
+```
+skills/
+└── daily-check/          ← 目录名即技能名
+    └── SKILL.md
+```
+
+`SKILL.md` 格式（YAML frontmatter + 自然语言指令）：
+
+```markdown
+---
+name: daily-check
+description: 每日例行检查流程
+triggers:            # 用户输入包含这些词时自动激活
+  - "每日检查"
+  - "daily check"
+tools:               # 该技能建议使用的工具（可省略）
+  - bash
+  - read_file
+---
+
+你是执行每日检查的助手。按以下步骤：
+
+1. 运行 `uv run pytest tests/ -q` 检查测试
+2. 运行 `uv run ruff check src/` 检查代码规范
+3. 汇总结果：全绿则简短报告，有失败则列出失败项和建议
+```
+
+**使用**：
+- 自动触发：对话中说"帮我做每日检查"（命中 triggers）→ 技能指令自动注入
+- 手动管理：`/skill` 列出全部、`/skill activate daily-check` 强制激活、`/skill deactivate` 取消
+
+项目自带 4 个示例技能（`skills/` 目录）：code_review / init_project / offline-ollama / teach-mode，可直接参考格式。
+
 ## 机制透明：/trace 模式
 
 商用 Agent 是黑盒，本项目每个内部状态都可观测。`/trace on` 后实时显示：
@@ -426,6 +576,8 @@ uv run python benchmarks/report.py          # 生成报告
 | `/session save\|list\|load\|delete` | 会话管理（自动保存已默认开启） |
 | `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
+| `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |
+| `/replay <名称>` | 零 LLM 确定性重放已录制的工具序列 |
 | `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
 | `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
 | `/audit [on\|off\|verify]` | 审计日志开关 + 哈希链完整性验证 |

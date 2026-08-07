@@ -127,6 +127,20 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="record",
+            description="Record tool calls (usage: /record start <name>|stop|cancel|list|delete)",
+            handler=_make_record(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="replay",
+            description="Replay a recorded tool sequence without LLM (usage: /replay <name>)",
+            handler=_make_replay(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="undo",
             description="Roll back the last N turns (usage: /undo [N], default 1)",
             handler=_make_undo(app),
@@ -162,6 +176,116 @@ def _make_help(app: Application) -> HandlerFn:
         lines = ["**Available Commands 可用命令：**", ""]
         for c in sorted(cmds, key=lambda x: x.name):
             lines.append(f"  `/{c.name}` — {c.description}")
+        return "\n".join(lines)
+
+    return handler
+
+
+def _make_record(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        rec = app.tool_recorder
+        parts = args.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+
+        if sub == "start":
+            if len(parts) < 2 or not parts[1].strip():
+                return "Usage: /record start <name>"
+            if rec.is_recording:
+                return f"Already recording '{rec.recording_name}'. Stop or cancel it first."
+            name = parts[1].strip().replace(" ", "_")
+            rec.start(name)
+            return (
+                f"Recording '{name}' -- all successful tool calls from now on "
+                f"will be captured. /record stop to save."
+            )
+
+        if sub == "stop":
+            if not rec.is_recording:
+                return "Not recording. /record start <name> to begin."
+            name = rec.recording_name
+            count, path = rec.stop()
+            return f"Saved recording '{name}': {count} step(s) -> {path}"
+
+        if sub == "cancel":
+            if not rec.is_recording:
+                return "Not recording."
+            name = rec.recording_name
+            rec.cancel()
+            return f"Recording '{name}' discarded."
+
+        if sub == "delete":
+            if len(parts) < 2:
+                return "Usage: /record delete <name>"
+            name = parts[1].strip()
+            return (
+                f"Deleted recording '{name}'."
+                if rec.delete(name)
+                else f"Recording not found: {name}"
+            )
+
+        # default: list 默认列出
+        items = rec.list_recordings()
+        status = f"Recording now: '{rec.recording_name}'\n" if rec.is_recording else ""
+        if not items:
+            return status + "No saved recordings. /record start <name> to begin."
+        lines = [status + "**Saved Recordings 已保存的录制：**"]
+        for it in items:
+            lines.append(f"  {it['name']} -- {it['steps']} step(s), {it['created_at']}")
+        lines.append("\nReplay with /replay <name>")
+        return "\n".join(lines)
+
+    return handler
+
+
+def _make_replay(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.core.tool_recorder import (
+            builtin_variables,
+            find_placeholders,
+            render_template,
+        )
+        from mini_agent.models.message import ToolCall
+
+        parts = args.strip().split()
+        if not parts:
+            return "Usage: /replay <name> [var=value ...]  (see /record list)"
+        name = parts[0]
+        rec_data = app.tool_recorder.load(name)
+        if rec_data is None:
+            return f"Recording not found: {name}"
+        steps = rec_data.get("steps", [])
+        if not steps:
+            return f"Recording '{name}' has no steps."
+
+        # Template variables: built-ins + user-supplied k=v pairs
+        # 模板变量：内置变量 + 用户提供的 k=v
+        variables = builtin_variables()
+        for pair in parts[1:]:
+            if "=" in pair:
+                k, _, v = pair.partition("=")
+                variables[k.strip()] = v
+
+        missing = find_placeholders(steps) - set(variables)
+        if missing:
+            return (
+                f"Missing template variable(s): {', '.join(sorted(missing))}\n"
+                f"Usage: /replay {name} " + " ".join(f"{m}=<value>" for m in sorted(missing))
+            )
+
+        app.tool_recorder.suspended = True  # don't re-record the replay 防自录
+        lines = [f"Replaying '{name}' ({len(steps)} steps):"]
+        try:
+            for i, step in enumerate(steps, 1):
+                rendered_args = render_template(step["args"], variables)
+                tc = ToolCall(id=f"replay-{i}", name=step["tool"], arguments=rendered_args)
+                result = await app.agent_loop._execute_single_tool(tc)
+                status = "FAILED" if result.is_error else "ok"
+                lines.append(f"  [{i}/{len(steps)}] {step['tool']} ... {status}")
+                if result.is_error:
+                    lines.append(f"  Stopped: {result.output[:150]}")
+                    break
+        finally:
+            app.tool_recorder.suspended = False
         return "\n".join(lines)
 
     return handler

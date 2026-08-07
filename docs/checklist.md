@@ -571,3 +571,20 @@
 - [x] 快照失败绝不阻断工具执行（try/except 包裹）
 - [x] 磁盘存储零内存占用；快照时机在工具执行前（agent_loop 集中拦截）
 - [x] 10 个新测试，总计 344 个全过
+
+---
+
+## Phase 28 检查项：工具链录制/回放
+
+### 功能完整性
+- [x] /record start 后所有成功工具调用被捕获，失败调用不录
+- [x] /record stop 保存 JSON 并显示步数；cancel 丢弃
+- [x] /replay 零 LLM 逐条重放，逐步进度显示，失败立即停止
+- [x] 回放走完整权限管线（危险命令弹确认/hook 生效/快照进 undo）
+- [x] 回放期间 suspended 防自录
+- [x] 录制文件可手工编辑（JSON 明文）
+
+### 架构合规
+- [x] EventBus 订阅者模式（与 AuditLogger/TraceRenderer 同款——零侵入 agent_loop）
+- [x] 回放复用 _execute_single_tool（不绕过任何安全层）
+- [x] 10 个新测试，总计 354 个全过
