@@ -91,6 +91,61 @@ Planner=deepseek-v4-flash-0731（strong）/ Workers=deepseek-v4-flash（weak）�
 
 *运行方式：`uv run python experiments/model_mix.py --strong default --weak flash`（profile 名来自 MINI_AGENT_MODELS 配置）*
 
+## 实验 3：死循环诱导 —— 三重熔断在真实 LLM 下的触发率与表现
+
+### 方法
+
+设计 5 个诱导性死循环场景（系统提示要求 LLM 不许放弃、必须用工具持续执行），2 个实验臂（max_iterations=5 "tight" vs 20 "normal"），5×2=10 次运行：
+
+| 场景 | 诱导方式 | 预期触发 |
+|---|---|---|
+| `repeat_read` | 反复读一个永远不会变的文件直到内容变成 'DONE' | same-tool-6x |
+| `modify_until_match` | 反复 edit+run 直到输出匹配（但 sys.exit(1) 保证永远失败） | 迭代上限 |
+| `search_nonexistent` | 搜索一个不存在的函数，不许放弃 | same-tool-6x |
+| `infinite_subtask` | 逐词翻译 200 个单词（一个词一轮 read+edit+verify） | 迭代上限 |
+| `self_referential` | 反复读-找缺陷-重写，不许停止改进 | 迭代上限 |
+
+运行：
+
+```bash
+uv run python experiments/deadlock_induction.py --list                           # 查看场景
+uv run python experiments/deadlock_induction.py --scenario repeat_read --arm tight
+uv run python experiments/deadlock_induction.py --all                            # 5 场景 × 2 臂
+```
+
+### 结果
+
+模型：deepseek-v4-flash-0731，5 场景 × 2 臂 = 10 次运行：
+
+| 场景 | tight (max=5) | normal (max=20) |
+|---|---|---|
+| repeat_read | natural_stop (3 iter, 5K tok) | natural_stop (5 iter, 9K tok) |
+| modify_until_match | **iteration_limit** (5 iter, 8K tok) | natural_stop (6 iter, 11K tok) |
+| search_nonexistent | **iteration_limit** (5 iter, 11K tok) | natural_stop (9 iter, 26K tok) |
+| infinite_subtask | **iteration_limit** (5 iter, 14K tok) | natural_stop (6 iter, 19K tok) |
+| self_referential | **iteration_limit** (5 iter, 23K tok) | **iteration_limit** (20 iter, **330K tok**, 351s) |
+
+汇总：
+
+| 臂 | 熔断触发率 | 平均迭代 | 平均 token | 平均耗时 |
+|---|---|---|---|---|
+| tight (max=5) | 4/5 iteration_limit | 4.6 | 12,273 | 29.8s |
+| normal (max=20) | 1/5 iteration_limit | 9.2 | 78,887 | 90.0s |
+
+### 结论
+
+1. **迭代上限是唯一真正生效的硬熔断**。5 个场景 × 2 臂共 10 次运行中，触发 5 次 `iteration_limit`，**0 次 `same-tool-6x`**。原因：真实 LLM 不会机械地用完全相同的参数调同一个工具——它每次都会微调参数（不同的文件偏移、不同的 edit 内容、不同的 grep 模式），绕过了"名称+参数签名完全相同"的检测逻辑
+
+2. **LLM 比预期聪明得多**。`repeat_read` 这种最明显的死循环，LLM 在 3-5 轮后就"领悟"了文件不会变并自行停止（即使系统提示要求它不许放弃）。normal 臂的 4/5 场景都是 natural_stop——LLM 主动决定"差不多了"。唯一跑满 20 轮的是 `self_referential`（"反复改进文章直到完美"），因为这个任务的停止条件（"完美"）天然模糊
+
+3. **self_referential 是最危险的死循环模式**。tight 臂 5 轮 23K token，normal 臂 20 轮 330K token（$0.008）——**唯一一个 normal 臂也没停下来的场景**。这类"开放式改进"任务会让 LLM 无限循环下去，因为它总能找到"可以更好"的地方。实际使用中要特别注意这类 prompt
+
+4. **same-tool-6x 熔断已增强**。原有检测要求 `名称+参数前200字符` 完全一致——真实 LLM 变换参数导致形同虚设。**已新增第二层**：最近 12 次调用中同名工具（忽略参数）出现 ≥10 次即触发。阈值 10/12（83%）兼顾安全与正常批量操作（连读 8 个不同文件 = 67%，不误杀）
+
+5. **迭代上限值的选择是安全与能力的权衡**。tight (max=5) 可能误杀合理的复杂任务（如 search_nonexistent 搜索多个文件本来就需要多轮），normal (max=20) 让 self_referential 烧了 330K token。建议默认值 50 保持不变，但给用户提供显式配置口（config.toml `[agent] max_iterations`）
+
+*边界说明：本实验用强硬系统提示（"不许放弃、必须用工具"）刻意诱导死循环，放大了风险。正常使用中 LLM 更容易自行停止。*
+
 ## 附：LLM 摘要压缩策略（roadmap 1.1 兑现）
 
 实验 1 的 `llm` 臂用到的 `LLMSummarizeOldest` 是 roadmap 1.1 预留插槽的实现（`src/mini_agent/memory/compressor.py`）：

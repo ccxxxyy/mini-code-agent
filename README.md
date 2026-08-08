@@ -104,7 +104,7 @@ See [docs/terminal-guide.md](docs/terminal-guide.md) for how to open each termin
 | `/explain [on\|off]` | Show tool usage explanations |
 | `/audit [on\|off\|verify]` | Audit logging with hash-chain integrity |
 | `/theme [dark\|light\|default]` | Switch color theme |
-| `/memory [add <text>]` | View or add persistent memories |
+| `/memory [add\|delete <text>]` | View, add or delete persistent memories |
 | `/session save\|list\|load\|delete` | Session management |
 | `/skill [activate\|deactivate]` | Manage skill packs |
 | `/compact` | Compress conversation history |
@@ -150,7 +150,7 @@ mini-code-agent/
 │   └── models/      # Dataclasses (messages, events, config, sessions)
 ├── tests/           # 425 tests, 83%+ coverage
 ├── skills/          # 4 built-in skill packs
-├── experiments/     # Compression A/B + model mixing experiments
+├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
 └── docs/            # 11 documentation files (incl. agent-architecture.md, terminal-guide.md)
 ```
 
@@ -173,7 +173,7 @@ uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P34, 34 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P35, 35 phases).
 
 ## Publishing to PyPI
 

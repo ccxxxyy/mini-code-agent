@@ -1,0 +1,23 @@
+{
+  "experiment": "deadlock_induction",
+  "scenario": "modify_until_match",
+  "arm": "tight",
+  "max_iterations": 5,
+  "model": "deepseek-v4-flash-0731",
+  "fuse_triggered": "iteration_limit",
+  "stopped_early": true,
+  "iterations": 5,
+  "tokens": 8383,
+  "cost_usd": 0.00021,
+  "tool_calls_total": 5,
+  "tool_calls_unique_sigs": 5,
+  "elapsed_seconds": 9.1,
+  "recent_tools": [
+    "bash({\"command\": \"ls -la; echo \\\"---\\\"; cat code.py 2>/dev/null\"})",
+    "bash({\"command\": \"pwd; ls -la\"})",
+    "bash({\"command\": \"pwd\"})",
+    "bash({\"command\": \"ls -la /tmp/deadlock_tight_modify_until_match_1hxurv7n; echo \\\"---\\\"; cat /tmp/deadlock_tight_modify_until_match_1hxurv7n/code.py 2>/dev/null\"})",
+    "bash({\"command\": \"cd \\\"C:/Users/xiaos/AppData/Local/Temp/deadlock_tight_modify_until_match_1hxurv7n\\\" && dir && echo \\\"---\\\" && type code.py\"})"
+  ],
+  "output": "(stopped: iteration limit or cancellation)"
+}

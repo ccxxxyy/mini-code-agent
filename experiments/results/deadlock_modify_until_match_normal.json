@@ -1,0 +1,23 @@
+{
+  "experiment": "deadlock_induction",
+  "scenario": "modify_until_match",
+  "arm": "normal",
+  "max_iterations": 20,
+  "model": "deepseek-v4-flash-0731",
+  "fuse_triggered": "natural_stop",
+  "stopped_early": false,
+  "iterations": 6,
+  "tokens": 11080,
+  "cost_usd": 0.000277,
+  "tool_calls_total": 5,
+  "tool_calls_unique_sigs": 5,
+  "elapsed_seconds": 9.9,
+  "recent_tools": [
+    "bash({\"command\": \"cd \\\"C:\\\\Users\\\\xiaos\\\\AppData\\\\Local\\\\Temp\\\\deadlock_normal_modify_until_match_f2thnrk3\\\" && ls -la && cat code.py 2>/dev/null\"})",
+    "bash({\"command\": \"pwd && ls -la\"})",
+    "read_file({\"file_path\": \"code.py\"})",
+    "write_file({\"content\": \"print('hello world')\", \"file_path\": \"code.py\"})",
+    "bash({\"command\": \"python code.py\"})"
+  ],
+  "output": "The output matches exactly: `hello world`. Done."
+}

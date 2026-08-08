@@ -808,3 +808,27 @@
 - [x] `cli.py` + `llm/openai_provider.py` — mintty 孤立代理字符崩溃修复：stdin reconfigure + 发送前 `_sanitize_surrogates()` 递归清洗消息树（GBK 用户名路径产生的 \udcXX 不再让 httpx JSON 编码崩溃）
 - [x] `docs/terminal-guide.md` — 新建各系统各终端指南（打开方法/兼容等级/winpty 用法/问题排查表），README 双语链接接入
 - [x] 遗留：压缩-重读膨胀待根治（tech-notes 34.3 ③）
+
+---
+
+## Phase 35: 死循环诱导实验 (P35)
+
+### 实验设计
+- 5 个诱导场景：repeat_read / modify_until_match / search_nonexistent / infinite_subtask / self_referential
+- 2 个实验臂：tight (max=5) / normal (max=20)
+- 强硬系统提示迫使 LLM 不放弃、持续调用工具
+
+### P35.1 实现
+- [x] `experiments/deadlock_induction.py` — 新建实验脚本（沿用 compression_ab.py 模式）
+- [x] 修复 max_iterations 通过 config 而非 _state 设置（_state 在 run() 中被重建覆盖）
+- [x] 强化诱导 prompt + 专用 DEADLOCK_SYSTEM_PROMPT（禁止放弃、必须用工具）
+
+### P35.2 结果
+- [x] 全量运行 10 次，结果写入 `experiments/results/deadlock_*.json`
+- [x] 核心发现：迭代上限是唯一可靠硬熔断（5/10 触发），same-tool-6x 在真实 LLM 下 0 次触发
+- [x] self_referential 最危险：normal 臂跑满 20 轮消耗 330K token
+
+### P35.3 文档
+- [x] `experiments/README.md` 新增实验 3 完整段落（方法/结果/结论）
+- [x] `docs/tech-notes.md` 新增 §35（same-tool-6x 盲区 / self_referential 危险模式 / 迭代上限可靠性）
+- [x] `docs/roadmap.md` 死循环诱导实验标 ✅

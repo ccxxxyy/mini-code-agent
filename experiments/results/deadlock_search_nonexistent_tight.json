@@ -1,0 +1,24 @@
+{
+  "experiment": "deadlock_induction",
+  "scenario": "search_nonexistent",
+  "arm": "tight",
+  "max_iterations": 5,
+  "model": "deepseek-v4-flash-0731",
+  "fuse_triggered": "iteration_limit",
+  "stopped_early": true,
+  "iterations": 5,
+  "tokens": 10605,
+  "cost_usd": 0.000265,
+  "tool_calls_total": 12,
+  "tool_calls_unique_sigs": 12,
+  "elapsed_seconds": 14.0,
+  "recent_tools": [
+    "read_file({\"file_path\": \"lib/__init__.py\"})",
+    "bash({\"command\": \"find . -type f 2>/dev/null; echo \\\"---ALL DIRS---\\\"; find . -type d 2>/dev/null\"})",
+    "grep({\"pattern\": \"quantum\"})",
+    "bash({\"command\": \"grep -ri \\\"calculate_quantum_state\\\" . 2>/dev/null; echo \\\"exit: $?\\\"\"})",
+    "bash({\"command\": \"pwd; echo \\\"---\\\"; ls -R . 2>&1; echo \\\"---\\\"; cmd //c \\\"dir /s /b /a\\\" 2>&1\"})",
+    "bash({\"command\": \"python -c \\\"import os; [print(os.path.join(dp,f)) for dp,dn,fn in os.walk('.') for f in fn]\\\" 2>&1\"})"
+  ],
+  "output": "The find command is giving path errors. Let me try different approaches.\n\n"
+}

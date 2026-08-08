@@ -260,7 +260,7 @@
 | 评测 | 10 个标准编程任务 **10/10 通过**，总成本 $0.0015，详见 `benchmarks/README.md` |
 | 机制透明 | `/trace` 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息）——商用 Agent 给不了的白盒能力 |
 | 垂直场景 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（哈希链防篡改 JSONL + `/audit verify` 完整性校验）+ offline-ollama 内网离线 Skill——"因为拥有源码所以能做"的三个活证据 |
-| 机制实验 | `experiments/` 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）+ 强弱模型混编（发现：strong-weak 帕累托最优）——从"做了个项目"到"做了研究" |
+| 机制实验 | `experiments/` 三项：① 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）；② 强弱模型混编（发现：strong-weak 帕累托最优）；③ 死循环诱导（发现：迭代上限是唯一可靠硬熔断，same-tool-6x 在真实 LLM 下从未触发）——从"做了个项目"到"做了研究" |
 | 流式中断 | 双 Esc 优雅中断流式输出（守护线程 + cancelled 标志），不用 Ctrl+C 冒险杀进程 |
 | 长记忆自动化 | PRE_LLM hook 自动注入记忆 + SESSION_END hook 自动提取偏好——用户无感知的跨会话记忆 |
 | 溢出兜底 | 发送前 token 预检（P20）+ 超限强制 SlidingWindow 截断——三级压缩走完仍超窗时的最终防线，杜绝 API 400 |
