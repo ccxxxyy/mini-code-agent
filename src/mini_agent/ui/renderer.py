@@ -44,7 +44,15 @@ class StreamRenderer:
     def start(self) -> None:
         self._buffer = ""
         self._full = ""
-        self._live = Live("", console=self._console, refresh_per_second=15)
+        # 8 Hz refresh: legacy Windows consoles redraw slowly -- 15 Hz
+        # amplifies tearing/ghost lines when long lines wrap.
+        # 8Hz 刷新：legacy Windows 控制台重绘慢，15Hz 会加剧长行换行时的撕裂/残影。
+        self._live = Live(
+            "",
+            console=self._console,
+            refresh_per_second=8,
+            vertical_overflow="crop",
+        )
         self._live.start()
 
     def feed(self, delta: str) -> None:
@@ -127,17 +135,31 @@ class StreamRenderer:
             return "", text
         return "\n".join(lines[:last_safe]), "\n".join(lines[last_safe + 1 :])
 
-    @classmethod
-    def _render_tail(cls, tail: str) -> Markdown:
+    def _tail_budget(self) -> int:
+        """Effective tail line budget accounting for line wrapping: long
+        logical lines occupy multiple physical rows, which breaks Live's
+        erase math on legacy Windows consoles (ghost/duplicated lines).
+        考虑自动换行的尾段行数预算：长逻辑行占多个物理行，会打破
+        legacy Windows 控制台上 Live 的擦除计算（残影/首行重复）。"""
+        width = max(20, self._console.width)
+        lines = self._buffer.split("\n")[-_TAIL_LINES:]
+        physical = sum(max(1, (len(ln) + width - 1) // width) for ln in lines)
+        if physical <= _TAIL_LINES:
+            return _TAIL_LINES
+        # Shrink budget proportionally 按超出比例收缩预算
+        return max(4, _TAIL_LINES * _TAIL_LINES // physical)
+
+    def _render_tail(self, tail: str) -> Markdown:
         """尾段超长时只渲染最后 N 行，防止 Live 区超过终端高度。"""
+        budget = self._tail_budget()
         lines = tail.split("\n")
-        if len(lines) <= _TAIL_LINES:
-            return Markdown(cls._normalize(tail))
+        if len(lines) <= budget:
+            return Markdown(self._normalize(tail))
         stack: list[tuple[int, str]] = []
-        for line in lines[:-_TAIL_LINES]:
+        for line in lines[:-budget]:
             _stack_step(stack, line)
-        visible = "\n".join(lines[-_TAIL_LINES:])
+        visible = "\n".join(lines[-budget:])
         if stack:
             ticks, lang = stack[-1]
             visible = f"{'`' * ticks}{lang}\n{visible}"
-        return Markdown(cls._normalize(visible))
+        return Markdown(self._normalize(visible))

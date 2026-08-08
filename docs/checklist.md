@@ -116,33 +116,34 @@
 
 ## Phase 5 检查项
 
-### Slash Commands
-- [ ] `/help` 列出所有命令
-- [ ] `/clear` 清空对话
-- [ ] `/status` 显示状态
-- [ ] `/model <name>` 切换模型
-- [ ] `/compact` 手动压缩
-- [ ] `/quit` 退出
-- [ ] 未知命令给出提示
+### Slash Commands（后续自动化测试已覆盖——test_slash_commands.py 等）
+- [x] `/help` 列出所有命令
+- [x] `/clear` 清空对话
+- [x] `/status` 显示状态
+- [x] `/model <name>` 切换模型
+- [x] `/compact` 手动压缩
+- [x] `/quit` 退出
+- [x] 未知命令给出提示
 
-### Skill 系统
-- [ ] SKILL.md 正确解析（YAML front-matter + prompt body）
-- [ ] 技能激活后 system prompt 正确注入
-- [ ] 触发词自动匹配
-- [ ] 技能停用后 prompt 正确移除
+### Skill 系统（后续自动化测试已覆盖——test_skills.py）
+- [x] SKILL.md 正确解析（YAML front-matter + prompt body）
+- [x] 技能激活后 system prompt 正确注入
+- [x] 触发词自动匹配
+- [x] 技能停用后 prompt 正确移除
 
-### MCP
-- [ ] stdio transport 连接正常
-- [ ] 工具发现正确
-- [ ] MCPToolAdapter 注册到 ToolRegistry
-- [ ] 通过 Agent 调用 MCP 工具正常
-- [ ] 服务器断连后优雅处理
+### MCP（后续自动化测试已覆盖——test_mcp.py，P31 加 HTTP transport 测试）
+- [x] stdio transport 连接正常
+- [x] 工具发现正确
+- [x] MCPToolAdapter 注册到 ToolRegistry
+- [x] 通过 Agent 调用 MCP 工具正常
+- [x] 服务器断连后优雅处理
 
-### Anthropic Provider
+### Anthropic Provider（未实际验证——代码就绪但从未连接真实 Claude API）
 - [ ] 流式响应正常
 - [ ] tool_use 格式正确
 - [ ] thinking blocks 解析（如适用）
 - [ ] token 计数合理
+> 注：以上 4 项需要 Anthropic API key 才能验证。单元测试覆盖了消息格式转换，但端到端调用从未执行——待有 Claude API 访问权限时补验。
 
 ---
 
@@ -671,7 +672,24 @@
 - [x] README 包含 pip install 安装方式
 - [x] uv build 成功产出 wheel + sdist
 
-### 待用户操作
-- [ ] pypi.org 注册账号
-- [ ] 添加 Trusted Publisher（GitHub ccxxxyy/mini-code-agent）
-- [ ] git tag v1.0.0 && git push origin v1.0.0 触发首次发布
+---
+
+## Phase 34 检查项：Windows 终端适配
+
+### 功能完整性
+- [x] CMD 旧代码页（cp936/cp437）下特殊字符不崩溃（UTF-8 加固 + replace 容错）
+- [x] TERM=xterm 等无控制台环境下 ask_yes_no 不崩（input 兜底）
+- [x] 流式长行换行不再首行重复（物理行感知预算）
+- [x] 双 Esc 停止后不吞用户按键（线程 join）
+- [x] legacy 控制台 /todo 标记降级 ASCII
+
+### 架构合规
+- [x] 全部修复不改变非 Windows 行为（platform/legacy_windows 条件分支）
+- [x] 10 个新测试模拟 legacy 条件（无需真实 CMD），总计 425 个全过
+
+### 实战验证补充（P34.3）
+- [x] bash 子进程 GBK 输出正确解码（三级解码，中文 CMD 错误信息不乱码）
+- [x] 全部 git 状态修改命令需用户确认（human-in-the-loop 硬闸门，13 断言矩阵测试）
+- [x] Git Bash（mintty）直接运行不秒退（isatty 检测 → 朴素输入降级）
+- [x] GBK 用户名/路径产生的孤立代理字符不再崩 API 请求（_sanitize_surrogates 出口兜底）
+- [x] docs/terminal-guide.md 覆盖 Windows/macOS/Linux 各终端打开方法与排查表

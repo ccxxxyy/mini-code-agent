@@ -779,3 +779,32 @@
 ### P33.3 文档
 - [x] README 加 `pip install mini-code-agent` 安装方式 + PyPI/Python/License 徽章 + 发布操作手册
 - [x] 415 个测试全过
+
+---
+
+## Phase 34: Windows 终端适配 (P34)
+
+### 审计发现（5 类问题）
+- CLI 入口无 UTF-8 设置（CMD cp936 下特殊字符可能 UnicodeEncodeError）
+- ask_yes_no 裸 PromptSession（TERM=xterm 时 NoConsoleScreenBufferError）
+- 流式首行重复（Live 逻辑行 vs 物理行不一致，legacy 擦除不全）
+- EscWatcher stop 不 join（残留线程吞按键）
+- /todo emoji 在 legacy 控制台宽度错乱
+
+### P34.1 修复
+- [x] `cli.py` — _harden_windows_stdio()：入口 reconfigure UTF-8 + errors=replace 双保险
+- [x] `ui/terminal.py` — ask_yes_no 构造失败退回朴素 input
+- [x] `ui/renderer.py` — refresh 15→8Hz + vertical_overflow=crop + _tail_budget 物理行感知（长行换行时收缩逻辑行预算）
+- [x] `ui/esc_watcher.py` — stop() join(timeout=0.2) 防吞键
+- [x] `builtin_commands.py` — /todo 状态标记 legacy 下降级 ASCII（[ ]/[~]/[x]/[!]）
+
+### P34.2 验证
+- [x] `tests/unit/test_windows_rendering.py` 新建 10 个测试（legacy 控制台 diff/cost 渲染、GBK 流不崩、stdio 加固、EscWatcher join、ask_yes_no 兜底、emoji 降级、尾段预算收缩/不收缩），425 个测试全过
+
+### P34.3 实战修复（真实终端验证时发现的问题）
+- [x] `tools/builtin/bash.py` — `_decode_console_bytes()` 三级解码（严格 UTF-8 → 活动代码页/GBK → UTF-8 replace），修子进程 GBK 输出乱码
+- [x] `app.py` + `security/permission.py` — LLM 擅自 git commit 双层防护：system prompt CRITICAL 红线 + DANGEROUS_COMMAND_PATTERNS 拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean）
+- [x] `ui/terminal.py` — Git Bash（mintty）秒退修复：`_stdin_is_console()` isatty 检测 → 管道环境降级朴素 input；ask_yes_no 双重兜底（构造失败 + 运行时 EOF）
+- [x] `cli.py` + `llm/openai_provider.py` — mintty 孤立代理字符崩溃修复：stdin reconfigure + 发送前 `_sanitize_surrogates()` 递归清洗消息树（GBK 用户名路径产生的 \udcXX 不再让 httpx JSON 编码崩溃）
+- [x] `docs/terminal-guide.md` — 新建各系统各终端指南（打开方法/兼容等级/winpty 用法/问题排查表），README 双语链接接入
+- [x] 遗留：压缩-重读膨胀待根治（tech-notes 34.3 ③）

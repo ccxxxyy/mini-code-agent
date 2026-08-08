@@ -89,8 +89,12 @@ async def test_streaming_matches_full_render():
 
 
 def test_render_tail_reopens_fence():
+    from rich.console import Console
+
+    r = StreamRenderer(Console(width=200, force_terminal=False, record=True))
     lines = ["```python"] + [f"line {i}" for i in range(30)]
-    md = StreamRenderer._render_tail("\n".join(lines))
+    r._buffer = "\n".join(lines)
+    md = r._render_tail(r._buffer)
     assert md.markup.startswith("```python\n")
 
 

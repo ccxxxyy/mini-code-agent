@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed 修复
+
+- **bash GBK output mojibake** — subprocess output now decoded strict UTF-8 → active codepage/GBK → UTF-8 replace (three-tier), so Chinese CMD error messages render correctly. bash 子进程输出三级解码，中文 CMD 错误信息不再乱码。
+- **LLM autonomous git commands** — all git state-changing commands (commit/push/reset/stash/rebase/checkout/restore/clean) now require user confirmation (human-in-the-loop), plus CRITICAL system prompt rules. 全部 git 状态修改命令需用户确认 + system prompt 红线。
+- **Git Bash (mintty) instant exit** — piped stdin detected via isatty(), falls back to plain input mode (no completion menu; use `winpty mini` for the full experience). mintty 管道 stdin 自动降级朴素输入，`winpty mini` 可获完整体验。
+- **Surrogates crash on GBK usernames** — lone surrogate chars (\udcXX) from GBK paths no longer crash the API request; messages are sanitized before JSON encoding. GBK 用户名路径产生的孤立代理字符不再崩 API 请求。
+
+### Docs 文档
+
+- New `docs/terminal-guide.md` — how to open each terminal per OS (Windows/macOS/Linux), compatibility levels, troubleshooting table. 新增各系统终端指南。
+
 ## v1.0.0
 
 ### Interface Freeze 接口冻结
@@ -71,8 +84,8 @@ These dataclasses are part of the stable interface:
 
 ### Features 功能
 
-- P1-P33: 33 development phases completed (see README.md for full list)
-- 415 tests, zero external dependencies for testing
+- P1-P34: 34 development phases completed (see README.md for full list)
+- 425 tests, zero external dependencies for testing
 - Per-turn file change summary (+created / ~modified / -deleted)
 - Colored diff preview for edit_file (full-width background highlight)
 - 8 built-in tools (read/write/edit/delete/bash/glob/grep/spawn_agents)

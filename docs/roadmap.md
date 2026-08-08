@@ -100,7 +100,7 @@
 |---|---|
 | 接口冻结 ✅ | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿（CHANGELOG.md），v1.0.0 语义版本承诺向后兼容 |
 | 覆盖率门禁 ✅ | pytest-cov 81.62%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
-| PyPI 发布 ✅ | P33 实现：pyproject.toml 元数据补全 + MIT LICENSE + publish.yml Trusted Publisher workflow（待用户注册 PyPI 后首次发布） |
+| PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
 | 插件生态 | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
 | 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具） |
@@ -110,7 +110,7 @@
 | 工具链录制/回放 ✅ | P28 实现：EventBus 订阅式录制 + _execute_single_tool 安全等价回放（权限/hook/快照全走） |
 | 成本仪表盘 ✅ | P29 实现：LLMResponseEvent 扩展 + CostTracker 订阅者（第 5 个）+ [cost] 配置计价 + 预算 80/100 警告 |
 | 持久化任务系统 ✅ | P32 实现（S12 补全）：TaskStore 磁盘持久 + /todo 命令 + blockedBy 依赖追踪 + 解锁提示 |
-| Windows 终端适配 | CMD/PowerShell/Windows Terminal 的颜色与按键差异全面测试 |
+| Windows 终端适配 ✅ | P34 实现：UTF-8 stdio 加固 + 物理行感知流式渲染 + EscWatcher join + ask_yes_no 兜底 + emoji 降级；P34.3 实战补修：bash GBK 三级解码 + git 命令 human-in-the-loop 硬闸门 + mintty 秒退/代理字符崩溃修复 + terminal-guide.md 终端指南 |
 
 ---
 
@@ -122,7 +122,34 @@
 | 机制透明度演示 | ✅ 已完成 | /trace 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息） |
 | 垂直场景定制 | ✅ 已完成 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（EventBus JSONL）+ offline-ollama 内网 Skill |
 | 机制实验 | ✅ 已完成 | `experiments/` 压缩策略 A/B（none/extractive/llm 三臂）+ 强弱模型混合编排（三臂），数据见 experiments/README.md |
-| 开源社区 | 待做 | PyPI 发布 + README 英文化 + "the readable agent" 定位 |
+| 开源社区 | ✅ 已完成 | PyPI 已发布（pip install mini-code-agent）+ README 英文化 + "the readable agent" 定位 |
+
+---
+
+## 七、剩余待办清单（P34 后的完整盘点）
+
+### 待用户手动操作（代码侧已就绪）
+
+| 项 | 操作 |
+|---|---|
+| Anthropic Provider 验证 | 代码就绪但从未连接真实 Claude API——待有 API key 时验证 4 项（见 checklist Phase 5） |
+| CC 对照评测数据补齐 | benchmarks/ 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） |
+
+### 待做实验
+
+| 项 | 说明 | 工作量 |
+|---|---|---|
+| **死循环诱导实验** | 构造让 Agent 卡死的任务（如"重复读同一个文件直到内容改变"），验证三重熔断（迭代上限/same-tool-6x/token 上限）的实际触发率与触发时长。机制实验系列（压缩 A/B、强弱混编）的收官篇 | ~半天 |
+| **压缩-重读膨胀根治** | 实战单请求烧 50 万 token 的问题（tech-notes 34.3 ③）。候选方案：压缩时保护"已读文件清单"元信息，或 read_file 会话级缓存（同文件同参数返回"内容未变化"） | ~半天 |
+
+### 明确不做（有意决策，非遗漏）
+
+| 项 | 理由 |
+|---|---|
+| 插件生态（plugin_loader） | 没有用户基础前是过早投资——生态建设需要先有用户 |
+| S14 Cron 定时调度 | 终端交互工具用 OS 的 cron/Task Scheduler 更合适 |
+| MCP SSE 长连接 | POST 请求-响应已覆盖全部工具功能，ABC 留有 SSETransport 扩展位 |
+| bash 文件变更跟踪 | 需要文件系统快照对比，成本远超收益（undo/汇总的已知盲区） |
 
 ## 六、优先级建议
 

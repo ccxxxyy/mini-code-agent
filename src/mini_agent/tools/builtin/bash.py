@@ -12,6 +12,31 @@ from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
 MAX_OUTPUT_CHARS = 30_000
 
 
+def _decode_console_bytes(data: bytes) -> str:
+    """Decode subprocess output with Windows codepage fallback.
+    CMD on Chinese Windows emits GBK (cp936) error messages -- plain UTF-8
+    decoding turns them into mojibake. Try UTF-8 strictly first, then the
+    active console codepage, then UTF-8 with replacement as last resort.
+    解码子进程输出——中文 Windows 的 CMD 用 GBK 输出错误信息，纯 UTF-8
+    解码会乱码。先严格试 UTF-8，再试控制台活动代码页，最后 UTF-8 容错兜底。
+    """
+    if not data:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    if sys.platform == "win32":
+        import locale
+
+        for enc in (locale.getpreferredencoding(False), "gbk"):
+            try:
+                return data.decode(enc)
+            except (UnicodeDecodeError, LookupError):
+                continue
+    return data.decode("utf-8", errors="replace")
+
+
 class BashTool(Tool):
     @property
     def schema(self) -> ToolSchema:
@@ -68,8 +93,8 @@ class BashTool(Tool):
             await proc.wait()
             return self.error_result("", f"Command timed out after {timeout}s: {command}")
 
-        stdout = stdout_b.decode("utf-8", errors="replace")
-        stderr = stderr_b.decode("utf-8", errors="replace")
+        stdout = _decode_console_bytes(stdout_b)
+        stderr = _decode_console_bytes(stderr_b)
 
         parts: list[str] = []
         if stdout:
