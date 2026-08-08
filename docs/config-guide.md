@@ -313,7 +313,7 @@ PRE_LLM hook → 自动读取记忆 → 注入 system prompt → LLM 从第一�
 | 注入方式 | 每次 LLM 调用前自动注入 system prompt（最多 10 条） |
 | 手动添加 | `/memory add 我喜欢某某某`（不等退出，立即生效） |
 | 查看 | `/memory` |
-| 删除 | 编辑 JSON 文件删对应条目（无 `/memory delete` 命令——计划后续加） |
+| 删除 | `/memory delete <ID或关键词>`（ID 可从 `/memory` 列表复制，也可用内容关键词匹配） |
 
 ### 关闭/调试
 

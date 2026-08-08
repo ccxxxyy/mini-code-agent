@@ -455,11 +455,20 @@ class AgentLoop:
             return False
         if self._cancelled:
             return False
-        # Infinite loop guard: same tool called 6+ times in a row
-        # 死循环保护：同一工具连续调用 6 次及以上
+        # Infinite loop guard 1: same tool+args called 6+ times in a row
+        # 死循环保护 1：同一工具+参数连续调用 6 次及以上
         recent = self._state.recent_tool_names[-6:]
         if len(recent) >= 6 and len(set(recent)) == 1:
             return False
+        # Infinite loop guard 2: same tool NAME dominates recent calls
+        # (10+ of last 12 calls are the same tool, regardless of args)
+        # 死循环保护 2：同名工具占据最近调用的绝对多数（不看参数）
+        window = self._state.recent_tool_names[-12:]
+        if len(window) >= 12:
+            names = [sig.split("(", 1)[0] for sig in window]
+            most_common = max(set(names), key=names.count)
+            if names.count(most_common) >= 10:
+                return False
         return True
 
     async def _transition(self, new_phase: AgentPhase) -> None:

@@ -693,3 +693,19 @@
 - [x] Git Bash（mintty）直接运行不秒退（isatty 检测 → 朴素输入降级）
 - [x] GBK 用户名/路径产生的孤立代理字符不再崩 API 请求（_sanitize_surrogates 出口兜底）
 - [x] docs/terminal-guide.md 覆盖 Windows/macOS/Linux 各终端打开方法与排查表
+
+---
+
+## Phase 35 检查项：死循环诱导实验
+
+### 实验完整性
+- [x] 5 个诱导场景覆盖不同死循环模式（重复读/无限编辑运行/搜索不存在/逐词翻译/自我改进）
+- [x] 2 个实验臂（tight=5 / normal=20）对比安全余量
+- [x] 10 个结果 JSON 全部生成（experiments/results/deadlock_*.json）
+- [x] 结果表、熔断矩阵、结论写入 experiments/README.md
+
+### 发现验证
+- [x] 迭代上限在 tight 臂 4/5 场景触发（正确生效）
+- [x] same-tool-6x 在所有 10 次运行中 0 次触发（已记录为设计盲区）
+- [x] self_referential/normal 跑满 20 轮 330K token（最危险模式已识别）
+- [x] tech-notes §35 记录 3 条实验结论

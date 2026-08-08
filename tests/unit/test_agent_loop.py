@@ -157,6 +157,32 @@ async def test_infinite_loop_guard(tool_context):
     assert len(read_calls) <= 7
 
 
+async def test_same_tool_name_dominance_guard(tool_context):
+    files = []
+    for i in range(15):
+        f = tool_context.working_dir / f"f{i}.txt"
+        f.write_text(f"data{i}", encoding="utf-8")
+        files.append(f)
+
+    config = AgentConfig(max_agent_iterations=20)
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    scripts = [tool_call_response("read_file", {"file_path": str(f)}) for f in files]
+    loop = AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=config,
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.stopped_early
+    assert loop.state.iteration <= 14
+
+
 async def test_max_iterations_guard(tool_context):
     f = tool_context.working_dir / "x.txt"
     f.write_text("data", encoding="utf-8")

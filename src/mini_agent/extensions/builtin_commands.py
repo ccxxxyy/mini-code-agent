@@ -58,7 +58,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="memory",
-            description="Show or add memory (usage: /memory [add <text>])",
+            description="Show, add or delete memory (usage: /memory [add|delete <text>])",
             handler=_make_memory(app),
         )
     )
@@ -653,6 +653,45 @@ def _make_memory(app: Application) -> HandlerFn:
                 await pm.add_user_memory(entry)
                 return f"Added user memory: {parts[1]}"
 
+        if subcmd == "delete" and len(parts) > 1:
+            query = parts[1]
+            all_entries: list[MemoryEntry] = []
+            if project_dir:
+                all_entries += await pm.load_project_memory(project_dir)
+            all_entries += await pm.load_user_memory()
+
+            exact = [e for e in all_entries if e.id == query or e.id.startswith(query)]
+            if len(exact) == 1:
+                if project_dir:
+                    await pm.delete_project_memory(project_dir, exact[0].id)
+                await pm.delete_user_memory(exact[0].id)
+                c = exact[0].content
+                preview = c[:60] + "..." if len(c) > 60 else c
+                return f"Deleted ({exact[0].id}): {preview}"
+
+            q = query.lower()
+            fuzzy = [e for e in all_entries if q in e.content.lower()]
+            if len(fuzzy) == 1:
+                if project_dir:
+                    await pm.delete_project_memory(project_dir, fuzzy[0].id)
+                await pm.delete_user_memory(fuzzy[0].id)
+                c = fuzzy[0].content
+                preview = c[:60] + "..." if len(c) > 60 else c
+                return f"Deleted ({fuzzy[0].id}): {preview}"
+
+            matches = exact if len(exact) > 1 else fuzzy
+            if matches:
+                lines = [
+                    f"Found {len(matches)} matches for '{query}', use exact ID to delete:",
+                ]
+                for e in matches:
+                    c = e.content
+                    p = c[:50] + "..." if len(c) > 50 else c
+                    lines.append(f"  `{e.id}` [{e.source}] {p}")
+                return "\n".join(lines)
+
+            return f"No memory matching '{query}'. Use `/memory` to see all entries."
+
         # Default: list memories
         entries = []
         if project_dir:
@@ -665,7 +704,7 @@ def _make_memory(app: Application) -> HandlerFn:
         lines = [f"**Memories 记忆 ({len(entries)})：**"]
         for e in entries:
             tags = f" [{', '.join(e.tags)}]" if e.tags else ""
-            lines.append(f"  [{e.source}] {e.content}{tags}")
+            lines.append(f"  `{e.id}` [{e.source}] {e.content}{tags}")
         return "\n".join(lines)
 
     return handler

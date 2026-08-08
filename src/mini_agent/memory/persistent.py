@@ -25,6 +25,19 @@ class MemoryEntry:
             self.created_at = datetime.now().isoformat()
 
 
+def _find_and_remove(entries: list[MemoryEntry], query: str) -> MemoryEntry | None:
+    """Find an entry by ID prefix or content substring and remove it.
+    按 ID 前缀或内容子串匹配，找到并移除条目。"""
+    q = query.lower()
+    for i, e in enumerate(entries):
+        if e.id == query or e.id.startswith(query):
+            return entries.pop(i)
+    for i, e in enumerate(entries):
+        if q in e.content.lower():
+            return entries.pop(i)
+    return None
+
+
 class PersistentMemory:
     """Stores and retrieves long-term memory across sessions. 跨 session 存储和检索长期记忆。"""
 
@@ -54,6 +67,13 @@ class PersistentMemory:
         entries.append(entry)
         await self.save_project_memory(project_dir, entries)
 
+    async def delete_project_memory(self, project_dir: Path, query: str) -> MemoryEntry | None:
+        entries = await self.load_project_memory(project_dir)
+        removed = _find_and_remove(entries, query)
+        if removed:
+            await self.save_project_memory(project_dir, entries)
+        return removed
+
     # --- User-level memory ---
 
     def _user_path(self) -> Path:
@@ -69,6 +89,13 @@ class PersistentMemory:
         entries = await self.load_user_memory()
         entries.append(entry)
         await self.save_user_memory(entries)
+
+    async def delete_user_memory(self, query: str) -> MemoryEntry | None:
+        entries = await self.load_user_memory()
+        removed = _find_and_remove(entries, query)
+        if removed:
+            await self.save_user_memory(entries)
+        return removed
 
     # --- Search ---
 
