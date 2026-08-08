@@ -659,3 +659,19 @@
 - [x] 与 PlanStep/team 分离（/todo = 用户手动管理，/team = LLM 自动执行）
 - [x] TaskStore 仿 SessionStore 存盘模式
 - [x] 16 个新测试（含 6 个 /todo 命令集成），总计 412 个全过
+
+---
+
+## Phase 33 检查项：PyPI 发布准备
+
+### 功能完整性
+- [x] pyproject.toml 包含 PyPI 发布所需的全部元数据
+- [x] LICENSE 文件存在（MIT）
+- [x] publish.yml 自动发布 workflow（tag 触发 + Trusted Publisher）
+- [x] README 包含 pip install 安装方式
+- [x] uv build 成功产出 wheel + sdist
+
+### 待用户操作
+- [ ] pypi.org 注册账号
+- [ ] 添加 Trusted Publisher（GitHub ccxxxyy/mini-code-agent）
+- [ ] git tag v1.0.0 && git push origin v1.0.0 触发首次发布

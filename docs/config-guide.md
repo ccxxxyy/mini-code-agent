@@ -340,4 +340,4 @@ auto_extract = false   # 关闭后改用 /memory add 手动添加
 
 ---
 
-*相关文档：终端输出说明见 output-guide.md，能力对照见 capabilities.md。*
+*相关文档：终端输出说明见 output-guide.md，能力对照见 capabilities.md，架构原理见 agent-architecture.md。*

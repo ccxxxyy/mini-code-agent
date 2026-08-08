@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent 后续演进路线图
 
-> 当前版本 v1.0.0, P1-P32。
+> 当前版本 v1.0.0, P1-P33。
 > 本文档收录开发过程中**有意推迟**的增强项——每一项在代码里都预留了升级插槽，
 > 按优先级和工作量组织，作为后续版本的开发依据。
 
@@ -100,7 +100,7 @@
 |---|---|
 | 接口冻结 ✅ | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿（CHANGELOG.md），v1.0.0 语义版本承诺向后兼容 |
 | 覆盖率门禁 ✅ | pytest-cov 81.62%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
-| PyPI 发布 | `pip install mini-code-agent` 直接安装，不再需要克隆源码 |
+| PyPI 发布 ✅ | P33 实现：pyproject.toml 元数据补全 + MIT LICENSE + publish.yml Trusted Publisher workflow（待用户注册 PyPI 后首次发布） |
 | 插件生态 | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
 | 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具） |

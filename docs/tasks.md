@@ -764,3 +764,18 @@
 
 ### P32.3 验证
 - [x] 16 个新测试（CRUD + 持久化往返 + 依赖解锁 + /todo 命令各子命令），412 个测试全过
+
+---
+
+## Phase 33: PyPI 发布准备 (P33)
+
+### P33.1 元数据补全
+- [x] `pyproject.toml` — readme/license/authors/classifiers/[project.urls] 补齐（PyPI 必需字段）
+- [x] `LICENSE` 文件新建（MIT）
+
+### P33.2 发布 CI
+- [x] `.github/workflows/publish.yml` 新建——tag v* 推送触发，PyPI Trusted Publisher（OIDC，无需 API token secret）
+
+### P33.3 文档
+- [x] README 加 `pip install mini-code-agent` 安装方式 + PyPI/Python/License 徽章 + 发布操作手册
+- [x] 415 个测试全过
