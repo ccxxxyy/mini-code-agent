@@ -27,6 +27,27 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 
+def _sanitize_surrogates(value: Any) -> Any:
+    """Strip lone UTF-16 surrogates that cannot be UTF-8 encoded.
+    On Windows, paths/usernames decoded via surrogateescape (e.g. mintty,
+    GBK filenames) can carry \\udc80-\\udcff chars -- httpx's JSON encoding
+    then raises 'surrogates not allowed'. Replace them so requests never crash.
+    清除无法 UTF-8 编码的孤立代理字符。Windows 上经 surrogateescape 解码的
+    路径/用户名（mintty、GBK 文件名）可能携带 \\udc80-\\udcff——httpx 的
+    JSON 编码会抛 'surrogates not allowed'。替换掉保证请求不崩。"""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+            return value
+        except UnicodeEncodeError:
+            return value.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(value, dict):
+        return {k: _sanitize_surrogates(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_surrogates(v) for v in value]
+    return value
+
+
 class OpenAIProvider(LLMProvider):
     """OpenAI-compatible provider (GPT, local servers, Azure, etc.).
     兼容 OpenAI 的 Provider（GPT、本地服务、Azure 等）。
@@ -52,7 +73,7 @@ class OpenAIProvider(LLMProvider):
     ) -> AsyncIterator[StreamChunk]:
         body: dict[str, Any] = {
             "model": self._config.model,
-            "messages": messages,
+            "messages": _sanitize_surrogates(messages),
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
             "stream": True,

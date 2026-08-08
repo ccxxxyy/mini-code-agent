@@ -43,7 +43,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _harden_windows_stdio() -> None:
+    """Windows consoles default to legacy codepages (cp936/cp437) that cannot
+    encode box-drawing chars -- reconfigure stdio to UTF-8 with replacement.
+    stdin matters too: mintty (Git Bash) pipes may surface lone surrogates
+    via surrogateescape, which later crash httpx's UTF-8 JSON encoding.
+    Windows 控制台默认旧代码页编码不了制表符——入口统一切 UTF-8 并容错替换。
+    stdin 同样要处理：mintty 管道可能经 surrogateescape 产生孤立代理字符，
+    后续 httpx 的 UTF-8 JSON 编码会因此崩溃。"""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> None:
+    _harden_windows_stdio()
     args = parse_args(argv)
 
     from mini_agent.app import Application

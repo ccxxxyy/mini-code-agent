@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-415%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-425%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -83,6 +83,8 @@ mini          # start the agent
 mini --help   # see all options
 ```
 
+See [docs/terminal-guide.md](docs/terminal-guide.md) for how to open each terminal per OS and their compatibility levels.
+
 ## Commands
 
 | Command | What it does |
@@ -146,10 +148,10 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 415 tests, 83%+ coverage
+├── tests/           # 425 tests, 83%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # Compression A/B + model mixing experiments
-└── docs/            # 11 documentation files (incl. agent-architecture.md)
+└── docs/            # 11 documentation files (incl. agent-architecture.md, terminal-guide.md)
 ```
 
 **Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) decoupled via EventBus. All I/O is async. Zero vendor SDK dependency — just httpx.
@@ -166,12 +168,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 415 tests
+uv run pytest tests/           # 425 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P33, 33 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P34, 34 phases).
 
 ## Publishing to PyPI
 

@@ -149,9 +149,24 @@ async def test_dangerous_command_no_ui_denied(path_guard):
     assert await pm.check_command("rm -rf /tmp/x") == PermissionDecision.DENIED
 
 
-async def test_force_push_flagged(path_guard):
+async def test_git_state_changing_commands_flagged(path_guard):
+    # All git state-changing commands need confirmation (P34.3 hardening
+    # after the LLM autonomously attempted a commit)
+    # 全部 git 状态修改命令需确认（P34.3 加固——LLM 曾擅自尝试 commit）
     assert PermissionManager.is_dangerous_command("git push origin main --force")
-    assert not PermissionManager.is_dangerous_command("git push origin main")
+    assert PermissionManager.is_dangerous_command("git push origin main")
+    assert PermissionManager.is_dangerous_command("git commit -m 'auto'")
+    assert PermissionManager.is_dangerous_command("git stash")
+    assert PermissionManager.is_dangerous_command("git rebase main")
+    assert PermissionManager.is_dangerous_command("git checkout main")
+    assert PermissionManager.is_dangerous_command("git restore file.py")
+    assert PermissionManager.is_dangerous_command("git clean -fd")
+    # Read-only git stays free 只读 git 命令不拦
+    assert not PermissionManager.is_dangerous_command("git status")
+    assert not PermissionManager.is_dangerous_command("git log --oneline")
+    assert not PermissionManager.is_dangerous_command("git diff HEAD")
+    # checkout -b creates a branch without discarding work 建分支不丢改动
+    assert not PermissionManager.is_dangerous_command("git checkout -b feature-x")
 
 
 async def test_curl_pipe_sh_flagged(path_guard):

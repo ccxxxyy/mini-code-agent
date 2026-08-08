@@ -253,7 +253,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 415 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
+| 测试 | 425 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
 | 工具 | 7 个内置工具（read_file / write_file / edit_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -276,16 +276,17 @@
 | MCP HTTP Transport | HTTPTransport 远程 MCP 服务器连接 + app 启动自动发现（P31）——P5 预留的 MCP 架构终于接通，支持 headers 认证 |
 | 持久化任务系统 | `/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪（P32）——S12 补全，S01-S20 覆盖 19/20 |
 | PyPI 发布 | `pip install mini-code-agent` 一行安装（P33）——元数据补全 + MIT LICENSE + tag 触发自动发布 workflow |
+| Windows 终端适配 | UTF-8 加固/流式防重影/按键防吞/无控制台兜底/emoji 降级（P34）——CMD/PowerShell/Windows Terminal 全兼容；P34.3 补修 bash GBK 解码、git 命令确认闸门、Git Bash（mintty）降级运行与代理字符清洗，各终端指南见 terminal-guide.md |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
-## 如实说明：四处有意简化
+## 如实说明：有意简化（历史记录，多数已升级）
 
-以下为 mini 实现的合理取舍，**不影响需求达成**，均已预留升级插槽（详见 `docs/roadmap.md`）：
+以下为 mini 早期实现的合理取舍，**不影响需求达成**。带 ✅ 的已在后续阶段升级：
 
 1. 默认压缩链 Stage 2 用提取式摘要（LLM 摘要 `LLMSummarizeOldest` 已实现但需显式配置——压缩本身耗 token，默认不开启）
-2. 记忆提取用正则模式而非 LLM 分析（避免每轮额外调用，接口不变可替换）
-3. MCP 仅实现 stdio transport（HTTP 留有 MCPTransport ABC 插槽）
-4. 多个 tool_calls 顺序执行而非并行（保证权限确认弹窗不交错）
+2. ✅ 记忆提取已从正则升级为 LLM 结构化提取（P30）
+3. ✅ MCP HTTP transport 已实现（P31，含 headers 认证）
+4. ✅ 多个 tool_calls 已改为权限预检串行 + 执行并行（P17，asyncio.gather + 审计锁）
 
 ---
 

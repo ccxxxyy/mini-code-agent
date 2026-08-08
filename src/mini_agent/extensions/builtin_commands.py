@@ -266,12 +266,22 @@ def _make_todo(app: Application) -> HandlerFn:
         groups = {"pending": [], "in_progress": [], "completed": [], "failed": []}
         for t in tasks:
             groups.get(t.status, groups["pending"]).append(t)
-        labels = {
-            "pending": "⏳ pending",
-            "in_progress": "🔄 in_progress",
-            "completed": "✅ completed",
-            "failed": "❌ failed",
-        }
+        # Legacy Windows consoles render emoji with wrong cell width -- ASCII fallback
+        # legacy Windows 控制台 emoji 宽度错乱——降级 ASCII
+        if app.terminal.console.options.legacy_windows:
+            labels = {
+                "pending": "[ ] pending",
+                "in_progress": "[~] in_progress",
+                "completed": "[x] completed",
+                "failed": "[!] failed",
+            }
+        else:
+            labels = {
+                "pending": "⏳ pending",
+                "in_progress": "🔄 in_progress",
+                "completed": "✅ completed",
+                "failed": "❌ failed",
+            }
         lines = ["**Tasks 任务列表：**"]
         for status in ("pending", "in_progress", "completed", "failed"):
             items = groups[status]

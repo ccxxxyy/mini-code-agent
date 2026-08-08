@@ -27,8 +27,14 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"\bmkfs\b",
     r"\bdd\s+if=",
     r">\s*/dev/sd",
-    r"\bgit\s+push\s+.*--force",
-    r"\bgit\s+reset\s+--hard",
+    r"\bgit\s+push\b",  # any push touches the remote 任何 push 都影响远程
+    r"\bgit\s+commit\b",  # commits must be user-initiated 提交必须由用户主动发起
+    r"\bgit\s+reset\b",
+    r"\bgit\s+stash\b",  # can silently shelve user's in-progress work 会静默搁置用户未完成的工作
+    r"\bgit\s+rebase\b",
+    r"\bgit\s+checkout\s+(?!-b\b)",  # switching/restoring can discard changes 切换/还原可能丢弃改动
+    r"\bgit\s+restore\b",
+    r"\bgit\s+clean\b",
     r"\bdel\s+/[sq]",  # Windows del /s /q Windows 的递归/静默删除
     r"\brmdir\s+/s",  # Windows rmdir /s Windows 的递归删除目录
     r"\bformat\s+[a-z]:",  # Windows format Windows 的格式化磁盘

@@ -72,7 +72,12 @@ class EscWatcher:
         """Stop watching (call when streaming ends).
         停止监听（流式结束时调用）。"""
         self._running = False
-        self._thread = None
+        if self._thread is not None:
+            # Wait for the poll loop to exit so a lingering _getch() cannot
+            # swallow the user's next keystroke after streaming ends.
+            # 等轮询循环退出——防止残留的 _getch() 吞掉流式结束后用户的下一个按键。
+            self._thread.join(timeout=0.2)
+            self._thread = None
 
     @property
     def triggered(self) -> bool:

@@ -79,11 +79,30 @@ class Terminal:
                 theme=self.theme,
             )
 
+    @staticmethod
+    def _stdin_is_console() -> bool:
+        """False when stdin is a pipe (Git Bash mintty, redirects) --
+        prompt_toolkit gets instant EOF there and the app would exit at once.
+        stdin 是管道时（Git Bash mintty/重定向）返回 False——
+        prompt_toolkit 在这种环境下立即 EOF，程序会秒退。"""
+        import sys
+
+        try:
+            return sys.stdin.isatty()
+        except Exception:
+            return False
+
     async def get_user_input(self) -> str:
-        self._ensure_prompt_session()
         # Top rule marking the input area (bottom toolbar is the lower bound)
         # 输入区上边界线（下边界由底部工具栏承担）
         self.console.print(f"[{self.theme.dim}]{'─' * self.console.width}[/{self.theme.dim}]")
+        if not self._stdin_is_console():
+            # Plain-input mode: no completion/toolbar, but works in mintty.
+            # 朴素输入模式：无补全/工具栏，但 mintty 下可用。
+            import asyncio
+
+            return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
+        self._ensure_prompt_session()
         return await self._prompt_session.prompt_async()
 
     async def confirm(self, prompt: str) -> bool | str:
@@ -117,9 +136,28 @@ class Terminal:
         使用临时提示的朴素是/否（不污染主输入 session 的默认 message）。"""
         from prompt_toolkit import PromptSession as _PS
 
-        tmp = _PS()
+        def _plain_input() -> bool:
+            # Fallback for terminals prompt_toolkit cannot drive (Git Bash
+            # mintty pipes stdin, so PromptSession may construct fine but
+            # hit instant EOF on read).
+            # prompt_toolkit 无法驱动的终端兜底（Git Bash 的 mintty 管道化
+            # stdin——PromptSession 构造成功但读取立即 EOF）。
+            try:
+                answer = input(f"{prompt} [y/n] > ").strip().lower()
+            except EOFError:
+                return False  # non-interactive: safe default 无交互时安全默认拒绝
+            return answer in ("y", "yes")
+
+        try:
+            tmp = _PS()
+        except Exception:
+            return _plain_input()
+
         while True:
-            answer = (await tmp.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
+            try:
+                answer = (await tmp.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
+            except Exception:
+                return _plain_input()
             if answer in ("y", "yes"):
                 return True
             if answer in ("n", "no", ""):

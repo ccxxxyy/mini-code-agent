@@ -68,7 +68,15 @@ run them in parallel via sub-agents. Each sub-agent has its own \
 tools but cannot spawn further sub-agents. Sub-agent results are \
 returned as a combined report.
 - IMPORTANT: Use platform-appropriate shell commands. \
-On Windows use dir/type/findstr/where, NOT ls/cat/grep/which."""
+On Windows use dir/type/findstr/where, NOT ls/cat/grep/which.
+- CRITICAL: NEVER run git commit, git push, git stash, git reset, \
+git rebase, or any git command that modifies repository state or \
+history, unless the user EXPLICITLY asked for that exact operation \
+in their current message. Answering a question is never a reason \
+to commit. Read-only git commands (status/log/diff) are fine.
+- Stay on the user's actual request. Do not expand a simple question \
+into project auditing, committing work, or cleaning up files the \
+user did not mention."""
 
 
 class Application:

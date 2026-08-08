@@ -179,6 +179,8 @@ uv tool uninstall mini-code-agent
 
 启动后你会看到欢迎界面，直接输入你的问题即可开始对话。输入 `/exit` 或按 `Ctrl+C` 退出。
 
+各系统各终端的打开方法、兼容等级、问题排查见 [docs/terminal-guide.md](docs/terminal-guide.md)。
+
 ### 6. 常用 CLI 参数
 
 ```bash
@@ -237,7 +239,8 @@ mini-code-agent/
     ├── positioning.md          # 项目立意与价值定位
     ├── output-guide.md         # 终端输出来源与配置指南
     ├── config-guide.md         # 配置文件与上下文文件完全指南
-    └── agent-architecture.md   # Agent 架构原理与 S01-S20 实现解析
+    ├── agent-architecture.md   # Agent 架构原理与 S01-S20 实现解析
+    └── terminal-guide.md       # 各系统各终端的打开方法与兼容性指南
 ```
 
 ## 开发状态
@@ -275,8 +278,9 @@ mini-code-agent/
 - [x] P31：MCP HTTP Transport（HTTPTransport + app 启动自动连接 MCP 服务器 + 关闭断连 + HTTP headers 认证）
 - [x] P32：持久化任务系统（`/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪——S12 补全）
 - [x] P33：PyPI 发布准备（元数据补全 + MIT LICENSE + publish workflow + pip install）
+- [x] P34：Windows 终端适配（UTF-8 stdio 加固 + 流式降频防重影 + emoji 降级 + EscWatcher join + ask_yes_no 兜底；实战补修：bash GBK 解码、git 命令确认闸门、Git Bash 降级运行与代理字符清洗）
 
-**全部阶段已完成，415 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，425 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

@@ -1226,7 +1226,7 @@ result = await board.run_while(mgr.wait_all(timeout=300))
 
 修复后立即验证成功：`/team 分析项目生成架构摘要到su.md` 四步全 [OK]，su.md（242 行）真实生成，零中间文件，136K token（比首轮 426K 降 68%）。
 
-**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。415 个测试全过。
+**六轮 E2E 的完整教训链**：成功语义误报 → 依赖并行冲突 → 平台路径习惯 → 任务粒度失控 → prompt 遵从失效 → **护栏误杀**。前五轮都在治症状，第六轮才找到病根——而找到它靠的是第五轮的对照实验（换强模型排除模型因素）。调试多 Agent 系统的方法论与调试代码相同：先隔离变量，再定位根因。425 个测试全过。
 
 ---
 
@@ -1503,12 +1503,40 @@ S01-S20 对照审计中 S12 是唯一有实际价值的缺口。PlanStep 已有�
 
 单文件 `tasks.json` 而非按任务一个文件——任务量不会大到需要分文件（不是 sessions 的几百个），JSON 方便用编辑器直接改。ID 用 `task_<uuid8>` 而非整数（PlanStep 用整数 index 在 /team 内部自增，跨会话不唯一）。ID 前缀匹配（`/todo done task_a1` 匹配完整 ID）是用户体验细节——16 位全输太长。
 
+# 第三十四部分：P34 Windows 终端适配
+
+## 34.1 逻辑行 vs 物理行——流式首行重复的真相
+
+Rich Live 擦除旧帧时按"上次渲染了几行"回退光标。_render_tail 限制尾段 15 逻辑行，但一条 200 字符的行在 80 宽终端下占 3 物理行——Live 以为画了 15 行实际占了 45 行，回退 15 行擦除后残留 30 行旧帧，视觉上就是"首行重复"。legacy Windows 控制台的光标控制精度更差，放大了这个问题。修复：_tail_budget 用 console.width 估算物理行数，超预算时按比例收缩逻辑行数；刷新率 15→8Hz 减少重绘竞争；vertical_overflow=crop 避免省略号在 legacy 下的额外不确定性。
+
+## 34.2 兜底优先于完美
+
+三个修复共享同一哲学：**先保证不崩，再谈体验**。UTF-8 reconfigure 失败就 errors=replace 显示问号（丑但不崩）；PromptSession 构造失败就退回朴素 input（没有补全但能答 y/n）；emoji 显示错乱就降级 ASCII 方括号。Windows 终端生态碎片化（conhost/Windows Terminal/ConEmu/Git Bash 行为各异），逐一完美适配不现实——分层降级让最坏情况也可用。
+
+## 34.3 实战暴露的三个后续问题（P34 验证时发现）
+
+**① bash 子进程输出 GBK 乱码（已修）**：P34 修了自己打印的字符编码，漏了子进程输出的解码——中文 Windows 的 CMD 错误信息是 GBK（"'wc' 不是内部或外部命令"变成乱码）。修复：`_decode_console_bytes` 三级解码——严格 UTF-8 → 控制台活动代码页/GBK → UTF-8 容错兜底。教训：编码适配要覆盖输入（自己打印）和输出（子进程返回）两个方向。
+
+**② LLM 擅自执行 git 状态修改操作（已加双层防护）**：用户问"介绍所有文档"，LLM 跑偏成"审计 P34 工作状态"，中途执行了 git stash/stash pop，最后试图 git commit。两层修复：system prompt 加 CRITICAL 红线（非用户明确要求绝不执行 commit/push/stash/reset/rebase 等状态修改命令 + 不许把简单问题扩大为项目审计）；DANGEROUS_COMMAND_PATTERNS 从只拦 push --force / reset --hard 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需用户确认）。提示词是软约束、权限确认是硬闸门——LLM 不听话时闸门兜底。
+
+**③ 压缩-重读膨胀的实战重现（待根治）**：同一请求烧了 50 万 token（¥0.51）。trace 显示同一文件被读 3-4 次：读大量文档 → 触发 75% 压缩 → 已读内容被摘要掉 → LLM"忘了"读过 → 重读 → 再触发压缩。机制实验 1 的结论（压缩的隐性代价是重复劳动）在真实使用中完整重现。same-tool-6x 熔断没拦住——每次读的参数不同（offset/文件名），签名不重复。**候选根治方向**：压缩时保护"已读文件清单"元信息（把"已读 spec.md 全文"作为一句话保留在摘要里），或 read_file 会话级缓存（同文件同参数返回"内容未变化，见前文"）。
+
+## 34.4 mintty（Git Bash）适配——管道 stdin 的两个坑
+
+Git Bash 的 mintty 不是 Windows 控制台——它把 stdin 包装成管道，带来两个独立故障：
+
+**① 启动秒退**：prompt_toolkit 的 PromptSession 在管道 stdin 上构造成功但 prompt_async 立即 EOF，主循环读到空输入直接 Goodbye。修复：`Terminal._stdin_is_console()` 用 `sys.stdin.isatty()` 检测，管道环境自动降级为朴素 `input()`（无补全/工具栏但可正常对话）。想要完整体验用 `winpty mini`——winpty 桥接出真控制台。
+
+**② 孤立代理字符崩溃**：用户名/路径含中文（GBK）时，mintty 管道经 surrogateescape 解码产生 `\udc81` 这类孤立代理字符，混进 system prompt 的 working_dir——httpx 的 UTF-8 JSON 编码直接抛 `surrogates not allowed`，请求发不出去。修复双层：cli.py 入口把 stdin 也 reconfigure 为 UTF-8 + replace（源头减量）；openai_provider 发请求前 `_sanitize_surrogates` 递归清洗整个消息树（出口兜底，任何来源的代理字符都替换成 `?`）。教训同 34.2——**出口兜底比堵住所有入口更可靠**，代理字符可能来自 stdin、环境变量、文件读取任何一路。
+
+> 各系统各终端的打开方法、兼容等级、排查表见 [terminal-guide.md](terminal-guide.md)。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——415 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——425 个测试 36 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

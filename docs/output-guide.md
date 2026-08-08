@@ -194,3 +194,9 @@
 ```
 
 **核心原则**：agent_loop 不直接 print——所有输出通过**回调**（on_xxx）或**EventBus 订阅者**间接到达终端。这意味着任何输出都可以通过设回调为 None 或 detach 订阅者来关闭，不需要改 agent_loop 代码。
+
+---
+
+## 附：终端环境差异
+
+不同终端（Windows Terminal / CMD / PowerShell / Git Bash / macOS / Linux）下输出与输入体验有差异——比如 Git Bash 直接运行会降级为朴素输入模式（无补全菜单）。各系统各终端的打开方法、兼容等级、问题排查见 [terminal-guide.md](terminal-guide.md)。
