@@ -168,6 +168,11 @@ class Application:
             path_guard=path_guard,
             confirm_callback=self.terminal.confirm,
         )
+        # User-defined permission rules 用户自定义权限规则文件
+        self.permission_manager.load_rule_files(
+            user_file=Path.home() / ".mini-agent" / "permissions.toml",
+            project_file=working_dir / ".mini-agent" / "permissions.toml",
+        )
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
 

@@ -770,3 +770,17 @@
 - [x] .git/.venv/__pycache__ 等目录不出现在补全菜单
 - [x] @ 后有空格时停止补全
 - [x] 12 个新测试，总计 471 个全过
+
+---
+
+## Phase 40 检查项：权限规则文件
+
+- [x] 用户级 ~/.mini-agent/permissions.toml 加载生效
+- [x] 项目级 .mini-agent/permissions.toml 加载生效，与用户级合并
+- [x] allow 规则让危险命令免确认（如 git push）
+- [x] deny 规则无条件拒绝（DENY > ALLOW > 内置默认）
+- [x] PATH deny 规则对项目内路径同样生效（短路盲区已修复）
+- [x] would_ask 与 deny 规则一致（不弹窗直接拒）
+- [x] 文件缺失/格式错误不影响启动
+- [x] /trace 显示规则来源（rule:pattern）
+- [x] 9 个新测试，总计 480 个全过
