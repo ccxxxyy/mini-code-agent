@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from mini_agent.core.agent_state import AgentPhase, AgentState
 from mini_agent.events.bus import EventBus
@@ -95,6 +96,8 @@ class IncrementalAssembler:
 
 class AgentLoop:
     """Orchestrates the think-act-observe ReAct cycle. 编排“思考-行动-观察”的 ReAct 循环。"""
+
+    MAX_TOKENS_RETRIES = 3
 
     def __init__(
         self,
@@ -270,12 +273,42 @@ class AgentLoop:
             if truncated:
                 api_messages = conversation.to_api_messages()
 
+        # max_tokens recovery: if the response was cut off (finish_reason
+        # "length"), retry with a doubled limit -- up to 3 retries, keeping
+        # the last result if still truncated (P44).
+        # max_tokens 恢复：回答被截断（finish_reason "length"）时翻倍限制
+        # 重试——最多 3 次，仍截断则保留最后一次结果。
+        retry_max_tokens = 0  # 0 = provider uses its configured default
+        for _attempt in range(1 + self.MAX_TOKENS_RETRIES):
+            response = await self._stream_once(
+                api_messages, tool_schemas, max_tokens=retry_max_tokens
+            )
+            if response.finish_reason != "length" or self._cancelled:
+                break
+            # Discard tools submitted mid-stream for the truncated attempt --
+            # their arguments may be cut off mid-JSON.
+            # 丢弃截断尝试中流式提交的工具任务——参数可能在 JSON 中途被切断。
+            for task in self._streaming_tasks.values():
+                task.cancel()
+            self._streaming_tasks = {}
+            retry_max_tokens = (retry_max_tokens or self._config.llm.max_tokens) * 2
+        return response
+
+    async def _stream_once(
+        self,
+        api_messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        max_tokens: int = 0,
+    ) -> LLMResponse:
+        """Single streaming LLM call; assembles chunks into a response.
+        单次流式 LLM 调用，将 chunk 组装为完整响应。"""
         chunks: list[StreamChunk] = []
         stream_started = False
         assembler = IncrementalAssembler()
         streaming_enabled = self._config.streaming_tool_execution
+        extra: dict[str, Any] = {"max_tokens": max_tokens} if max_tokens else {}
 
-        async for chunk in self._llm.stream(api_messages, tools=tool_schemas or None):
+        async for chunk in self._llm.stream(api_messages, tools=tool_schemas or None, **extra):
             if self._cancelled:
                 break
             chunks.append(chunk)

@@ -76,7 +76,9 @@ class AnthropicProvider(LLMProvider):
         body: dict[str, Any] = {
             "model": self._config.model,
             "messages": api_messages,
-            "max_tokens": self._config.max_tokens,
+            # kwargs override supports max_tokens recovery retries (P44)
+            # kwargs 覆盖支持 max_tokens 恢复重试
+            "max_tokens": kwargs.get("max_tokens") or self._config.max_tokens,
             "stream": True,
         }
         if system_prompt:
@@ -154,6 +156,11 @@ class AnthropicProvider(LLMProvider):
                 finish = "stop"
             elif stop_reason == "tool_use":
                 finish = "tool_calls"
+            elif stop_reason == "max_tokens":
+                # Normalize to OpenAI's "length" so the recovery logic in
+                # agent_loop works for both providers.
+                # 归一化为 OpenAI 的 "length"，让 agent_loop 的恢复逻辑对两家通用。
+                finish = "length"
             if finish or usage:
                 return StreamChunk(
                     finish_reason=finish,

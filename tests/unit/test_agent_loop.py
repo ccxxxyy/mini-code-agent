@@ -290,3 +290,79 @@ async def test_tool_callbacks(tool_context):
 
     assert started == ["read_file"]
     assert ended == ["read_file"]
+
+
+# --- max_tokens recovery (P44) max_tokens 恢复 ---
+
+
+class KwargsMockLLM(MockLLM):
+    """MockLLM that records the kwargs of each stream() call.
+    记录每次 stream() 调用 kwargs 的 MockLLM。"""
+
+    def __init__(self, scripts):
+        super().__init__(scripts)
+        self.calls: list[dict] = []
+
+    async def stream(self, messages, tools=None, **kwargs):
+        self.calls.append(kwargs)
+        async for chunk in super().stream(messages, tools, **kwargs):
+            yield chunk
+
+
+def truncated_response(text: str) -> list[StreamChunk]:
+    return [StreamChunk(delta=text), StreamChunk(finish_reason="length")]
+
+
+async def test_max_tokens_recovery_retries_with_doubled_limit(tool_context):
+    # 第 1 次截断 → 翻倍重试成功
+    llm = KwargsMockLLM([truncated_response("partial"), text_response("full answer")])
+    loop = AgentLoop(
+        llm=llm,
+        tool_registry=ToolRegistry(),
+        event_bus=EventBus(),
+        config=AgentConfig(),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert result == "full answer"
+    assert len(llm.calls) == 2
+    assert "max_tokens" not in llm.calls[0]  # 首次用 provider 默认
+    assert llm.calls[1]["max_tokens"] == AgentConfig().llm.max_tokens * 2  # 翻倍
+
+
+async def test_max_tokens_recovery_gives_up_after_retries(tool_context):
+    # 全部截断：3 次重试后保留最后一次结果
+    llm = KwargsMockLLM([truncated_response("still cut off")])
+    loop = AgentLoop(
+        llm=llm,
+        tool_registry=ToolRegistry(),
+        event_bus=EventBus(),
+        config=AgentConfig(),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert result == "still cut off"  # 保留截断结果而非丢弃
+    assert len(llm.calls) == 1 + AgentLoop.MAX_TOKENS_RETRIES  # 1 原始 + 3 重试
+    base = AgentConfig().llm.max_tokens
+    assert llm.calls[1]["max_tokens"] == base * 2
+    assert llm.calls[2]["max_tokens"] == base * 4
+    assert llm.calls[3]["max_tokens"] == base * 8
+
+
+async def test_no_retry_on_normal_finish(tool_context):
+    # 正常结束不重试
+    llm = KwargsMockLLM([text_response("ok")])
+    loop = AgentLoop(
+        llm=llm,
+        tool_registry=ToolRegistry(),
+        event_bus=EventBus(),
+        config=AgentConfig(),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+    assert len(llm.calls) == 1

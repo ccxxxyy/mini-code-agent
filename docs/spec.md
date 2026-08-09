@@ -542,7 +542,10 @@ class AgentLoop:
 
     async def _think(self, conversation: Conversation) -> LLMResponse:
         """Call LLM with current conversation. Returns response
-        with possible tool calls."""
+        with possible tool calls. Retries with doubled max_tokens
+        (up to 3 times) when the response is cut off by the limit
+        (finish_reason "length") -- keeps the last result if still
+        truncated (P44)."""
         ...
 
     async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:

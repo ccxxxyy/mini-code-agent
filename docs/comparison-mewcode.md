@@ -176,21 +176,17 @@
 
 代码改动：`core/agent_loop.py` ~50 行重构。需要注意权限确认的工具必须延后到流式结束后串行弹窗。
 
-### 1.5 max_tokens 恢复
+### 1.5 max_tokens 恢复 ✅ 已实现（P44）
 
 | | mini | mewcode |
 |---|---|---|
-| max_tokens 截断处理 | 无（截断就截断了） | 检测到 `stop_reason=max_tokens` 自动提升限制重试（最多 3 次） |
+| max_tokens 截断处理 | ✅ 检测 `finish_reason="length"` 自动翻倍重试（最多 3 次），仍截断保留最后结果 | 检测到 `stop_reason=max_tokens` 自动提升限制重试（最多 3 次） |
 
-**差距**：LLM 生成的回答超出 max_tokens 时被截断，mini 把不完整的回答直接展示。
+**原差距**：LLM 生成的回答超出 max_tokens 时被截断，mini 把不完整的回答直接展示。P44 已实现：
 
-**增强方案**：
-在 `agent_loop.py` 的 `_think()` 后检查 `response.finish_reason`，如果是 `max_tokens`：
-1. 把当前 `max_tokens` 翻倍（或使用模型最大值）
-2. 重发请求（最多 3 次）
-3. 3 次后仍截断则保留最后一次结果
-
-代码改动：`core/agent_loop.py` ~15 行。
+1. `_think()` 的重试循环：`finish_reason == "length"` 时把 max_tokens 翻倍（4096 → 8192 → 16384 → 32768）重发，最多 3 次，仍截断保留最后一次结果
+2. 两家 Provider 的 `stream()` 支持 `max_tokens` kwargs 覆盖配置值；Anthropic 的 `stop_reason="max_tokens"` 归一化为 OpenAI 的 `"length"`，恢复逻辑两家通用
+3. 细节：重试前取消截断尝试中流式提交的工具任务（参数可能在 JSON 中途被切断）；用户取消（Esc）时不重试
 
 ---
 
@@ -662,7 +658,7 @@
 | ✅ 完成 | 3.1 | OS 级沙箱（P41） | 安全质变 | 已完成 |
 | ✅ 完成 | 1.3 | 上下文窗口 API 探测（P42） | 新模型免更新代码 | 已完成 |
 | ✅ 完成 | 4.3 | Token 计数精度提升（P43） | 压缩阈值准确性 | 已完成 |
-| 🟢 P2 | 1.5 | max_tokens 恢复 | 长回答不截断 | 2 小时 |
+| ✅ 完成 | 1.5 | max_tokens 恢复（P44） | 长回答不截断 | 已完成 |
 | 🟢 P2 | 6.1 | Coordinator 模式 | /team 质量 | 半天 |
 | 🟢 P2 | 6.3 | Agent 类型定义 | SubAgent 差异化 | 半天 |
 | 🟢 P2 | 3.3 | Plan 模式只读 | 规划安全 | 2 小时 |

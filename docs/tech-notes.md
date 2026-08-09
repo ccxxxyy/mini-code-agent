@@ -1736,6 +1736,24 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 
 **② assemble_response 的 usage 覆盖丢数据**（`openai_provider.py`）：原来 `if chunk.usage: usage = chunk.usage` 直接覆盖。OpenAI 把完整 usage 放在最后一个 chunk 没问题；但 Anthropic 拆在两个事件——`message_start` 带 prompt_tokens（含缓存统计），`message_delta` 带 completion_tokens——后者会把前者覆盖清零。改按字段取 max 合并，两家协议都正确。
 
+# 第四十四部分：max_tokens 恢复（P44）
+
+## 44.1 为什么需要：截断的回答直接展示给用户
+
+`max_tokens` 默认 4096——长回答（大文件生成、详细解释）超限时被 API 硬切，`finish_reason` 变为 `"length"`（OpenAI）或 `stop_reason="max_tokens"`（Anthropic）。此前 mini 不检查这个信号，半截回答直接进对话历史并展示。更隐蔽的是工具调用场景：参数 JSON 被中途切断 → 解析失败兜底为空字典 → 工具带错误参数执行。
+
+## 44.2 实现：_think() 重试循环 + finish_reason 归一化
+
+`_think()` 的流式调用提取为 `_stream_once()`，外面包一层重试循环：`finish_reason == "length"` 时把 max_tokens 翻倍（4096 → 8192 → 16384 → 32768）重发，最多 `MAX_TOKENS_RETRIES=3` 次，仍截断则保留最后一次结果——最后一次的上限已是配置值的 8 倍，再截断说明回答本身异常长，保留部分结果比丢弃好。
+
+跨供应商归一化在 Provider 解析层做：Anthropic 的 `stop_reason="max_tokens"` 在 `_parse_event` 里映射为 OpenAI 的 `"length"`——agent_loop 的恢复逻辑对两家通用，未来新 Provider 只需遵守同一约定。max_tokens 的覆盖通过 `stream()` 已有的 `**kwargs` 传递（`kwargs.get("max_tokens") or config.max_tokens`），不改接口签名。
+
+## 44.3 两个边界处理
+
+**流式工具任务的丢弃**：截断尝试中已经流式提交的工具任务必须取消——它们的参数可能正是被切断的那个 JSON。重试成功后的完整响应会重新提交这些工具。
+
+**用户取消不重试**：Esc 中断的流也可能没有正常 finish_reason，重试会违背用户意图——`self._cancelled` 在重试条件中短路。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

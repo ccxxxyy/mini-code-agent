@@ -953,3 +953,15 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 ### P43.2 测试
 - [x] `tests/unit/test_token_counter.py` 新建 11 个测试（CJK 估算 5 / usage 锚点 5 / usage 合并 1），515 个测试全过
 - [x] 真实 API 实测校准（阿里云 MaaS，API usage 为真值）：中文估算从 -56% 低估（危险方向：压缩不触发→崩溃）修正为 +76% 高估（安全方向：压缩提前）；混合文本 -20% → +12%；英文/代码不变
+
+---
+
+## Phase 44: max_tokens 恢复 (P44)
+
+### P44.1 实现
+- [x] `core/agent_loop.py` — _think() 重试循环：finish_reason == "length" 时 max_tokens 翻倍重发（最多 MAX_TOKENS_RETRIES=3 次），仍截断保留最后结果；重试前取消流式提交的工具任务（参数可能被 JSON 中途切断）；用户取消不重试；流式调用逻辑提取为 _stream_once()
+- [x] `llm/openai_provider.py` — stream() 的 max_tokens 支持 kwargs 覆盖配置值
+- [x] `llm/anthropic_provider.py` — 同上；stop_reason="max_tokens" 归一化为 OpenAI 的 "length"（恢复逻辑两家通用）
+
+### P44.2 测试
+- [x] `tests/unit/test_agent_loop.py` 新增 3 个测试（翻倍重试成功 / 3 次后保留截断结果+倍增序列 / 正常结束不重试）+ `test_llm_providers.py` 补 max_tokens 映射断言，518 个测试全过

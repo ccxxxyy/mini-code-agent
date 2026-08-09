@@ -109,7 +109,7 @@ mkdir .mini-agent && copy config.toml.example .mini-agent\config.toml
 provider = "openai"          # LLM 提供方
 model = "deepseek-chat"      # 模型名
 temperature = 0.0
-max_tokens = 4096
+max_tokens = 4096            # 单次回复上限；截断时自动翻倍重试最多 3 次（P44），此值是重试的起点
 timeout = 120.0
 
 [tools]
