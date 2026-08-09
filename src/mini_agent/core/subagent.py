@@ -30,6 +30,7 @@ Shell: {shell}
 Complete the task using the available tools, then give a concise final report.
 Do not ask questions -- make reasonable decisions autonomously.
 Your final message is your report back to the orchestrator.
+Respond in the same language the task is written in (Chinese task -> Chinese report).
 
 BUDGET: you have roughly {iteration_budget} think-act rounds before you are \
 force-stopped. Plan your tool usage: prioritize the most important \
@@ -109,6 +110,17 @@ class SubAgent:
         )
         self._loop.model_name = model_name  # cost attribution 成本归属
 
+        # Spill oversized tool results (sub-agents have no ContextManager,
+        # so this is their only protection against context bloat)
+        # 超大工具结果溢写（子代理没有 ContextManager——这是它们防上下文膨胀的唯一保护）
+        from mini_agent.memory.tool_result_cache import ToolResultCache
+
+        self._result_cache = ToolResultCache(
+            Path.home() / ".mini-agent" / "cache" / "results" / f"subagent_{self.agent_id}",
+            threshold_chars=config.memory.spill_threshold_chars,
+        )
+        self._loop.result_cache = self._result_cache
+
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
         shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
         self._conversation = Conversation(
@@ -154,6 +166,8 @@ class SubAgent:
                 worktree_path=self._worktree_path,
                 error=str(e),
             )
+        finally:
+            self._result_cache.cleanup()
 
 
 @dataclass

@@ -48,7 +48,7 @@
 **实现**（`core/agent_loop.py`）：
 - ReAct 循环：THINK（LLM 流式生成）→ 有 tool_calls 则 ACT（执行工具）→ OBSERVE（结果写回对话）→ 回到 THINK，直到 LLM 给出最终回答
 - 自主性本质：工具结果作为 TOOL 消息进入对话，LLM 看到结果自然继续推理——循环不含任务逻辑，所有决策由 LLM 做出
-- 三重熔断：max_iterations 上限（50）、用户取消、同工具连续 6 次的死循环检测
+- 熔断保护：max_iterations 上限（50）、用户取消、双层死循环检测（同签名连续 6 次 + 同工具名连续 8 轮每轮出现——P35 实验后升级 v2，不误杀批量并行）
 
 **验证**：8 个 MockLLM 单测覆盖完整链路；真实 API 验证 Agent 自主多步执行（一次任务里自主 glob→read→回答）
 
@@ -252,15 +252,15 @@
 
 | 维度 | 数据 |
 |---|---|
-| 源文件 | 64 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 425 个测试全部通过（约 41 秒，零网络依赖），单元 23 文件 + 集成 2 文件 |
-| 工具 | 7 个内置工具（read_file / write_file / edit_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |（约 40 秒，零网络依赖），单元 22 文件 + 集成 2 文件 |
+| 源文件 | 77 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
+| 测试 | 443 个测试全部通过（约 55 秒，零网络依赖），单元 25 文件 + 集成 2 文件 |
+| 工具 | 8 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
 | 评测 | 10 个标准编程任务 **10/10 通过**，总成本 $0.0015，详见 `benchmarks/README.md` |
 | 机制透明 | `/trace` 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息）——商用 Agent 给不了的白盒能力 |
 | 垂直场景 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（哈希链防篡改 JSONL + `/audit verify` 完整性校验）+ offline-ollama 内网离线 Skill——"因为拥有源码所以能做"的三个活证据 |
-| 机制实验 | `experiments/` 三项：① 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）；② 强弱模型混编（发现：strong-weak 帕累托最优）；③ 死循环诱导（发现：迭代上限是唯一可靠硬熔断，same-tool-6x 在真实 LLM 下从未触发）——从"做了个项目"到"做了研究" |
+| 机制实验 | `experiments/` 三项：① 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）；② 强弱模型混编（发现：strong-weak 帕累托最优）；③ 死循环诱导（发现：迭代上限是唯一可靠硬熔断，same-tool-6x 在真实 LLM 下从未触发→已升级 v2 按轮检测并实战修正误杀）——从"做了个项目"到"做了研究" |
 | 流式中断 | 双 Esc 优雅中断流式输出（守护线程 + cancelled 标志），不用 Ctrl+C 冒险杀进程 |
 | 长记忆自动化 | PRE_LLM hook 自动注入记忆 + SESSION_END hook 自动提取偏好——用户无感知的跨会话记忆 |
 | 溢出兜底 | 发送前 token 预检（P20）+ 超限强制 SlidingWindow 截断——三级压缩走完仍超窗时的最终防线，杜绝 API 400 |

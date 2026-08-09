@@ -59,6 +59,9 @@ class MemoryConfig:
     persistent_memory_dir: str = "~/.mini-agent/memory"
     project_memory_file: str = ".mini-agent/memory.json"
     auto_extract: bool = True
+    # Tool results above this size are spilled to disk (0 = disabled)
+    # 超过此字符数的工具结果溢写磁盘（0 = 禁用）
+    spill_threshold_chars: int = 50_000
 
 
 @dataclass

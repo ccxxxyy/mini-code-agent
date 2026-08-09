@@ -75,6 +75,9 @@ class AgentLoop:
         # Optional per-turn file snapshots for operation-level undo (app injects)
         # 可选的每轮文件快照——操作级撤销（app.py 注入）
         self.snapshot_store = None
+        # Optional spill-to-disk cache for oversized tool results (app injects)
+        # 可选的超大工具结果溢写缓存（app.py 注入）
+        self.result_cache = None
         self.current_turn_id: int = 0
         # Model name for cost attribution (app/subagent manager sets it)
         # 模型名——供成本归属（app/subagent manager 设置）
@@ -134,6 +137,7 @@ class AgentLoop:
             await self._transition(AgentPhase.TOOL_CALLING)
             results = await self._act(response.tool_calls)
             tools_called += len(results)
+            self._state.record_iteration_tools({tc.name for tc in response.tool_calls})
 
             # OBSERVE
             await self._transition(AgentPhase.OBSERVING)
@@ -385,6 +389,16 @@ class AgentLoop:
                 is_error=raw.is_error,
                 metadata=raw.metadata,
             )
+            # Spill oversized outputs to disk -- large file contents entering
+            # the conversation wholesale is the root cause of the
+            # compression-reread inflation loop
+            # 超大输出溢写磁盘——大文件内容整体进对话是压缩-重读膨胀的根源
+            if self.result_cache is not None:
+                result = self.result_cache.maybe_spill(result)
+            if self._context is not None and tc.name == "read_file" and not result.is_error:
+                path = args.get("file_path")
+                if path:
+                    self._context.record_file_read(str(path))
         except ValueError as e:
             result = ToolResult(call_id=tc.id, name=tc.name, output=str(e), is_error=True)
         except Exception as e:
@@ -460,14 +474,17 @@ class AgentLoop:
         recent = self._state.recent_tool_names[-6:]
         if len(recent) >= 6 and len(set(recent)) == 1:
             return False
-        # Infinite loop guard 2: same tool NAME dominates recent calls
-        # (10+ of last 12 calls are the same tool, regardless of args)
-        # 死循环保护 2：同名工具占据最近调用的绝对多数（不看参数）
-        window = self._state.recent_tool_names[-12:]
-        if len(window) >= 12:
-            names = [sig.split("(", 1)[0] for sig in window]
-            most_common = max(set(names), key=names.count)
-            if names.count(most_common) >= 10:
+        # Infinite loop guard 2: the same tool name appears in EVERY one of
+        # the last 8 iterations (args ignored). Per-iteration granularity --
+        # reading 10 files in parallel within one iteration is normal batch
+        # work; calling read_file every iteration for 8 rounds is a loop.
+        # 死循环保护 2：同一工具名连续 8 轮迭代每轮都出现（不看参数）。
+        # 按轮统计——一轮内并行读 10 个文件是正常批量；连续 8 轮每轮都在
+        # read_file 才是死循环。
+        window = self._state.iteration_tools[-8:]
+        if len(window) >= 8:
+            common = frozenset.intersection(*window)
+            if common:
                 return False
         return True
 

@@ -28,6 +28,17 @@ class AgentState:
     pending_tool_calls: list[ToolCall] = field(default_factory=list)
     recent_tool_names: list[str] = field(default_factory=list)
     last_tool_results: list[ToolResult] = field(default_factory=list)
+    # Distinct tool names used per iteration (sliding window of 8) --
+    # a real loop calls the same tool every iteration; a batch job calls
+    # it many times within ONE iteration, which is fine
+    # 每轮迭代用到的工具名集合（滑窗 8）——真死循环是每轮都调同一个工具；
+    # 批量任务是一轮内并行调多次，这是正常的
+    iteration_tools: list[frozenset[str]] = field(default_factory=list)
+
+    def record_iteration_tools(self, names: set[str]) -> None:
+        self.iteration_tools.append(frozenset(names))
+        if len(self.iteration_tools) > 8:
+            self.iteration_tools = self.iteration_tools[-8:]
 
     @property
     def is_terminal(self) -> bool:

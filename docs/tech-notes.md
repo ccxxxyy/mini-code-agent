@@ -1519,7 +1519,7 @@ Rich Live 擦除旧帧时按"上次渲染了几行"回退光标。_render_tail �
 
 **② LLM 擅自执行 git 状态修改操作（已加双层防护）**：用户问"介绍所有文档"，LLM 跑偏成"审计 P34 工作状态"，中途执行了 git stash/stash pop，最后试图 git commit。两层修复：system prompt 加 CRITICAL 红线（非用户明确要求绝不执行 commit/push/stash/reset/rebase 等状态修改命令 + 不许把简单问题扩大为项目审计）；DANGEROUS_COMMAND_PATTERNS 从只拦 push --force / reset --hard 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需用户确认）。提示词是软约束、权限确认是硬闸门——LLM 不听话时闸门兜底。
 
-**③ 压缩-重读膨胀的实战重现（待根治）**：同一请求烧了 50 万 token（¥0.51）。trace 显示同一文件被读 3-4 次：读大量文档 → 触发 75% 压缩 → 已读内容被摘要掉 → LLM"忘了"读过 → 重读 → 再触发压缩。机制实验 1 的结论（压缩的隐性代价是重复劳动）在真实使用中完整重现。same-tool-6x 熔断没拦住——每次读的参数不同（offset/文件名），签名不重复。**候选根治方向**：压缩时保护"已读文件清单"元信息（把"已读 spec.md 全文"作为一句话保留在摘要里），或 read_file 会话级缓存（同文件同参数返回"内容未变化，见前文"）。
+**③ 压缩-重读膨胀的实战重现（已于 P36 根治，见 §36）**：同一请求烧了 50 万 token（¥0.51）。trace 显示同一文件被读 3-4 次：读大量文档 → 触发 75% 压缩 → 已读内容被摘要掉 → LLM"忘了"读过 → 重读 → 再触发压缩。机制实验 1 的结论（压缩的隐性代价是重复劳动）在真实使用中完整重现。same-tool-6x 熔断没拦住——每次读的参数不同（offset/文件名），签名不重复。**根治方案（P36 已实现）**：双层修复——大工具结果溢写磁盘 + 压缩后注入已读文件清单。
 
 ## 34.4 mintty（Git Bash）适配——管道 stdin 的两个坑
 
@@ -1539,13 +1539,17 @@ Git Bash 的 mintty 不是 Windows 控制台——它把 stdin 包装成管道�
 
 这揭示了一个设计盲区：`record_tool_call` 使用 `name + args 前 200 字符` 作为签名，本意是"同一工具处理不同文件是正常的"——但结果是**任何参数变化都让检测失效**。候选改进方向：只比较工具名（忽略参数），或改为"最近 N 次调用中同名工具占比超过阈值"。但要注意不能太激进——read_file 连读 6 个不同文件是正常的批量操作。
 
-## 35.2 same-tool-6x 增强：同名工具占比检测
+## 35.2 same-tool-6x 增强：按轮统计的同名工具检测（v2，修正过一次误杀）
 
-实验暴露问题后，新增第二层检测：最近 12 次调用中，如果同一个**工具名**（忽略参数）出现 10 次以上（≥83%），判定为死循环并停止。阈值设高是为了不误杀正常批量操作——一口气读 8 个不同文件是合理的（8/12=67%），但连续 10 次 read_file 几乎肯定是循环。
+实验暴露问题后，第一版增强按"最近 12 次调用中同名 ≥10 次"检测——**实战立刻误杀**：用户问"详细解释所有文档"，LLM 高效地在 4 轮内并行读了 10 个文档（一轮读 3-4 个），12 次调用里 read_file 占 10 次，触发熔断，回答没生成就被终止。
+
+教训：**死循环的特征是"每轮迭代都在调同一个工具"，不是"调用总量大"**。一轮内并行调 10 次是高效批量；连续 8 轮每轮都调才是循环。
+
+v2 改为按轮统计：`AgentState.iteration_tools` 记录每轮迭代用到的工具名集合（滑窗 8），`_should_continue` 检查**连续 8 轮的交集**——某个工具名在每一轮都出现才熔断。批量并行读文档只占 3-4 轮，永不触发；真死循环（每轮 read 一次 ×8 轮）依然被拦。
 
 两层检测互补：
-- 第一层（原有）：`name(args)` 签名完全相同 ×6 → 捕获 MockLLM 式的机械重复
-- 第二层（新增）：同名工具 ≥10/12 → 捕获真实 LLM 的参数变换式重复
+- 第一层（原有）：`name(args)` 签名完全相同 ×6 → 捕获机械重复
+- 第二层（v2）：同一工具名连续 8 轮每轮出现 → 捕获真实 LLM 的参数变换式循环，且不误杀批量任务
 
 ## 35.3 self_referential 是最危险的模式
 
@@ -1553,9 +1557,43 @@ Git Bash 的 mintty 不是 Windows 控制台——它把 stdin 包装成管道�
 
 其余 4 个场景在 normal 臂下都自然停止——LLM 足够"聪明"，几轮后就判断任务不可能完成并主动报告。这说明 LLM 的自主判断是第一道防线，迭代上限是兜底。
 
-## 35.3 迭代上限是唯一可靠的硬熔断
+## 35.4 迭代上限是唯一可靠的硬熔断
 
 实验证明三重熔断的实际保护力排序：**迭代上限 >> LLM 自主停止 >> same-tool-6x（未触发）**。预算警告只是提醒（soft fuse），不阻止循环。默认 max_iterations=50 保持合理——允许复杂任务有足够空间，同时在最坏情况下限制损失。
+
+# 第三十六部分：压缩-重读膨胀根治（P36）
+
+## 36.1 问题回顾与双层修复
+
+34.3 ③ 记录的实战问题：单请求烧 50 万 token。链条是 读大文件 → 内容整体进对话 → 触发 75% 压缩 → 摘要连内容带文件名一起丢弃（`DropToolResults` 只留前 200 字符，`_extractive_digest` 压成 `read_file → ok`）→ LLM"忘了"读过 → 重读 → 再压缩 → 循环。
+
+修复分两层，借鉴 mewcode 的成熟方案（comparison-mewcode.md §4.1/§4.2）：
+
+**第一层：溢写（源头减量）**。`memory/tool_result_cache.py` 的 `ToolResultCache.maybe_spill()`——工具结果超过 50K 字符（`[memory] spill_threshold_chars` 可配，0 禁用）时写入 `~/.mini-agent/cache/results/{session_id}/`，对话中只留 500 字符预览 + 提示（"输出过大已溢写，用 offset/limit 重新读取特定段落"）。大文件根本不进对话，压缩触发频率大幅下降。挂载点在 `agent_loop._run_tool_pipeline()`——工具管线层，SubAgent（没有 ContextManager）同样受保护。
+
+**第二层：已读清单注入（断循环）**。`ContextManager.record_file_read()` 追踪本会话读过的文件（保序去重）；压缩完成后 `_inject_read_files()` 在摘要消息末尾追加 `[Files already read this session -- do NOT re-read unless their content changed: a.py, b.md]`。二次压缩时替换旧清单（清单可能已增长）；纯 SlidingWindow 路径（无摘要消息）插入独立 SYSTEM 消息。
+
+## 36.2 为什么两层都要
+
+只做溢写：小于 50K 的文件仍然会进对话并在压缩时丢失身份——多个中等文件累积照样触发重读。只做清单：大文件第一次读还是全量进对话，一个 200K 的文件立即吃掉 50K token。两层配合：大文件被拦在门外，中小文件被清单记住——重读循环的两个入口都被堵上。
+
+## 36.3 实战验证暴露的第三个洞：任务锚点
+
+P36 上线后实测"详细介绍所有文档"：溢写生效（tech-notes 60K+ 字符只留 661 字符预览）、熔断不再误杀（v2 按轮统计）、token 从 50 万降到 17 万——但 LLM 读完所有文档后反问"你要我做什么？"。
+
+原因：单轮膨胀到 173K 超过 128K 窗口 → `ensure_fits` 强制 SlidingWindow 截断（从后往前保留）→ 用户的**提问是本轮最旧的消息**（后面跟着几十条工具结果）→ 被丢弃 → 任务没了。
+
+修复：SlidingWindow 增加**任务锚点**——截断后如果保留的消息里没有任何 USER 消息，把最近一条用户消息插回最前。摘要路径（SummarizeOldest）不受此影响——提问会以 `[user] 内容前300字符` 形式留在摘要里。
+
+教训：压缩策略的保护优先级应该是 **用户任务 > 已读状态 > 工具结果内容**——任务丢了一切白读。
+
+## 36.4 设计细节
+
+- `ToolResult` 是 frozen dataclass——溢写通过重建实现（与 `DropToolResults` 同模式），`metadata` 带 `spilled_path`/`full_chars` 供排查
+- 错误结果永不溢写（错误信息本来就该完整可见）
+- 文件路径只存在于 `tc.arguments`——记录点选在 agent_loop（同时看得到调用参数和结果），而非改 read_file 的 metadata
+- 预览长度取 `min(500, threshold)`——防止极小阈值下预览本身超阈值
+- 缓存生命周期：主会话正常退出时清理；SubAgent 在 `run()` 的 finally 里清理
 
 # 附录：贯穿各阶段的通用设计原则
 
@@ -1563,6 +1601,6 @@ Git Bash 的 mintty 不是 Windows 控制台——它把 stdin 包装成管道�
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——425 个测试 36 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——443 个测试约 55 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

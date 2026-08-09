@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-425%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-443%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,7 +19,7 @@
 | **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~4,200 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~4,600 lines of readable Python, MIT licensed |
 
 ## Features
 
@@ -148,10 +148,10 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 425 tests, 83%+ coverage
+├── tests/           # 443 tests, 83%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
-└── docs/            # 11 documentation files (incl. agent-architecture.md, terminal-guide.md)
+└── docs/            # 12 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
 ```
 
 **Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) decoupled via EventBus. All I/O is async. Zero vendor SDK dependency — just httpx.
@@ -168,12 +168,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 425 tests
+uv run pytest tests/           # 443 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P35, 35 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P36, 36 phases).
 
 ## Publishing to PyPI
 

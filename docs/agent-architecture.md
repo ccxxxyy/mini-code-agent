@@ -202,7 +202,7 @@ while True:
 
 **为什么需要**：真实环境里错误是常态。一个健壮的 Agent 应该：重试失败操作、压缩过长上下文、在必要时切换模型。
 
-**本项目实现**：`app.py` `_friendly_error`（HTTP 异常转用户友好提示）+ `core/agent_state.py` 熔断器（same-tool-6x 循环检测防无限递归）+ 溢出兜底（P20）+ `stopped_early` 标志优雅终止。
+**本项目实现**：`app.py` `_friendly_error`（HTTP 异常转用户友好提示）+ `core/agent_state.py` 熔断器（双层死循环检测：同签名 6 次 + 同工具名连续 8 轮，防无限递归）+ 溢出兜底（P20）+ `stopped_early` 标志优雅终止。
 
 **判断标准**：Agent 遇到 API 错误会直接崩溃还是有恢复策略？有没有防无限循环的熔断？
 

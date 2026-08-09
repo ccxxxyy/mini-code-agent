@@ -157,7 +157,9 @@ async def test_infinite_loop_guard(tool_context):
     assert len(read_calls) <= 7
 
 
-async def test_same_tool_name_dominance_guard(tool_context):
+async def test_same_tool_every_iteration_guard(tool_context):
+    # Same tool called once per iteration for many rounds = a real loop
+    # 同一工具每轮调一次持续多轮 = 真死循环
     files = []
     for i in range(15):
         f = tool_context.working_dir / f"f{i}.txt"
@@ -180,7 +182,60 @@ async def test_same_tool_name_dominance_guard(tool_context):
     await loop.run(conv)
 
     assert loop.stopped_early
-    assert loop.state.iteration <= 14
+    assert loop.state.iteration <= 9  # guard fires after 8 consecutive rounds
+
+
+async def test_batch_parallel_reads_not_killed(tool_context):
+    # Many read_file calls within FEW iterations = normal batch work,
+    # must NOT trigger the loop guard (real-world false positive fix)
+    # 少数几轮内并行大量 read_file = 正常批量工作，不能误杀（实战误杀修复）
+    import json as _json
+
+    from mini_agent.llm.base import StreamChunk, ToolCallDelta
+
+    files = []
+    for i in range(10):
+        f = tool_context.working_dir / f"b{i}.txt"
+        f.write_text(f"data{i}", encoding="utf-8")
+        files.append(f)
+
+    def multi_tool_response(paths):
+        deltas = [
+            ToolCallDelta(
+                index=j,
+                id=f"call_{j}",
+                name="read_file",
+                arguments_delta=_json.dumps({"file_path": str(p)}),
+            )
+            for j, p in enumerate(paths)
+        ]
+        return [
+            StreamChunk(tool_call_deltas=deltas),
+            StreamChunk(finish_reason="tool_calls"),
+        ]
+
+    # 3 iterations x parallel reads, then a final answer -- like reading
+    # all project docs 三轮并行读 + 最终回答——类似"读所有文档"场景
+    scripts = [
+        multi_tool_response(files[0:4]),
+        multi_tool_response(files[4:8]),
+        multi_tool_response(files[8:10]),
+        text_response("Here is the summary of all files."),
+    ]
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    loop = AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(max_agent_iterations=20),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert not loop.stopped_early
+    assert "summary" in result
 
 
 async def test_max_iterations_guard(tool_context):

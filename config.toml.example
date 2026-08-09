@@ -20,6 +20,7 @@
 # context_window = 128000
 # compression_threshold = 0.75
 # auto_extract = true
+# spill_threshold_chars = 50000  # tool results above this spill to disk, 0 = off 工具结果超此字符数溢写磁盘，0 禁用
 
 [security]
 # permission_mode = "ask"    # "allow" | "ask" | "deny"

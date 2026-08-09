@@ -52,6 +52,9 @@ You have access to tools for reading/writing/editing files, running shell comman
 and searching the codebase (glob for file names, grep for file contents).
 
 Guidelines:
+- ALWAYS respond in the same language the user writes in. If the user asks \
+in Chinese, answer in Chinese; if in English, answer in English. This applies \
+to ALL your text output, including explanations between tool calls.
 - Only use tools when the task actually requires them (reading/changing files, \
 running commands). For simple questions, conversation, or anything you already \
 know (including your own model name above), answer directly WITHOUT any tool calls.
@@ -193,6 +196,16 @@ class Application:
         self.agent_loop.snapshot_store = FileSnapshotStore(
             working_dir / ".mini-agent" / "undo_snapshots"
         )
+
+        # Spill oversized tool results to disk (compression-reread fix)
+        # 超大工具结果溢写磁盘（压缩-重读膨胀根治）
+        from mini_agent.memory.tool_result_cache import ToolResultCache
+
+        self.result_cache = ToolResultCache(
+            Path.home() / ".mini-agent" / "cache" / "results" / self.session.metadata.session_id,
+            threshold_chars=config.memory.spill_threshold_chars,
+        )
+        self.agent_loop.result_cache = self.result_cache
 
         # SubAgent + Worktree: /spawn and /team use these
         # SubAgent + Worktree：/spawn 和 /team 命令使用
@@ -423,6 +436,8 @@ class Application:
             await self._autosave(force=True)
             if self.agent_loop.snapshot_store:
                 self.agent_loop.snapshot_store.clear()
+            if self.agent_loop.result_cache:
+                self.agent_loop.result_cache.cleanup()
             await self.mcp_manager.disconnect_all()
             self.terminal.show_info("Goodbye!")
 
