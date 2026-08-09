@@ -341,4 +341,37 @@ auto_extract = false   # 关闭后改用 /memory add 手动添加
 
 ---
 
+## 权限规则文件（permissions.toml）
+
+自定义哪些命令/路径免确认放行、哪些无条件拒绝——不用改代码。
+
+**位置**（两级，同时生效）：
+
+| 文件 | 作用域 |
+|---|---|
+| `~/.mini-agent/permissions.toml` | 用户级——所有项目 |
+| `<项目>/.mini-agent/permissions.toml` | 项目级——仅当前项目 |
+
+**格式**（完整示例见项目根 `permissions.toml.example`）：
+
+```toml
+[commands]
+allow = ["git push origin dev", "docker build *"]   # 免确认放行（危险命令也行）
+deny = ["docker rm *"]                               # 无条件拒绝
+
+[paths]
+allow = ["D:/shared/workspace/*"]    # 放行项目外路径（默认项目外要确认）
+deny = ["*secrets*", "*.key"]        # 拒绝访问（项目内路径也拦）
+```
+
+**优先级**：`deny 规则 > allow 规则 > 内置默认`（危险命令确认 / 敏感路径拒绝 / 项目内放行）。deny 最优先——即使路径在项目内也会被拦。
+
+**匹配语法**：glob 风格。`git *` 匹配 `git status` 但不匹配 `github`；`*secrets*` 匹配任何含 secrets 的路径。
+
+**验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<pattern>` 作为判定依据。
+
+**修改后生效**：重启 mini（启动时加载一次）。
+
+---
+
 *相关文档：终端输出说明见 output-guide.md，各系统终端打开方法与兼容性见 terminal-guide.md，能力对照见 capabilities.md，架构原理见 agent-architecture.md。*

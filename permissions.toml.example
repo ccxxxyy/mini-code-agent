@@ -1,0 +1,36 @@
+# Mini-Code-Agent 权限规则文件示例 Permission rules example
+# 复制到 Copy to:
+#   ~/.mini-agent/permissions.toml      （用户级，所有项目生效 user-level, all projects）
+#   .mini-agent/permissions.toml        （项目级，仅当前项目 project-level, this project only）
+#
+# 优先级 Priority: DENY 规则 > ALLOW 规则 > 内置默认（危险命令确认/敏感路径拒绝/项目内放行）
+# 匹配语法 Glob: "git *" 匹配 "git status" 但不匹配 "github"；"*" 单独匹配一切
+#
+# 注意 Note: DENY 规则最优先——即使路径在项目内、命令看起来安全，命中 deny 即拒绝。
+
+[commands]
+# 免确认放行这些命令（即使匹配危险模式，如 git push）
+# Allow these without confirmation (even if they match dangerous patterns)
+allow = [
+    # "git push origin dev",
+    # "docker build *",
+    # "npm run *",
+]
+# 无条件拒绝这些命令 Deny these unconditionally
+deny = [
+    # "docker rm *",
+    # "npm publish *",
+]
+
+[paths]
+# 放行项目外的这些路径（默认项目外要确认）
+# Allow these paths outside the project (outside paths ask by default)
+allow = [
+    # "D:/shared/workspace/*",
+]
+# 拒绝访问这些路径（项目内的路径也会被拦）
+# Deny access to these paths (applies even inside the project)
+deny = [
+    # "*/secrets/*",
+    # "*.key",
+]

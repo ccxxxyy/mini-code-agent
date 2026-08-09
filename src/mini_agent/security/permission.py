@@ -91,6 +91,60 @@ class PermissionManager:
     def add_rule(self, rule: PermissionRule) -> None:
         self._rules.append(rule)
 
+    def load_rule_files(
+        self,
+        user_file: Path | None = None,
+        project_file: Path | None = None,
+    ) -> int:
+        """Load user-defined permission rules from TOML files.
+        从 TOML 文件加载用户自定义权限规则。
+
+        Format 格式:
+            [commands]
+            allow = ["docker build *"]
+            deny = ["docker rm *"]
+            [paths]
+            allow = ["D:/shared/*"]
+            deny = ["*/secrets/*"]
+
+        Returns the number of rules loaded. Missing files are skipped;
+        malformed files are skipped with a warning (startup must not crash).
+        返回加载的规则数。文件缺失跳过；格式错误警告后跳过（启动不能崩）。
+        """
+        count = 0
+        for path, source in ((user_file, "user"), (project_file, "project")):
+            if path is None or not path.is_file():
+                continue
+            try:
+                import tomllib
+
+                with open(path, "rb") as f:
+                    data = tomllib.load(f)
+            except Exception as e:
+                import sys
+
+                print(f"Warning: skipping {path}: {e}", file=sys.stderr)
+                continue
+            reason = f"permissions.toml({source})"
+            for section, scope in (
+                ("commands", PermissionScope.COMMAND),
+                ("paths", PermissionScope.PATH),
+            ):
+                table = data.get(section, {})
+                if not isinstance(table, dict):
+                    continue
+                levels = (("deny", PermissionLevel.DENY), ("allow", PermissionLevel.ALLOW))
+                for level_key, level in levels:
+                    for pattern in table.get(level_key, []):
+                        if isinstance(pattern, str) and pattern:
+                            self._rules.append(
+                                PermissionRule(
+                                    scope=scope, pattern=pattern, level=level, reason=reason
+                                )
+                            )
+                            count += 1
+        return count
+
     def grant_session_permission(self, scope: PermissionScope, pattern: str) -> None:
         """User granted permission for the remainder of the session.
         用户在本会话剩余时间内授予了该权限。"""
@@ -136,8 +190,16 @@ class PermissionManager:
         return await self._ask_user(request)
 
     async def check_path(self, path: Path, operation: str = "read") -> PermissionDecision:
-        """Check file path access via PathGuard, then rules.
-        先通过 PathGuard 检查文件路径访问，再检查规则。"""
+        """Check file path access: explicit DENY rules -> PathGuard -> rules.
+        检查文件路径访问：显式 DENY 规则 -> PathGuard -> 其余规则。
+
+        Explicit DENY rules come FIRST -- otherwise PathGuard's project-dir
+        ALLOW short-circuits them, and a user's `deny = ["*/secrets/*"]`
+        for an in-project path would silently never apply.
+        显式 DENY 规则最优先——否则 PathGuard 的项目内 ALLOW 会短路它们，
+        用户对项目内路径写的 deny 规则会静默失效。"""
+        if self._deny_rule_matches(PermissionScope.PATH, str(path)):
+            return PermissionDecision.DENIED
         level = self._path_guard.check(path, operation)
         if level == PermissionLevel.DENY:
             self.last_decision_reason = "path_guard:sensitive"
@@ -151,6 +213,17 @@ class PermissionManager:
             context=f"{operation} access outside project directory",
         )
         return await self.check(request)
+
+    def _deny_rule_matches(self, scope: PermissionScope, resource: str) -> bool:
+        for rule in self._rules:
+            if (
+                rule.scope == scope
+                and rule.level == PermissionLevel.DENY
+                and self._matches(rule.pattern, resource)
+            ):
+                self.last_decision_reason = f"rule:{rule.pattern}"
+                return True
+        return False
 
     async def check_command(self, command: str) -> PermissionDecision:
         """Check bash command: dangerous patterns need confirmation.
@@ -237,6 +310,8 @@ class PermissionManager:
         return False  # normal commands auto-resolve in every mode 普通命令各模式均自动判定
 
     def _would_ask_path(self, path: Path) -> bool:
+        if self._deny_rule_matches(PermissionScope.PATH, str(path)):
+            return False  # explicit deny resolves without prompting 显式拒绝不弹窗
         level = self._path_guard.check(path)
         if level != PermissionLevel.ASK:
             return False  # ALLOW / DENY resolve without prompting

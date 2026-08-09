@@ -268,13 +268,13 @@
 
 代码改动：新增 2 个文件 ~100 行/个 + `bash.py` ~10 行集成。配置：`[security] sandbox = true`。
 
-### 3.2 权限规则文件
+### 3.2 权限规则文件 ✅ 已实现（P40）
 
 | | mini | mewcode |
 |---|---|---|
-| 权限规则定义 | 代码内 `DANGEROUS_COMMAND_PATTERNS` + `SENSITIVE_PATTERNS` | YAML 规则文件（用户级 + 项目级 + 本地三层） |
+| 权限规则定义 | ✅ **TOML 规则文件**（用户级 `~/.mini-agent/permissions.toml` + 项目级 `.mini-agent/permissions.toml`）+ 内置默认；顺带修复了 PATH deny 被项目内放行短路的盲区 | YAML 规则文件（用户级 + 项目级 + 本地三层） |
 
-**差距**：用户无法定制权限规则——想加一个"允许 docker build"要改代码。
+**原差距**：用户无法定制权限规则——想加一个"允许 docker build"要改代码。P40 已实现，见 permissions.toml.example。
 
 **增强方案**：
 1. 支持 `~/.mini-agent/permissions.toml`（用户级）和 `.mini-agent/permissions.toml`（项目级）
@@ -447,19 +447,15 @@
 
 代码改动：新增 ~400 行。优先级较低——大多数用户场景用终端就够了。
 
-### 5.3 输入补全增强
+### 5.3 输入补全增强 ✅ 已实现
 
 | | mini | mewcode |
 |---|---|---|
 | `/` 命令补全 | ✅ | ✅ |
-| `@file` 补全 | ❌ | ✅ |
-| 输入历史 | ❌（每次会话独立） | ✅ 上下箭头浏览历史 |
+| `@file` 补全 | ✅（P39） | ✅ |
+| 输入历史 | ✅ `FileHistory(~/.mini-agent/input_history)`，跨会话上下箭头浏览，失败退回内存 | ✅ 上下箭头浏览历史 |
 
-**增强方案**：
-1. `@file` 补全：见 §2.2
-2. 输入历史：`prompt_toolkit.history.FileHistory('~/.mini-agent/input_history')`——一行代码
-
-代码改动：`ui/input_handler.py` ~3 行（历史）+ ~30 行（@file）。
+此维度已全部对齐。
 
 ---
 
@@ -667,8 +663,8 @@
 | ✅ 完成 | 1.2 | Prompt 缓存（P37） | Anthropic 省 90% 输入 token | 已完成 |
 | ✅ 完成 | 1.4 | 流式工具执行（P38） | 多工具调用提速 | 已完成 |
 | ✅ 完成 | 2.2 | `@file` 引用（P39） | 用户体验 | 已完成 |
-| 🟡 P1 | 5.3 | 输入历史持久化 | 用户体验（1 行代码） | 5 分钟 |
-| 🟡 P1 | 3.2 | 权限规则文件 | 用户自定义权限 | 半天 |
+| ✅ 完成 | 5.3 | 输入历史持久化 | 用户体验 | 已完成 |
+| ✅ 完成 | 3.2 | 权限规则文件（P40） | 用户自定义权限 | 已完成 |
 | 🟢 P2 | 3.1 | OS 级沙箱（Linux/macOS） | 安全质变 | 1 天 |
 | 🟢 P2 | 1.3 | 上下文窗口 API 探测 | 新模型免更新代码 | 2 小时 |
 | 🟢 P2 | 4.3 | Token 计数精度提升 | 压缩阈值准确性 | 2 小时 |

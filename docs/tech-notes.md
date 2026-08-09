@@ -1611,6 +1611,16 @@ Chat Completions 协议没有"单个工具调用结束"事件，但有两个可�
 
 `streaming_tool_execution = false` 完全回退 P17 的"流后并行"行为——排查问题时可对照。
 
+# 第四十部分：权限规则文件（P40）
+
+## 40.1 从硬编码到用户可配
+
+危险命令模式和敏感路径此前硬编码在 `DANGEROUS_COMMAND_PATTERNS` / `SENSITIVE_PATTERNS`——用户想"docker build 免确认"必须改源码。P40 支持两级 TOML 规则文件（用户级 `~/.mini-agent/permissions.toml` + 项目级 `.mini-agent/permissions.toml`），`load_rule_files()` 启动时解析 `[commands]`/`[paths]` 的 allow/deny 列表为 `PermissionRule` 追加进现有规则表——评估逻辑零改动，完全复用 `check()` 的 DENY→ALLOW→session→mode 顺序。文件缺失跳过、格式错误警告不崩（启动韧性优先）。
+
+## 40.2 顺带修复的盲区：PATH deny 被项目内放行短路
+
+实现时发现 `check_path()` 的流程是"先问 PathGuard，项目内 ALLOW 直接返回"——显式 DENY 规则根本没机会被评估。用户写 `deny = ["*secrets*"]` 拦项目内的机密目录会**静默失效**。修复：`check_path()` 和 `_would_ask_path()` 都在 PathGuard 之前先查 `_deny_rule_matches()`——DENY 规则最优先，符合权限系统"显式拒绝高于一切"的一贯哲学。这是一个"加功能时暴露旧盲区"的典型案例：规则文件让 PATH deny 第一次有了真实用户，短路问题才浮出水面。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

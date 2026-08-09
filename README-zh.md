@@ -285,8 +285,9 @@ mini-code-agent/
 - [x] P37：Anthropic Prompt 缓存（三处 cache_control 标记：系统提示/最后工具/最后用户消息——缓存命中部分输入 token 成本降约 90%）
 - [x] P38：流式工具执行（工具调用流式中组装完成即执行，实测提前 400-550ms 开跑；需确认的延迟到流后，可配置关闭）
 - [x] P39：@file 内联引用（输入 `@文件名` 自动内联文件内容 + Tab 补全，省掉 read_file 调用）
+- [x] P40：权限规则文件（用户级/项目级 permissions.toml 自定义 allow/deny + 修复项目内 PATH deny 短路盲区）
 
-**全部阶段已完成，471 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，480 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

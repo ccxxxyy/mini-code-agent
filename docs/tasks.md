@@ -897,3 +897,16 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P39.2 测试
 - [x] `tests/unit/test_at_file_refs.py` 新建 12 个测试（展开 6 + 补全 6），471 个测试全过
+
+---
+
+## Phase 40: 权限规则文件 (P40)
+
+### P40.1 实现
+- [x] `security/permission.py` — load_rule_files()：解析用户级/项目级 permissions.toml 的 [commands]/[paths] allow/deny 规则；文件缺失跳过、格式错误警告不崩；reason 标注来源
+- [x] `security/permission.py` — **PATH deny 短路修复**：check_path() 先查显式 DENY 规则再问 PathGuard——此前项目内路径被 PathGuard ALLOW 短路，用户的 deny 规则静默失效；_would_ask_path 对齐
+- [x] `app.py` — 构造 PermissionManager 后加载两级规则文件
+- [x] `permissions.toml.example` — 新建带注释示例（格式/优先级/glob 语法说明）
+
+### P40.2 测试
+- [x] `tests/unit/test_permission_files.py` 新建 9 个测试（用户级 allow/项目级 deny/两级合并/缺失/格式错误/项目内 deny 生效/would_ask 一致/deny 优先 allow/来源标注），480 个测试全过
