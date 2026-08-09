@@ -121,7 +121,7 @@
 
 **实现**（`memory/context.py` + `compressor.py` + `llm/token_counter.py`）：
 - Token 管理：tiktoken 精确计数（可选依赖，缺失时 chars/4 估算）+ LRU 缓存 + 每轮界面显示用量（`tokens: xxx this turn / xxx total`）
-- 自动压缩：ContextManager 每轮 OBSERVE 后检查，达到窗口 75% 触发
+- 自动压缩：ContextManager 每轮 OBSERVE 后检查，达到窗口 75% 触发；ensure_fits 溢出兜底使用 API 探测的真实窗口值（P42）
 - 三级压缩级联（保留关键信息的关键设计）：
   1. DropToolResults — 先压最冗余的工具输出（保留调用结构）
   2. SummarizeOldest — 摘要旧消息，最近 6 条不动（当前工作上下文完整保留）
@@ -192,7 +192,7 @@
 | 要求点 | 实现 |
 |---|---|
 | System Prompt 工程 | `app.py` SYSTEM_PROMPT — 动态注入工作目录/平台/shell/当前模型名，平台感知命令指引，工具使用准则 |
-| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI 兼容 + Anthropic 双 Provider，注册表工厂模式，`/model` 多模型热切换 |
+| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI 兼容 + Anthropic 双 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42：GET /models/{model} 递归提取，失败回退内置表） |
 | 流式响应 | SSE 逐行解析 → StreamChunk 统一抽象 → Rich Live 实时渲染 |
 | 多轮对话 | Conversation 全量重放，工具调用配对协议（tool_calls ↔ tool_call_id） |
 | 对话管理器 | Conversation 类：append / to_api_messages / slice_window / token 累计 |

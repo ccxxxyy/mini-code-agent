@@ -73,6 +73,99 @@ def test_openai_context_window_lookup():
     assert provider.context_window == 128_000  # fallback 兜底值
 
 
+# --- OpenAI: 上下文窗口 API 探测 ---
+
+
+def test_extract_context_window_top_level():
+    assert OpenAIProvider._extract_context_window({"context_window": 200_000}) == 200_000
+    assert OpenAIProvider._extract_context_window({"context_length": 131_072}) == 131_072
+    assert OpenAIProvider._extract_context_window({"max_model_len": 32_768}) == 32_768
+
+
+def test_extract_context_window_nested():
+    # OpenRouter 风格：字段在嵌套对象里
+    data = {"id": "m", "top_provider": {"context_length": 65_536}}
+    assert OpenAIProvider._extract_context_window(data) == 65_536
+
+
+def test_extract_context_window_deeply_nested():
+    # 阿里云 MaaS 风格：extra_info.default_envs.max_input_tokens（实测验证）
+    data = {
+        "id": "deepseek-v4-flash-0731",
+        "extra_info": {"default_envs": {"max_tokens": 131_072, "max_input_tokens": 129_024}},
+    }
+    assert OpenAIProvider._extract_context_window(data) == 129_024
+
+
+def test_extract_context_window_missing_or_invalid():
+    assert OpenAIProvider._extract_context_window({"id": "gpt-4o"}) is None
+    assert OpenAIProvider._extract_context_window({"context_window": "big"}) is None
+    assert OpenAIProvider._extract_context_window({"context_window": 0}) is None
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict:
+        return self._payload
+
+
+async def test_probe_context_window_success():
+    provider = OpenAIProvider(LLMConfig(api_key="x", model="some-new-model"))
+
+    async def fake_get(url, **kwargs):
+        assert url == "/models/some-new-model"
+        return _FakeResponse({"id": "some-new-model", "context_window": 262_144})
+
+    provider._client.get = fake_get
+    await provider._probe_context_window()
+    assert provider.context_window == 262_144
+
+
+async def test_probe_context_window_failure_falls_back():
+    import httpx
+
+    provider = OpenAIProvider(LLMConfig(api_key="x", model="gpt-4"))
+
+    async def fake_get(url, **kwargs):
+        raise httpx.ConnectError("boom")
+
+    provider._client.get = fake_get
+    await provider._probe_context_window()
+    assert provider.context_window == 8_192  # 回退到硬编码表
+
+
+async def test_prepare_probes_context_window():
+    # 启动预热：app.run() 在首轮对话前调用 prepare()，让首轮溢出检查用真实窗口
+    provider = OpenAIProvider(LLMConfig(api_key="x", model="some-new-model"))
+
+    async def fake_get(url, **kwargs):
+        return _FakeResponse({"context_window": 262_144})
+
+    provider._client.get = fake_get
+    await provider.prepare()
+    assert provider.context_window == 262_144
+
+
+async def test_probe_context_window_only_once():
+    provider = OpenAIProvider(LLMConfig(api_key="x", model="m"))
+    calls = 0
+
+    async def fake_get(url, **kwargs):
+        nonlocal calls
+        calls += 1
+        return _FakeResponse({"context_window": 100_000})
+
+    provider._client.get = fake_get
+    await provider._probe_context_window()
+    await provider._probe_context_window()
+    assert calls == 1
+
+
 # --- assemble_response: 碎片组装 ---
 
 

@@ -646,6 +646,10 @@ class LLMProvider(ABC):
         """Convert internal Tool objects to this provider's tool format."""
         ...
 
+    async def prepare(self) -> None:
+        """Optional warmup before first use (e.g. context window probing).
+        Default: no-op. 首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
+
     @property
     @abstractmethod
     def context_window(self) -> int:
@@ -1448,9 +1452,16 @@ class OpenAIProvider(LLMProvider):
         # {"type": "function", "function": {"name": ..., "parameters": ...}}
         ...
 
+    async def prepare(self) -> None:
+        # Probe GET {base_url}/models/{model} for the real context window (P42).
+        # Recursively extracts context_window/context_length/max_context_length/
+        # max_model_len/max_input_tokens from the response (any nesting depth).
+        # Once per instance; silent fallback on failure.
+        ...
+
     @property
     def context_window(self) -> int:
-        # Lookup from MODEL_CONTEXT_WINDOWS dict
+        # 3-tier fallback: probed value -> MODEL_CONTEXT_WINDOWS dict -> 128k
         ...
 ```
 

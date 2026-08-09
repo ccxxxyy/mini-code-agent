@@ -151,16 +151,13 @@
 
 代码改动量：`llm/anthropic_provider.py` ~10 行。效果：系统提示和工具 schema 只在首次请求完整传输，后续请求命中缓存——**Anthropic 用户的输入 token 成本降低约 90%**。
 
-### 1.3 上下文窗口探测
+### 1.3 上下文窗口探测 ✅ 已实现（P42）
 
 | | mini | mewcode |
 |---|---|---|
-| 窗口大小获取 | 硬编码 `MODEL_CONTEXT_WINDOWS` 表 | 4 层回退：配置 → API `/v1/models` 查询 → 内置表 → 默认值 |
+| 窗口大小获取 | ✅ **3 层回退**：API `/models/{model}` 探测 → 内置表 → 128k 默认值；递归提取 5 种字段名（context_window/context_length/max_context_length/max_model_len/max_input_tokens），兼容任意深度嵌套 | 4 层回退：配置 → API `/v1/models` 查询 → 内置表 → 默认值 |
 
-**差距**：新模型上线后 mini 需要手动更新代码里的表，mewcode 可以自动从 API 获取。
-
-**增强方案**：
-在 `OpenAIProvider` 初始化时（或首次调用前），尝试 GET `{base_url}/models/{model_name}` 获取 `context_window` 字段。失败时回退到现有的硬编码表。代码改动：`llm/openai_provider.py` ~15 行。
+**原差距**：新模型上线后 mini 需要手动更新代码里的表。P42 已实现：`LLMProvider.prepare()` 预热钩子在启动时（`app.run()`）和 `/model` 切换后触发探测，`stream()` 入口兜底；每实例只探测一次，失败静默回退。真实 API 实测（阿里云 MaaS 三个模型）均成功探测到 129024——窗口值藏在 `extra_info.default_envs.max_input_tokens` 深层嵌套里，正是递归提取要解决的场景。
 
 ### 1.4 流式工具执行 ✅ 已实现（P38）
 
@@ -666,7 +663,7 @@
 | ✅ 完成 | 5.3 | 输入历史持久化 | 用户体验 | 已完成 |
 | ✅ 完成 | 3.2 | 权限规则文件（P40） | 用户自定义权限 | 已完成 |
 | ✅ 完成 | 3.1 | OS 级沙箱（P41） | 安全质变 | 已完成 |
-| 🟢 P2 | 1.3 | 上下文窗口 API 探测 | 新模型免更新代码 | 2 小时 |
+| ✅ 完成 | 1.3 | 上下文窗口 API 探测（P42） | 新模型免更新代码 | 已完成 |
 | 🟢 P2 | 4.3 | Token 计数精度提升 | 压缩阈值准确性 | 2 小时 |
 | 🟢 P2 | 1.5 | max_tokens 恢复 | 长回答不截断 | 2 小时 |
 | 🟢 P2 | 6.1 | Coordinator 模式 | /team 质量 | 半天 |

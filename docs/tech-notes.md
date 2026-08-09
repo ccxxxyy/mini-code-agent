@@ -1673,6 +1673,33 @@ Windows 的 Job Objects / AppContainers 需要管理员权限或 COM 接口调�
 
 `sandbox_auto_allow` 的设计意图是"内核提供了隔离，不需要每次弹窗问用户了"——但显式 deny 规则仍然拦截。评估顺序：显式规则（P40）→ sandbox_auto_allow → 弹窗。deny 规则在 sandbox_auto_allow 之前被评估（`_check_rules_only` 在 `check_command` 的第一步），所以 `denied_commands = ["docker rm *"]` 即使沙箱开启也会被拒绝——用户的意志高于自动化。
 
+# 第四十二部分：上下文窗口 API 探测（P42）
+
+## 42.1 为什么需要：硬编码表跟不上模型上新
+
+Provider 的 `context_window` 属性驱动 `ensure_fits` 溢出兜底（`agent_loop._think()` 在每次 LLM 调用前用它预检强制截断；压缩触发阈值另走 `MemoryConfig.context_window` 配置值）。此前它来自硬编码的 `MODEL_CONTEXT_WINDOWS` 表——每有新模型就要改源码，而第三方兼容服务（DeepSeek、阿里云 MaaS、OpenRouter、本地 vLLM）的模型名根本不可能提前穷举，全都落到 128k 默认值。默认值偏大时的后果是实质性的：真实窗口 8k 的本地模型按 128k 算，`ensure_fits` 预检永远放行，直接 HTTP 400 崩溃。
+
+## 42.2 探测机制：GET /models/{model} + 递归字段提取
+
+OpenAI 兼容服务普遍实现了 `GET {base_url}/models/{model}` 端点，但**返回结构没有标准**——这是本实现最核心的经验：
+
+- 字段名各家不同：`context_window` / `context_length`（OpenRouter）/ `max_context_length` / `max_model_len`（vLLM）/ `max_input_tokens`（阿里云 MaaS）
+- 嵌套深度各家不同：OpenRouter 在 `top_provider.context_length`，阿里云 MaaS 藏在 `extra_info.default_envs.max_input_tokens` 三层深
+
+所以 `_extract_context_window()` 做**递归查找**：先查当前层的 5 个候选字段名（要求正整数），再深入所有 dict 子对象。初版只查顶层+一层嵌套，真实 API 实测（阿里云 MaaS）返回 `None` 才暴露问题——**mock 单测验证不了供应商响应结构的多样性，真实 API 实测不可省略**。实测三个模型（deepseek-v4-flash-0731 / deepseek-v4-flash / qwen3.6-plus）均成功探测到 129024。
+
+回退链三层：探测值 → `MODEL_CONTEXT_WINDOWS` 表 → 128k 默认。探测失败（404、超时、无效 JSON、字段缺失）静默回退不打扰用户——探测是增强不是依赖。
+
+## 42.3 探测时机：prepare() 钩子解决"首轮读不到"
+
+天真的做法是在 `stream()` 入口探测——但 `agent_loop._think()` 在调用 `stream()` **之前**就读 `context_window` 做溢出预检，首轮拿到的永远是回退值。解决：`LLMProvider.prepare()` 可选预热钩子（基类默认无操作，Anthropic/Mock Provider 零改动），三个触发点覆盖 provider 的全部创建路径：
+
+1. `app.run()` 启动时——首轮对话前完成探测
+2. `/model` 切换后（命名 profile 和裸模型名两条路径）——新 provider 立即探测
+3. `stream()` 入口兜底——其他路径（SubAgent worker 等）创建的 provider 首次调用时探测
+
+`_probe_attempted` 标志保证每实例只探测一次（成败皆然），10 秒独立超时不拖慢启动。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
