@@ -1159,6 +1159,7 @@ class TeamConfig:
     members: list[TeamMember]
     coordination_strategy: str = "orchestrator"
     # orchestrator | peer | pipeline
+    coordinator: bool = False  # P45: Planner pure-dispatch mode
 
 
 class AgentTeam:

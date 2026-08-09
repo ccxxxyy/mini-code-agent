@@ -965,3 +965,15 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P44.2 测试
 - [x] `tests/unit/test_agent_loop.py` 新增 3 个测试（翻倍重试成功 / 3 次后保留截断结果+倍增序列 / 正常结束不重试）+ `test_llm_providers.py` 补 max_tokens 映射断言，518 个测试全过
+
+---
+
+## Phase 45: Coordinator 模式 (P45)
+
+### P45.1 实现
+- [x] `core/planner.py` — _COORDINATOR_PREFIX 常量 + Planner 新增 coordinator 参数：coordinator 模式下 prompt 前追加协调者指令（只分解不操作）；max_steps 放宽到至少 8（不能自己补漏需更细粒度分解）
+- [x] `core/team.py` — TeamConfig 新增 coordinator 字段；start() 中 coordinator 模式项目扫描从 2 级/80 行加深到 3 级/120 行；_scan_project_structure() 改为递归实现支持可配深度
+- [x] `extensions/builtin_commands.py` — /team 解析 --coordinator flag + usage 字符串更新
+
+### P45.2 测试
+- [x] `tests/unit/test_team.py` 新增 3 个测试（prompt 注入验证 / max_steps 放宽 / 深度扫描），521 个测试全过

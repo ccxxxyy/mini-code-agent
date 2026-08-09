@@ -1754,6 +1754,23 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 
 **用户取消不重试**：Esc 中断的流也可能没有正常 finish_reason，重试会违背用户意图——`self._cancelled` 在重试条件中短路。
 
+# 第四十五部分：Coordinator 模式（P45）
+
+## 45.1 为什么需要：规划和执行的注意力分散
+
+`/team` 的 Planner 纯做分解（一次 LLM 调用输出 JSON 计划），看上去已经"只规划不执行"了。但差距在于：① Planner 的 prompt 没有明确声明职责边界，LLM 可能在分解时混入执行细节（"读 main.py 然后..."）而 Worker 其实无法访问 Planner 的上下文；② Planner 只看到 2 级、80 行的项目结构——当它不能自己读文件时，这些信息可能不够支撑细粒度分解。
+
+## 45.2 实现：prompt 强化 + 上下文加深 + 粒度放宽
+
+**不做成 AgentLoop**：comparison 原方案提到"Planner 的 ToolRegistry 只保留 spawn_agents"，暗示把 Planner 改成有工具的 Agent 循环。但当前 Planner 是纯 LLM 调用（一发一收），已经物理上不能操作文件——改 AgentLoop 复杂度远超 "~20 行"的估算，且引入递归风险（Coordinator 调 spawn_agents → Worker 的 AgentLoop 本身也可能被嵌套）。正确的做法是强化已有的纯调度属性。
+
+三处加强：
+1. `_COORDINATOR_PREFIX` 注入 Planner prompt——"你是 COORDINATOR，只分解和分派，不能直接读写文件，给 Worker 足够独立工作的上下文"
+2. `max_steps` 从 5 放宽到至少 8——Coordinator 不能自己兜底（"最后一步我自己来"），必须把任务拆得更细让 Workers 各自独立
+3. 项目扫描从 2 级/80 行加深到 3 级/120 行——`_scan_project_structure()` 重构为递归实现（`_scan_dir()`），coordinator 模式下给 Planner 看到 `src/core/engine.py` 级别的文件而非只看到 `src/core/` 目录名
+
+入口：`/team --coordinator <task>` flag 解析（同 `--isolated` 的模式），通过 `TeamConfig.coordinator` 和 `Planner(coordinator=True)` 贯穿数据流。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

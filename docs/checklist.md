@@ -839,3 +839,15 @@
 - [x] OpenAI/Anthropic 两家 Provider 的 stream() 都支持 max_tokens kwargs 覆盖
 - [x] Anthropic stop_reason="max_tokens" 归一化为 "length"
 - [x] 3 个新测试 + 1 个映射断言，总计 518 个全过
+
+---
+
+## Phase 45 检查项：Coordinator 模式
+
+- [x] `/team --coordinator` 正确解析 flag 并传入 TeamConfig 和 Planner
+- [x] Planner prompt 包含 "COORDINATOR" 和 "cannot directly read, write" 指令
+- [x] coordinator 模式下 max_steps 放宽到至少 8（已 ≥8 则不降低）
+- [x] 项目扫描从 2 级/80 行加深到 3 级/120 行
+- [x] 非 coordinator 模式行为不变（回归安全）
+- [x] Workers 保持完整工具集不受影响
+- [x] 3 个新测试，总计 521 个全过

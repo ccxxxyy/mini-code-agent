@@ -1023,25 +1023,32 @@ def _make_team(app: Application) -> HandlerFn:
         raw = args.strip()
         if not raw:
             return (
-                "Usage: `/team <task description>` [--isolated]\n"
+                "Usage: `/team <task description>` [--isolated] [--coordinator]\n"
                 "Decomposes the task via Planner, runs SubAgents in parallel, "
-                "and returns a summary report."
+                "and returns a summary report.\n"
+                "--coordinator: Planner only decomposes and assigns, Workers do all file ops."
             )
 
         isolation = "none"
+        coordinator = False
         task_text = raw
-        if "--isolated" in task_text:
-            isolation = "worktree"
-            task_text = task_text.replace("--isolated", "").strip()
+        for flag, setter in [("--isolated", "isolation"), ("--coordinator", "coordinator")]:
+            if flag in task_text:
+                if setter == "isolation":
+                    isolation = "worktree"
+                else:
+                    coordinator = True
+                task_text = task_text.replace(flag, "").strip()
 
         planner_llm = ProviderRegistry.create_for_role(app.config, "planner")
-        planner = Planner(llm=planner_llm, max_steps=5)
+        planner = Planner(llm=planner_llm, max_steps=5, coordinator=coordinator)
 
         team = AgentTeam(
             config=TeamConfig(
                 name="adhoc",
                 members=[TeamMember(name="worker", role="generalist")],
                 isolation=isolation,
+                coordinator=coordinator,
             ),
             planner=planner,
             subagent_manager=app.subagent_manager,
