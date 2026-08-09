@@ -28,6 +28,7 @@ class TeamConfig:
     name: str
     members: list[TeamMember] = field(default_factory=list)
     isolation: str = "none"  # "none" | "worktree" 隔离模式：无 | worktree
+    coordinator: bool = False  # Coordinator mode: Planner only decomposes, Workers do all file ops
 
 
 @dataclass
@@ -85,7 +86,10 @@ class AgentTeam:
         """
         # Feed the planner the real project layout so it does not assume
         # a generic web-app structure 给 Planner 真实项目结构，避免套用通用 web 模板
-        context = self._scan_project_structure()
+        deep = self._config.coordinator  # coordinator needs richer context 协调者需要更丰富的上下文
+        context = self._scan_project_structure(
+            depth=3 if deep else 2, max_lines=120 if deep else 80
+        )
         plan = await self._planner.decompose(task, context=context)
 
         results_by_index: dict[int, SubAgentResult] = {}
@@ -150,31 +154,29 @@ class AgentTeam:
         """Cancel all running team members. 取消所有运行中的团队成员。"""
         self._manager.cancel_all()
 
-    def _scan_project_structure(self) -> str:
-        """Lightweight two-level directory scan for planner context.
-        供 Planner 参考的轻量两级目录扫描。"""
+    def _scan_project_structure(self, depth: int = 2, max_lines: int = 80) -> str:
+        """Directory scan for planner context. Coordinator mode uses deeper scan.
+        供 Planner 参考的目录扫描。Coordinator 模式用更深扫描。"""
         root = self._manager._working_dir
-        lines = [f"Project root: {root}", "Structure (2 levels):"]
+        lines = [f"Project root: {root}", f"Structure ({depth} levels):"]
+        self._scan_dir(root, lines, depth, indent=1)
+        return "\n".join(lines[:max_lines])
+
+    def _scan_dir(self, path, lines: list[str], depth: int, indent: int) -> None:
+        if depth <= 0:
+            return
+        prefix = "  " * indent
         try:
-            for entry in sorted(root.iterdir()):
+            for entry in sorted(path.iterdir())[:20]:
                 if entry.name in _SCAN_IGNORE or entry.name.startswith("."):
                     continue
                 if entry.is_dir():
-                    lines.append(f"  {entry.name}/")
-                    try:
-                        children = sorted(entry.iterdir())[:15]
-                        for child in children:
-                            if child.name in _SCAN_IGNORE or child.name.startswith("."):
-                                continue
-                            suffix = "/" if child.is_dir() else ""
-                            lines.append(f"    {child.name}{suffix}")
-                    except OSError:
-                        pass
+                    lines.append(f"{prefix}{entry.name}/")
+                    self._scan_dir(entry, lines, depth - 1, indent + 1)
                 else:
-                    lines.append(f"  {entry.name}")
+                    lines.append(f"{prefix}{entry.name}")
         except OSError:
-            return ""
-        return "\n".join(lines[:80])
+            pass
 
     @staticmethod
     def _build_subtask_prompt(step, member: TeamMember | None) -> str:

@@ -451,21 +451,19 @@
 
 ## 六、多 Agent
 
-### 6.1 Coordinator 模式
+### 6.1 Coordinator 模式 ✅ 已实现（P45）
 
 | | mini | mewcode |
 |---|---|---|
-| 主 Agent 角色 | 既规划又执行 | **Coordinator 模式**——主 Agent 纯调度，物理上不能读写文件 |
+| 主 Agent 角色 | ✅ `/team --coordinator`——Planner 纯调度（prompt 强制"只分解不操作"+ max_steps 放宽到 8 + 项目扫描加深到 3 级），Workers 保持完整工具集 | **Coordinator 模式**——主 Agent 纯调度，物理上不能读写文件 |
 
-**差距**：主 Agent 同时规划和执行时注意力容易分散——一边想下一步做什么、一边在读文件写代码。
+**原差距**：主 Agent 同时规划和执行时注意力容易分散。P45 已实现：
 
-**增强方案**：
-1. `/team` 命令新增 `--coordinator` 选项
-2. 开启时，Planner 的 ToolRegistry 只保留 `spawn_agents` + `send_message` 工具
-3. System prompt 追加："你是协调者。你只负责分解任务和分配给 Worker，不能直接读写文件。"
-4. Worker 仍保持完整工具集
-
-代码改动：`core/agent_team.py` ~20 行 + `extensions/builtin_commands.py` ~5 行。
+1. `/team --coordinator` 入口（同 `--isolated` 的 flag 解析模式）
+2. Planner 收到 `_COORDINATOR_PREFIX` 指令："你是 COORDINATOR，只分解和分派，不能直接读写文件"——当前 Planner 已经是纯 LLM 调用（不是 AgentLoop），prompt 强化让职责分离显式化
+3. coordinator 模式下 `max_steps` 放宽到至少 8（Coordinator 不能自己补漏，需要更细粒度分解）
+4. 项目扫描从 2 级/80 行加深到 3 级/120 行——Coordinator 不能自己读文件，给更丰富的结构上下文
+5. Workers 保持完整工具集，不受影响
 
 ### 6.2 跨 Agent 通信
 
@@ -659,7 +657,7 @@
 | ✅ 完成 | 1.3 | 上下文窗口 API 探测（P42） | 新模型免更新代码 | 已完成 |
 | ✅ 完成 | 4.3 | Token 计数精度提升（P43） | 压缩阈值准确性 | 已完成 |
 | ✅ 完成 | 1.5 | max_tokens 恢复（P44） | 长回答不截断 | 已完成 |
-| 🟢 P2 | 6.1 | Coordinator 模式 | /team 质量 | 半天 |
+| ✅ 完成 | 6.1 | Coordinator 模式（P45） | /team 质量 | 已完成 |
 | 🟢 P2 | 6.3 | Agent 类型定义 | SubAgent 差异化 | 半天 |
 | 🟢 P2 | 3.3 | Plan 模式只读 | 规划安全 | 2 小时 |
 | 🟢 P2 | 7.1 | Hook 事件类型扩充 | Hook 灵活性 | 半天 |

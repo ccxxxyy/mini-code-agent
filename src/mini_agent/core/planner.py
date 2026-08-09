@@ -76,12 +76,22 @@ class Plan:
         return all(s.status in ("completed", "failed") for s in self.steps)
 
 
+_COORDINATOR_PREFIX = """\
+You are the COORDINATOR. You ONLY decompose tasks and assign them to \
+specialist Workers. You cannot directly read, write, or modify any files \
+-- all file operations must be delegated to Workers. Produce a thorough \
+plan that gives each Worker enough context to work independently.
+
+"""
+
+
 class Planner:
     """Decomposes tasks into structured plans using the LLM. 使用 LLM 将任务分解为结构化计划。"""
 
-    def __init__(self, llm: LLMProvider, max_steps: int = 5) -> None:
+    def __init__(self, llm: LLMProvider, max_steps: int = 5, coordinator: bool = False) -> None:
         self._llm = llm
-        self._max_steps = max_steps
+        self._max_steps = max_steps if not coordinator else max(max_steps, 8)
+        self._coordinator = coordinator
 
     async def decompose(self, task: str, context: str = "") -> Plan:
         """Ask the LLM to break a task into subtasks. 请求 LLM 将任务拆分为子任务。"""
@@ -89,6 +99,8 @@ class Planner:
         prompt = PLANNER_PROMPT.format(
             task=task, context_section=context_section, max_steps=self._max_steps
         )
+        if self._coordinator:
+            prompt = _COORDINATOR_PREFIX + prompt
 
         messages = [{"role": "user", "content": prompt}]
         chunks = []

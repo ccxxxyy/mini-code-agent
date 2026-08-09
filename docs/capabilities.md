@@ -179,7 +179,7 @@
 **实现**（`core/team.py` + `core/planner.py`）：
 - TeamMember：名称 + 角色（backend/frontend/tester...）+ 工具白名单
 - Planner：LLM 结构化任务分解（JSON 输出，三级解析容错）
-- AgentTeam 编排（Orchestrator 策略）：分解大任务 → 按角色匹配成员 → 并行 spawn（可 worktree 隔离）→ wait_all 收集 → TeamRunReport 汇总（每步状态+输出摘要）
+- AgentTeam 编排（Orchestrator 策略）：分解大任务 → 按角色匹配成员 → 并行 spawn（可 worktree 隔离）→ wait_all 收集 → TeamRunReport 汇总（每步状态+输出摘要）；`--coordinator` 模式 Planner 纯调度（prompt 强化 + max_steps 放宽 + 扫描加深，P45）
 
 **验证**：5+6 个单测；真实 API E2E：Planner 分解调研任务 → 2 角色成员并行执行 → 汇总 success=True
 

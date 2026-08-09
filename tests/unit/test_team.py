@@ -306,3 +306,77 @@ async def test_failed_dependency_skips_dependent(tmp_path):
     assert not report.results[0].success
     assert not report.results[1].success
     assert "Skipped" in (report.results[1].error or "")
+
+
+# --- Coordinator mode (P45) Coordinator 模式 ---
+
+
+async def test_coordinator_mode_prompt_injection(tmp_path):
+    """Coordinator mode injects coordinator prefix into Planner prompt.
+    Coordinator 模式在 Planner prompt 前注入协调者指令。"""
+
+    captured_messages: list = []
+
+    class CaptureLLM(LLMProvider):
+        async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
+            captured_messages.extend(messages)
+            yield StreamChunk(delta='[{"description": "do it", "role": "dev"}]')
+            yield StreamChunk(finish_reason="stop")
+
+        def count_tokens(self, text: str) -> int:
+            return len(text) // 4
+
+        @property
+        def context_window(self) -> int:
+            return 128_000
+
+    llm = CaptureLLM()
+    planner = Planner(llm, coordinator=True)
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    manager = SubAgentManager(
+        llm=TeamMockLLM('[{"description":"x"}]'),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+    )
+    team = AgentTeam(
+        config=TeamConfig(name="t", members=[TeamMember(name="w", role="dev")], coordinator=True),
+        planner=planner,
+        subagent_manager=manager,
+    )
+    await team.start("build feature X")
+
+    assert captured_messages
+    prompt_text = captured_messages[0]["content"]
+    assert "COORDINATOR" in prompt_text
+    assert "cannot directly read, write" in prompt_text
+
+
+async def test_coordinator_mode_max_steps_relaxed():
+    """Coordinator mode raises max_steps to at least 8.
+    Coordinator 模式把 max_steps 放宽到至少 8。"""
+    llm = TeamMockLLM('[{"description":"x"}]')
+    planner = Planner(llm, max_steps=5, coordinator=True)
+    assert planner._max_steps == 8
+
+    planner2 = Planner(llm, max_steps=10, coordinator=True)
+    assert planner2._max_steps == 10  # 已大于 8 则不降低
+
+
+async def test_coordinator_mode_deeper_scan(tmp_path):
+    """Coordinator mode scans 3 levels deep instead of 2.
+    Coordinator 模式扫描 3 级深度而非 2 级。"""
+    (tmp_path / "src" / "core").mkdir(parents=True)
+    (tmp_path / "src" / "core" / "engine.py").write_text("x", encoding="utf-8")
+
+    team = make_team(tmp_path, '[{"description":"x"}]', [])
+    scan_2 = team._scan_project_structure(depth=2)
+    scan_3 = team._scan_project_structure(depth=3)
+
+    # depth=2 sees src/core/ but not engine.py inside it
+    assert "core/" in scan_2
+    assert "engine.py" not in scan_2
+    # depth=3 sees the file inside src/core/
+    assert "engine.py" in scan_3
