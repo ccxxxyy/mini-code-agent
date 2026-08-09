@@ -1595,6 +1595,22 @@ P36 上线后实测"详细介绍所有文档"：溢写生效（tech-notes 60K+ �
 - 预览长度取 `min(500, threshold)`——防止极小阈值下预览本身超阈值
 - 缓存生命周期：主会话正常退出时清理；SubAgent 在 `run()` 的 finally 里清理
 
+# 第三十八部分：流式工具执行（P38）
+
+## 38.1 判定信号：流式中怎么知道一个工具调用组装完了
+
+Chat Completions 协议没有"单个工具调用结束"事件，但有两个可靠信号：**出现更高 index 的 delta**（协议按顺序传输，新调用开始意味着旧调用结束）和 **finish_reason 到达**（关闭最后一个未完成的调用）。`IncrementalAssembler.feed()` 维护与 `assemble_response` 同构的 per-index builder，在这两个信号上即时 flush ToolCall——组装逻辑不重复造，只是把"事后一次性组装"变成"流中增量组装"。
+
+## 38.2 权限预判：会弹窗的不能流中执行
+
+`_check_permission` 是 async 且可能弹确认框——弹窗和流式渲染会打架（Rich Live 冲突）。解法是 `PermissionManager.would_ask()`：**非交互、无副作用**地预判"这次调用会不会弹窗"。判定素材全部复用现有构件：显式规则匹配/session grant → 不弹；危险命令 → 弹；PathGuard 项目内 ALLOW/敏感 DENY → 不弹；项目外 + ask 模式 → 弹。不弹的流中直接 `asyncio.create_task` 提交（走完整的 `_execute_single_tool` 管线——权限、hook、溢写、审计全生效）；会弹的延迟到 `_act()` 的原有串行确认阶段。
+
+## 38.3 顺序保持与取消清理
+
+流中提交的任务按 `call_id` 存入 `_streaming_tasks`；`_act()` 收集时按 tool_calls 原顺序遍历——已提交的 await 任务，其余走常规路径，OBSERVE 阶段的 TOOL 消息顺序与调用顺序严格一致（API 要求 tool_result 与 tool_use 配对）。取消路径两处清理：`cancel()` 主动取消所有未完成任务；流中断导致 response 无 tool_calls 时取消孤儿任务（提交了但没人收集）。
+
+`streaming_tool_execution = false` 完全回退 P17 的"流后并行"行为——排查问题时可对照。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

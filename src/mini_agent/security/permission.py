@@ -209,6 +209,53 @@ class PermissionManager:
     def is_dangerous_command(command: str) -> bool:
         return any(re.search(p, command, re.IGNORECASE) for p in DANGEROUS_COMMAND_PATTERNS)
 
+    # --- Non-interactive peek: "would this call pop a confirm dialog?"
+    # --- 非交互预判："这次调用会不会弹确认框？"
+    # Used by streaming tool execution: tools that would NOT prompt can be
+    # submitted while the LLM response is still streaming; tools that would
+    # prompt are deferred until after the stream (dialogs cannot interleave
+    # with live rendering). Never prompts, never mutates state.
+    # 供流式工具执行使用：不会弹窗的工具可以在流式期间提前提交执行，
+    # 会弹窗的延迟到流结束后（弹窗不能和流式渲染交错）。不弹窗、无副作用。
+
+    def would_ask(self, tool_name: str, arguments: dict) -> bool:
+        if tool_name == "bash":
+            return self._would_ask_command(str(arguments.get("command", "")))
+        if tool_name in ("read_file", "glob", "grep", "write_file", "edit_file", "delete_file"):
+            path = arguments.get("file_path") or arguments.get("path")
+            if not path:
+                return False
+            return self._would_ask_path(Path(str(path)))
+        return False  # unrestricted tools never prompt 非受限工具永不弹窗
+
+    def _would_ask_command(self, command: str) -> bool:
+        request = PermissionRequest(scope=PermissionScope.COMMAND, resource=command)
+        if self._rules_would_resolve(request):
+            return False
+        if self.is_dangerous_command(command):
+            return True  # dangerous -> always confirms 危险命令始终确认
+        return False  # normal commands auto-resolve in every mode 普通命令各模式均自动判定
+
+    def _would_ask_path(self, path: Path) -> bool:
+        level = self._path_guard.check(path)
+        if level != PermissionLevel.ASK:
+            return False  # ALLOW / DENY resolve without prompting
+        request = PermissionRequest(scope=PermissionScope.PATH, resource=str(path))
+        if self._rules_would_resolve(request):
+            return False
+        return self._config.permission_mode == "ask"
+
+    def _rules_would_resolve(self, request: PermissionRequest) -> bool:
+        """True if explicit rules or session grants decide this request.
+        显式规则或会话授权能直接判定则返回 True。"""
+        for rule in self._rules:
+            if rule.scope == request.scope and self._matches(rule.pattern, request.resource):
+                return True
+        for scope, pattern in self._session_grants:
+            if scope == request.scope and self._matches(pattern, request.resource):
+                return True
+        return False
+
     async def _ask_user(self, request: PermissionRequest) -> PermissionDecision:
         if self._confirm is None:
             # No UI available -> deny by default (safe)

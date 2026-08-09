@@ -16,6 +16,7 @@
 - **Same-tool per-iteration fuse** — second circuit breaker layer: a tool name appearing in every one of the last 8 iterations (args ignored) stops the loop; parallel batch reads within few iterations are unaffected. same-tool 按轮熔断（连续 8 轮每轮出现即停，一轮内并行批量不误杀）。
 
 - **Anthropic prompt caching** — three `cache_control: ephemeral` markers (system prompt, last tool, last user message) enable API-side caching; subsequent requests pay ~10% for cached input tokens. Cache hit/creation stats parsed into `TokenUsage`. Anthropic prompt 缓存：三处标记启用 API 侧缓存，后续请求缓存命中部分计费约 10%。
+- **Streaming tool execution** — tool calls execute the moment they finish assembling mid-stream (tool #1 runs while tool #2 still streams); tools needing confirmation are deferred until after the stream. Toggle: `streaming_tool_execution` (default on). 流式工具执行：工具调用组装完成即执行，需确认的延迟到流后；可配置关闭。
 
 ### Fixed 修复（P36 实战补修）
 

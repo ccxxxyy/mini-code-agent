@@ -3,6 +3,10 @@
 # 项目级配置覆盖用户级；环境变量覆盖 TOML；CLI 参数覆盖一切
 # 未设置的字段使用内置默认值
 
+# 顶层字段 Top-level fields:
+# max_agent_iterations = 50           # 每轮对话最大 ReAct 迭代数
+# streaming_tool_execution = true     # 流式期间工具组装完成即执行（false 回退流后执行）
+
 [llm]
 # provider = "openai"
 # model = "deepseek-chat"

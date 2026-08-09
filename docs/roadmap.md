@@ -30,6 +30,7 @@
 
 > 已实现：`_act()` 两阶段——Phase 1 串行权限预检（确认弹窗不交错）→ Phase 2 全部 GRANTED 的工具 `asyncio.gather` 并行执行。单工具走快速路径不 gather。AuditLogger 三个 handler 加 `asyncio.Lock` 保护 hash chain。5 个新测试（并行计时/单工具/未知工具/取消/顺序保持），281 个全过。
 - **工作量**：中（~100 行改造 + UI 适配 + 测试）
+> **P38 进一步升级为流式工具执行**：工具调用在 LLM 流式响应期间组装完成即执行（IncrementalAssembler + would_ask 权限预判），实测提前 400-550ms。`streaming_tool_execution` 可关闭回退。
 
 ---
 
@@ -132,7 +133,7 @@
 
 | 项 | 操作 |
 |---|---|
-| Anthropic Provider 验证 | 代码就绪但从未连接真实 Claude API——待有 API key 时验证 4 项（见 checklist Phase 5） |
+| Anthropic Provider 验证 | 代码就绪（P37 已加 prompt 缓存三处标记）但从未连接真实 Claude API——待有 API key 时验证 4 项 + 缓存命中（见 checklist Phase 5/37） |
 | CC 对照评测数据补齐 | benchmarks/ 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） |
 
 ### 待做实验
