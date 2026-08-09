@@ -188,6 +188,20 @@ class SlidingWindow(CompressionStrategy):
             kept.append(msg)
             running += cost
         kept.reverse()
+
+        # Task anchor: NEVER drop the latest user message. A long turn (one
+        # question + dozens of tool results) can push the question itself out
+        # of the window -- the LLM then finishes reading and asks "what did
+        # you want?" because the task is gone.
+        # 任务锚点：绝不丢弃最近一条用户消息。长轮次（一个提问 + 几十条工具
+        # 结果）会把提问本身挤出窗口——LLM 读完文件后反问"你要我做什么"，
+        # 因为任务没了。
+        if not any(m.role == Role.USER for m in kept):
+            for msg in reversed(conversation.messages):
+                if msg.role == Role.USER:
+                    kept.insert(0, msg)
+                    break
+
         conversation.messages = kept
 
 

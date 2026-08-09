@@ -242,6 +242,24 @@ async def test_sliding_window():
     assert "msg 49" in conv.messages[-1].content
 
 
+async def test_sliding_window_keeps_latest_user_message():
+    # One user question followed by many huge tool results: the question
+    # must survive truncation (task anchor), or the LLM forgets the task
+    # 一个用户提问 + 大量工具结果：提问必须在截断后存活（任务锚点）
+    strategy = SlidingWindow()
+    conv = Conversation(system_prompt="sys")
+    conv.messages.append(make_msg(role=Role.USER, content="explain all docs", token_count=10))
+    for _ in range(30):
+        conv.messages.append(make_tool_msg(token_count=200))
+
+    await strategy.compress(conv, 800)
+
+    user_msgs = [m for m in conv.messages if m.role == Role.USER]
+    assert len(user_msgs) == 1
+    assert user_msgs[0].content == "explain all docs"
+    assert conv.messages[0].role == Role.USER  # anchored at the front 锚定在最前
+
+
 # --- Full Compressor cascade --- 完整的 Compressor 级联
 
 

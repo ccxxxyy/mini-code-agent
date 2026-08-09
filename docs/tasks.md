@@ -807,7 +807,7 @@
 - [x] `ui/terminal.py` — Git Bash（mintty）秒退修复：`_stdin_is_console()` isatty 检测 → 管道环境降级朴素 input；ask_yes_no 双重兜底（构造失败 + 运行时 EOF）
 - [x] `cli.py` + `llm/openai_provider.py` — mintty 孤立代理字符崩溃修复：stdin reconfigure + 发送前 `_sanitize_surrogates()` 递归清洗消息树（GBK 用户名路径产生的 \udcXX 不再让 httpx JSON 编码崩溃）
 - [x] `docs/terminal-guide.md` — 新建各系统各终端指南（打开方法/兼容等级/winpty 用法/问题排查表），README 双语链接接入
-- [x] 遗留：压缩-重读膨胀待根治（tech-notes 34.3 ③）
+- [x] 遗留：压缩-重读膨胀待根治（tech-notes 34.3 ③）→ 已于 P36 根治
 
 ---
 
@@ -832,3 +832,26 @@
 - [x] `experiments/README.md` 新增实验 3 完整段落（方法/结果/结论）
 - [x] `docs/tech-notes.md` 新增 §35（same-tool-6x 盲区 / self_referential 危险模式 / 迭代上限可靠性）
 - [x] `docs/roadmap.md` 死循环诱导实验标 ✅
+
+---
+
+## Phase 36: 压缩-重读膨胀根治 (P36)
+
+### 背景
+tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 → 压缩丢弃内容和文件名 → LLM 重读 → 再压缩循环。
+
+### P36.1 实现（双层修复）
+- [x] `memory/tool_result_cache.py` — 新建 ToolResultCache：>50K 字符工具结果溢写磁盘（`~/.mini-agent/cache/results/{session_id}/`），对话留 500 字符预览 + offset/limit 提示；错误结果不溢写；threshold=0 禁用
+- [x] `models/config.py` — MemoryConfig 新增 `spill_threshold_chars = 50_000`（TOML `[memory]` 自动可配）
+- [x] `core/agent_loop.py` — `_run_tool_pipeline()` 溢写钩子 + read_file 成功时记录已读文件
+- [x] `memory/context.py` — `record_file_read()`（保序去重）+ `_inject_read_files()`：压缩后在摘要注入"已读文件清单"，二次压缩替换旧清单，纯滑窗路径插独立消息
+- [x] `app.py` — 主循环注入 cache + 正常退出清理
+- [x] `core/subagent.py` — SubAgent 独立 cache（子代理无 ContextManager，溢写是唯一保护）+ finally 清理
+
+### P36.2 测试
+- [x] `tests/unit/test_tool_result_cache.py` 新建 10 个测试（小结果不动/大结果溢写/错误不溢写/禁用/清理/去重保序/压缩注入清单/二次压缩替换/无已读不注入/agent_loop 集成），443 个测试全过
+
+### P36.3 实战补修（真实验证暴露）
+- [x] `memory/compressor.py` — SlidingWindow 任务锚点：截断后必保最近一条用户消息（长轮次提问被挤出窗口 → LLM 反问"你要做什么"）
+- [x] `app.py` + `core/subagent.py` — system prompt 语言规则：用户用什么语言提问就用什么语言回答（此前默认英文回答中文问题）
+- [x] 实测效果：同一问题 token 从 50 万降到 17 万，溢写生效（60K 字符文档只留 661 字符预览），熔断不误杀

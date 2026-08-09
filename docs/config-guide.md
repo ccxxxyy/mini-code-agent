@@ -122,6 +122,7 @@ denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
 context_window = 128000      # 上下文窗口 token 数
 compression_threshold = 0.75 # 压缩触发阈值（75% 时压缩）
 auto_extract = true          # 会话结束自动提取记忆
+spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留预览（0 = 禁用）——防大文件撑爆上下文
 
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）

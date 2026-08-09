@@ -6,7 +6,7 @@ from __future__ import annotations
 from mini_agent.llm.token_counter import count_tokens
 from mini_agent.memory.compressor import SlidingWindow
 from mini_agent.models.config import MemoryConfig
-from mini_agent.models.message import Conversation, Message
+from mini_agent.models.message import Conversation, Message, Role
 
 
 class ContextManager:
@@ -18,11 +18,22 @@ class ContextManager:
         self._total_tokens = 0
         self._compressor = None  # set via set_compressor() after init
         # 初始化后通过 set_compressor() 设置
+        # Ordered, deduplicated list of files read this session -- re-injected
+        # after compression so the LLM does not forget and re-read them
+        # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
+        self._read_files: dict[str, None] = {}
 
     def set_compressor(self, compressor) -> None:
         """Inject the compressor (avoids circular import at init time).
         注入压缩器（避免初始化时的循环导入）。"""
         self._compressor = compressor
+
+    def record_file_read(self, path: str) -> None:
+        self._read_files[path] = None
+
+    @property
+    def read_files(self) -> list[str]:
+        return list(self._read_files)
 
     def count_message(self, message: Message) -> int:
         """Count and cache tokens for a message. 统计并缓存消息的 token 数。"""
@@ -86,8 +97,36 @@ class ContextManager:
 
         target = int(self._max_tokens * 0.5)
         await self._compressor.compress(conversation, target)
+        self._inject_read_files(conversation)
         self.update_total(conversation)
         return True
+
+    def _inject_read_files(self, conversation: Conversation) -> None:
+        """After compression, remind the LLM which files it already read --
+        summaries discard file contents AND identities, so without this the
+        LLM re-reads the same files and re-triggers compression in a loop.
+        压缩后提醒 LLM 已读过哪些文件——摘要连内容带文件名一起丢弃，
+        没有这行 LLM 会重读同样的文件并再次触发压缩，形成循环。"""
+        if not self._read_files:
+            return
+        note = (
+            "[Files already read this session -- do NOT re-read unless "
+            "their content changed: " + ", ".join(self._read_files) + "]"
+        )
+        marker = "[Files already read this session"
+        for msg in reversed(conversation.messages):
+            if msg.role == Role.SYSTEM and msg.compressed:
+                content = msg.content or ""
+                if marker in content:
+                    # Replace stale note -- the read list may have grown
+                    # 替换旧清单——已读列表可能已增长
+                    content = content[: content.index(marker)].rstrip()
+                msg.content = (content + "\n" + note) if content else note
+                msg.token_count = None
+                return
+        # No summary message (pure SlidingWindow path): insert a standalone note
+        # 没有摘要消息（纯滑窗路径）：插入独立提示
+        conversation.messages.insert(0, Message(role=Role.SYSTEM, content=note, compressed=True))
 
     async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
         """Last-resort guard: force-truncate if conversation exceeds max_tokens.
