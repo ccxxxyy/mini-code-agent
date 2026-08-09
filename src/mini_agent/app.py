@@ -279,7 +279,9 @@ class Application:
         self.slash_commands = SlashCommandRegistry()
         register_builtin_commands(self)
 
-        # Wire slash command completions to terminal 将斜杠命令补全接入终端
+        # Wire slash command completions + @file completions to terminal
+        # 将斜杠命令补全 + @文件补全接入终端
+        self.terminal.set_working_dir(working_dir)
         self.terminal.set_slash_commands(
             [(c.name, c.description) for c in self.slash_commands.list_commands()]
         )
@@ -585,6 +587,11 @@ class Application:
                 pass
 
     async def _handle_turn(self, user_input: str) -> None:
+        from mini_agent.ui.input_handler import expand_at_refs
+
+        if "@" in user_input:
+            user_input = expand_at_refs(user_input, self._tool_context.working_dir)
+
         await self.event_bus.emit(UserMessageEvent(content=user_input))
 
         self.session.conversation.append(Message(role=Role.USER, content=user_input))

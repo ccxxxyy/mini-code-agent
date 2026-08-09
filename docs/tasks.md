@@ -883,3 +883,17 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P38.2 测试
 - [x] `tests/unit/test_streaming_execution.py` 新建 10 个测试（组装器 3 / would_ask 4 / 集成 3：流中启动时序、开关回退、ask 工具延迟），459 个测试全过
+
+---
+
+## Phase 39: @file 内联引用 (P39)
+
+### P39.1 实现
+- [x] `ui/input_handler.py` — FileRefCompleter：@ 后触发文件路径补全（os.listdir 扫描，跳过 .git/.venv 等，目录结尾加 /，子目录路径支持）
+- [x] `ui/input_handler.py` — expand_at_refs()：正则匹配 @filepath → 读文件内容替换为 `[File: path]\n```\ncontent\n```\``（10KB 上限截断，非文件原样保留）
+- [x] `ui/input_handler.py` — merge_completers 合并斜杠命令补全和文件引用补全；_completion_active 条件扩展支持 @
+- [x] `ui/terminal.py` — set_working_dir() + 传给 create_prompt_session
+- [x] `app.py` — _handle_turn() 创建 Message 前展开 @file 引用
+
+### P39.2 测试
+- [x] `tests/unit/test_at_file_refs.py` 新建 12 个测试（展开 6 + 补全 6），471 个测试全过

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.theme import Theme as RichTheme
@@ -43,6 +45,11 @@ class Terminal:
         self._completer = SlashCommandCompleter()
         self._prompt_session = None
         self._toolbar_provider = None
+        self._working_dir: Path | None = None
+
+    def set_working_dir(self, working_dir: Path) -> None:
+        self._working_dir = working_dir
+        self._prompt_session = None  # force rebuild with new dir 重建以使用新目录
 
     def set_theme(self, theme: Theme) -> None:
         """Switch theme, including the console's markdown styles.
@@ -77,6 +84,7 @@ class Terminal:
                 completer=self._completer,
                 toolbar_provider=self._toolbar_provider,
                 theme=self.theme,
+                working_dir=self._working_dir,
             )
 
     @staticmethod
