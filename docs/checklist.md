@@ -744,3 +744,15 @@
 - [x] 空工具列表不崩溃
 - [x] message_start 事件正确解析 cache_read/cache_creation 统计
 - [x] 6 个新测试，总计 449 个全过
+
+---
+
+## Phase 38 检查项：流式工具执行
+
+- [x] 工具调用在流式期间组装完成即提交执行（index 前进 + finish_reason 双信号）
+- [x] 会弹确认框的工具不在流式期间执行（would_ask 预判 → 延迟到 _act 串行确认）
+- [x] 结果顺序与 tool_calls 顺序一致（OBSERVE 阶段配对不乱）
+- [x] streaming_tool_execution=false 完全回退旧行为
+- [x] 取消时清理未完成任务（cancel + 孤儿任务兜底）
+- [x] would_ask 无副作用不弹窗（危险命令 True / session grant 后 False / 项目内路径 False / 敏感路径 False）
+- [x] 10 个新测试，总计 459 个全过

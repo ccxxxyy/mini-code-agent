@@ -868,3 +868,18 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P37.2 测试
 - [x] 6 个新测试（系统缓存标记/最后工具标记/最后用户消息/tool_result 用户消息/空工具/缓存统计解析），449 个测试全过
+
+---
+
+## Phase 38: 流式工具执行 (P38)
+
+### P38.1 实现
+- [x] `core/agent_loop.py` — IncrementalAssembler：流式中检测工具调用组装完成（index 前进 = 前序完成 / finish_reason = 全部完成），与 assemble_response 同构的 builder 逻辑但即时 flush
+- [x] `core/agent_loop.py` — _think() 流式循环内：组装完成的调用经 would_ask 预判后 asyncio.create_task 立即提交；会弹窗的延迟到 _act
+- [x] `core/agent_loop.py` — _act()：已提交的任务直接 await 收集，deferred 的走原有 Phase 1 串行确认；结果顺序保持
+- [x] `security/permission.py` — would_ask() 非交互预判（bash→危险命令 / 路径工具→PathGuard+模式 / 其他→False），不弹窗无副作用
+- [x] `models/config.py` — `streaming_tool_execution: bool = True` 开关（可关闭回退旧行为）
+- [x] 取消清理：cancel() 和 no-tool-calls 分支取消孤儿任务
+
+### P38.2 测试
+- [x] `tests/unit/test_streaming_execution.py` 新建 10 个测试（组装器 3 / would_ask 4 / 集成 3：流中启动时序、开关回退、ask 工具延迟），459 个测试全过

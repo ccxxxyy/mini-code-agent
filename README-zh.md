@@ -282,8 +282,10 @@ mini-code-agent/
 - [x] P34：Windows 终端适配（UTF-8 stdio 加固 + 流式降频防重影 + emoji 降级 + EscWatcher join + ask_yes_no 兜底；实战补修：bash GBK 解码、git 命令确认闸门、Git Bash 降级运行与代理字符清洗）
 - [x] P35：死循环诱导实验（5 场景 × 2 臂实测三重熔断：迭代上限是唯一可靠硬熔断，same-tool-6x 未触发→已增强为同名占比检测）
 - [x] P36：压缩-重读膨胀根治（>50K 工具结果溢写磁盘只留预览 + 压缩后注入已读文件清单——实战 50 万 token 单请求问题的双层修复）
+- [x] P37：Anthropic Prompt 缓存（三处 cache_control 标记：系统提示/最后工具/最后用户消息——缓存命中部分输入 token 成本降约 90%）
+- [x] P38：流式工具执行（工具调用流式中组装完成即执行，实测提前 400-550ms 开跑；需确认的延迟到流后，可配置关闭）
 
-**全部阶段已完成，449 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，459 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

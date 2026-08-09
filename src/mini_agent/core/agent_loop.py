@@ -37,6 +37,62 @@ ToolStartCallback = Callable[[ToolCall], None]
 ToolEndCallback = Callable[[ToolResult], None]
 
 
+class IncrementalAssembler:
+    """Detects completed tool calls mid-stream.
+    在流式过程中检测已组装完成的工具调用。
+
+    Chat Completions streams tool calls sequentially: a delta with a NEW
+    (higher) index means all lower indexes are complete; finish_reason
+    closes the last open index. This mirrors assemble_response's builder
+    logic, but flushes ToolCalls as soon as they are known complete.
+    Chat Completions 按顺序流式传输工具调用：出现更高 index 的 delta
+    意味着所有更低的 index 已完成；finish_reason 关闭最后一个未完成的
+    index。与 assemble_response 的 builder 逻辑一致，但一旦确定完成就
+    立刻产出 ToolCall。
+    """
+
+    def __init__(self) -> None:
+        self._builders: dict[int, dict[str, str]] = {}
+        self._flushed: set[int] = set()
+
+    def feed(self, chunk: StreamChunk) -> list[ToolCall]:
+        """Feed one chunk; return tool calls that just became complete.
+        喂入一个 chunk；返回本次新确定完成的工具调用。"""
+        completed: list[ToolCall] = []
+        for tcd in chunk.tool_call_deltas:
+            if tcd.index not in self._builders:
+                # New index opens -> all lower indexes are complete
+                # 新 index 开启 -> 所有更低的 index 已完成
+                for idx in sorted(self._builders):
+                    if idx < tcd.index and idx not in self._flushed:
+                        completed.append(self._flush(idx))
+                self._builders[tcd.index] = {"id": "", "name": "", "arguments": ""}
+            b = self._builders[tcd.index]
+            if tcd.id:
+                b["id"] = tcd.id
+            if tcd.name:
+                b["name"] = tcd.name
+            if tcd.arguments_delta:
+                b["arguments"] += tcd.arguments_delta
+        if chunk.finish_reason:
+            for idx in sorted(self._builders):
+                if idx not in self._flushed:
+                    completed.append(self._flush(idx))
+        return completed
+
+    def _flush(self, idx: int) -> ToolCall:
+        import json as _json
+
+        self._flushed.add(idx)
+        b = self._builders[idx]
+        raw = b["arguments"]
+        try:
+            parsed = _json.loads(raw) if raw else {}
+        except _json.JSONDecodeError:
+            parsed = {}
+        return ToolCall(id=b["id"], name=b["name"], arguments=parsed, raw_arguments=raw)
+
+
 class AgentLoop:
     """Orchestrates the think-act-observe ReAct cycle. 编排“思考-行动-观察”的 ReAct 循环。"""
 
@@ -78,6 +134,9 @@ class AgentLoop:
         # Optional spill-to-disk cache for oversized tool results (app injects)
         # 可选的超大工具结果溢写缓存（app.py 注入）
         self.result_cache = None
+        # Tasks submitted mid-stream (streaming tool execution), keyed by call id
+        # 流式期间提交的执行任务（按 call id 索引）
+        self._streaming_tasks: dict[str, asyncio.Task] = {}
         self.current_turn_id: int = 0
         # Model name for cost attribution (app/subagent manager sets it)
         # 模型名——供成本归属（app/subagent manager 设置）
@@ -92,6 +151,9 @@ class AgentLoop:
 
     def cancel(self) -> None:
         self._cancelled = True
+        for task in self._streaming_tasks.values():
+            task.cancel()
+        self._streaming_tasks = {}
 
     async def run(self, conversation: Conversation) -> str:
         """Execute the full ReAct loop. Appends messages to the conversation.
@@ -102,6 +164,7 @@ class AgentLoop:
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
         self.stopped_early = False
         self._file_changes = {}
+        self._streaming_tasks = {}
         if self.snapshot_store:
             self.current_turn_id += 1
             self.snapshot_store.begin_turn(self.current_turn_id)
@@ -129,6 +192,11 @@ class AgentLoop:
 
             # No tool calls -> final answer
             if not response.tool_calls:
+                # Cancel orphan streaming tasks (partial stream after cancel)
+                # 取消孤儿流式任务（中断后流不完整时可能残留）
+                for task in self._streaming_tasks.values():
+                    task.cancel()
+                self._streaming_tasks = {}
                 final_content = response.content
                 await self._transition(AgentPhase.RESPONDING)
                 break
@@ -197,6 +265,8 @@ class AgentLoop:
 
         chunks: list[StreamChunk] = []
         stream_started = False
+        assembler = IncrementalAssembler()
+        streaming_enabled = self._config.streaming_tool_execution
 
         async for chunk in self._llm.stream(api_messages, tools=tool_schemas or None):
             if self._cancelled:
@@ -213,6 +283,24 @@ class AgentLoop:
                 for tcd in chunk.tool_call_deltas:
                     if tcd.name:
                         self.on_tool_call_assembling(tcd.name)
+            # Streaming tool execution: submit each tool call the moment it
+            # finishes assembling -- tool #1 runs while tool #2 still streams.
+            # Tools that would pop a confirm dialog are deferred to _act()
+            # (dialogs cannot interleave with live stream rendering).
+            # 流式工具执行：工具调用一组装完成就提交——工具 #1 执行时
+            # 工具 #2 还在流式传输。会弹确认框的延迟到 _act()（弹窗不能
+            # 和流式渲染交错）。
+            if streaming_enabled:
+                for tc in assembler.feed(chunk):
+                    if not tc.name or not tc.id:
+                        continue
+                    if self._permissions is not None and self._permissions.would_ask(
+                        tc.name, tc.arguments
+                    ):
+                        continue  # deferred to _act 延迟到 _act
+                    self._streaming_tasks[tc.id] = asyncio.create_task(
+                        self._execute_single_tool(tc)
+                    )
 
         if stream_started and self.on_stream_end:
             self.on_stream_end()
@@ -242,10 +330,17 @@ class AgentLoop:
         阶段 2：所有 GRANTED 的工具通过 asyncio.gather 并行执行。
         """
         n = len(tool_calls)
+        # Tasks already submitted mid-stream (streaming tool execution)
+        # 流式期间已提交的任务
+        streaming = self._streaming_tasks
+        self._streaming_tasks = {}
 
-        # --- Phase 1: sequential permission pre-check ---
+        # --- Phase 1: sequential permission pre-check (skip streamed ones) ---
         decisions: list[PermissionDecision | None] = []
         for tc in tool_calls:
+            if tc.id in streaming:
+                decisions.append(PermissionDecision.GRANTED)  # already running 已在执行
+                continue
             if self._cancelled:
                 decisions.append(None)
                 continue
@@ -254,9 +349,11 @@ class AgentLoop:
             else:
                 decisions.append(PermissionDecision.GRANTED)
 
-        # --- Phase 2: parallel execution ---
+        # --- Phase 2: parallel execution / collect streamed results ---
         async def _run_one(i: int) -> ToolResult:
             tc = tool_calls[i]
+            if tc.id in streaming:
+                return await streaming[tc.id]
             d = decisions[i]
             if d is None:
                 return ToolResult(

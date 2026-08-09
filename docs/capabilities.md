@@ -253,7 +253,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 77 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 449 个测试全部通过（约 55 秒，零网络依赖），单元 25 文件 + 集成 2 文件 |
+| 测试 | 459 个测试全部通过（约 55 秒，零网络依赖），单元 25 文件 + 集成 2 文件 |
 | 工具 | 8 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -286,7 +286,7 @@
 1. 默认压缩链 Stage 2 用提取式摘要（LLM 摘要 `LLMSummarizeOldest` 已实现但需显式配置——压缩本身耗 token，默认不开启）
 2. ✅ 记忆提取已从正则升级为 LLM 结构化提取（P30）
 3. ✅ MCP HTTP transport 已实现（P31，含 headers 认证）
-4. ✅ 多个 tool_calls 已改为权限预检串行 + 执行并行（P17，asyncio.gather + 审计锁）
+4. ✅ 多个 tool_calls 已改为权限预检串行 + 执行并行（P17，asyncio.gather + 审计锁）；P38 进一步升级为流式执行（组装完成即跑，不等流结束）
 
 ---
 
