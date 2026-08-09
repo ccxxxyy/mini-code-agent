@@ -20,6 +20,7 @@
 - **@file inline references** — type `@README.md` in your message to auto-inline the file content (10KB cap, Tab completion with directory drilling). Saves a round-trip LLM read_file call. @文件内联引用：输入 `@文件名` 自动内联内容（10KB 上限，Tab 补全支持子目录），省掉一轮 read_file 调用。
 - **Permission rule files** — user-defined allow/deny rules in `~/.mini-agent/permissions.toml` (user) and `.mini-agent/permissions.toml` (project); DENY > ALLOW > built-in defaults. Also fixes PATH deny rules being bypassed by the project-dir allow shortcut. 权限规则文件：用户级/项目级 TOML 自定义 allow/deny 规则；修复项目内路径 deny 被短路的盲区。
 - **OS-level sandbox** — Linux bubblewrap (bwrap) + macOS Seatbelt (sandbox-exec) kernel isolation for bash commands: read-only rootfs with writable working dir + /tmp. `sandbox_auto_allow` skips confirmation for dangerous commands (kernel provides isolation), but explicit deny rules still block. Config: `[security] sandbox = true`. OS 级沙箱：Linux bwrap + macOS Seatbelt 内核隔离——只读文件系统 + 可写工作目录。
+- **Context window API probing** — OpenAI provider probes GET `{base_url}/models/{model}` at startup and after `/model` switch (new `LLMProvider.prepare()` hook, no-op by default) to discover the real context window; recursively extracts 5 field-name variants (context_window/context_length/max_context_length/max_model_len/max_input_tokens) at any nesting depth. Silent fallback: probed → built-in table → 128k. New models work without code changes. 上下文窗口 API 探测：启动/切换模型时经 prepare() 钩子自动从 API 获取真实窗口，递归提取 5 种字段名，失败静默回退内置表 → 128k。
 
 ### Fixed 修复（P36 实战补修）
 

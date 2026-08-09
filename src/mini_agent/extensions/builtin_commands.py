@@ -597,6 +597,7 @@ def _make_model(app: Application) -> HandlerFn:
         # 匹配模型名称：切换完整配置（模型+密钥+地址+Provider）
         if arg in app.config.llm_profiles:
             app.switch_llm_profile(arg)
+            await app._llm.prepare()
             return f"已切换到 `{arg}`: {app.config.llm.model} ({app.config.llm.provider})"
 
         # Fallback: treat as a raw model name (same provider/key)
@@ -608,6 +609,7 @@ def _make_model(app: Application) -> HandlerFn:
         app._llm = ProviderRegistry.create(app.config.llm)
         app.agent_loop._llm = app._llm
         app.agent_loop.model_name = arg  # cost attribution 成本归属
+        await app._llm.prepare()
         return f"模型已切换为: {arg}"
 
     return handler

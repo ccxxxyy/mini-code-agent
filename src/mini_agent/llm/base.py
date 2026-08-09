@@ -53,6 +53,10 @@ class LLMResponse:
 class LLMProvider(ABC):
     """Abstract base for all LLM providers. 所有 LLM Provider 的抽象基类。"""
 
+    async def prepare(self) -> None:
+        """Optional warmup before first use (e.g. context window probing).
+        首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
+
     @abstractmethod
     async def stream(
         self,

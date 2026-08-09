@@ -26,6 +26,17 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-3.5-turbo": 16_385,
 }
 
+# Field names that OpenAI-compatible servers use for context window size
+# (vLLM: max_model_len, OpenRouter: context_length, Aliyun MaaS: max_input_tokens...)
+# 各兼容服务返回上下文窗口大小时使用的字段名
+_CONTEXT_WINDOW_KEYS = (
+    "context_window",
+    "context_length",
+    "max_context_length",
+    "max_model_len",
+    "max_input_tokens",
+)
+
 
 def _sanitize_surrogates(value: Any) -> Any:
     """Strip lone UTF-16 surrogates that cannot be UTF-8 encoded.
@@ -64,6 +75,42 @@ class OpenAIProvider(LLMProvider):
             },
             timeout=httpx.Timeout(config.timeout, connect=10.0),
         )
+        self._probed_window: int | None = None
+        self._probe_attempted = False
+
+    @staticmethod
+    def _extract_context_window(data: dict[str, Any]) -> int | None:
+        """Find a context window field anywhere in a /models response (recursive).
+        递归查找 /models 响应中的上下文窗口字段（如阿里云 MaaS 嵌套在
+        extra_info.default_envs.max_input_tokens）。"""
+        for key in _CONTEXT_WINDOW_KEYS:
+            value = data.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+        for value in data.values():
+            if isinstance(value, dict):
+                found = OpenAIProvider._extract_context_window(value)
+                if found:
+                    return found
+        return None
+
+    async def prepare(self) -> None:
+        await self._probe_context_window()
+
+    async def _probe_context_window(self) -> None:
+        """Query GET /models/{model} for the context window, once per instance.
+        通过 GET /models/{model} 探测上下文窗口，每实例只尝试一次，失败静默回退。"""
+        if self._probe_attempted:
+            return
+        self._probe_attempted = True
+        try:
+            response = await self._client.get(
+                f"/models/{self._config.model}", timeout=httpx.Timeout(10.0)
+            )
+            response.raise_for_status()
+            self._probed_window = self._extract_context_window(response.json())
+        except (httpx.HTTPError, ValueError):
+            pass
 
     async def stream(
         self,
@@ -71,6 +118,7 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
+        await self._probe_context_window()
         body: dict[str, Any] = {
             "model": self._config.model,
             "messages": _sanitize_surrogates(messages),
@@ -136,6 +184,8 @@ class OpenAIProvider(LLMProvider):
 
     @property
     def context_window(self) -> int:
+        if self._probed_window:
+            return self._probed_window
         return MODEL_CONTEXT_WINDOWS.get(self._config.model, 128_000)
 
 

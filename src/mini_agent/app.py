@@ -404,6 +404,9 @@ class Application:
 
     async def run(self) -> None:
         self.terminal.show_welcome()
+        # Probe context window before the first turn's overflow check
+        # 启动时预热探测上下文窗口，让首轮溢出检查就用上真实值
+        await self._llm.prepare()
         await self._connect_mcp_servers()
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))

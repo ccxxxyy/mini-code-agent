@@ -798,3 +798,16 @@
 - [x] 显式 deny 规则不被沙箱绕过
 - [x] Windows 无内核沙箱——保持现有正则拦截（不崩不报错）
 - [x] 16 个新测试，总计 496 个全过
+
+---
+
+## Phase 42 检查项：上下文窗口 API 探测
+
+- [x] GET {base_url}/models/{model} 探测成功时 context_window 返回探测值
+- [x] 递归提取 5 种字段名（context_window/context_length/max_context_length/max_model_len/max_input_tokens），任意嵌套深度
+- [x] 探测失败（网络错误/404/无效 JSON/字段缺失）静默回退硬编码表 → 128k 默认
+- [x] 每实例只探测一次（成败皆然），10 秒独立超时
+- [x] prepare() 预热：app.run() 启动时 + /model 切换后（两条路径）+ stream() 入口兜底
+- [x] 基类 prepare() 默认无操作——Anthropic/Mock Provider 零改动
+- [x] 真实 API 实测：阿里云 MaaS 三个模型均探测到 129024（extra_info.default_envs.max_input_tokens 深层嵌套）
+- [x] 8 个新测试，总计 504 个全过

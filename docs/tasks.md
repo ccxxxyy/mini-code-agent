@@ -926,3 +926,16 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P41.2 测试
 - [x] `tests/unit/test_sandbox.py` 新建 16 个测试（bwrap 5 / seatbelt 4 / 工厂 3 / bash 集成 2 / 权限 2），496 个测试全过
+
+---
+
+## Phase 42: 上下文窗口 API 探测 (P42)
+
+### P42.1 实现
+- [x] `llm/openai_provider.py` — _probe_context_window()：GET `{base_url}/models/{model}`，递归提取上下文窗口字段（context_window/context_length/max_context_length/max_model_len/max_input_tokens，阿里云 MaaS 实测嵌套在 extra_info.default_envs）；每实例只探测一次，失败静默回退硬编码表 → 128k 默认值
+- [x] `llm/base.py` — LLMProvider.prepare() 可选预热钩子（默认无操作）
+- [x] `app.py` — run() 首轮对话前调用 prepare()，让首轮溢出检查就用探测值（否则 agent_loop 在 stream() 前读 context_window 拿到的是回退值）
+- [x] `extensions/builtin_commands.py` — /model 切换后对新 provider 调用 prepare()
+
+### P42.2 测试
+- [x] `tests/unit/test_llm_providers.py` 新增 8 个测试（字段提取 4 / 探测成功 / 失败回退 / 只探测一次 / prepare 预热），504 个测试全过；真实 API 实测阿里云 MaaS deepseek-v4-flash-0731 探测到 129024
