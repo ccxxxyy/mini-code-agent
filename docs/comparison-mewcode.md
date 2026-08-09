@@ -344,20 +344,17 @@
 
 代码改动：`memory/context.py` ~15 行 + `core/agent_loop.py` ~5 行记录。
 
-### 4.3 Token 计数精度
+### 4.3 Token 计数精度 ✅ 已实现（P43）
 
 | | mini | mewcode |
 |---|---|---|
-| Token 计数方式 | `len(text) // 4` 估算 | **真实 API usage** + 新消息字符估算混合 |
+| Token 计数方式 | ✅ **API usage 锚点** + CJK 感知估算混合：API 返回的权威总量锚定在最新消息，只对锚点后的新消息估算 | **真实 API usage** + 新消息字符估算混合 |
 
-**差距**：`len // 4` 对中文严重不准（一个中文字符 1 char 但 ~2 token），导致压缩阈值判断偏差。
+**原差距**：`len // 4` 对中文严重不准（一个汉字 1 char 但 ~1 token，低估 4 倍），导致压缩阈值判断偏差。P43 已实现：
 
-**增强方案**：
-1. LLM 返回的 `response.usage.total_tokens` 已经记录在 `assistant_msg.token_count` 里
-2. `ContextManager.update_total()` 时优先累加已有的 `token_count`，只对没有 usage 的消息用估算
-3. 估算公式改为：英文 `len // 4`，检测到 CJK 字符占比 >30% 时用 `len // 2`
-
-代码改动：`memory/context.py` ~10 行。
+1. **API usage 锚点**（`memory/context.py`）：每轮 LLM 响应后 `record_api_usage()` 把 `usage` 总量锚定在最新消息上——prompt_tokens 覆盖 API 实际计费的一切（系统提示、全部消息、工具 schema），比任何估算都准。`update_total()` 用锚点总量 + 锚点后新消息的估算；对象身份检查让压缩/undo 重排历史后锚点自动失效回退全量估算
+2. **CJK 感知估算**（`llm/token_counter.py`）：按字符统计——CJK 字符（汉字/假名/谚文/全角符号）1 token/字，其余 4 字符/token；比原方案的"占比 >30% 则 len//2"更准且无阈值跳变。真实 API 实测校准：中文从 -56% 低估（危险方向）修正为 +76% 高估（安全方向——低估导致压缩不触发直至崩溃，高估只是压缩稍早），混合文本 +12%
+3. **顺带修复两个真实 bug**：①assistant 消息的 `token_count` 原来存 `usage.total_tokens`（含整个 prompt），按消息累加会把对话重复算 N 遍——改存 `completion_tokens`（消息自身大小）；②`assemble_response` 的 usage 直接覆盖，Anthropic 把 prompt/completion 拆在两个事件里会丢 prompt 计数——改按字段合并
 
 ### 4.4 选择性记忆召回
 
@@ -664,7 +661,7 @@
 | ✅ 完成 | 3.2 | 权限规则文件（P40） | 用户自定义权限 | 已完成 |
 | ✅ 完成 | 3.1 | OS 级沙箱（P41） | 安全质变 | 已完成 |
 | ✅ 完成 | 1.3 | 上下文窗口 API 探测（P42） | 新模型免更新代码 | 已完成 |
-| 🟢 P2 | 4.3 | Token 计数精度提升 | 压缩阈值准确性 | 2 小时 |
+| ✅ 完成 | 4.3 | Token 计数精度提升（P43） | 压缩阈值准确性 | 已完成 |
 | 🟢 P2 | 1.5 | max_tokens 恢复 | 长回答不截断 | 2 小时 |
 | 🟢 P2 | 6.1 | Coordinator 模式 | /team 质量 | 半天 |
 | 🟢 P2 | 6.3 | Agent 类型定义 | SubAgent 差异化 | 半天 |

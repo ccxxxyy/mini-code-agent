@@ -186,9 +186,16 @@ class AgentLoop:
                 tool_calls=response.tool_calls,
             )
             if response.usage:
-                assistant_msg.token_count = response.usage.total_tokens
+                # completion_tokens (this message's own size), NOT total_tokens:
+                # total includes the whole prompt, so summing it per message
+                # would count the conversation N times over.
+                # 用 completion_tokens（本消息自身大小）而非 total_tokens：
+                # total 含整个 prompt，按消息累加会把对话重复算 N 遍。
+                assistant_msg.token_count = response.usage.completion_tokens or None
                 tokens_used += response.usage.total_tokens
             conversation.append(assistant_msg)
+            if response.usage and self._context:
+                self._context.record_api_usage(conversation, response.usage)
 
             # No tool calls -> final answer
             if not response.tool_calls:

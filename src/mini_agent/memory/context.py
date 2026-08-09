@@ -22,6 +22,16 @@ class ContextManager:
         # after compression so the LLM does not forget and re-read them
         # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
         self._read_files: dict[str, None] = {}
+        # API usage anchor: the LLM-reported total is authoritative for the
+        # whole conversation up to the anchored message (it even includes
+        # tool schemas, which estimation cannot see). Messages after the
+        # anchor are estimated. Identity check auto-invalidates on compression.
+        # API usage 锚点：LLM 返回的总量是锚点消息之前整个对话的权威计数
+        # （连估算看不到的工具 schema 都包含）。锚点之后的消息用估算。
+        # 对象身份检查让压缩重排后锚点自动失效。
+        self._api_total = 0
+        self._api_index = -1
+        self._api_anchor: Message | None = None
 
     def set_compressor(self, compressor) -> None:
         """Inject the compressor (avoids circular import at init time).
@@ -34,6 +44,26 @@ class ContextManager:
     @property
     def read_files(self) -> list[str]:
         return list(self._read_files)
+
+    def record_api_usage(self, conversation: Conversation, usage) -> None:
+        """Anchor the authoritative API-reported token total at the newest message.
+        将 API 返回的权威 token 总量锚定在最新一条消息上。
+
+        usage.prompt_tokens covers everything the API actually billed for the
+        conversation so far (system prompt, all messages, tool schemas);
+        adding completion gives the exact total through the last message.
+        prompt_tokens 覆盖 API 实际计费的全部内容（系统提示、所有消息、
+        工具 schema），加上 completion 即截至最新消息的精确总量。"""
+        if usage.prompt_tokens <= 0 or not conversation.messages:
+            return
+        self._api_total = usage.total_tokens or (usage.prompt_tokens + usage.completion_tokens)
+        self._api_index = len(conversation.messages) - 1
+        self._api_anchor = conversation.messages[-1]
+
+    def _invalidate_api_anchor(self) -> None:
+        self._api_total = 0
+        self._api_index = -1
+        self._api_anchor = None
 
     def count_message(self, message: Message) -> int:
         """Count and cache tokens for a message. 统计并缓存消息的 token 数。"""
@@ -52,10 +82,27 @@ class ContextManager:
         return message.token_count
 
     def update_total(self, conversation: Conversation) -> int:
-        """Recount total tokens from the conversation. 重新统计对话的总 token 数。"""
-        total = count_tokens(conversation.system_prompt) if conversation.system_prompt else 0
-        for msg in conversation.messages:
-            total += self.count_message(msg)
+        """Recount total tokens. Prefers the API-reported total (anchored at
+        the message that usage covered) and only estimates messages appended
+        after the anchor -- estimation error no longer accumulates over turns.
+        重新统计总 token。优先用 API 返回的权威总量（锚定在 usage 覆盖的
+        消息上），只对锚点之后追加的消息估算——估算误差不再逐轮累积。"""
+        msgs = conversation.messages
+        anchor_valid = (
+            self._api_anchor is not None
+            and 0 <= self._api_index < len(msgs)
+            and msgs[self._api_index] is self._api_anchor
+        )
+        if anchor_valid:
+            total = self._api_total
+            for msg in msgs[self._api_index + 1 :]:
+                total += self.count_message(msg)
+        else:
+            if self._api_anchor is not None:
+                self._invalidate_api_anchor()  # compression/undo reshaped history
+            total = count_tokens(conversation.system_prompt) if conversation.system_prompt else 0
+            for msg in msgs:
+                total += self.count_message(msg)
         self._total_tokens = total
         conversation.total_tokens = total
         return total

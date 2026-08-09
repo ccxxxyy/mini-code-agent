@@ -863,6 +863,12 @@ class ContextManager:
         if compressed."""
         ...
 
+    def record_api_usage(self, conversation: Conversation, usage) -> None:
+        """Anchor the API-reported authoritative token total at the newest
+        message (P43). update_total() then only estimates messages appended
+        after the anchor; identity check auto-invalidates on compression."""
+        ...
+
     @property
     def usage_ratio(self) -> float:
         """Current context usage as fraction of window (0.0 to 1.0)."""
