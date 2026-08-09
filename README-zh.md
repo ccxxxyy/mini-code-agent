@@ -283,7 +283,7 @@ mini-code-agent/
 - [x] P35：死循环诱导实验（5 场景 × 2 臂实测三重熔断：迭代上限是唯一可靠硬熔断，same-tool-6x 未触发→已增强为同名占比检测）
 - [x] P36：压缩-重读膨胀根治（>50K 工具结果溢写磁盘只留预览 + 压缩后注入已读文件清单——实战 50 万 token 单请求问题的双层修复）
 
-**全部阶段已完成，443 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，449 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

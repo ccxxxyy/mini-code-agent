@@ -135,13 +135,13 @@
 1. **Anthropic Provider E2E 验证**：获取 API key 后验证 streaming/tool_use/thinking blocks/token counting 四项（代码已就绪）
 2. **OpenAI Responses API**：在 `llm/` 下新增 `openai_responses_provider.py`，与现有 `openai_provider.py`（Chat Completions）并列。Responses API 支持 reasoning summaries，对 o1/o3 系列模型有价值。注册到 ProviderRegistry，用户通过 `provider = "openai-responses"` 切换
 
-### 1.2 Prompt 缓存
+### 1.2 Prompt 缓存 ✅ 已实现（P37）
 
 | | mini | mewcode |
 |---|---|---|
-| Anthropic prompt caching | ❌ | ✅ `cache_control: ephemeral` |
+| Anthropic prompt caching | ✅ **三处 cache_control 标记**（系统提示 + 最后工具 + 最后用户消息）+ 缓存命中统计 | ✅ `cache_control: ephemeral` |
 
-**差距**：mini 每次请求都发送完整的系统提示 + 工具 schema，Anthropic 按输入 token 计费——重复发送 = 重复花钱。
+**原差距**：mini 每次请求都全价计费。P37 已实现，Anthropic 用户输入 token 成本降约 90%。
 
 **增强方案**：
 在 Anthropic Provider 的消息构造中，给以下三处加 `cache_control: {"type": "ephemeral"}`：
@@ -664,7 +664,7 @@
 |---|---|---|---|---|
 | ✅ 完成 | 4.1 | 大工具结果溢写磁盘（P36） | 压缩-重读膨胀（原唯一高严重度遗留） | 已完成 |
 | ✅ 完成 | 4.2 | 压缩后恢复·已读文件清单（P36） | 同上 | 已完成 |
-| 🟡 P1 | 1.2 | Prompt 缓存 | Anthropic 省 90% 输入 token | 2 小时 |
+| ✅ 完成 | 1.2 | Prompt 缓存（P37） | Anthropic 省 90% 输入 token | 已完成 |
 | 🟡 P1 | 1.4 | 流式工具执行 | 多工具调用提速 | 半天 |
 | 🟡 P1 | 2.2 | `@file` 引用 | 用户体验 | 半天 |
 | 🟡 P1 | 5.3 | 输入历史持久化 | 用户体验（1 行代码） | 5 分钟 |

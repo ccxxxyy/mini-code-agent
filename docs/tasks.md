@@ -855,3 +855,16 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `memory/compressor.py` — SlidingWindow 任务锚点：截断后必保最近一条用户消息（长轮次提问被挤出窗口 → LLM 反问"你要做什么"）
 - [x] `app.py` + `core/subagent.py` — system prompt 语言规则：用户用什么语言提问就用什么语言回答（此前默认英文回答中文问题）
 - [x] 实测效果：同一问题 token 从 50 万降到 17 万，溢写生效（60K 字符文档只留 661 字符预览），熔断不误杀
+
+---
+
+## Phase 37: Anthropic Prompt 缓存 (P37)
+
+### P37.1 实现
+- [x] `llm/anthropic_provider.py` — stream() 三处 `cache_control: {"type": "ephemeral"}` 标记：系统提示（字符串→内容块列表）、工具 schema 最后一个、最后一条用户消息（字符串→块格式或已有块加标记）
+- [x] `llm/anthropic_provider.py` — _parse_event() 解析 message_start 中的 cache_read_input_tokens / cache_creation_input_tokens
+- [x] `llm/base.py` — TokenUsage 新增 cache_read_input_tokens / cache_creation_input_tokens 两个字段
+- [x] `_mark_last_user_for_cache()` 独立辅助函数，处理字符串和内容块列表两种格式
+
+### P37.2 测试
+- [x] 6 个新测试（系统缓存标记/最后工具标记/最后用户消息/tool_result 用户消息/空工具/缓存统计解析），449 个测试全过

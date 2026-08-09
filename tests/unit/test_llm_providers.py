@@ -259,3 +259,111 @@ def test_anthropic_tools_format_conversion():
     assert result[0]["name"] == "read_file"
     assert result[0]["description"] == "Read a file"
     assert "input_schema" in result[0]
+
+
+# --- Anthropic: Prompt 缓存标记 ---
+
+
+def test_anthropic_cache_control_on_system():
+
+    provider = make_anthropic()
+    system, api_msgs = provider._split_system(
+        [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+    body: dict = {"model": "claude-sonnet-4-20250514", "messages": api_msgs}
+    if system:
+        body["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    assert isinstance(body["system"], list)
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert body["system"][0]["text"] == "You are helpful."
+
+
+def test_anthropic_cache_control_on_last_tool():
+    provider = make_anthropic()
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "read_file", "description": "Read", "parameters": {}},
+        },
+        {
+            "type": "function",
+            "function": {"name": "bash", "description": "Run", "parameters": {}},
+        },
+    ]
+    converted = provider._convert_tools(tools)
+    if converted:
+        converted[-1] = {**converted[-1], "cache_control": {"type": "ephemeral"}}
+    assert "cache_control" not in converted[0]
+    assert converted[-1]["cache_control"] == {"type": "ephemeral"}
+    assert converted[-1]["name"] == "bash"
+
+
+def test_anthropic_cache_control_on_last_user_msg():
+    from mini_agent.llm.anthropic_provider import _mark_last_user_for_cache
+
+    _, msgs = AnthropicProvider._split_system(
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "answer"},
+            {"role": "user", "content": "second question"},
+        ]
+    )
+    _mark_last_user_for_cache(msgs)
+    last_user = msgs[-1]
+    assert isinstance(last_user["content"], list)
+    assert last_user["content"][0]["type"] == "text"
+    assert last_user["content"][0]["text"] == "second question"
+    assert last_user["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert isinstance(msgs[0]["content"], str)
+
+
+def test_anthropic_cache_control_on_tool_result_user_msg():
+    from mini_agent.llm.anthropic_provider import _mark_last_user_for_cache
+
+    _, msgs = AnthropicProvider._split_system(
+        [
+            {"role": "user", "content": "do something"},
+            {"role": "tool", "tool_call_id": "c1", "content": "result"},
+        ]
+    )
+    _mark_last_user_for_cache(msgs)
+    tool_result_msg = msgs[-1]
+    assert tool_result_msg["role"] == "user"
+    assert isinstance(tool_result_msg["content"], list)
+    last_block = tool_result_msg["content"][-1]
+    assert last_block["cache_control"] == {"type": "ephemeral"}
+
+
+def test_anthropic_cache_control_no_tools():
+    from mini_agent.llm.anthropic_provider import _mark_last_user_for_cache
+
+    provider = make_anthropic()
+    converted = provider._convert_tools([])
+    assert converted == []
+
+    _, msgs = AnthropicProvider._split_system([{"role": "system", "content": "sys"}])
+    _mark_last_user_for_cache(msgs)
+
+
+def test_anthropic_cache_usage_parsing():
+    provider = make_anthropic()
+    chunk = provider._parse_event(
+        {
+            "type": "message_start",
+            "message": {
+                "usage": {
+                    "input_tokens": 1000,
+                    "cache_read_input_tokens": 800,
+                    "cache_creation_input_tokens": 200,
+                }
+            },
+        }
+    )
+    assert chunk is not None
+    assert chunk.usage.prompt_tokens == 1000
+    assert chunk.usage.cache_read_input_tokens == 800
+    assert chunk.usage.cache_creation_input_tokens == 200

@@ -28,6 +28,25 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 
+_EPHEMERAL = {"type": "ephemeral"}
+
+
+def _mark_last_user_for_cache(messages: list[dict[str, Any]]) -> None:
+    """Add cache_control to the last user message's content.
+    给最后一条用户消息的内容加 cache_control——Anthropic 会缓存到此标记
+    为止的所有前缀内容，后续请求命中缓存后输入 token 成本降约 90%。"""
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = [{"type": "text", "text": content, "cache_control": _EPHEMERAL}]
+        elif isinstance(content, list) and content:
+            last = {**content[-1], "cache_control": _EPHEMERAL}
+            msg["content"] = content[:-1] + [last]
+        break
+
+
 class AnthropicProvider(LLMProvider):
     """Claude API provider via Messages API with SSE streaming.
     通过 Messages API 和 SSE 流式传输的 Claude API Provider。
@@ -61,9 +80,19 @@ class AnthropicProvider(LLMProvider):
             "stream": True,
         }
         if system_prompt:
-            body["system"] = system_prompt
+            body["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         if tools:
-            body["tools"] = self._convert_tools(tools)
+            tools_list = self._convert_tools(tools)
+            if tools_list:
+                tools_list[-1] = {**tools_list[-1], "cache_control": {"type": "ephemeral"}}
+            body["tools"] = tools_list
+        _mark_last_user_for_cache(api_messages)
 
         async with self._client.stream("POST", "/v1/messages", json=body) as response:
             response.raise_for_status()
@@ -139,7 +168,13 @@ class AnthropicProvider(LLMProvider):
             msg = event.get("message", {})
             usage = msg.get("usage", {})
             if usage:
-                return StreamChunk(usage=TokenUsage(prompt_tokens=usage.get("input_tokens", 0)))
+                return StreamChunk(
+                    usage=TokenUsage(
+                        prompt_tokens=usage.get("input_tokens", 0),
+                        cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+                        cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
+                    )
+                )
 
         return None
 
