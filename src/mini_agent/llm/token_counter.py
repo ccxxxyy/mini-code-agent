@@ -15,6 +15,28 @@ from typing import Any
 _encoder = None
 _tiktoken_checked = False
 
+# CJK character ranges: these tokenize at ~1 token/char (not 1 token per
+# 4 chars like English), so len//4 underestimates Chinese text ~4x and
+# delays compression until the context overflows.
+# CJK 字符范围：约 1 token/字符（不像英文 4 字符/token），len//4 对
+# 中文低估约 4 倍，导致压缩迟迟不触发直到上下文溢出。
+_CJK_RANGES = (
+    (0x3000, 0x303F),  # CJK punctuation 中日韩标点
+    (0x3040, 0x30FF),  # Hiragana/Katakana 平假名/片假名
+    (0x3400, 0x4DBF),  # CJK Extension A 扩展 A
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs 基本汉字
+    (0xAC00, 0xD7AF),  # Hangul syllables 谚文
+    (0xF900, 0xFAFF),  # CJK Compatibility Ideographs 兼容汉字
+    (0xFF00, 0xFFEF),  # Fullwidth forms 全角符号
+)
+
+
+def _estimate_tokens(text: str) -> int:
+    """CJK-aware estimation: 1 token per CJK char + 1 per 4 other chars.
+    CJK 感知估算：CJK 字符按 1 token/字，其余按 4 字符/token。"""
+    cjk = sum(1 for ch in text if any(lo <= ord(ch) <= hi for lo, hi in _CJK_RANGES))
+    return max(1, cjk + (len(text) - cjk) // 4)
+
 
 def _get_encoder() -> Any:
     global _encoder, _tiktoken_checked
@@ -34,7 +56,7 @@ def _count_cached(text: str) -> int:
     encoder = _get_encoder()
     if encoder is not None:
         return len(encoder.encode(text))
-    return max(1, len(text) // 4)
+    return _estimate_tokens(text)
 
 
 def count_tokens(text: str) -> int:
@@ -53,7 +75,7 @@ def count_tokens(text: str) -> int:
         encoder = _get_encoder()
         if encoder is not None:
             return len(encoder.encode(text))
-        return max(1, len(text) // 4)
+        return _estimate_tokens(text)
     return _count_cached(text)
 
 

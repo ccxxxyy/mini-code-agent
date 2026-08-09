@@ -204,7 +204,23 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
         if chunk.finish_reason:
             finish_reason = chunk.finish_reason
         if chunk.usage:
-            usage = chunk.usage
+            # Field-wise merge: Anthropic splits usage across two events
+            # (message_start has prompt tokens, message_delta has completion)
+            # -- overwriting would lose the prompt count.
+            # 按字段合并：Anthropic 的 usage 分散在两个事件中（message_start
+            # 带 prompt，message_delta 带 completion）——覆盖会丢掉 prompt 计数。
+            u = chunk.usage
+            usage = TokenUsage(
+                prompt_tokens=max(usage.prompt_tokens, u.prompt_tokens),
+                completion_tokens=max(usage.completion_tokens, u.completion_tokens),
+                total_tokens=max(usage.total_tokens, u.total_tokens),
+                cache_read_input_tokens=max(
+                    usage.cache_read_input_tokens, u.cache_read_input_tokens
+                ),
+                cache_creation_input_tokens=max(
+                    usage.cache_creation_input_tokens, u.cache_creation_input_tokens
+                ),
+            )
 
         for tcd in chunk.tool_call_deltas:
             if tcd.index not in tool_call_builders:

@@ -467,14 +467,14 @@ count_message_tokens(msg)   → 单条 API 消息（含 role 开销 + 工具调�
 | 路径 | 精度 | 场景 |
 |---|---|---|
 | tiktoken（cl100k_base 编码） | 精确 | 安装了可选依赖 tiktoken 时 |
-| `len(text) // 4` | 估算 | 无 tiktoken 的兜底（英文 ~4 chars/token，中文偏差更大但足够做阈值判断） |
+| CJK 感知估算（P43） | 估算 | 无 tiktoken 的兜底——CJK 字符 1 token/字 + 其余 4 字符/token（原纯 `len//4` 对中文低估 ~56%，实测见 §43） |
 
 每条消息额外加 4 token 开销（角色标记 + 分隔符），工具调用额外加 3 token/call（函数名 + 参数包裹）。
 
 ### 设计权衡
 
 - **为什么 tiktoken 是可选依赖？** 它是编译型包（Rust 实现），在部分环境下载困难（我们的清华镜像就 403 了）。核心功能不应因此无法使用。
-- **为什么不调 API 的 token 计数端点？** 每次发请求前先调一次计数 API 开销太大且增加延迟。本地估算足够触发压缩阈值。
+- **为什么不调 API 的 token 计数端点？** 每次发请求前先调一次计数 API 开销太大且增加延迟。P43 用了零成本的替代：**复用每轮响应自带的 usage 字段**做锚点（见 §43.2）——权威计数不需要额外请求，本地估算只覆盖锚点后的增量消息。
 
 ## 4.2 ContextManager 上下文管理器
 
@@ -485,7 +485,8 @@ count_message_tokens(msg)   → 单条 API 消息（含 role 开销 + 工具调�
 ```
 ContextManager:
     count_message(msg) → int      # 计数并缓存到 msg.token_count
-    update_total(conv) → int      # 全量重算（system_prompt + 所有消息）
+    update_total(conv) → int      # 重算总量（优先 API usage 锚点，P43）
+    record_api_usage(conv, usage) # 锚定 API 返回的权威总量（P43）
     usage_ratio → float           # 已用 / 总窗口（0.0~1.0）
     tokens_remaining → int        # 剩余可用
     needs_compression → bool      # >= threshold?
@@ -1699,6 +1700,41 @@ OpenAI 兼容服务普遍实现了 `GET {base_url}/models/{model}` 端点，但*
 3. `stream()` 入口兜底——其他路径（SubAgent worker 等）创建的 provider 首次调用时探测
 
 `_probe_attempted` 标志保证每实例只探测一次（成败皆然），10 秒独立超时不拖慢启动。
+
+# 第四十三部分：Token 计数精度提升（P43）
+
+## 43.1 为什么需要：len//4 对中文低估过半，且误差逐轮累积
+
+token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 环境（编译型依赖，部分镜像 403）全靠 `len(text) // 4` 估算——对英文尚可，对中文实测**低估 56%**（824 字符的中文段落真实 468 token，估算只有 206）。低估的方向是危险的：压缩迟迟不触发 → 上下文持续膨胀 → 超窗 HTTP 400。且估算按消息逐条累加，误差随对话轮数线性累积，越到后期越离谱。
+
+## 43.2 主力机制：API usage 锚点——让估算退居配角
+
+比"更准的估算"更本质的改进是**尽量不估算**。每次 LLM 响应的 `usage.prompt_tokens` 是 API 实际计费的权威数字，它覆盖了估算根本看不到的东西——工具 schema（几十个工具的 JSON schema 可能上万 token）、消息格式开销、系统提示。
+
+`record_api_usage()` 在每轮响应后把 `prompt + completion` 总量锚定在最新一条消息上；`update_total()` 检查锚点有效性：有效则"锚点总量 + 锚点之后新消息的估算"，无效则回退全量估算。这样估算只覆盖锚点后追加的一两条消息（下一轮响应又会刷新锚点），**误差不再累积**。
+
+锚点有效性用**对象身份**（`msgs[i] is anchor`）而非索引判断——压缩、undo、截断都会重排 `conversation.messages`，重排后锚定消息不在原位置（或已被替换），身份检查自动失效并安全回退。这比"在压缩代码里手动清锚点"可靠：不管未来加多少种历史重排操作，锚点永远不会错误地存活。
+
+## 43.3 配角改进：CJK 感知估算 + 实测校准
+
+估算公式从纯 `len//4` 改为：CJK 字符（7 个 Unicode 区间：汉字/扩展 A/假名/谚文/全角符号/中日韩标点/兼容汉字）按 1 token/字，其余按 4 字符/token。不采用原方案"CJK 占比 >30% 时 len//2"——按字符归类无阈值跳变，混合文本更平滑。
+
+**真实 API 实测校准**（阿里云 MaaS deepseek-v4-flash-0731，API usage 为真值）：
+
+| 样本 | API 真值 | 旧 len//4 | 新 CJK 感知 |
+|---|---|---|---|
+| 纯英文 1456 字符 | 237 | +54% | +54% |
+| 纯中文 824 字符 | 468 | **-56%** | +76% |
+| 中英混合 1592 字符 | 500 | -20% | +12% |
+| 代码 1352 字符 | 340 | -1% | -1% |
+
+两个实测发现：①DeepSeek 分词器对中文压缩率高（~0.57 token/字），1 token/字的假设在它身上偏保守——但 OpenAI cl100k 对中文就是 ~1 token/字，按最保守分词器估算是跨供应商的正确策略；②**高估与低估风险不对称**——低估导致压缩不触发直至崩溃，高估只是压缩稍微提前、多花一点压缩成本。对阈值判断用途，宁可高估。不做按 provider 的自适应系数：锚点机制已把估算的影响限制在增量消息上，那是过度工程。
+
+## 43.4 顺带修复的两个真实 bug
+
+**① assistant 消息的 token_count 存错了量级**（`agent_loop.py`）：原来存 `usage.total_tokens`——它包含**整个 prompt**（系统提示 + 全部历史 + 工具 schema）。`update_total()` 按消息累加时，每条 assistant 消息都携带一份"全对话总量"，对话被重复计算 N 遍——10 轮对话后总量虚高一个数量级，压缩被过早疯狂触发。改存 `completion_tokens`（消息自身的真实大小）。这个 bug 此前被"len//4 低估"部分掩盖——两个方向相反的误差抵消了一部分，修一个必须同时修另一个。
+
+**② assemble_response 的 usage 覆盖丢数据**（`openai_provider.py`）：原来 `if chunk.usage: usage = chunk.usage` 直接覆盖。OpenAI 把完整 usage 放在最后一个 chunk 没问题；但 Anthropic 拆在两个事件——`message_start` 带 prompt_tokens（含缓存统计），`message_delta` 带 completion_tokens——后者会把前者覆盖清零。改按字段取 max 合并，两家协议都正确。
 
 # 附录：贯穿各阶段的通用设计原则
 

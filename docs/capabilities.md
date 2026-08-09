@@ -120,7 +120,7 @@
 **要求**：对话变长后自动压缩历史，省 token 又不丢关键信息。
 
 **实现**（`memory/context.py` + `compressor.py` + `llm/token_counter.py`）：
-- Token 管理：tiktoken 精确计数（可选依赖，缺失时 chars/4 估算）+ LRU 缓存 + 每轮界面显示用量（`tokens: xxx this turn / xxx total`）
+- Token 管理：tiktoken 精确计数（可选依赖，缺失时 CJK 感知估算——CJK 1 token/字 + 其余 chars/4，P43）+ API usage 锚点（对话总量直接用 API 返回的权威计数，只对新消息估算，误差不累积，P43）+ LRU 缓存 + 每轮界面显示用量（`tokens: xxx this turn / xxx total`）
 - 自动压缩：ContextManager 每轮 OBSERVE 后检查，达到窗口 75% 触发；ensure_fits 溢出兜底使用 API 探测的真实窗口值（P42）
 - 三级压缩级联（保留关键信息的关键设计）：
   1. DropToolResults — 先压最冗余的工具输出（保留调用结构）
@@ -222,7 +222,7 @@
 |---|---|
 | 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝 |
 | 上下文压缩 | 三级级联（75% 阈值自动 + /compact 手动） |
-| token 管理 | tiktoken/估算双路径 + LRU 缓存 + 每轮界面显示 |
+| token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
 | 跨会话记忆 | 项目级 + 用户级双层 JSON 存储 + 关键词/标签搜索 |
 | 会话持久化 | SessionStore 完整序列化（含 ToolCall/ToolResult），/session 全套命令 |

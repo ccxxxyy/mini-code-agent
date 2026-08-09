@@ -811,3 +811,18 @@
 - [x] 基类 prepare() 默认无操作——Anthropic/Mock Provider 零改动
 - [x] 真实 API 实测：阿里云 MaaS 三个模型均探测到 129024（extra_info.default_envs.max_input_tokens 深层嵌套）
 - [x] 8 个新测试，总计 504 个全过
+
+---
+
+## Phase 43 检查项：Token 计数精度提升
+
+- [x] CJK 感知估算：CJK 字符 1 token/字 + 其余 4 字符/token（7 个 Unicode 区间：汉字/扩展A/假名/谚文/全角/标点/兼容）
+- [x] 纯英文估算行为不变（len//4）
+- [x] API usage 锚点：record_api_usage() 锚定权威总量，update_total() 只对锚点后新消息估算
+- [x] 锚点失效安全：压缩/undo 重排历史后对象身份检查自动失效，回退全量估算
+- [x] 全 0 usage（供应商没返回）不建锚点
+- [x] total_tokens 缺失时由 prompt + completion 计算（Anthropic 风格）
+- [x] 修复：assistant 消息 token_count 存 completion_tokens 而非 total_tokens（消除对话重复计算 N 遍）
+- [x] 修复：assemble_response usage 按字段合并（Anthropic 拆分事件不丢 prompt 计数）
+- [x] 真实 API 实测校准：中文估算从 -56% 低估（危险方向）修正为 +76% 高估（安全方向），混合文本 +12%
+- [x] 11 个新测试（CJK 估算 5 / 锚点 5 / 合并 1），总计 515 个全过

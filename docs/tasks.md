@@ -939,3 +939,17 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P42.2 测试
 - [x] `tests/unit/test_llm_providers.py` 新增 8 个测试（字段提取 4 / 探测成功 / 失败回退 / 只探测一次 / prepare 预热），504 个测试全过；真实 API 实测阿里云 MaaS deepseek-v4-flash-0731 探测到 129024
+
+---
+
+## Phase 43: Token 计数精度提升 (P43)
+
+### P43.1 实现
+- [x] `llm/token_counter.py` — _estimate_tokens()：CJK 感知估算——CJK 字符（汉字/假名/谚文/全角符号 7 个 Unicode 区间）按 1 token/字，其余按 4 字符/token；替换纯 len//4（中文低估约 4 倍导致压缩迟迟不触发）
+- [x] `memory/context.py` — record_api_usage()：API usage 锚点——LLM 返回的 usage 总量锚定在最新消息（prompt_tokens 含系统提示/全部消息/工具 schema，比估算准）；update_total() 优先用锚点总量 + 锚点后新消息估算；对象身份检查让压缩/undo 重排后锚点自动失效
+- [x] `core/agent_loop.py` — 修复：assistant 消息 token_count 由 usage.total_tokens（含整个 prompt，按消息累加重复算 N 遍）改存 completion_tokens（消息自身大小）；每轮响应后调用 record_api_usage()
+- [x] `llm/openai_provider.py` — 修复：assemble_response 的 usage 由直接覆盖改按字段合并（Anthropic 把 prompt/completion 拆在 message_start/message_delta 两个事件，覆盖会丢 prompt 计数）
+
+### P43.2 测试
+- [x] `tests/unit/test_token_counter.py` 新建 11 个测试（CJK 估算 5 / usage 锚点 5 / usage 合并 1），515 个测试全过
+- [x] 真实 API 实测校准（阿里云 MaaS，API usage 为真值）：中文估算从 -56% 低估（危险方向：压缩不触发→崩溃）修正为 +76% 高估（安全方向：压缩提前）；混合文本 -20% → +12%；英文/代码不变
