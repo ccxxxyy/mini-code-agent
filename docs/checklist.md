@@ -732,3 +732,15 @@
 - [x] 任务锚点——单轮超窗强制截断后用户提问不丢失（曾致 LLM 反问"你要做什么"）
 - [x] 语言跟随——中文提问全程中文回答（system prompt 语言规则）
 - [x] 实测同一问题 token 从 50 万降到 17 万，最终正常输出完整回答
+
+---
+
+## Phase 37 检查项：Anthropic Prompt 缓存
+
+- [x] 系统提示以 cache_control 内容块列表形式传入（非字符串）
+- [x] 工具 schema 列表最后一个工具携带 cache_control
+- [x] 最后一条用户消息内容被升级为块格式并携带 cache_control
+- [x] tool_result 类型的用户消息（role=user, content=[tool_result block]）同样被标记
+- [x] 空工具列表不崩溃
+- [x] message_start 事件正确解析 cache_read/cache_creation 统计
+- [x] 6 个新测试，总计 449 个全过
