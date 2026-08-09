@@ -286,6 +286,12 @@ def test_anthropic_stop_reason_mapping():
     )
     assert chunk.finish_reason == "tool_calls"
 
+    # max_tokens 归一化为 OpenAI 的 "length"——agent_loop 恢复逻辑两家通用
+    chunk = provider._parse_event(
+        {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}, "usage": {}}
+    )
+    assert chunk.finish_reason == "length"
+
 
 def test_anthropic_unknown_event_ignored():
     provider = make_anthropic()

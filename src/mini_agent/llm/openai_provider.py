@@ -123,7 +123,9 @@ class OpenAIProvider(LLMProvider):
             "model": self._config.model,
             "messages": _sanitize_surrogates(messages),
             "temperature": self._config.temperature,
-            "max_tokens": self._config.max_tokens,
+            # kwargs override supports max_tokens recovery retries (P44)
+            # kwargs 覆盖支持 max_tokens 恢复重试
+            "max_tokens": kwargs.get("max_tokens") or self._config.max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
         }

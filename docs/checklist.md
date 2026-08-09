@@ -826,3 +826,16 @@
 - [x] 修复：assemble_response usage 按字段合并（Anthropic 拆分事件不丢 prompt 计数）
 - [x] 真实 API 实测校准：中文估算从 -56% 低估（危险方向）修正为 +76% 高估（安全方向），混合文本 +12%
 - [x] 11 个新测试（CJK 估算 5 / 锚点 5 / 合并 1），总计 515 个全过
+
+---
+
+## Phase 44 检查项：max_tokens 恢复
+
+- [x] finish_reason == "length" 触发翻倍重试（4096 → 8192 → 16384 → 32768）
+- [x] 最多 3 次重试，仍截断保留最后一次结果（不丢弃）
+- [x] 正常结束（stop/tool_calls）不重试
+- [x] 用户取消（Esc）不重试
+- [x] 重试前取消截断尝试中流式提交的工具任务（防半截 JSON 参数执行）
+- [x] OpenAI/Anthropic 两家 Provider 的 stream() 都支持 max_tokens kwargs 覆盖
+- [x] Anthropic stop_reason="max_tokens" 归一化为 "length"
+- [x] 3 个新测试 + 1 个映射断言，总计 518 个全过
