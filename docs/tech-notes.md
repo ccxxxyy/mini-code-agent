@@ -1595,6 +1595,22 @@ P36 上线后实测"详细介绍所有文档"：溢写生效（tech-notes 60K+ �
 - 预览长度取 `min(500, threshold)`——防止极小阈值下预览本身超阈值
 - 缓存生命周期：主会话正常退出时清理；SubAgent 在 `run()` 的 finally 里清理
 
+# 第三十七部分：Anthropic Prompt 缓存（P37）
+
+## 37.1 三个缓存标记点
+
+Anthropic API 支持 `cache_control: {"type": "ephemeral"}`——标记的内容被 API 缓存，后续请求前缀相同则命中缓存（输入 token 成本降约 90%）。标记放在"最长稳定前缀"的三个末端：
+
+1. **系统提示**：每次请求都一样——`body["system"]` 从字符串改为 `[{"type": "text", "text": ..., "cache_control": {"type": "ephemeral"}}]`（Anthropic API 接受两种格式）
+2. **工具 schema 最后一个**：工具定义每次也一样——浅拷贝最后一个 dict 加标记（不污染原始数据）
+3. **最后一条用户消息**：到这里为止是对话的稳定前缀——字符串内容自动升级为块格式
+
+三个标记后面的内容（新的 assistant 回复、工具结果）自然落在缓存范围之外。
+
+## 37.2 缓存命中统计
+
+`_parse_event` 在 `message_start` 事件中新增解析 `cache_read_input_tokens`（命中）和 `cache_creation_input_tokens`（首次写入），传入 `TokenUsage`——CostTracker 可用于展示缓存节省量。OpenAI/DeepSeek 等其他 Provider 服务端自动缓存，无需客户端标记。
+
 # 第三十八部分：流式工具执行（P38）
 
 ## 38.1 判定信号：流式中怎么知道一个工具调用组装完了
@@ -1611,6 +1627,20 @@ Chat Completions 协议没有"单个工具调用结束"事件，但有两个可�
 
 `streaming_tool_execution = false` 完全回退 P17 的"流后并行"行为——排查问题时可对照。
 
+# 第三十九部分：@file 内联引用（P39）
+
+## 39.1 展开时机：_handle_turn 而非 get_user_input
+
+`expand_at_refs()` 放在 `_handle_turn()` 创建 Message 之前——而非 `get_user_input()` 返回后立即展开。原因：斜杠命令也经过 `get_user_input()`，如果在那里展开，`/memory add @README.md` 会把整个文件内容作为记忆存入——不是预期行为。放在 `_handle_turn` 则只对真正要发给 LLM 的消息展开。
+
+## 39.2 正则与容错
+
+`_AT_REF_RE = r"@([\w./_\-\\]+(?:\.[\w]+)*)"` 匹配路径字符（字母/数字/点/斜杠/连字符/反斜杠），要求至少一个文件扩展名片段。不匹配 `@mention`（无路径分隔符且无扩展名时通常不是文件）——但如果有个目录叫 `mention/`，`@mention/` 会被尝试。匹配到但路径不是真实文件时**原样保留**（不报错不替换）。10KB 上限截断——大文件应该用 read_file 的 offset/limit 按需读取。
+
+## 39.3 补全触发
+
+`FileRefCompleter` 用 `os.listdir` 单目录扫描（不递归），跳过 `.git`/`.venv`/`__pycache__` 等。目录结尾加 `/` 支持钻入（`@src/` → 列出 src 下的文件）。`merge_completers` 合并斜杠命令和文件引用两个补全器——按键触发条件从 `text.startswith("/")` 扩展为 `text.startswith("/") or "@" in text`。
+
 # 第四十部分：权限规则文件（P40）
 
 ## 40.1 从硬编码到用户可配
@@ -1621,12 +1651,34 @@ Chat Completions 协议没有"单个工具调用结束"事件，但有两个可�
 
 实现时发现 `check_path()` 的流程是"先问 PathGuard，项目内 ALLOW 直接返回"——显式 DENY 规则根本没机会被评估。用户写 `deny = ["*secrets*"]` 拦项目内的机密目录会**静默失效**。修复：`check_path()` 和 `_would_ask_path()` 都在 PathGuard 之前先查 `_deny_rule_matches()`——DENY 规则最优先，符合权限系统"显式拒绝高于一切"的一贯哲学。这是一个"加功能时暴露旧盲区"的典型案例：规则文件让 PATH deny 第一次有了真实用户，短路问题才浮出水面。
 
+# 第四十一部分：OS 级沙箱（P41）
+
+## 41.1 为什么 Windows 不做
+
+Windows 的 Job Objects / AppContainers 需要管理员权限或 COM 接口调用，复杂度远超收益。Linux bwrap 和 macOS Seatbelt 都是用户态免提权——bwrap 用用户命名空间（`--unshare-user`），Seatbelt 是每进程 sandbox profile。Windows 保持现有正则拦截 + P40 的规则文件——regex 不是内核隔离但有 deny 规则兜底。
+
+## 41.2 bwrap vs Seatbelt 的关键差异
+
+两者效果等价（命令只能读不能写，除白名单路径外），但机制完全不同：
+
+| | bwrap (Linux) | Seatbelt (macOS) |
+|---|---|---|
+| 隔离机制 | 用户命名空间 + 绑定挂载 | 进程沙箱策略（SBPL） |
+| 只读方式 | `--ro-bind / /`（整个 rootfs 只读挂载） | `(deny default)` + `(allow file-read*)` |
+| 可写方式 | `--bind <path> <path>`（覆盖挂载） | `(allow file-write* (subpath "<path>"))` |
+| 禁网 | `--unshare-net`（网络命名空间隔离） | `(deny network*)` |
+| deny > allow | 后挂载覆盖前挂载 | 后匹配优先（SBPL 是 last-match-wins） |
+
+## 41.3 auto_allow 不绕过 deny
+
+`sandbox_auto_allow` 的设计意图是"内核提供了隔离，不需要每次弹窗问用户了"——但显式 deny 规则仍然拦截。评估顺序：显式规则（P40）→ sandbox_auto_allow → 弹窗。deny 规则在 sandbox_auto_allow 之前被评估（`_check_rules_only` 在 `check_command` 的第一步），所以 `denied_commands = ["docker rm *"]` 即使沙箱开启也会被拒绝——用户的意志高于自动化。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——443 个测试约 55 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——496 个测试约 58 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -29,6 +29,9 @@
 [security]
 # permission_mode = "ask"    # "allow" | "ask" | "deny"
 # allowed_commands = ["git *", "npm *", "python *", "uv *"]
+# sandbox = false            # OS 沙箱（Linux bwrap / macOS seatbelt），true 启用
+# sandbox_auto_allow = false # 沙箱下危险命令免确认（deny 规则仍拦）
+# sandbox_network = false    # 允许沙箱内网络访问
 
 [context]
 # 上下文感知：项目指令文件名及优先级（第一个命中即用）

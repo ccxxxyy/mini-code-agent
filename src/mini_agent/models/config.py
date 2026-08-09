@@ -72,6 +72,11 @@ class SecurityConfig:
         default_factory=lambda: ["rm -rf /", "sudo", "curl|sh", "wget|sh"]
     )
     worktree_base_dir: str = ".mini-agent/worktrees"
+    # OS-level sandbox (Linux bwrap / macOS seatbelt); Windows: no-op
+    # OS 级沙箱（Linux bwrap / macOS seatbelt）；Windows 无效
+    sandbox: bool = False
+    sandbox_auto_allow: bool = False
+    sandbox_network: bool = False
 
 
 @dataclass

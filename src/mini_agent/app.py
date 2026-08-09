@@ -173,6 +173,26 @@ class Application:
             user_file=Path.home() / ".mini-agent" / "permissions.toml",
             project_file=working_dir / ".mini-agent" / "permissions.toml",
         )
+
+        # OS-level sandbox (Linux bwrap / macOS seatbelt)
+        # OS 级沙箱（Linux bwrap / macOS seatbelt）
+        if config.security.sandbox:
+            from mini_agent.security.sandbox import SandboxConfig, create_sandbox
+
+            os_sandbox = create_sandbox()
+            if os_sandbox and os_sandbox.available():
+                sb_config = SandboxConfig(
+                    allow_write=[str(working_dir), "/tmp"],
+                    deny_write=[str(Path.home() / ".mini-agent")],
+                    network=config.security.sandbox_network,
+                )
+                bash_tool = self.tool_registry.get("bash")
+                if bash_tool:
+                    bash_tool.sandbox = os_sandbox
+                    bash_tool.sandbox_config = sb_config
+                if config.security.sandbox_auto_allow:
+                    self.permission_manager.sandbox_auto_allow = True
+
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
 

@@ -127,6 +127,9 @@ spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）
 allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单
+sandbox = false              # OS 级沙箱（Linux bwrap / macOS seatbelt），true 启用
+sandbox_auto_allow = false   # 沙箱下危险命令免确认（deny 规则仍拦）
+sandbox_network = false      # 允许沙箱内网络访问
 
 [context]                    # 上下文感知（P25）
 instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
@@ -371,6 +374,64 @@ deny = ["*secrets*", "*.key"]        # 拒绝访问（项目内路径也拦）
 **验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<pattern>` 作为判定依据。
 
 **修改后生效**：重启 mini（启动时加载一次）。
+
+---
+
+## OS 级沙箱（sandbox）
+
+内核级别隔离 bash 命令的执行环境——即使命令通过了权限检查，也只能在受限范围内操作。
+
+**支持平台**：
+
+| 平台 | 后端 | 安装 |
+|---|---|---|
+| Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` 或 `yum install bubblewrap` |
+| macOS | Seatbelt (sandbox-exec) | 系统自带（`/usr/bin/sandbox-exec`） |
+| Windows | 不支持 | 保持现有正则拦截 + permissions.toml 规则 |
+
+**启用**：
+
+```toml
+# config.toml
+[security]
+sandbox = true               # 开启沙箱
+sandbox_auto_allow = false    # 可选：沙箱下危险命令免确认
+sandbox_network = false       # 可选：允许网络访问
+```
+
+**沙箱内的文件权限**（代码固定，非用户配置）：
+
+| 路径 | 权限 |
+|---|---|
+| 工作目录（项目目录） | 可读可写 |
+| `/tmp` | 可读可写 |
+| `~/.mini-agent` | 只读（防命令篡改配置） |
+| 其余整个文件系统 | 只读 |
+
+**sandbox_auto_allow 与 permissions.toml 的配合**：
+
+```
+命令到达
+  ↓
+① permissions.toml deny 规则？→ 拒绝（沙箱也救不了）
+  ↓
+② permissions.toml allow 规则 / session grant？→ 放行
+  ↓
+③ 危险命令？
+     sandbox_auto_allow=true → 放行（内核兜底）
+     sandbox_auto_allow=false → 弹窗确认
+  ↓
+④ 执行：有沙箱 → 内核隔离执行（只读 rootfs）
+       无沙箱 → 原样执行
+```
+
+- **permissions.toml** 管"要不要执行这条命令"
+- **sandbox** 管"执行时能碰哪些文件"
+- **deny 规则最大**，谁都绕不过——sandbox_auto_allow 不影响它
+
+**验证是否生效**：`/trace on` 后执行命令，trace 行会显示 `sandbox_auto_allow` 作为判定依据（沙箱下免确认时）。
+
+**Windows**：`sandbox = true` 但无 bwrap/sandbox-exec → 静默退回，功能不受影响、无报错。
 
 ---
 
