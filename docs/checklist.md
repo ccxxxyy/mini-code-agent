@@ -784,3 +784,17 @@
 - [x] 文件缺失/格式错误不影响启动
 - [x] /trace 显示规则来源（rule:pattern）
 - [x] 9 个新测试，总计 480 个全过
+
+---
+
+## Phase 41 检查项：OS 级沙箱
+
+- [x] Linux bwrap 命令格式正确（只读根 + 可写白名单 + 禁网 + proc/dev）
+- [x] macOS Seatbelt SBPL profile 正确（deny default + 选择性 file-write + 网络控制）
+- [x] create_sandbox() 按平台返回正确实现（Linux/Darwin/Windows）
+- [x] bwrap/sandbox-exec 不可用时 available() 返回 False（静默退回正则拦截）
+- [x] BashTool 默认无沙箱；注入后命令被 wrap
+- [x] sandbox_auto_allow 让危险命令免确认
+- [x] 显式 deny 规则不被沙箱绕过
+- [x] Windows 无内核沙箱——保持现有正则拦截（不崩不报错）
+- [x] 16 个新测试，总计 496 个全过

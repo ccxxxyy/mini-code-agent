@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **443 测试，83.1% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **496 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -106,12 +106,12 @@
 |---|---|---|
 | 文档数量 | **12 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
-| 技术笔记 | tech-notes.md（36 节，设计决策记录） | 无 |
+| 技术笔记 | tech-notes.md（41 节，设计决策记录） | 无 |
 | 配置指南 | config-guide.md（全配置文件说明） | config.yaml.example |
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
-| 开发历史 | tasks.md（P1-P36 完整记录） | 无 |
+| 开发历史 | tasks.md（P1-P41 完整记录） | 无 |
 
 **差距**：此维度 mini **远超** mewcode。
 
@@ -251,13 +251,13 @@
 
 ## 三、安全/权限
 
-### 3.1 OS 级沙箱
+### 3.1 OS 级沙箱 ✅ 已实现（P41）
 
 | | mini | mewcode |
 |---|---|---|
-| 沙箱隔离 | ❌ 仅正则模式匹配 | ✅ Linux bubblewrap + macOS Seatbelt **内核级隔离** |
+| 沙箱隔离 | ✅ **Linux bubblewrap + macOS Seatbelt**（只读 rootfs + 可写白名单 + 可选禁网）+ sandbox_auto_allow（沙箱下危险命令免确认，deny 规则仍拦）；Windows 无内核沙箱退回正则 | ✅ Linux bubblewrap + macOS Seatbelt 内核级隔离 |
 
-**差距**：这是最大的安全差距。mini 的 `DANGEROUS_COMMAND_PATTERNS` 是正则匹配——恶意构造的命令可以绕过（如 base64 编码、管道拼接）。mewcode 的 bwrap 把子进程关在只读文件系统里，即使命令被放行也无法越权。
+**原差距**：最大安全差距——正则匹配可被绕过。P41 已实现双平台内核沙箱。
 
 **增强方案**：
 1. 新建 `security/sandbox/` 目录
@@ -665,7 +665,7 @@
 | ✅ 完成 | 2.2 | `@file` 引用（P39） | 用户体验 | 已完成 |
 | ✅ 完成 | 5.3 | 输入历史持久化 | 用户体验 | 已完成 |
 | ✅ 完成 | 3.2 | 权限规则文件（P40） | 用户自定义权限 | 已完成 |
-| 🟢 P2 | 3.1 | OS 级沙箱（Linux/macOS） | 安全质变 | 1 天 |
+| ✅ 完成 | 3.1 | OS 级沙箱（P41） | 安全质变 | 已完成 |
 | 🟢 P2 | 1.3 | 上下文窗口 API 探测 | 新模型免更新代码 | 2 小时 |
 | 🟢 P2 | 4.3 | Token 计数精度提升 | 压缩阈值准确性 | 2 小时 |
 | 🟢 P2 | 1.5 | max_tokens 恢复 | 长回答不截断 | 2 小时 |

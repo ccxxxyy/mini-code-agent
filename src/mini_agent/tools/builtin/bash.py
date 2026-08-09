@@ -38,6 +38,9 @@ def _decode_console_bytes(data: bytes) -> str:
 
 
 class BashTool(Tool):
+    sandbox = None  # Sandbox | None — injected by app.py when enabled app.py 启用时注入
+    sandbox_config = None  # SandboxConfig | None
+
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
@@ -66,6 +69,9 @@ class BashTool(Tool):
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         command = kwargs["command"]
         timeout = float(kwargs.get("timeout", ctx.config.tools.bash_timeout))
+
+        if self.sandbox and self.sandbox_config and self.sandbox.available():
+            command = self.sandbox.wrap(command, self.sandbox_config)
 
         try:
             if sys.platform == "win32":

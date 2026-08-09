@@ -64,6 +64,9 @@ class PermissionManager:
         self._confirm = confirm_callback
         self._rules: list[PermissionRule] = []
         self._session_grants: set[tuple[PermissionScope, str]] = set()
+        # OS sandbox auto-allows normal commands (kernel provides isolation)
+        # OS 沙箱自动放行普通命令（内核提供隔离）
+        self.sandbox_auto_allow: bool = False
         # Why the last decision was made (for /trace) 最近一次判定的依据（用于 /trace）
         self.last_decision_reason: str = ""
         self._load_rules_from_config(config)
@@ -239,9 +242,12 @@ class PermissionManager:
         if decision is not None:
             return decision
 
-        # Dangerous pattern -> always confirm (even in allow mode)
-        # 危险模式 -> 始终确认（即使在 allow 模式下）
+        # Dangerous pattern -> confirm (unless kernel sandbox provides isolation)
+        # 危险模式 -> 确认（除非内核沙箱提供隔离）
         if self.is_dangerous_command(command):
+            if self.sandbox_auto_allow:
+                self.last_decision_reason = "sandbox_auto_allow"
+                return PermissionDecision.GRANTED
             request.context = "dangerous command detected"
             self.last_decision_reason = "dangerous_command"
             return await self._ask_user(request)

@@ -910,3 +910,19 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P40.2 测试
 - [x] `tests/unit/test_permission_files.py` 新建 9 个测试（用户级 allow/项目级 deny/两级合并/缺失/格式错误/项目内 deny 生效/would_ask 一致/deny 优先 allow/来源标注），480 个测试全过
+
+---
+
+## Phase 41: OS 级沙箱 (P41)
+
+### P41.1 实现
+- [x] `security/sandbox/__init__.py` — Sandbox ABC + SandboxConfig（allow_write/deny_write/network）+ create_sandbox() 工厂（Linux→BwrapSandbox / macOS→SeatbeltSandbox / Windows→None）
+- [x] `security/sandbox/bwrap.py` — BwrapSandbox：bwrap --ro-bind / / + --bind 可写路径 + --ro-bind 强制只读 + --unshare-net 禁网 + --proc/--dev；shlex.quote 全转义
+- [x] `security/sandbox/seatbelt.py` — SeatbeltSandbox：_build_profile SBPL（deny default + allow file-read* + 选择性 file-write* + 网络控制）；sandbox-exec -p profile bash -c command
+- [x] `tools/builtin/bash.py` — sandbox/sandbox_config 工具属性 + execute() 创建子进程前 wrap
+- [x] `models/config.py` — SecurityConfig 新增 sandbox/sandbox_auto_allow/sandbox_network
+- [x] `app.py` — 启动接线（检测平台 + 注入 BashTool + 通知 PermissionManager）
+- [x] `security/permission.py` — sandbox_auto_allow：危险命令在沙箱下免确认（显式 deny 规则仍拦）
+
+### P41.2 测试
+- [x] `tests/unit/test_sandbox.py` 新建 16 个测试（bwrap 5 / seatbelt 4 / 工厂 3 / bash 集成 2 / 权限 2），496 个测试全过
