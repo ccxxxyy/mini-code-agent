@@ -114,3 +114,75 @@ async def test_merge_back(git_repo):
     result = await mgr.merge_back("feature-merge")
     assert result.success
     assert (git_repo / "feature.txt").is_file()
+
+
+# --- P54: lifecycle enhancements ---
+
+
+async def test_create_symlinks_dependency_dirs(git_repo):
+    venv = git_repo / ".venv"
+    venv.mkdir()
+    (venv / "marker.txt").write_text("deps", encoding="utf-8")
+
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("with-deps")
+
+    linked = wt / ".venv"
+    if not linked.exists():
+        pytest.skip("symlink not permitted (Windows without developer mode)")
+    assert (linked / "marker.txt").is_file()
+
+
+async def test_has_uncommitted_changes(git_repo):
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("check-changes")
+
+    assert not await mgr.has_uncommitted_changes(wt)
+    (wt / "dirty.txt").write_text("x", encoding="utf-8")
+    assert await mgr.has_uncommitted_changes(wt)
+
+
+async def test_cleanup_stale_removes_old_clean(git_repo):
+    import os
+    import time
+
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("old-clean")
+
+    old = time.time() - 30 * 86400
+    os.utime(wt, (old, old))
+
+    removed = await mgr.cleanup_stale(max_age_days=7)
+    assert str(wt) in removed
+    assert not wt.exists()
+
+
+async def test_cleanup_stale_keeps_dirty(git_repo):
+    import os
+    import time
+
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("old-dirty")
+    (wt / "uncommitted.txt").write_text("keep me", encoding="utf-8")
+
+    old = time.time() - 30 * 86400
+    os.utime(wt, (old, old))
+
+    removed = await mgr.cleanup_stale(max_age_days=7)
+    assert removed == []
+    assert wt.exists()
+
+
+async def test_cleanup_stale_keeps_recent(git_repo):
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("fresh")
+
+    removed = await mgr.cleanup_stale(max_age_days=7)
+    assert removed == []
+    assert wt.exists()
+
+
+async def test_cleanup_stale_disabled(git_repo):
+    mgr = WorktreeManager(git_repo)
+    await mgr.create("any")
+    assert await mgr.cleanup_stale(max_age_days=0) == []

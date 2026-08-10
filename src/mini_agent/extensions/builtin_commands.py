@@ -1087,6 +1087,10 @@ def _format_agent_result(r) -> str:
         lines.append(f"  Output: {r.output[:200]}")
     if r.error:
         lines.append(f"  Error: {r.error}")
+    if r.worktree_path:
+        branch = r.worktree_path.name
+        lines.append(f"  Worktree: {r.worktree_path}")
+        lines.append(f"  Merge with: `git merge {branch}` (then clean up the worktree)")
     return "\n".join(lines)
 
 

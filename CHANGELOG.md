@@ -32,6 +32,7 @@
 - **Tool search / lazy loading** — MCP servers can use `loading = "dispatch"` to keep tools out of the LLM context; the LLM discovers them via `tool_search` and invokes them via `mcp_call`. Two new builtin tools (10 total). 工具搜索/延迟加载：MCP dispatch 模式不注册 schema，LLM 通过 tool_search 按需搜索 + mcp_call 按需调用。
 - **Selective memory recall** — when stored memories exceed `recall_threshold` (10), a lightweight LLM call picks the `recall_top_k` (5) most relevant entries to inject instead of head-truncating. Fail-safe fallback to the old behavior on any error. 选择性记忆召回：记忆超过阈值时 LLM 挑选最相关的注入，失败静默回退。
 - **Memory consolidation** — when memories exceed `consolidation_threshold` (20), an LLM merges semantically related entries into one (keeps newest timestamp, unions tags). Also available manually via `/memory consolidate`. Fail-safe no-op on any error. 记忆合并：超阈值时 LLM 语义合并相关记忆（保留最新时间戳、tags 并集），也可 `/memory consolidate` 手动触发。
+- **Worktree lifecycle** — new worktrees auto-symlink `node_modules`/`.venv`/`vendor` (skip reinstalls); stale clean worktrees older than `worktree_max_age_days` (7) are removed at startup (dirty ones kept); `/spawn wait` shows the worktree path with a `git merge` hint. Worktree 生命周期：依赖目录符号链接、过期干净 worktree 启动清理（脏的保留）、结果显示合并提示。
 
 ### Fixed 修复（P36 实战补修）
 

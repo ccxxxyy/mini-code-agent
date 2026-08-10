@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **611 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **616 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -499,18 +499,18 @@
 
 代码改动：新增 `core/spawn_backends.py` ~80 行。优先级较低——进度面板已提供可视化。
 
-### 6.5 Worktree 完善
+### 6.5 Worktree 完善 ✅ 已实现（P54）
 
 | | mini | mewcode |
 |---|---|---|
-| Git worktree | 代码就绪 | 完整生命周期管理（符号链接/过期清理/变更检测） |
+| Git worktree | **完整生命周期管理**：符号链接/过期清理/变更检测 (P54) | 完整生命周期管理（符号链接/过期清理/变更检测） |
 
-**增强方案**：
-1. 创建 worktree 时自动符号链接 `node_modules`/`.venv`/`vendor`（避免重装依赖）
-2. 过期清理：启动时扫描 `.mini-agent/worktrees/`，超过可配天数的自动删除
-3. 退出 worktree 前检测是否有未提交变更，有则提示
-
-代码改动：`security/worktree.py` ~40 行。
+**已完成**（P54）：
+- `create()` 自动符号链接 `node_modules`/`.venv`/`vendor`（Windows 无权限静默跳过）
+- `cleanup_stale(max_age_days)` — 启动时清理超龄的干净 worktree（脏的保留，不丢未提交工作）+ 删除对应分支
+- `SecurityConfig.worktree_max_age_days = 7`（0 = 禁用）
+- `has_uncommitted_changes()` 便捷检测方法
+- `/spawn wait` 结果显示 worktree 路径 + `git merge <branch>` 合并提示
 
 ---
 
@@ -647,7 +647,7 @@
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |
-| ⚪ P4 | 6.5 | Worktree 完善 | 并行隔离 | 半天 |
+| ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ⚪ P4 | 8.1 | Skill 安装命令 | 扩展性 | 2 小时 |
 | ⚪ P4 | 8.2 | Skill 热重载 | 开发效率 | 2 小时 |
 | ⚪ P4 | 9.1 | 会话自动清理 | 磁盘管理 | 2 小时 |

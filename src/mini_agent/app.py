@@ -418,6 +418,17 @@ class Application:
         # 启动时预热探测上下文窗口，让首轮溢出检查就用上真实值
         await self._llm.prepare()
         await self._connect_mcp_servers()
+        # Stale worktree cleanup (P54): clean worktrees older than N days
+        # 过期 worktree 清理：清除超龄的干净 worktree
+        if self.config.security.worktree_max_age_days > 0:
+            try:
+                removed = await self.worktree_manager.cleanup_stale(
+                    self.config.security.worktree_max_age_days
+                )
+                if removed:
+                    self.terminal.show_info(f"Cleaned {len(removed)} stale worktree(s)")
+            except Exception:
+                pass
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
         try:

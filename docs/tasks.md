@@ -1197,3 +1197,23 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - empty_result / invalid_json / llm_none / exception / fewer_than_two_entries → 全部返回 None
   - markdown_fenced / parse_groups_valid / parse_groups_invalid / parse_groups_skips_malformed
 - [x] 611 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 54: Worktree 完善 (P54)
+
+### P54.1 实现
+- [x] `models/config.py` — SecurityConfig 新增 `worktree_max_age_days: int = 7`（0 = 禁用）
+- [x] `security/worktree.py` — `create()` 自动符号链接依赖目录（`_LINK_DIRS = node_modules/.venv/vendor`）
+- [x] `_link_dependency_dirs()`：存在才链，Windows 无符号链接权限时静默跳过（OSError）
+- [x] `cleanup_stale(max_age_days)` — 扫描 base_dir，超龄且干净的 worktree 删除 + 删除对应分支；脏的保留（不丢未提交工作）；单个失败跳过不影响其他
+- [x] `has_uncommitted_changes(worktree_path)` — 变更检测便捷方法
+- [x] `app.py` — 启动时调 `cleanup_stale`（try/except 包裹，失败不阻断启动），有清理时显示提示
+- [x] `extensions/builtin_commands.py` — `_format_agent_result()` 显示 worktree 路径 + `git merge <branch>` 合并提示
+
+### P54.2 测试
+- [x] `tests/integration/test_worktree.py` 新增 6 个测试：
+  - create_symlinks_dependency_dirs（Windows 无权限 skip）
+  - has_uncommitted_changes（干净 False / 脏 True）
+  - cleanup_stale_removes_old_clean / keeps_dirty / keeps_recent / disabled
+- [x] 616 个测试全过（1 skip：Windows symlink 权限），ruff lint + format clean
