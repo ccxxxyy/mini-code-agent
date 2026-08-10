@@ -1124,3 +1124,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - test_user_input_block_via_manager — BLOCK 拦截
   - test_startup_shutdown_session_start_via_manager — 生命周期注册链路
 - [x] 569 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 51: 工具搜索/延迟加载 (P51)
+
+### P51.1 实现
+- [x] `models/config.py` — `MCPServerConfig.loading: str = "eager"` 新增配置字段（"eager" | "dispatch"）
+- [x] `tools/mcp/client.py` — `MCPManager._dispatch_tools` shadow catalog；`connect_server()` dispatch 模式不注册到 ToolRegistry
+- [x] `tools/mcp/client.py` — `search_tools(query)` 按 name/description 模糊搜索；`list_dispatch_tools()` 列出全部概要
+- [x] `tools/builtin/tool_search.py` — 新工具 ToolSearchTool：LLM 按关键词搜索 dispatch 工具
+- [x] `tools/builtin/mcp_call.py` — 新工具 MCPCallTool：LLM 调用 dispatch 模式工具（server/tool/arguments）
+- [x] `tools/builtin/__init__.py` — ALL_BUILTIN_TOOLS 增加 ToolSearchTool/MCPCallTool（共 10 个）
+- [x] `tools/base.py` — ToolContext 新增 `mcp_manager: Any = None` 字段
+- [x] `app.py` — ToolContext 注入 mcp_manager
+- [x] `models/config.py` — enabled_tools 默认列表增加 tool_search/mcp_call
+
+### P51.2 测试
+- [x] `tests/unit/test_tool_search.py` 新文件，13 个测试：
+  - search_tools 4 个（by_name/by_description/no_match/case_insensitive）
+  - search_returns_parameters/search_multiple_matches
+  - list_dispatch_tools/list_dispatch_tools_empty
+  - dispatch_mode_not_in_registry/eager_mode_tools_in_registry
+  - mcp_call_executes/tool_search_tool_returns_results/tool_search_no_results
+- [x] `tests/integration/test_agent_e2e.py` 适配 10 工具集
+- [x] 582 个测试全过，ruff lint + format clean

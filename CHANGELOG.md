@@ -29,6 +29,7 @@
 - **Agent Type Definition** — `AgentTypeDefinition` frozen dataclass with 4 built-in types (explore/plan/worker/verify); SubAgent/SubAgentManager/SpawnAgentsTool accept `agent_type` parameter; `/spawn --type <name>` flag. Each type defines: system prompt, tool whitelist, iteration cap. Agent 类型定义：4 种内置类型（explore/plan/worker/verify），SubAgent 差异化配置（prompt/工具白名单/迭代上限）。
 - **Plan mode read-only** — `/plan [on|off]` toggles physical read-only enforcement: write tool schemas hidden from LLM + execution blocked as double safety. System prompt injection on toggle. Plan 模式只读：`/plan` 切换物理只读——写工具 schema 隐藏 + 执行拦截双保险。
 - **Hook lifecycle expansion** — HookStage grows to 11 stages, all actually fired: new STARTUP/SHUTDOWN/TURN_START/TURN_END + wired up previously-dead POST_LLM/SESSION_START/USER_INPUT. USER_INPUT supports BLOCK to intercept a turn. Hook 事件类型扩充：11 个阶段全部实际触发——新增 4 个生命周期阶段 + 接线 3 个已定义未触发的；USER_INPUT 支持拦截输入。
+- **Tool search / lazy loading** — MCP servers can use `loading = "dispatch"` to keep tools out of the LLM context; the LLM discovers them via `tool_search` and invokes them via `mcp_call`. Two new builtin tools (10 total). 工具搜索/延迟加载：MCP dispatch 模式不注册 schema，LLM 通过 tool_search 按需搜索 + mcp_call 按需调用。
 
 ### Fixed 修复（P36 实战补修）
 

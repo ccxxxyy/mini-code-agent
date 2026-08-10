@@ -1874,10 +1874,33 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 
 # 附录：贯穿各阶段的通用设计原则
 
+# 第五十一部分：工具搜索/延迟加载（P51）
+
+## 51.1 为什么需要：100+ MCP 工具全塞上下文
+
+当前所有 MCP 工具连接后全部注册到 ToolRegistry，每轮 `_think()` 都把全部 schema 发给 LLM。接入多个 MCP 服务器时（GitHub + Slack + DB + ...），100+ 工具 schema 轻松占 5000-10000 token，每轮浪费且可能分散 LLM 注意力。
+
+## 51.2 实现：dispatch 模式 + tool_search + mcp_call
+
+**三层设计**：
+1. **配置层**：`MCPServerConfig.loading = "eager" | "dispatch"`——eager 是现有行为，dispatch 是新模式
+2. **存储层**：`MCPManager._dispatch_tools` shadow catalog——dispatch 工具信息存这里而非注册到 ToolRegistry。LLM 看不到这些工具的 schema
+3. **接口层**：两个新内置工具——`tool_search`（按关键词搜索 shadow catalog，返回匹配工具的完整 schema）和 `mcp_call`（用 server/tool/arguments 调用 dispatch 工具）
+
+**流程**：LLM 需要某个功能 → 调 tool_search 搜索 → 看到工具名和参数 → 调 mcp_call 执行。整个过程只在实际需要时才消耗 token。
+
+## 51.3 设计权衡
+
+- **不动态提升到 registry**：ToolSearch 找到工具后不把它注册回 ToolRegistry（那样会越用越多），而是通过 mcp_call 中转——保持 registry 干净
+- **搜索是简单子串匹配**：`query.lower() in name.lower() or query.lower() in desc.lower()`——够用，不需要向量搜索或 TF-IDF
+- **ToolContext.mcp_manager 用 Any 类型**：避免循环导入（tools/ 不应 import tools/mcp/client）
+
+# 附录：贯穿各阶段的通用设计原则
+
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——569 个测试约 56 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——582 个测试约 54 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

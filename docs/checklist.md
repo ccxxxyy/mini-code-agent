@@ -922,3 +922,18 @@
 - [x] 全部触发 try/except 包裹（hook 异常不破坏主流程）
 - [x] 触发顺序验证：turn_start → pre_llm → turn_end
 - [x] 7 个新测试，总计 569 个全过
+
+---
+
+## Phase 51 检查项：工具搜索/延迟加载
+
+- [x] `MCPServerConfig.loading` 字段：`"eager"` / `"dispatch"`
+- [x] dispatch 模式工具不注册到 ToolRegistry（shadow catalog 存储）
+- [x] `search_tools(query)` 按 name/description 模糊搜索，大小写不敏感
+- [x] `list_dispatch_tools()` 列出全部 dispatch 工具概要
+- [x] `tool_search` 新内置工具：LLM 搜索 dispatch 工具
+- [x] `mcp_call` 新内置工具：LLM 调用 dispatch 工具
+- [x] `ToolContext.mcp_manager` 注入
+- [x] 10 个内置工具（原 8 + tool_search + mcp_call）
+- [x] eager 模式行为完全不变（向后兼容）
+- [x] 13 个新测试（test_tool_search.py），总计 582 个全过
