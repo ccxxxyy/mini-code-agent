@@ -38,6 +38,9 @@ ToolStartCallback = Callable[[ToolCall], None]
 ToolEndCallback = Callable[[ToolResult], None]
 
 
+_WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
+
+
 class IncrementalAssembler:
     """Detects completed tool calls mid-stream.
     在流式过程中检测已组装完成的工具调用。
@@ -147,6 +150,7 @@ class AgentLoop:
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
+        self.plan_mode: bool = False
 
     @property
     def state(self) -> AgentState:
@@ -251,6 +255,8 @@ class AgentLoop:
         """
         api_messages = conversation.to_api_messages()
         tool_schemas = self._tools.get_schemas()
+        if self.plan_mode:
+            tool_schemas = [s for s in tool_schemas if s["function"]["name"] not in _WRITE_TOOLS]
 
         await self._event_bus.emit(
             LLMRequestEvent(message_count=len(api_messages), tool_count=len(tool_schemas))
@@ -334,6 +340,8 @@ class AgentLoop:
                 for tc in assembler.feed(chunk):
                     if not tc.name or not tc.id:
                         continue
+                    if self.plan_mode and tc.name in _WRITE_TOOLS:
+                        continue  # plan mode: deny in _act
                     if self._permissions is not None and self._permissions.would_ask(
                         tc.name, tc.arguments
                     ):
@@ -380,6 +388,9 @@ class AgentLoop:
         for tc in tool_calls:
             if tc.id in streaming:
                 decisions.append(PermissionDecision.GRANTED)  # already running 已在执行
+                continue
+            if self.plan_mode and tc.name in _WRITE_TOOLS:
+                decisions.append(PermissionDecision.DENIED)
                 continue
             if self._cancelled:
                 decisions.append(None)

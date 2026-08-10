@@ -1831,12 +1831,32 @@ P46 的 `_schema_from_model()` 只提取 `type/description/default/enum` 四个�
 - **不与 Team 系统耦合**：`TeamMember.role` 是自由字符串，由 Planner 输出匹配——连接到 agent_type 会要求 Planner 输出类型名，耦合两个独立系统
 - **bash 保留在只读类型中**：安全由权限系统（沙箱/Hook）保障，类型系统只控制工具可见性
 
+# 第四十九部分：Plan 模式只读（P49）
+
+## 49.1 为什么需要：prompt 不是物理约束
+
+主 Agent 没有物理级只读模式——即使 prompt 说"不要修改文件"，LLM 仍然**看得到** write_file/edit_file/delete_file 的 schema，可能仍然调用。SubAgent 的 P48 类型系统已经有物理级工具白名单，主 Agent 缺少同等能力。
+
+## 49.2 实现：双层拦截 + `/plan` 命令
+
+**第一层（schema 隐藏）**：`AgentLoop._think()` 中 `plan_mode=True` 时从 `get_schemas()` 结果过滤掉 `_WRITE_TOOLS`（write_file/edit_file/delete_file）——LLM 看不到这些工具的 schema，自然不会调用。
+
+**第二层（执行拦截）**：`_act()` 中 plan_mode 时写工具调用直接返回 `DENIED`——防止 LLM 幻觉或缓存的旧 schema 触发写操作。流式工具执行也同样延迟写工具。
+
+**`/plan [on|off]` 命令**：切换 `agent_loop.plan_mode`，同时向 system prompt 注入/移除只读提示。
+
+## 49.3 设计权衡
+
+- **bash 不在 _WRITE_TOOLS 中**：bash 可以做危险操作，但也是搜索的核心工具（grep/find/git log）。P48 的 explore/plan/verify 类型都保留 bash。危险命令由权限系统（DANGEROUS_COMMAND_PATTERNS）和 OS 沙箱拦截
+- **不修改 ToolRegistry**：plan_mode 是临时状态，不应改变 registry 持有的工具。在 `_think()` 层面过滤 schema 列表比 clone+unregister 更轻量
+- **不持久化**：plan_mode 是会话级运行时开关，不存入 config 或 session——重启自动回到正常模式
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——559 个测试约 56 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——562 个测试约 54 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

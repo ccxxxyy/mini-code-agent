@@ -895,3 +895,16 @@
 - [x] `/spawn --type <name>` 命令行解析
 - [x] 向后兼容：不指定 agent_type 时行为不变
 - [x] 15 个新测试（test_agent_types.py 11 个 + test_subagent.py 4 个），总计 559 个全过
+
+---
+
+## Phase 49 检查项：Plan 模式只读
+
+- [x] `_WRITE_TOOLS` 定义：write_file/edit_file/delete_file（不含 bash）
+- [x] `AgentLoop.plan_mode` 运行时切换开关
+- [x] `_think()` plan_mode 时从 schema 列表过滤写工具（LLM 看不到）
+- [x] `_act()` plan_mode 时写工具调用返回 DENIED（双保险）
+- [x] 流式工具执行延迟写工具到 `_act()` 拦截
+- [x] `/plan [on|off]` 命令注册 + system prompt 注入/移除
+- [x] plan_mode=False 时行为完全不变（回归安全）
+- [x] 3 个新测试，总计 562 个全过

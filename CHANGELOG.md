@@ -27,6 +27,7 @@
 - **Pydantic Schema generation** — 7 core tools now auto-generate JSON schemas from Pydantic BaseModels (ReadFile, WriteFile, EditFile, DeleteFile, Glob, Grep, SpawnAgents). Reduces boilerplate, adds type safety (automatic string→int coercion), and ensures schema stays in sync with parameter validation. BashTool kept hand-written for backward compatibility; Tool.schema can still be overridden. Pydantic 自动生成 schema：7 个核心工具从 Pydantic 类定义生成 JSON schema，减少重复，类型安全（自动字符串转数字），schema 与校验自动同步。
 - **Pydantic Schema full enhancement** — `_schema_from_model()` rewritten as raw JSON Schema passthrough: `$ref/$defs` resolution, `title` stripping, full support for Optional/anyOf, array items, nested models, Field constraints, Literal, dict, default values, circular ref protection. Pydantic Schema 全面增强：raw passthrough 直通完整 JSON Schema，支持 Optional/数组/嵌套模型/约束/Literal/dict/默认值。
 - **Agent Type Definition** — `AgentTypeDefinition` frozen dataclass with 4 built-in types (explore/plan/worker/verify); SubAgent/SubAgentManager/SpawnAgentsTool accept `agent_type` parameter; `/spawn --type <name>` flag. Each type defines: system prompt, tool whitelist, iteration cap. Agent 类型定义：4 种内置类型（explore/plan/worker/verify），SubAgent 差异化配置（prompt/工具白名单/迭代上限）。
+- **Plan mode read-only** — `/plan [on|off]` toggles physical read-only enforcement: write tool schemas hidden from LLM + execution blocked as double safety. System prompt injection on toggle. Plan 模式只读：`/plan` 切换物理只读——写工具 schema 隐藏 + 执行拦截双保险。
 
 ### Fixed 修复（P36 实战补修）
 

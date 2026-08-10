@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **559 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **562 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -284,21 +284,19 @@
 
 代码改动：`security/permission.py` ~40 行。
 
-### 3.3 Plan 模式只读权限
+### 3.3 Plan 模式只读权限 ✅ 已实现（P49）
 
 | | mini | mewcode |
 |---|---|---|
-| Plan 模式权限 | 无物理限制（靠 prompt 说"不要改文件"） | **物理只读**——Plan 模式下 write/edit/bash 工具被禁用 |
+| Plan 模式权限 | **物理只读**——`/plan` 开启后 write/edit/delete schema 隐藏 + 调用拦截双保险 (P49) | **物理只读**——Plan 模式下 write/edit/bash 工具被禁用 |
 
-**差距**：prompt 是软约束，LLM 可能无视。
-
-**增强方案**：
-1. `AgentLoop` 新增 `readonly_mode: bool` 参数
-2. `readonly_mode=True` 时，`_act()` 中过滤掉 `write_file`/`edit_file`/`delete_file`/`bash` 工具调用，返回错误信息"Plan mode: write operations disabled"
-3. `/plan` 命令进入 Plan 模式时设 `readonly_mode=True`，退出时设 `False`
-4. 或者更简单：Plan 模式下从 `ToolRegistry` 临时移除写工具的 schema——LLM 根本看不到这些工具
-
-代码改动：`core/agent_loop.py` ~10 行 或 `tools/base.py` ToolRegistry ~10 行。
+**已完成**（P49）：
+- `AgentLoop.plan_mode: bool` — 运行时切换
+- `_think()` 过滤 `_WRITE_TOOLS` schema → LLM 看不到写工具
+- `_act()` 双保险拦截 → 即使幻觉调用也返回 Permission denied
+- 流式工具执行也延迟写工具到 `_act()` 拦截
+- `/plan [on|off]` 命令切换 + system prompt 注入只读提示
+- bash 保留（由权限系统和沙箱控制危险命令）
 
 ---
 
@@ -652,7 +650,7 @@
 | ✅ 完成 | 1.5 | max_tokens 恢复（P44） | 长回答不截断 | 已完成 |
 | ✅ 完成 | 6.1 | Coordinator 模式（P45） | /team 质量 | 已完成 |
 | ✅ 完成 | 6.3 | Agent 类型定义（P48） | SubAgent 差异化 | 已完成 |
-| 🟢 P2 | 3.3 | Plan 模式只读 | 规划安全 | 2 小时 |
+| ✅ 完成 | 3.3 | Plan 模式只读（P49） | 规划安全 | 已完成 |
 | 🟢 P2 | 7.1 | Hook 事件类型扩充 | Hook 灵活性 | 半天 |
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
 | 🔵 P3 | 2.3 | 工具搜索/延迟加载 | 大量 MCP 工具场景 | 半天 |
