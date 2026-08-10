@@ -272,6 +272,7 @@ class Application:
         from mini_agent.tools.mcp.client import MCPManager
 
         self.mcp_manager = MCPManager()
+        self._tool_context.mcp_manager = self.mcp_manager
 
         # Persistent task system (S12): /todo command 持久化任务系统
         from mini_agent.core.task_store import TaskStore

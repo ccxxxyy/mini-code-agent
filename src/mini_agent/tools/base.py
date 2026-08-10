@@ -86,6 +86,7 @@ class ToolContext:
     event_bus: EventBus
     config: AgentConfig
     subagent_manager: SubAgentManager | None = None
+    mcp_manager: Any = None
 
 
 def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:

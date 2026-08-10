@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **569 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **582 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -222,21 +222,19 @@
 
 代码改动：`ui/input_handler.py` ~30 行 + `app.py` ~15 行。
 
-### 2.3 工具搜索/延迟加载
+### 2.3 工具搜索/延迟加载 ✅ 已实现（P51）
 
 | | mini | mewcode |
 |---|---|---|
-| MCP 工具加载策略 | 全部注册到 ToolRegistry | **三种策略**：EAGER / DISPATCH / NATIVE |
+| MCP 工具加载策略 | **两种策略**：eager（默认，全部注册）/ dispatch（按需搜索+调用）(P51) | **三种策略**：EAGER / DISPATCH / NATIVE |
 
-**差距**：接入大量 MCP 工具（如 100+ 个）时，全部塞进上下文浪费 token。
-
-**增强方案**：
-1. 新增 `ToolSearch` 工具——LLM 可以搜索可用工具而不是看到完整列表
-2. MCP 配置新增 `loading = "eager" | "dispatch"` 选项
-3. `dispatch` 模式下 MCP 工具不注册到主 schema 列表，LLM 通过 ToolSearch 发现后用 `mcp_call` 间接调用
-4. 对 Anthropic 原生模式预留 `native`（`defer_loading` flag）
-
-代码改动：`tools/mcp/` ~50 行 + 新增 `tools/builtin/tool_search.py` ~40 行。
+**已完成**（P51）：
+- `MCPServerConfig.loading = "eager" | "dispatch"` 配置选项
+- `MCPManager._dispatch_tools` shadow catalog：dispatch 模式工具不注册到 ToolRegistry
+- `tool_search` 新工具：LLM 按关键词搜索 dispatch 工具的 name/description，返回完整 schema
+- `mcp_call` 新工具：LLM 调用 dispatch 模式发现的工具（server + tool + arguments）
+- `ToolContext.mcp_manager` 字段注入
+- 10 个内置工具（原 8 + tool_search + mcp_call）
 
 ---
 
@@ -648,7 +646,7 @@
 | ✅ 完成 | 3.3 | Plan 模式只读（P49） | 规划安全 | 已完成 |
 | ✅ 完成 | 7.1 | Hook 事件类型扩充（P50） | Hook 灵活性 | 已完成 |
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
-| 🔵 P3 | 2.3 | 工具搜索/延迟加载 | 大量 MCP 工具场景 | 半天 |
+| ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
 | 🔵 P3 | 4.4 | 选择性记忆召回 | 记忆多时省 token | 半天 |
 | 🔵 P3 | 4.5 | 记忆合并 | 记忆质量 | 半天 |
 | 🔵 P3 | 5.2 | 远程/浏览器模式 | 新使用场景 | 2 天 |

@@ -58,6 +58,7 @@ class MCPManager:
 
     def __init__(self) -> None:
         self._connections: dict[str, MCPServerConnection] = {}
+        self._dispatch_tools: dict[str, list[dict[str, Any]]] = {}
 
     async def connect_server(
         self,
@@ -92,13 +93,16 @@ class MCPManager:
         await conn.initialize()
         self._connections[name] = conn
 
-        for tool_info in conn.tools:
-            adapter = MCPToolAdapter(
-                server_name=name,
-                tool_info=tool_info,
-                manager=self,
-            )
-            tool_registry.register(adapter)
+        if config.loading == "dispatch":
+            self._dispatch_tools[name] = conn.tools
+        else:
+            for tool_info in conn.tools:
+                adapter = MCPToolAdapter(
+                    server_name=name,
+                    tool_info=tool_info,
+                    manager=self,
+                )
+                tool_registry.register(adapter)
 
         return len(conn.tools)
 
@@ -117,6 +121,41 @@ class MCPManager:
     def list_server_tools(self, server_name: str) -> list[dict[str, Any]]:
         conn = self._connections.get(server_name)
         return conn.tools if conn else []
+
+    def search_tools(self, query: str) -> list[dict[str, Any]]:
+        """Search dispatch-mode tools by keyword (name or description).
+        按关键词搜索 dispatch 模式的工具（匹配名称或描述）。"""
+        q = query.lower()
+        results: list[dict[str, Any]] = []
+        for server, tools in self._dispatch_tools.items():
+            for tool in tools:
+                name = tool.get("name", "")
+                desc = tool.get("description", "")
+                if q in name.lower() or q in desc.lower():
+                    results.append(
+                        {
+                            "server": server,
+                            "name": name,
+                            "description": desc,
+                            "parameters": tool.get("inputSchema", {}),
+                        }
+                    )
+        return results
+
+    def list_dispatch_tools(self) -> list[dict[str, str]]:
+        """List all dispatch-mode tools (name + description only).
+        列出所有 dispatch 模式的工具（仅名称和描述）。"""
+        results: list[dict[str, str]] = []
+        for server, tools in self._dispatch_tools.items():
+            for tool in tools:
+                results.append(
+                    {
+                        "server": server,
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                    }
+                )
+        return results
 
     async def call_tool(
         self,

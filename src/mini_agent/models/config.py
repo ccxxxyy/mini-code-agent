@@ -29,6 +29,8 @@ class ToolConfig:
             "glob",
             "grep",
             "spawn_agents",
+            "tool_search",
+            "mcp_call",
         ]
     )
     bash_timeout: float = 120.0
@@ -45,6 +47,7 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"
+    loading: str = "eager"
 
 
 @dataclass
