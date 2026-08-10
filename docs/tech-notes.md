@@ -1895,12 +1895,34 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **搜索是简单子串匹配**：`query.lower() in name.lower() or query.lower() in desc.lower()`——够用，不需要向量搜索或 TF-IDF
 - **ToolContext.mcp_manager 用 Any 类型**：避免循环导入（tools/ 不应 import tools/mcp/client）
 
+# 第五十二部分：选择性记忆召回（P52）
+
+## 52.1 为什么需要：无排序截断丢信息又浪费 token
+
+记忆注入是 `entries[:10]` 头部截断——超出的静默丢弃（可能正好是相关的），注入的 10 条可能与当前任务无关。记忆越积越多后，这个问题越来越严重。mewcode 的做法：先让 LLM 挑最相关的 ≤5 条。
+
+## 52.2 实现：MemoryRecall + 阈值触发
+
+**`memory/recall.py`**（仿 `MemoryExtractor._extract_candidates` 的轻量 LLM 调用模式）：
+- RECALL_PROMPT 只发 `id + content 前 50 字符`（不发全文，省 token）+ 用户最新消息（截断 500 字符）
+- LLM 返回相关 ID 的 JSON 数组 → `_parse_ids()` 解析（去 fence → json.loads → list 校验）
+- 按 LLM 返回的 ID 顺序过滤注入——保持 LLM 的相关性排序
+
+**接入点**：`app.py` 的 `_pre_llm_inject_memory` hook——`len(entries) > recall_threshold` 时走召回，否则走原逻辑。marker 一次性注入机制不变。
+
+## 52.3 设计权衡
+
+- **阈值触发而非始终召回**：≤10 条时全部注入 + 零额外 LLM 调用——召回本身也有成本（延迟 + token），记忆少时不划算
+- **fail-safe 回退链**：llm=None / stream 异常 / JSON 解析失败 / 非 list → 全部静默回退 `entries[:10]`（现有行为）——召回是优化不是依赖，绝不能因为召回失败丢掉记忆功能
+- **幻觉 ID 处理**：LLM 可能返回不存在的 ID，`by_id` 字典过滤自动忽略——不报错不重试
+- **不做并行预取**：comparison 提的可选优化（召回与主请求并行）会让 hook 结构复杂化，且 marker 机制每会话只注入一次，收益仅一次调用的延迟——不值得
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——582 个测试约 54 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——595 个测试约 56 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

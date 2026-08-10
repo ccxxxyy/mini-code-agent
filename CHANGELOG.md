@@ -30,6 +30,7 @@
 - **Plan mode read-only** — `/plan [on|off]` toggles physical read-only enforcement: write tool schemas hidden from LLM + execution blocked as double safety. System prompt injection on toggle. Plan 模式只读：`/plan` 切换物理只读——写工具 schema 隐藏 + 执行拦截双保险。
 - **Hook lifecycle expansion** — HookStage grows to 11 stages, all actually fired: new STARTUP/SHUTDOWN/TURN_START/TURN_END + wired up previously-dead POST_LLM/SESSION_START/USER_INPUT. USER_INPUT supports BLOCK to intercept a turn. Hook 事件类型扩充：11 个阶段全部实际触发——新增 4 个生命周期阶段 + 接线 3 个已定义未触发的；USER_INPUT 支持拦截输入。
 - **Tool search / lazy loading** — MCP servers can use `loading = "dispatch"` to keep tools out of the LLM context; the LLM discovers them via `tool_search` and invokes them via `mcp_call`. Two new builtin tools (10 total). 工具搜索/延迟加载：MCP dispatch 模式不注册 schema，LLM 通过 tool_search 按需搜索 + mcp_call 按需调用。
+- **Selective memory recall** — when stored memories exceed `recall_threshold` (10), a lightweight LLM call picks the `recall_top_k` (5) most relevant entries to inject instead of head-truncating. Fail-safe fallback to the old behavior on any error. 选择性记忆召回：记忆超过阈值时 LLM 挑选最相关的注入，失败静默回退。
 
 ### Fixed 修复（P36 实战补修）
 
