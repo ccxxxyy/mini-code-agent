@@ -1097,3 +1097,30 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - test_plan_mode_blocks_write_tool_call — 写工具拦截
   - test_plan_mode_off_allows_write — 正常模式不影响
 - [x] 562 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 50: Hook 事件类型扩充 (P50)
+
+### P50.1 实现
+- [x] `tools/hooks.py` — HookStage 新增 4 个：STARTUP/SHUTDOWN/TURN_START/TURN_END（共 11 个）
+- [x] `core/agent_loop.py` — `run()` 开头触发 TURN_START（metadata: turn_id）
+- [x] `core/agent_loop.py` — `run()` 结尾 TurnCompleteEvent 旁触发 TURN_END（metadata: iteration_count/tools_called/tokens_used）
+- [x] `core/agent_loop.py` — `_think()` assemble_response 后触发 POST_LLM（观察式，metadata: content_preview/has_tool_calls/finish_reason）
+- [x] `app.py` — `run()` 开头触发 STARTUP
+- [x] `app.py` — SessionStartEvent 旁触发 SESSION_START（metadata: session_id/model）
+- [x] `app.py` — 用户输入后触发 USER_INPUT，BLOCK 时跳过该轮显示 reason
+- [x] `app.py` — finally 末尾触发 SHUTDOWN
+- [x] 全部触发 try/except 包裹——hook 异常不破坏主流程
+- [x] 11 个 HookStage 全部实际触发（此前 POST_LLM/SESSION_START/USER_INPUT 定义了但从未触发）
+
+### P50.2 测试
+- [x] `tests/unit/test_hooks_lifecycle.py` 新增 7 个测试：
+  - test_all_stages_unique — 11 个枚举值唯一
+  - test_turn_start_and_end_fire — 触发顺序 turn_start → pre_llm → turn_end
+  - test_turn_end_receives_metadata — metadata 完整
+  - test_post_llm_fires_with_content — content_preview/finish_reason
+  - test_post_llm_block_does_not_affect_flow — 观察式验证
+  - test_user_input_block_via_manager — BLOCK 拦截
+  - test_startup_shutdown_session_start_via_manager — 生命周期注册链路
+- [x] 569 个测试全过，ruff lint + format clean

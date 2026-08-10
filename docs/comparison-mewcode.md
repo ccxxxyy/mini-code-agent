@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **562 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **569 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -524,24 +524,19 @@
 
 ## 七、Hook 系统
 
-### 7.1 Hook 事件类型
+### 7.1 Hook 事件类型 ✅ 已实现（P50）
 
 | | mini | mewcode |
 |---|---|---|
-| 事件类型 | PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END | 10 种事件（startup/shutdown/session_start/end/turn_start/end/pre_send/post_receive/pre_tool/post_tool） |
+| 事件类型 | **11 种全部实际触发**：STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL (P50) | 10 种事件（startup/shutdown/session_start/end/turn_start/end/pre_send/post_receive/pre_tool/post_tool） |
 
-**差距**：mini 的 hook 事件类型较少。
-
-**增强方案**：
-补齐缺失的事件类型：
-- `STARTUP`：应用启动时触发
-- `SHUTDOWN`：应用退出时触发
-- `TURN_START`：每轮用户输入后、调 LLM 前触发
-- `TURN_END`：每轮 Agent 回答后触发
-- `PRE_SEND`：发送消息给 LLM 前（可修改消息）
-- `POST_RECEIVE`：收到 LLM 响应后（可修改响应）
-
-代码改动：`models/events.py` ~6 个新事件类 + `app.py` / `agent_loop.py` ~20 行 emit 调用。
+**已完成**（P50）：
+- HookStage 新增 4 个：STARTUP/SHUTDOWN/TURN_START/TURN_END
+- 接线 3 个已定义但未触发的：POST_LLM/SESSION_START/USER_INPUT
+- 触发点：app.py（STARTUP/SESSION_START/USER_INPUT/SESSION_END/SHUTDOWN）+ agent_loop.py（TURN_START/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL/TURN_END）
+- USER_INPUT 支持 BLOCK 拦截用户输入；POST_LLM 观察式（含 content_preview/finish_reason）
+- 全部触发 try/except 包裹——hook 异常不破坏主流程
+- 对照 mewcode 的 pre_send/post_receive → mini 的 PRE_LLM/POST_LLM 等价
 
 ### 7.2 Hook 拒绝工具执行
 
@@ -651,7 +646,7 @@
 | ✅ 完成 | 6.1 | Coordinator 模式（P45） | /team 质量 | 已完成 |
 | ✅ 完成 | 6.3 | Agent 类型定义（P48） | SubAgent 差异化 | 已完成 |
 | ✅ 完成 | 3.3 | Plan 模式只读（P49） | 规划安全 | 已完成 |
-| 🟢 P2 | 7.1 | Hook 事件类型扩充 | Hook 灵活性 | 半天 |
+| ✅ 完成 | 7.1 | Hook 事件类型扩充（P50） | Hook 灵活性 | 已完成 |
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
 | 🔵 P3 | 2.3 | 工具搜索/延迟加载 | 大量 MCP 工具场景 | 半天 |
 | 🔵 P3 | 4.4 | 选择性记忆召回 | 记忆多时省 token | 半天 |
