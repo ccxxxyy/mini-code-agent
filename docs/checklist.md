@@ -967,3 +967,20 @@
 - [x] `/memory consolidate` 手动触发（≥2 条即可）
 - [x] 自动触发点：SESSION_END 记忆提取后
 - [x] 16 个新测试（test_memory_consolidation.py），总计 611 个全过
+
+---
+
+## Phase 54 检查项：Worktree 完善
+
+- [x] `create()` 自动符号链接 node_modules/.venv/vendor（存在才链）
+- [x] Windows 无符号链接权限时静默跳过（不阻断 worktree 创建）
+- [x] `cleanup_stale(max_age_days)` 清理超龄的干净 worktree + 删除对应分支
+- [x] 脏 worktree 不清理（未提交工作永不丢失）
+- [x] 新 worktree 不清理（mtime 检查）
+- [x] max_age_days=0 禁用清理
+- [x] 单个 worktree 清理失败不影响其他
+- [x] `SecurityConfig.worktree_max_age_days = 7` 可配置
+- [x] app 启动时自动清理（失败不阻断启动）
+- [x] `has_uncommitted_changes()` 变更检测
+- [x] `/spawn wait` 结果显示 worktree 路径 + git merge 提示
+- [x] 6 个新测试（test_worktree.py），总计 616 个全过（1 skip）

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Dependency dirs symlinked into new worktrees so agents skip reinstall (P54)
+# 创建 worktree 时符号链接的依赖目录——Agent 免重装依赖
+_LINK_DIRS = ("node_modules", ".venv", "vendor")
 
 
 @dataclass
@@ -74,7 +79,22 @@ class WorktreeManager:
         if code != 0:
             raise WorktreeError(f"git worktree add failed: {err}")
 
+        self._link_dependency_dirs(worktree_path)
         return worktree_path
+
+    def _link_dependency_dirs(self, worktree_path: Path) -> None:
+        """Symlink dependency dirs from the main repo into the worktree (P54).
+        把主仓库的依赖目录符号链接到 worktree——免重装依赖。
+        Windows without developer mode lacks symlink permission: skip silently.
+        Windows 无开发者模式时缺少符号链接权限：静默跳过。"""
+        for dep in _LINK_DIRS:
+            src = self._repo_dir / dep
+            dst = worktree_path / dep
+            if src.is_dir() and not dst.exists():
+                try:
+                    dst.symlink_to(src, target_is_directory=True)
+                except OSError:
+                    pass
 
     async def remove(self, worktree_path: Path, force: bool = False) -> None:
         """Remove a worktree. Refuses if it has uncommitted changes unless force.
@@ -143,6 +163,42 @@ class WorktreeManager:
             head_commit=head_out[:12],
             is_clean=is_clean,
         )
+
+    async def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        """Check whether a worktree has uncommitted changes (P54).
+        检查 worktree 是否有未提交的更改。"""
+        info = await self.status(worktree_path)
+        return not info.is_clean
+
+    async def cleanup_stale(self, max_age_days: int) -> list[str]:
+        """Remove worktrees older than max_age_days. Dirty ones are kept (P54).
+        清理超过 max_age_days 的过期 worktree。有未提交更改的保留。
+
+        Returns the list of removed paths. Individual failures are skipped
+        so one bad worktree cannot block the rest.
+        返回已删除的路径列表。单个失败跳过，不影响其他清理。"""
+        if max_age_days <= 0 or not self._base_dir.is_dir():
+            return []
+
+        cutoff = time.time() - max_age_days * 86400
+        removed: list[str] = []
+        for entry in self._base_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            try:
+                if entry.stat().st_mtime > cutoff:
+                    continue
+                info = await self.status(entry)
+                if not info.is_clean:
+                    continue  # keep uncommitted work 保留未提交的工作
+                branch = info.branch
+                await self.remove(entry)
+                if branch and branch != "HEAD":
+                    await _run_git("branch", "-D", branch, cwd=self._repo_dir)
+                removed.append(str(entry))
+            except (WorktreeError, OSError):
+                continue
+        return removed
 
     async def merge_back(self, branch_name: str, target_branch: str = "") -> MergeResult:
         """Merge a worktree branch back into the target branch (default: current).
