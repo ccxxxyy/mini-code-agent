@@ -31,7 +31,7 @@ from mini_agent.security.permission import PermissionManager
 from mini_agent.security.worktree import WorktreeManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
-from mini_agent.tools.hooks import HookContext, HookManager, HookResult, HookStage
+from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookResult, HookStage
 from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
@@ -403,6 +403,15 @@ class Application:
         return True
 
     async def run(self) -> None:
+        try:
+            await self.hook_manager.run(
+                HookContext(
+                    stage=HookStage.STARTUP,
+                    metadata={"session_id": self.session.metadata.session_id},
+                )
+            )
+        except Exception:
+            pass
         self.terminal.show_welcome()
         # Probe context window before the first turn's overflow check
         # 启动时预热探测上下文窗口，让首轮溢出检查就用上真实值
@@ -410,6 +419,18 @@ class Application:
         await self._connect_mcp_servers()
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
+        try:
+            await self.hook_manager.run(
+                HookContext(
+                    stage=HookStage.SESSION_START,
+                    metadata={
+                        "session_id": self.session.metadata.session_id,
+                        "model": self.config.llm.model,
+                    },
+                )
+            )
+        except Exception:
+            pass
 
         try:
             while True:
@@ -441,6 +462,21 @@ class Application:
                         await self._autosave()
                     continue
 
+                # USER_INPUT hook: can block a turn before it reaches the LLM
+                # USER_INPUT hook：可在输入到达 LLM 前拦截该轮
+                try:
+                    input_result = await self.hook_manager.run(
+                        HookContext(
+                            stage=HookStage.USER_INPUT,
+                            metadata={"input_text": user_input},
+                        )
+                    )
+                    if input_result.action == HookAction.BLOCK:
+                        self.terminal.show_info(input_result.reason or "Input blocked by hook")
+                        continue
+                except Exception:
+                    pass
+
                 await self._handle_turn(user_input)
                 # Force save after every completed turn: conversation data is
                 # tiny (KBs) and the 30s throttle window would lose the last
@@ -469,6 +505,15 @@ class Application:
             if self.agent_loop.result_cache:
                 self.agent_loop.result_cache.cleanup()
             await self.mcp_manager.disconnect_all()
+            try:
+                await self.hook_manager.run(
+                    HookContext(
+                        stage=HookStage.SHUTDOWN,
+                        metadata={"session_id": self.session.metadata.session_id},
+                    )
+                )
+            except Exception:
+                pass
             self.terminal.show_info("Goodbye!")
 
     async def _connect_mcp_servers(self) -> None:

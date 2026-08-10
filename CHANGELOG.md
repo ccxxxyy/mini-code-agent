@@ -28,6 +28,7 @@
 - **Pydantic Schema full enhancement** — `_schema_from_model()` rewritten as raw JSON Schema passthrough: `$ref/$defs` resolution, `title` stripping, full support for Optional/anyOf, array items, nested models, Field constraints, Literal, dict, default values, circular ref protection. Pydantic Schema 全面增强：raw passthrough 直通完整 JSON Schema，支持 Optional/数组/嵌套模型/约束/Literal/dict/默认值。
 - **Agent Type Definition** — `AgentTypeDefinition` frozen dataclass with 4 built-in types (explore/plan/worker/verify); SubAgent/SubAgentManager/SpawnAgentsTool accept `agent_type` parameter; `/spawn --type <name>` flag. Each type defines: system prompt, tool whitelist, iteration cap. Agent 类型定义：4 种内置类型（explore/plan/worker/verify），SubAgent 差异化配置（prompt/工具白名单/迭代上限）。
 - **Plan mode read-only** — `/plan [on|off]` toggles physical read-only enforcement: write tool schemas hidden from LLM + execution blocked as double safety. System prompt injection on toggle. Plan 模式只读：`/plan` 切换物理只读——写工具 schema 隐藏 + 执行拦截双保险。
+- **Hook lifecycle expansion** — HookStage grows to 11 stages, all actually fired: new STARTUP/SHUTDOWN/TURN_START/TURN_END + wired up previously-dead POST_LLM/SESSION_START/USER_INPUT. USER_INPUT supports BLOCK to intercept a turn. Hook 事件类型扩充：11 个阶段全部实际触发——新增 4 个生命周期阶段 + 接线 3 个已定义未触发的；USER_INPUT 支持拦截输入。
 
 ### Fixed 修复（P36 实战补修）
 

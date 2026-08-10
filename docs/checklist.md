@@ -908,3 +908,17 @@
 - [x] `/plan [on|off]` 命令注册 + system prompt 注入/移除
 - [x] plan_mode=False 时行为完全不变（回归安全）
 - [x] 3 个新测试，总计 562 个全过
+
+---
+
+## Phase 50 检查项：Hook 事件类型扩充
+
+- [x] HookStage 11 个值：STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL
+- [x] 全部 11 个实际触发（不再有定义了但从未触发的枚举值）
+- [x] TURN_START/TURN_END 在 agent_loop.run() 头尾触发，metadata 完整
+- [x] POST_LLM 在 assemble_response 后触发（观察式，BLOCK 无效果）
+- [x] STARTUP/SESSION_START/SHUTDOWN 在 app.run() 生命周期触发
+- [x] USER_INPUT 支持 BLOCK 拦截输入（显示 reason 跳过该轮）
+- [x] 全部触发 try/except 包裹（hook 异常不破坏主流程）
+- [x] 触发顺序验证：turn_start → pre_llm → turn_end
+- [x] 7 个新测试，总计 569 个全过

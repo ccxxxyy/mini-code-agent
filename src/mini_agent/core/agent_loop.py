@@ -179,6 +179,16 @@ class AgentLoop:
         tokens_used = 0
         final_content = ""
 
+        try:
+            await self._hooks.run(
+                HookContext(
+                    stage=HookStage.TURN_START,
+                    metadata={"turn_id": self.current_turn_id},
+                )
+            )
+        except Exception:
+            pass
+
         while True:
             self._state.iteration += 1
 
@@ -247,6 +257,20 @@ class AgentLoop:
                 tokens_used=tokens_used,
             )
         )
+        try:
+            await self._hooks.run(
+                HookContext(
+                    stage=HookStage.TURN_END,
+                    metadata={
+                        "turn_id": self.current_turn_id,
+                        "iteration_count": self._state.iteration,
+                        "tools_called": tools_called,
+                        "tokens_used": tokens_used,
+                    },
+                )
+            )
+        except Exception:
+            pass
         return final_content
 
     async def _think(self, conversation: Conversation) -> LLMResponse:
@@ -365,6 +389,21 @@ class AgentLoop:
                 model=self.model_name,
             )
         )
+        # POST_LLM hook: observe-only (mirrors POST_TOOL)
+        # POST_LLM hook：仅观察（与 POST_TOOL 一致）
+        try:
+            await self._hooks.run(
+                HookContext(
+                    stage=HookStage.POST_LLM,
+                    metadata={
+                        "content_preview": response.content[:200],
+                        "has_tool_calls": bool(response.tool_calls),
+                        "finish_reason": response.finish_reason,
+                    },
+                )
+            )
+        except Exception:
+            pass
         return response
 
     async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:

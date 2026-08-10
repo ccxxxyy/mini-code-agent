@@ -12,13 +12,17 @@ from mini_agent.models.message import ToolResult
 
 
 class HookStage(StrEnum):
-    PRE_TOOL = "pre_tool"
-    POST_TOOL = "post_tool"
-    PRE_LLM = "pre_llm"
-    POST_LLM = "post_llm"
+    STARTUP = "startup"
+    SHUTDOWN = "shutdown"
     SESSION_START = "session_start"
     SESSION_END = "session_end"
     USER_INPUT = "user_input"
+    TURN_START = "turn_start"
+    TURN_END = "turn_end"
+    PRE_LLM = "pre_llm"
+    POST_LLM = "post_llm"
+    PRE_TOOL = "pre_tool"
+    POST_TOOL = "post_tool"
 
 
 class HookAction(StrEnum):

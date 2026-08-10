@@ -1851,12 +1851,33 @@ P46 的 `_schema_from_model()` 只提取 `type/description/default/enum` 四个�
 - **不修改 ToolRegistry**：plan_mode 是临时状态，不应改变 registry 持有的工具。在 `_think()` 层面过滤 schema 列表比 clone+unregister 更轻量
 - **不持久化**：plan_mode 是会话级运行时开关，不存入 config 或 session——重启自动回到正常模式
 
+# 第五十部分：Hook 事件类型扩充（P50）
+
+## 50.1 为什么需要：一半的 HookStage 是死代码
+
+HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST_TOOL/PRE_LLM/SESSION_END）——POST_LLM/SESSION_START/USER_INPUT 定义至今从未接线。mewcode 有 10 种事件全部生效。用户想在"每轮结束时"或"收到 LLM 响应后"挂 hook 做不到。
+
+## 50.2 实现：新增 4 个 + 接线 3 个 = 11 个全部生效
+
+**新增**：STARTUP（应用启动）/SHUTDOWN（应用退出）/TURN_START（每轮开始）/TURN_END（每轮结束）。
+
+**接线已有**：POST_LLM（`_think()` assemble_response 后）/SESSION_START（SessionStartEvent 旁）/USER_INPUT（用户输入后，BLOCK 可拦截该轮）。
+
+触发点分布：app.py 管生命周期（STARTUP → SESSION_START → USER_INPUT → ... → SESSION_END → SHUTDOWN），agent_loop.py 管轮次（TURN_START → PRE_LLM → POST_LLM → PRE_TOOL → POST_TOOL → TURN_END）。
+
+## 50.3 设计权衡
+
+- **观察式 vs 干预式**：USER_INPUT/PRE_LLM/PRE_TOOL 支持 BLOCK；其余全部观察式（返回值忽略）——干预点只放在"动作发生前"，事后 hook 拦截没有意义
+- **全部 try/except 包裹**：hook 是扩展点，用户 hook 抛异常不能破坏主循环（与既有 SESSION_END 一致）
+- **不动 EventBus**：comparison 原文把 Hook 和 EventBus 事件混在一起（改动估算指向 models/events.py），实际 7.1 标题是 Hook 事件——EventBus 已有 SessionStart/TurnComplete 等事件，两套系统职责不同（EventBus 观察渲染，Hook 拦截干预），不需要重复
+- **PRE_SEND/POST_RECEIVE 等价映射**：mewcode 的这两个对应 mini 的 PRE_LLM/POST_LLM，不另加同义枚举
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——562 个测试约 54 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——569 个测试约 56 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
