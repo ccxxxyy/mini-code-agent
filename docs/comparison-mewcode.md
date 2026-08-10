@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **595 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **611 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -360,21 +360,18 @@
 - fail-safe：LLM 失败/解析失败/幻觉 ID → 静默回退头部截断 `entries[:10]`
 - 保持 LLM 返回的相关性排序注入
 
-### 4.5 记忆合并
+### 4.5 记忆合并 ✅ 已实现（P53）
 
 | | mini | mewcode |
 |---|---|---|
-| 重复记忆处理 | 60% 词重叠去重 | **LLM 语义合并**——自动把相关记忆整合成一条 |
+| 重复记忆处理 | 60% 词重叠去重（提取时预过滤）+ **LLM 语义合并**（超阈值触发）(P53) | **LLM 语义合并**——自动把相关记忆整合成一条 |
 
-**差距**：词重叠去重是表面相似度——"喜欢 tabs"和"讨厌 spaces"语义相关但词不重叠，不会被合并。
-
-**增强方案**：
-1. 在 `MemoryExtractor.maybe_extract()` 末尾，当总记忆条目 >20 时触发合并
-2. 把所有记忆发给 LLM："以下记忆中哪些可以合并？输出合并后的 JSON"
-3. 替换旧条目，保留最新的 `created_at`
-4. 合并阈值可配置：`[memory] consolidation_threshold = 20`
-
-代码改动：`memory/extraction.py` ~30 行。
+**已完成**（P53）：
+- `memory/consolidation.py` 新模块：`MemoryConsolidator.consolidate()`——LLM 识别语义相关的记忆组并合并
+- 触发点：`MemoryExtractor.maybe_extract()` 末尾，记忆 > `consolidation_threshold`（默认 20，可配置）
+- 合并规则：保留组内最新 `created_at`、tags 并集、source="extracted"、未合并条目原样保留
+- 防护：幻觉 ID 过滤、单 ID 组忽略、跨组重复 ID 只处理首组、fail-safe 静默 no-op
+- `/memory consolidate` 手动触发子命令（无阈值限制，≥2 条即可跑）
 
 ### 4.6 记忆存储格式
 
@@ -645,7 +642,7 @@
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
 | ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
 | ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
-| 🔵 P3 | 4.5 | 记忆合并 | 记忆质量 | 半天 |
+| ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
 | 🔵 P3 | 5.2 | 远程/浏览器模式 | 新使用场景 | 2 天 |
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |

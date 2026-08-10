@@ -58,7 +58,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="memory",
-            description="Show, add or delete memory (usage: /memory [add|delete <text>])",
+            description="Memory management (usage: /memory [add|delete <text>|consolidate])",
             handler=_make_memory(app),
         )
     )
@@ -661,6 +661,24 @@ def _make_memory(app: Application) -> HandlerFn:
             else:
                 await pm.add_user_memory(entry)
                 return f"Added user memory: {parts[1]}"
+
+        if subcmd == "consolidate":
+            from mini_agent.memory.consolidation import MemoryConsolidator
+
+            if project_dir:
+                entries = await pm.load_project_memory(project_dir)
+            else:
+                entries = await pm.load_user_memory()
+            if len(entries) < 2:
+                return "Nothing to merge (need at least 2 memories)."
+            merged = await MemoryConsolidator(app._llm).consolidate(entries)
+            if merged is None:
+                return "Nothing to merge — no semantically related entries found."
+            if project_dir:
+                await pm.save_project_memory(project_dir, merged)
+            else:
+                await pm.save_user_memory(merged)
+            return f"Merged {len(entries)} entries into {len(merged)}."
 
         if subcmd == "delete" and len(parts) > 1:
             query = parts[1]

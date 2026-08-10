@@ -31,6 +31,7 @@
 - **Hook lifecycle expansion** — HookStage grows to 11 stages, all actually fired: new STARTUP/SHUTDOWN/TURN_START/TURN_END + wired up previously-dead POST_LLM/SESSION_START/USER_INPUT. USER_INPUT supports BLOCK to intercept a turn. Hook 事件类型扩充：11 个阶段全部实际触发——新增 4 个生命周期阶段 + 接线 3 个已定义未触发的；USER_INPUT 支持拦截输入。
 - **Tool search / lazy loading** — MCP servers can use `loading = "dispatch"` to keep tools out of the LLM context; the LLM discovers them via `tool_search` and invokes them via `mcp_call`. Two new builtin tools (10 total). 工具搜索/延迟加载：MCP dispatch 模式不注册 schema，LLM 通过 tool_search 按需搜索 + mcp_call 按需调用。
 - **Selective memory recall** — when stored memories exceed `recall_threshold` (10), a lightweight LLM call picks the `recall_top_k` (5) most relevant entries to inject instead of head-truncating. Fail-safe fallback to the old behavior on any error. 选择性记忆召回：记忆超过阈值时 LLM 挑选最相关的注入，失败静默回退。
+- **Memory consolidation** — when memories exceed `consolidation_threshold` (20), an LLM merges semantically related entries into one (keeps newest timestamp, unions tags). Also available manually via `/memory consolidate`. Fail-safe no-op on any error. 记忆合并：超阈值时 LLM 语义合并相关记忆（保留最新时间戳、tags 并集），也可 `/memory consolidate` 手动触发。
 
 ### Fixed 修复（P36 实战补修）
 
