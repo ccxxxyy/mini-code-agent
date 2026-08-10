@@ -1238,3 +1238,20 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - install_from_local_path / install_invalid_no_skill_md / install_invalid_no_name
   - uninstall_removes_dir / uninstall_not_found
 - [x] 621 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 56: Skill 热重载 (P56)
+
+### P56.1 实现
+- [x] `extensions/skills.py` — `load_all()` 改为先 `_skills.clear()` 再扫描（不再累积旧条目）
+- [x] `SkillRegistry.reload(conversation)` — 保存活跃列表→全部停用（剥离旧 prompt）→重新加载→重激活（注入新 prompt）
+- [x] 返回 `(loaded_count, lost_skills)` — lost 是活跃但磁盘已删除的 skill 名称列表
+- [x] `extensions/builtin_commands.py` — `/skill reload` 子命令
+
+### P56.2 测试
+- [x] `tests/unit/test_skills.py` 新增 5 个测试：
+  - reload_picks_up_new_skill / reload_removes_deleted_skill
+  - reload_updates_active_prompt / reload_reports_lost_skills
+  - load_all_clears_stale
+- [x] 626 个测试全过，ruff lint + format clean

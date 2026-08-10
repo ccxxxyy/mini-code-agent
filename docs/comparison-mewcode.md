@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **621 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **626 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -558,18 +558,17 @@
 - `SkillRegistry.uninstall(name, target_dir)` — 遍历匹配 SKILL.md 中的 name 字段后删除目录
 - `/skill install <path_or_url>` / `/skill uninstall <name>` 子命令
 
-### 8.2 Skill 热重载
+### 8.2 Skill 热重载 ✅ 已实现（P56）
 
 | | mini | mewcode |
 |---|---|---|
-| 修改 skill 文件后 | 需要重启 | **自动检测文件变更，热重载** |
+| 修改 skill 文件后 | **`/skill reload` 热重载**——清除→重扫描→重激活，活跃 skill prompt 自动更新 (P56) | **自动检测文件变更，热重载** |
 
-**增强方案**：
-1. Skill 加载时记录文件的 mtime
-2. 每次 `/skill list` 或激活时检查 mtime，变了就重新加载
-3. 不需要文件监控守护线程——按需检查即可
-
-代码改动：`extensions/skill_loader.py` ~15 行。
+**已完成**（P56）：
+- `load_all()` 改为先清除再扫描（不再累积旧条目）
+- `SkillRegistry.reload(conversation)` — 保存活跃列表→全部停用→重新加载→重激活（prompt 自动更新）
+- 磁盘删除的 skill 从活跃列表移除并报告 lost
+- `/skill reload` 子命令
 
 ---
 
@@ -649,7 +648,7 @@
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
-| ⚪ P4 | 8.2 | Skill 热重载 | 开发效率 | 2 小时 |
+| ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |
 | ⚪ P4 | 9.1 | 会话自动清理 | 磁盘管理 | 2 小时 |
 | ⚪ P4 | 9.2 | 会话压缩边界 | 恢复性能 | 半天 |
 | ⚪ P4 | 4.6 | 记忆导出/导入 | 互操作 | 半天 |
