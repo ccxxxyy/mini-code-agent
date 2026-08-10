@@ -6,42 +6,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
+
+
+class ReadFileParams(BaseModel):
+    """Pydantic model for read_file parameters (P46). Auto-generates ToolSchema."""
+
+    file_path: str = Field(
+        description="Path to the file to read (absolute or relative to working dir)"
+    )
+    offset: int = Field(default=0, description="Line number to start reading from (0-based)")
+    limit: int = Field(default=2000, description="Maximum number of lines to read")
 
 
 class ReadFileTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="read_file",
-            description=(
-                "Read the contents of a file at the given path. "
-                "Returns file content with line numbers. "
-                "Use offset/limit for large files."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="Path to the file to read (absolute or relative to working dir)",
-                ),
-                ToolParameter(
-                    name="offset",
-                    type="integer",
-                    description="Line number to start reading from (0-based)",
-                    required=False,
-                    default=0,
-                ),
-                ToolParameter(
-                    name="limit",
-                    type="integer",
-                    description="Maximum number of lines to read",
-                    required=False,
-                    default=2000,
-                ),
-            ],
-        )
+    _name = "read_file"
+    _description = (
+        "Read the contents of a file at the given path. "
+        "Returns file content with line numbers. "
+        "Use offset/limit for large files."
+    )
+    params_model = ReadFileParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         file_path = Path(kwargs["file_path"])

@@ -46,19 +46,19 @@
 |---|---|---|
 | LLM SDK | **零 SDK**——httpx 直接调 API | `anthropic` + `openai` 两个官方 SDK |
 | 配置 | **tomllib**（Python 3.11 内置，零依赖） | `pyyaml`（第三方） |
-| 参数校验 | **dataclass**（标准库） | `pydantic`（第三方） |
+| 参数校验 | **dataclass** + **pydantic**（工具参数） | `pydantic`（第三方） |
 | TUI | Rich + prompt_toolkit（2 个） | Textual（1 个，但更重） |
 | MCP | httpx 手写 JSON-RPC | `mcp` 官方 SDK |
 | HTTP | httpx | httpx |
 | WebSocket | 无 | `websockets` |
-| 总第三方依赖 | **3 个**（httpx/rich/prompt_toolkit） | **7 个**（anthropic/openai/pyyaml/pydantic/mcp/textual/websockets） |
+| 总第三方依赖 | **4 个**（httpx/rich/prompt_toolkit/pydantic） | **7 个**（anthropic/openai/pyyaml/pydantic/mcp/textual/websockets） |
 
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
 - 用户可以审计全部代码（4600 行 vs 15000 行 + SDK 黑盒）
 
-**增强方向**：保持最小依赖原则。如果后续需要 Pydantic（工具 Schema 自动生成）或 websockets（远程模式），按需单独引入——不做一次性全加。
+**增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
 ### 0.4 配置系统
 
@@ -192,21 +192,19 @@
 
 ## 二、工具系统
 
-### 2.1 工具 Schema 生成
+### 2.1 工具 Schema 生成 ✅ 已实现（P46 + P47）
 
 | | mini | mewcode |
 |---|---|---|
-| Schema 定义方式 | 手写 `ToolSchema` dict | **Pydantic model** 自动生成 JSON Schema |
+| Schema 定义方式 | **Pydantic model** 自动生成 JSON Schema（P46），Raw Passthrough 全量保留（P47） | **Pydantic model** 自动生成 JSON Schema |
 
-**差距**：手写 schema 容易出错（参数名写错、漏字段、类型不对），每加一个工具要写一大段 dict。
+**已完成**（P46）：7/8 个工具定义 `ParamsModel(BaseModel)`，`Tool.params_model` 属性 + `_schema_from_model()` 自动生成。BashTool 保留手写 schema 向后兼容。
 
-**增强方案**：
-1. 每个工具定义一个 `ParamsModel(BaseModel)` 类，字段名和类型即为参数定义
-2. `Tool` ABC 新增可选的 `params_model` 属性
-3. `ToolSchema` 的 `parameters` 从 `params_model.model_json_schema()` 自动生成
-4. 向后兼容：不定义 `params_model` 的工具仍用手写 schema
-
-代码改动：`tools/base.py` ~15 行 + 每个工具新增 ParamsModel 类（约 5 行/工具 × 8 工具）。新增依赖：`pydantic>=2.0`。
+**已完成**（P47 增强）：`_schema_from_model()` 重写为 Raw JSON Schema Passthrough——Pydantic `model_json_schema()` 输出经 `_resolve_refs()` 解引用 `$ref/$defs`、去除 `title` 噪声后，完整 JSON Schema dict 直接存入 `ToolSchema.raw_parameters`，`to_json_schema()` 优先使用。全面支持：
+- `str | None`（anyOf）、`list[str]`（array + items）、嵌套 BaseModel（$ref 解引用内联）
+- `Field(ge=0, le=100)` 约束（minimum/maximum/minLength/maxLength）
+- `Literal["a","b"]`（enum）、`dict[str, int]`（additionalProperties）
+- `default` 值输出、循环引用防护
 
 ### 2.2 `@file` 引用 ✅ 已实现（P39）
 
@@ -661,7 +659,7 @@
 | 🟢 P2 | 6.3 | Agent 类型定义 | SubAgent 差异化 | 半天 |
 | 🟢 P2 | 3.3 | Plan 模式只读 | 规划安全 | 2 小时 |
 | 🟢 P2 | 7.1 | Hook 事件类型扩充 | Hook 灵活性 | 半天 |
-| 🔵 P3 | 2.1 | Pydantic Schema 生成 | 工具开发效率 | 1 天 |
+| ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
 | 🔵 P3 | 2.3 | 工具搜索/延迟加载 | 大量 MCP 工具场景 | 半天 |
 | 🔵 P3 | 4.4 | 选择性记忆召回 | 记忆多时省 token | 半天 |
 | 🔵 P3 | 4.5 | 记忆合并 | 记忆质量 | 半天 |

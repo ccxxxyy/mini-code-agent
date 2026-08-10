@@ -6,36 +6,32 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
 
 MAX_RESULTS = 500
 IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".idea", ".vscode"}
 
 
+class GlobParams(BaseModel):
+    """Pydantic model for glob parameters (P46). Auto-generates ToolSchema."""
+
+    pattern: str = Field(description="Glob pattern to match files against")
+    path: str | None = Field(
+        default=None,
+        description="Directory to search in (default: working directory)",
+    )
+
+
 class GlobTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="glob",
-            description=(
-                "Find files matching a glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
-                "Returns matching file paths sorted by modification time (newest first)."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="pattern",
-                    type="string",
-                    description="Glob pattern to match files against",
-                ),
-                ToolParameter(
-                    name="path",
-                    type="string",
-                    description="Directory to search in (default: working directory)",
-                    required=False,
-                ),
-            ],
-        )
+    _name = "glob"
+    _description = (
+        "Find files matching a glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
+        "Returns matching file paths sorted by modification time (newest first)."
+    )
+    params_model = GlobParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         pattern = kwargs["pattern"]

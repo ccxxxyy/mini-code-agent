@@ -5,32 +5,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
+
+
+class WriteFileParams(BaseModel):
+    """Pydantic model for write_file parameters (P46). Auto-generates ToolSchema."""
+
+    file_path: str = Field(
+        description="Path to the file to write (absolute or relative to working dir)"
+    )
+    content: str = Field(description="Content to write to the file")
 
 
 class WriteFileTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="write_file",
-            description=(
-                "Write content to a file. Creates the file (and parent directories) "
-                "if it doesn't exist, overwrites if it does."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="Path to the file to write (absolute or relative to working dir)",
-                ),
-                ToolParameter(
-                    name="content",
-                    type="string",
-                    description="Content to write to the file",
-                ),
-            ],
-        )
+    _name = "write_file"
+    _description = (
+        "Write content to a file. Creates the file (and parent directories) "
+        "if it doesn't exist, overwrites if it does."
+    )
+    params_model = WriteFileParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         file_path = Path(kwargs["file_path"])

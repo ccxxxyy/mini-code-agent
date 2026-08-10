@@ -7,50 +7,41 @@ import re
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
 
 MAX_MATCHES = 200
 MAX_FILE_BYTES = 5_000_000
 IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".idea", ".vscode"}
 
 
+class GrepParams(BaseModel):
+    """Pydantic model for grep parameters (P46). Auto-generates ToolSchema."""
+
+    pattern: str = Field(description="Regular expression pattern to search for")
+    path: str | None = Field(
+        default=None,
+        description="Directory or file to search in (default: working directory)",
+    )
+    include: str | None = Field(
+        default=None,
+        description="Glob filter for file names, e.g. '*.py' (default: all files)",
+    )
+    context: int = Field(
+        default=0,
+        description="Number of context lines to show before/after each match",
+    )
+
+
 class GrepTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="grep",
-            description=(
-                "Search file contents using a regular expression. "
-                "Returns matching lines with file path and line number."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="pattern",
-                    type="string",
-                    description="Regular expression pattern to search for",
-                ),
-                ToolParameter(
-                    name="path",
-                    type="string",
-                    description="Directory or file to search in (default: working directory)",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="include",
-                    type="string",
-                    description="Glob filter for file names, e.g. '*.py' (default: all files)",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="context",
-                    type="integer",
-                    description="Number of context lines to show before/after each match",
-                    required=False,
-                    default=0,
-                ),
-            ],
-        )
+    _name = "grep"
+    _description = (
+        "Search file contents using a regular expression. "
+        "Returns matching lines with file path and line number."
+    )
+    params_model = GrepParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         pattern = kwargs["pattern"]

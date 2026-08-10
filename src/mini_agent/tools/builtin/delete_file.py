@@ -5,27 +5,27 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
+
+
+class DeleteFileParams(BaseModel):
+    """Pydantic model for delete_file parameters (P46). Auto-generates ToolSchema."""
+
+    file_path: str = Field(
+        description="Path to the file to delete (absolute or relative to working dir)"
+    )
 
 
 class DeleteFileTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="delete_file",
-            description=(
-                "Delete a single file. Fails if the path is a directory "
-                "or the file does not exist. Prefer this over shell rm/del."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="Path to the file to delete (absolute or relative to working dir)",
-                ),
-            ],
-        )
+    _name = "delete_file"
+    _description = (
+        "Delete a single file. Fails if the path is a directory "
+        "or the file does not exist. Prefer this over shell rm/del."
+    )
+    params_model = DeleteFileParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         file_path = Path(kwargs["file_path"])

@@ -1,16 +1,26 @@
 """Tests for the tool system and builtin tools. 工具系统与内置工具的测试。"""
 
 import sys
+from typing import Literal
 
 import pytest
+from pydantic import BaseModel, Field
 
-from mini_agent.tools.base import ToolRegistry
+from mini_agent.tools.base import (
+    ToolParameter,
+    ToolRegistry,
+    ToolSchema,
+    _resolve_refs,
+    _schema_from_model,
+)
 from mini_agent.tools.builtin import (
     BashTool,
+    DeleteFileTool,
     EditFileTool,
     GlobTool,
     GrepTool,
     ReadFileTool,
+    SpawnAgentsTool,
     WriteFileTool,
 )
 
@@ -69,6 +79,75 @@ def test_validate_args_fills_defaults():
     validated = tool.validate_args({"file_path": "/tmp/x"})
     assert validated["offset"] == 0
     assert validated["limit"] == 2000
+
+
+# --- Pydantic Schema generation (P46) ---
+
+
+def test_pydantic_schema_generation():
+    tool = ReadFileTool()
+    s = tool.schema
+    assert s.name == "read_file"
+    assert "file" in s.description.lower()
+    js = s.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert set(props.keys()) == {"file_path", "offset", "limit"}
+    assert "file_path" in req
+    assert props["file_path"]["type"] == "string"
+    assert "offset" not in req
+    assert props["offset"]["default"] == 0
+    assert props["offset"]["type"] == "integer"
+
+
+def test_pydantic_schema_json_output():
+    tool = ReadFileTool()
+    js = tool.schema.to_json_schema()
+    assert js["type"] == "function"
+    assert js["function"]["name"] == "read_file"
+    props = js["function"]["parameters"]["properties"]
+    assert "file_path" in props
+    assert props["offset"]["type"] == "integer"
+    assert "file_path" in js["function"]["parameters"]["required"]
+    assert "offset" not in js["function"]["parameters"]["required"]
+
+
+def test_pydantic_validate_args_type_coercion():
+    tool = ReadFileTool()
+    result = tool.validate_args({"file_path": "/tmp/x", "offset": "5", "limit": "100"})
+    assert result["offset"] == 5
+    assert result["limit"] == 100
+    assert isinstance(result["offset"], int)
+
+
+def test_pydantic_validate_args_missing_required():
+    tool = ReadFileTool()
+    with pytest.raises(ValueError):
+        tool.validate_args({})
+
+
+def test_handwritten_schema_still_works():
+    tool = BashTool()
+    assert tool.params_model is None
+    s = tool.schema
+    assert s.name == "bash"
+    assert any(p.name == "command" for p in s.parameters)
+    validated = tool.validate_args({"command": "echo hi"})
+    assert validated["command"] == "echo hi"
+    assert validated["timeout"] == 120
+
+
+def test_registry_mixed_pydantic_and_handwritten():
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())  # Pydantic
+    registry.register(BashTool())  # handwritten
+    schemas = registry.get_schemas()
+    assert len(schemas) == 2
+    names = {s["function"]["name"] for s in schemas}
+    assert names == {"read_file", "bash"}
+    for s in schemas:
+        assert s["type"] == "function"
+        assert "properties" in s["function"]["parameters"]
 
 
 # --- ReadFile ---
@@ -263,3 +342,235 @@ async def test_grep_context_lines(tool_context):
 async def test_grep_invalid_regex(tool_context):
     result = await GrepTool().execute(tool_context, pattern="[invalid")
     assert result.is_error
+
+
+# --- Pydantic schema for all other tools (P46) ---
+
+
+def test_write_file_pydantic_schema():
+    tool = WriteFileTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert js["function"]["name"] == "write_file"
+    assert set(props.keys()) == {"file_path", "content"}
+    assert "file_path" in req and "content" in req
+
+
+def test_edit_file_pydantic_schema():
+    tool = EditFileTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert js["function"]["name"] == "edit_file"
+    assert set(props.keys()) == {"file_path", "old_text", "new_text", "replace_all"}
+    assert "replace_all" not in req
+    assert props["replace_all"]["default"] is False
+
+
+def test_glob_pydantic_schema():
+    tool = GlobTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert js["function"]["name"] == "glob"
+    assert set(props.keys()) == {"pattern", "path"}
+    assert "pattern" in req
+    assert "path" not in req
+
+
+def test_grep_pydantic_schema():
+    tool = GrepTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert js["function"]["name"] == "grep"
+    assert set(props.keys()) == {"pattern", "path", "include", "context"}
+    assert props["context"]["default"] == 0
+
+
+def test_delete_file_pydantic_schema():
+    tool = DeleteFileTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert js["function"]["name"] == "delete_file"
+    assert set(props.keys()) == {"file_path"}
+    assert "file_path" in req
+
+
+def test_spawn_agents_pydantic_schema():
+    tool = SpawnAgentsTool()
+    assert tool.params_model is not None
+    js = tool.schema.to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    req = js["function"]["parameters"]["required"]
+    assert js["function"]["name"] == "spawn_agents"
+    assert set(props.keys()) == {"tasks", "isolated"}
+    assert "tasks" in req
+    assert props["tasks"]["type"] == "array"
+    assert props["tasks"]["items"]["type"] == "string"
+
+
+def test_pydantic_schema_all_tools_json_format():
+    """Verify all Pydantic tools generate valid JSON schema format."""
+    tools = [
+        ReadFileTool(),
+        WriteFileTool(),
+        EditFileTool(),
+        GlobTool(),
+        GrepTool(),
+        DeleteFileTool(),
+        SpawnAgentsTool(),
+    ]
+    for tool in tools:
+        js = tool.schema.to_json_schema()
+        assert js["type"] == "function"
+        assert "function" in js
+        assert "name" in js["function"]
+        assert "parameters" in js["function"]
+        assert "properties" in js["function"]["parameters"]
+        assert "required" in js["function"]["parameters"]
+
+
+# --- Enhanced schema generation (complex types) ---
+
+
+def test_optional_type_schema():
+    class M(BaseModel):
+        name: str
+        tag: str | None = None
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert "tag" in props
+    assert "anyOf" in props["tag"]
+    types = {opt["type"] for opt in props["tag"]["anyOf"]}
+    assert types == {"string", "null"}
+
+
+def test_array_items_schema():
+    class M(BaseModel):
+        names: list[str]
+        counts: list[int] = []
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert props["names"]["type"] == "array"
+    assert props["names"]["items"]["type"] == "string"
+    assert props["counts"]["type"] == "array"
+    assert props["counts"]["items"]["type"] == "integer"
+
+
+def test_nested_model_schema():
+    class Inner(BaseModel):
+        value: int
+
+    class Outer(BaseModel):
+        item: Inner
+
+    js = _schema_from_model("t", "d", Outer).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert "item" in props
+    assert props["item"]["type"] == "object"
+    assert props["item"]["properties"]["value"]["type"] == "integer"
+    assert "$ref" not in str(props)
+
+
+def test_constrained_field_schema():
+    class M(BaseModel):
+        age: int = Field(ge=0, le=150)
+        name: str = Field(min_length=1, max_length=100)
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert props["age"]["minimum"] == 0
+    assert props["age"]["maximum"] == 150
+    assert props["name"]["minLength"] == 1
+    assert props["name"]["maxLength"] == 100
+
+
+def test_literal_type_schema():
+    class M(BaseModel):
+        mode: Literal["fast", "slow"]
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert props["mode"]["enum"] == ["fast", "slow"]
+
+
+def test_default_in_json_output():
+    class M(BaseModel):
+        limit: int = 10
+        tag: str = "default"
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert props["limit"]["default"] == 10
+    assert props["tag"]["default"] == "default"
+
+
+def test_resolve_refs_direct():
+    schema = {
+        "type": "object",
+        "title": "Root",
+        "properties": {
+            "item": {"$ref": "#/$defs/Item"},
+        },
+        "$defs": {
+            "Item": {
+                "type": "object",
+                "title": "Item",
+                "properties": {"x": {"type": "integer"}},
+                "required": ["x"],
+            },
+        },
+        "required": ["item"],
+    }
+    resolved = _resolve_refs(schema)
+    assert "$defs" not in resolved
+    assert "title" not in resolved
+    assert resolved["properties"]["item"]["type"] == "object"
+    assert resolved["properties"]["item"]["properties"]["x"]["type"] == "integer"
+    assert "title" not in resolved["properties"]["item"]
+
+
+def test_dict_type_schema():
+    class M(BaseModel):
+        metadata: dict[str, int]
+
+    js = _schema_from_model("t", "d", M).to_json_schema()
+    props = js["function"]["parameters"]["properties"]
+    assert props["metadata"]["type"] == "object"
+    assert props["metadata"]["additionalProperties"]["type"] == "integer"
+
+
+def test_manual_schema_emits_defaults():
+    schema = ToolSchema(
+        name="t",
+        description="d",
+        parameters=[ToolParameter(name="x", type="integer", description="", default=42)],
+    )
+    js = schema.to_json_schema()
+    assert js["function"]["parameters"]["properties"]["x"]["default"] == 42
+
+
+def test_resolve_refs_circular():
+    schema = {
+        "type": "object",
+        "properties": {"node": {"$ref": "#/$defs/Node"}},
+        "$defs": {
+            "Node": {
+                "type": "object",
+                "properties": {"child": {"$ref": "#/$defs/Node"}},
+            },
+        },
+    }
+    resolved = _resolve_refs(schema)
+    node = resolved["properties"]["node"]
+    assert node["type"] == "object"
+    assert node["properties"]["child"] == {"$ref": "#/$defs/Node"}
