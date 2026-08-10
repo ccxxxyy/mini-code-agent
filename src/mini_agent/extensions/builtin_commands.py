@@ -848,6 +848,13 @@ def _make_skill(app: Application) -> HandlerFn:
                 return f"Uninstalled skill: {name}"
             return f"Skill not found in user directory: {name}"
 
+        if subcmd == "reload":
+            loaded, lost = sr.reload(app.session.conversation)
+            msg = f"Reloaded {loaded} skill(s)."
+            if lost:
+                msg += f"\n  Lost (no longer on disk): {', '.join(lost)}"
+            return msg
+
         # Default: list skills
         skills = sr.list_skills()
         if not skills:

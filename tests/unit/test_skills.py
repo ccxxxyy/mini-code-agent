@@ -176,3 +176,79 @@ def test_uninstall_removes_dir(tmp_path):
 def test_uninstall_not_found(tmp_path):
     reg = SkillRegistry(skill_dirs=[tmp_path])
     assert not reg.uninstall("nonexistent", tmp_path)
+
+
+# --- Reload (P56) ---
+
+
+def test_reload_picks_up_new_skill(tmp_path):
+    make_skill_dir(tmp_path, "old", "name: old\ndescription: O", "Old prompt")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert reg.get("old") is not None
+    assert reg.get("new") is None
+
+    make_skill_dir(tmp_path, "new", "name: new\ndescription: N", "New prompt")
+    conv = Conversation()
+    loaded, lost = reg.reload(conv)
+    assert loaded == 2
+    assert reg.get("new") is not None
+    assert lost == []
+
+
+def test_reload_removes_deleted_skill(tmp_path):
+    d = make_skill_dir(tmp_path, "gone", "name: gone\ndescription: G", "Prompt")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert reg.get("gone") is not None
+
+    import shutil
+
+    shutil.rmtree(str(d))
+    conv = Conversation()
+    loaded, lost = reg.reload(conv)
+    assert reg.get("gone") is None
+
+
+def test_reload_updates_active_prompt(tmp_path):
+    d = make_skill_dir(tmp_path, "edit", "name: edit\ndescription: E", "Old version")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    conv = Conversation(system_prompt="Base")
+    reg.activate("edit", conv)
+    assert "Old version" in conv.system_prompt
+
+    (d / "SKILL.md").write_text(
+        "---\nname: edit\ndescription: E\n---\nNew version", encoding="utf-8"
+    )
+    loaded, lost = reg.reload(conv)
+    assert "New version" in conv.system_prompt
+    assert "Old version" not in conv.system_prompt
+
+
+def test_reload_reports_lost_skills(tmp_path):
+    d = make_skill_dir(tmp_path, "temp", "name: temp\ndescription: T", "Temp")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    conv = Conversation(system_prompt="Base")
+    reg.activate("temp", conv)
+
+    import shutil
+
+    shutil.rmtree(str(d))
+    loaded, lost = reg.reload(conv)
+    assert "temp" in lost
+    assert not reg.is_active("temp")
+
+
+def test_load_all_clears_stale(tmp_path):
+    d = make_skill_dir(tmp_path, "stale", "name: stale\ndescription: S", "P")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert reg.get("stale") is not None
+
+    import shutil
+
+    shutil.rmtree(str(d))
+    reg.load_all()
+    assert reg.get("stale") is None

@@ -37,6 +37,7 @@ class SkillRegistry:
     def load_all(self) -> None:
         """Scan skill directories and load all valid skill packs.
         扫描技能目录并加载所有有效的技能包。"""
+        self._skills.clear()
         for skill_dir in self._skill_dirs:
             skill_dir = Path(skill_dir).expanduser()
             if not skill_dir.is_dir():
@@ -95,6 +96,21 @@ class SkillRegistry:
                     matched.append(skill)
                     break
         return matched
+
+    def reload(self, conversation: Conversation) -> tuple[int, list[str]]:
+        """Hot-reload: rescan disk, update active skill prompts (P56).
+        热重载：重新扫描磁盘，更新活跃 skill 的 prompt。
+        Returns (loaded_count, lost_skills).
+        返回 (加载数量, 丢失的 skill 列表)。"""
+        previously_active = set(self._active)
+        for name in list(self._active):
+            self.deactivate(name, conversation)
+        self.load_all()
+        lost: list[str] = []
+        for name in previously_active:
+            if not self.activate(name, conversation):
+                lost.append(name)
+        return len(self._skills), lost
 
     async def install(self, source: str, target_dir: Path) -> str:
         """Install a skill from a local path or git URL into target_dir (P55).

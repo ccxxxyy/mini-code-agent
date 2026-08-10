@@ -996,3 +996,14 @@
 - [x] `/skill uninstall <name>` 按 SKILL.md 中的 name 匹配删除
 - [x] 卸载同时从内存注册表移除
 - [x] 5 个新测试（test_skills.py），总计 621 个全过
+
+---
+
+## Phase 56 检查项：Skill 热重载
+
+- [x] `load_all()` 先清除再扫描（磁盘删除的 skill 不再残留）
+- [x] `reload(conversation)` 剥离旧 prompt → 重载 → 注入新 prompt
+- [x] 活跃 skill 内容更新后 reload 对话中 prompt 自动更新
+- [x] 磁盘删除的活跃 skill 报告为 lost
+- [x] `/skill reload` 子命令
+- [x] 5 个新测试（test_skills.py），总计 626 个全过

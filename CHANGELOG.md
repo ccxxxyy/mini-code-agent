@@ -34,6 +34,7 @@
 - **Memory consolidation** — when memories exceed `consolidation_threshold` (20), an LLM merges semantically related entries into one (keeps newest timestamp, unions tags). Also available manually via `/memory consolidate`. Fail-safe no-op on any error. 记忆合并：超阈值时 LLM 语义合并相关记忆（保留最新时间戳、tags 并集），也可 `/memory consolidate` 手动触发。
 - **Worktree lifecycle** — new worktrees auto-symlink `node_modules`/`.venv`/`vendor` (skip reinstalls); stale clean worktrees older than `worktree_max_age_days` (7) are removed at startup (dirty ones kept); `/spawn wait` shows the worktree path with a `git merge` hint. Worktree 生命周期：依赖目录符号链接、过期干净 worktree 启动清理（脏的保留）、结果显示合并提示。
 - **Skill install/uninstall** — `/skill install <path_or_url>` installs a skill from a local directory or git URL into `~/.mini-agent/skills/` with SKILL.md validation (auto-cleanup on failure); `/skill uninstall <name>` removes by name. Skill 安装/卸载：从本地路径或 git URL 安装 skill，验证格式后自动清理失败项。
+- **Skill hot reload** — `/skill reload` rescans disk, updates active skill prompts in-place (strips old, injects new), and reports lost skills whose files were deleted. `load_all()` now clears before rescan so stale entries don't accumulate. Skill 热重载：`/skill reload` 重扫描磁盘，自动更新活跃 skill 的 prompt，报告磁盘已删除的 skill。
 
 ### Fixed 修复（P36 实战补修）
 
