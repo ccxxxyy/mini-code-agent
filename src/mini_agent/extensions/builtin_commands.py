@@ -929,6 +929,8 @@ def _make_spawn(app: Application) -> HandlerFn:
                 "  `/spawn <task>` — dispatch a single SubAgent\n"
                 "  `/spawn -p <task1> | <task2>` — parallel dispatch\n"
                 "  `/spawn --isolated <task>` — run in git worktree\n"
+                "  `/spawn --type <name> <task>` — use agent type "
+                "(explore/plan/worker/verify)\n"
                 "  `/spawn list` — show active agents\n"
                 "  `/spawn wait [id]` — wait for result\n"
                 "  `/spawn cancel [id]` — cancel agent(s)"
@@ -971,32 +973,48 @@ def _make_spawn(app: Application) -> HandlerFn:
             return "All SubAgents cancelled."
 
         # --- Spawn ---
+        import re
+
         isolation = "none"
         task_text = raw
         if "--isolated" in task_text:
             isolation = "worktree"
             task_text = task_text.replace("--isolated", "").strip()
 
-        if task_text.startswith("-p "):
-            tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
-            if not tasks:
-                return "No tasks provided. Use: `/spawn -p task1 | task2`"
-            ids = await mgr.spawn_parallel(tasks, isolation=isolation)
-            lines = [f"Spawned {len(ids)} SubAgents:"]
-            for aid, task in zip(ids, tasks):
-                lines.append(f"  `{aid}` — {task[:60]}")
-            lines.append("Use `/spawn wait` to collect results.")
-            return "\n".join(lines)
+        agent_type_name: str | None = None
+        type_match = re.search(r"--type[= ](\S+)", task_text)
+        if type_match:
+            agent_type_name = type_match.group(1)
+            task_text = task_text[: type_match.start()] + task_text[type_match.end() :]
+            task_text = task_text.strip()
 
-        if not task_text:
-            return "No task provided."
-        agent_id = await mgr.spawn(task_text, isolation=isolation)
-        return (
-            f"SubAgent spawned: `{agent_id}`\n"
-            f"  Task: {task_text[:80]}\n"
-            f"  Isolation: {isolation}\n"
-            "Use `/spawn wait {id}` or `/spawn wait` to collect result."
-        )
+        try:
+            if task_text.startswith("-p "):
+                tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
+                if not tasks:
+                    return "No tasks provided. Use: `/spawn -p task1 | task2`"
+                ids = await mgr.spawn_parallel(
+                    tasks, isolation=isolation, agent_type=agent_type_name
+                )
+                lines = [f"Spawned {len(ids)} SubAgents:"]
+                for aid, task in zip(ids, tasks):
+                    lines.append(f"  `{aid}` — {task[:60]}")
+                lines.append("Use `/spawn wait` to collect results.")
+                return "\n".join(lines)
+
+            if not task_text:
+                return "No task provided."
+            agent_id = await mgr.spawn(task_text, isolation=isolation, agent_type=agent_type_name)
+            type_info = f"  Type: {agent_type_name}\n" if agent_type_name else ""
+            return (
+                f"SubAgent spawned: `{agent_id}`\n"
+                f"  Task: {task_text[:80]}\n"
+                f"{type_info}"
+                f"  Isolation: {isolation}\n"
+                "Use `/spawn wait {id}` or `/spawn wait` to collect result."
+            )
+        except ValueError as e:
+            return str(e)
 
     return handler
 

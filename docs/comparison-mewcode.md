@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **496 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **559 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -111,7 +111,7 @@
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
-| 开发历史 | tasks.md（P1-P41 完整记录） | 无 |
+| 开发历史 | tasks.md（P1-P48 完整记录） | 无 |
 
 **差距**：此维度 mini **远超** mewcode。
 
@@ -479,25 +479,20 @@
 
 代码改动：新增 `core/mailbox.py` ~50 行 + 新增工具 ~30 行。
 
-### 6.3 Agent 类型定义
+### 6.3 Agent 类型定义 ✅ 已实现（P48）
 
 | | mini | mewcode |
 |---|---|---|
-| Agent 类型 | 无正式定义 | **4 种内置**：Explore（只读搜索）、Plan（规划）、general-purpose（全能）、Verification（验证） |
+| Agent 类型 | **4 种内置**：explore（只读搜索）、plan（规划）、worker（全能，默认）、verify（PASS/FAIL 验证）(P48) | **4 种内置**：Explore、Plan、general-purpose、Verification |
 
-**差距**：mini 的所有 SubAgent 都是相同配置——不区分"搜索 Agent"和"执行 Agent"。
-
-**增强方案**：
-1. 新建 `agents/` 目录，放 `.md` 格式的 Agent 定义文件
-2. 每个定义文件包含：名称、系统提示、允许的工具列表、模型偏好、最大轮次
-3. 至少定义 4 种：
-   - `explore.md`：只读工具（read_file/glob/grep），用弱模型
-   - `plan.md`：只读 + 输出规划，不执行
-   - `worker.md`：全工具
-   - `verify.md`：只读 + 输出 PASS/FAIL 判定
-4. `/spawn` 命令新增 `--type explore` 参数
-
-代码改动：新增 `agents/` 目录 + loader ~40 行 + SubAgent 集成 ~20 行。
+**已完成**（P48）：
+- `core/agent_types.py` — `AgentTypeDefinition` frozen dataclass，4 种内置类型
+- 每种类型定义：专属 system prompt、工具白名单（`allowed_tools`）、迭代上限（`max_iterations`）
+- `SubAgent.__init__` / `SubAgentManager.spawn` / `spawn_parallel` 均接受 `agent_type` 参数
+- `SpawnAgentsTool` 新增 `agent_type` 字段，LLM 可自主选择类型
+- `/spawn --type explore <task>` 命令行指定
+- `_intersect_tools()` 辅助函数：agent_type 工具白名单与调用方 `allowed_tools` 取交集
+- 向后兼容：不指定 agent_type 时行为与 P48 前完全一致
 
 ### 6.4 多后端 spawn
 
@@ -656,7 +651,7 @@
 | ✅ 完成 | 4.3 | Token 计数精度提升（P43） | 压缩阈值准确性 | 已完成 |
 | ✅ 完成 | 1.5 | max_tokens 恢复（P44） | 长回答不截断 | 已完成 |
 | ✅ 完成 | 6.1 | Coordinator 模式（P45） | /team 质量 | 已完成 |
-| 🟢 P2 | 6.3 | Agent 类型定义 | SubAgent 差异化 | 半天 |
+| ✅ 完成 | 6.3 | Agent 类型定义（P48） | SubAgent 差异化 | 已完成 |
 | 🟢 P2 | 3.3 | Plan 模式只读 | 规划安全 | 2 小时 |
 | 🟢 P2 | 7.1 | Hook 事件类型扩充 | Hook 灵活性 | 半天 |
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |

@@ -1050,3 +1050,29 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - test_manual_schema_emits_defaults — ToolParameter 路径也输出 default
   - test_resolve_refs_circular — 循环引用防护
 - [x] 48 个测试全过，ruff lint clean
+
+---
+
+## Phase 48: Agent Type Definition (P48)
+
+### P48.1 实现
+- [x] `core/agent_types.py` — 新文件：`AgentTypeDefinition` frozen dataclass + 4 种内置类型（explore/plan/worker/verify）
+- [x] 每种类型定义：专属 system prompt、工具白名单（`allowed_tools: tuple`）、迭代上限（`max_iterations`）
+- [x] `AGENT_TYPES` dict + `get_agent_type(name)` 查询（未知类型抛 ValueError）
+- [x] `core/subagent.py` — `_intersect_tools()` 辅助函数：agent_type 白名单与调用方 allowed_tools 取交集
+- [x] `SubAgent.__init__` 新增 `agent_type: AgentTypeDefinition | None` 参数：切换 prompt/工具过滤/config 浅拷贝覆盖迭代上限
+- [x] `SubAgentManager.spawn` / `spawn_parallel` 新增 `agent_type: str | None` 参数，名称解析为定义后传给 SubAgent
+- [x] `tools/builtin/spawn_agents.py` — `SpawnAgentsParams` 新增 `agent_type: str | None` 字段，execute 传递并捕获 ValueError
+- [x] `extensions/builtin_commands.py` — `/spawn --type <name>` flag 解析，更新 usage 字符串
+- [x] 向后兼容：不指定 agent_type 时行为与 P48 前完全一致
+
+### P48.2 测试
+- [x] `tests/unit/test_agent_types.py` 新文件：11 个测试
+  - get_agent_type known/unknown、all_builtin_types_exist、definitions_are_frozen
+  - worker_has_all_tools、verify_has_low_iterations、agent_types_dict_complete
+  - intersect_tools 4 种组合（both_none/type_none/caller_none/both_set）
+- [x] `tests/unit/test_subagent.py` 新增 4 个测试
+  - subagent_with_explore_type、type_intersects_with_caller_tools
+  - type_overrides_max_iterations、spawn_parallel_with_agent_type
+- [x] `tests/unit/test_tools.py` 适配 spawn_agents schema 新增 agent_type 字段
+- [x] 559 个测试全过，ruff lint + format clean

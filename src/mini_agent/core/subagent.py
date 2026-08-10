@@ -5,6 +5,7 @@ SubAgent 分发——将任务委派给并行运行的独立 Agent。
 from __future__ import annotations
 
 import asyncio
+import copy
 import os
 import sys
 import time
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.agent_state import AgentPhase
+from mini_agent.core.agent_types import AgentTypeDefinition, get_agent_type
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider
 from mini_agent.models.config import AgentConfig
@@ -49,6 +51,19 @@ NOT ls/cat/grep.
 and stop -- do NOT retry in a loop."""
 
 
+def _intersect_tools(
+    type_tools: tuple[str, ...] | None,
+    caller_tools: list[str] | None,
+) -> list[str] | None:
+    """Intersect agent-type tool list with caller-specified tool list.
+    取 agent type 工具列表与调用方工具列表的交集。"""
+    if type_tools is None:
+        return caller_tools
+    if caller_tools is None:
+        return list(type_tools)
+    return [t for t in type_tools if t in caller_tools]
+
+
 @dataclass
 class SubAgentResult:
     agent_id: str
@@ -77,58 +92,62 @@ class SubAgent:
         worktree_path: Path | None = None,
         allowed_tools: list[str] | None = None,
         model_name: str = "",
+        agent_type: AgentTypeDefinition | None = None,
     ) -> None:
         self.agent_id = uuid.uuid4().hex[:8]
         self.task = task
         self._worktree_path = worktree_path
         effective_dir = worktree_path or working_dir
 
-        # Independent tool registry (clone; optionally filtered)
-        # 独立的工具 registry（克隆副本；可按需过滤）
+        if agent_type is not None:
+            effective_config = copy.copy(config)
+            effective_config.max_agent_iterations = agent_type.max_iterations
+            effective_tools = _intersect_tools(agent_type.allowed_tools, allowed_tools)
+            prompt_template = agent_type.system_prompt
+        else:
+            effective_config = config
+            effective_tools = allowed_tools
+            prompt_template = SUBAGENT_SYSTEM_PROMPT
+
         registry = tool_registry.clone()
-        # Recursion guard: sub-agents cannot spawn further sub-agents
-        # 递归防护：子代理不能再派生子代理
         registry.unregister("spawn_agents")
-        if allowed_tools is not None:
+        if effective_tools is not None:
             for tool in registry.list_tools():
-                if tool.schema.name not in allowed_tools:
+                if tool.schema.name not in effective_tools:
                     registry.unregister(tool.schema.name)
 
         tool_context = ToolContext(
             working_dir=effective_dir,
             session=Session(),
             event_bus=event_bus,
-            config=config,
+            config=effective_config,
         )
 
         self._loop = AgentLoop(
             llm=llm,
             tool_registry=registry,
             event_bus=event_bus,
-            config=config,
+            config=effective_config,
             tool_context=tool_context,
         )
-        self._loop.model_name = model_name  # cost attribution 成本归属
+        self._loop.model_name = model_name
 
-        # Spill oversized tool results (sub-agents have no ContextManager,
-        # so this is their only protection against context bloat)
-        # 超大工具结果溢写（子代理没有 ContextManager——这是它们防上下文膨胀的唯一保护）
         from mini_agent.memory.tool_result_cache import ToolResultCache
 
         self._result_cache = ToolResultCache(
             Path.home() / ".mini-agent" / "cache" / "results" / f"subagent_{self.agent_id}",
-            threshold_chars=config.memory.spill_threshold_chars,
+            threshold_chars=effective_config.memory.spill_threshold_chars,
         )
         self._loop.result_cache = self._result_cache
 
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
         shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
         self._conversation = Conversation(
-            system_prompt=SUBAGENT_SYSTEM_PROMPT.format(
+            system_prompt=prompt_template.format(
                 working_dir=effective_dir,
                 platform=platform,
                 shell=shell,
-                iteration_budget=config.max_agent_iterations,
+                iteration_budget=effective_config.max_agent_iterations,
             )
         )
         self._conversation.append(Message(role=Role.USER, content=task))
@@ -218,6 +237,7 @@ class SubAgentManager:
         task: str,
         isolation: str = "none",
         allowed_tools: list[str] | None = None,
+        agent_type: str | None = None,
     ) -> str:
         """Spawn a sub-agent running in the background. Returns agent_id.
         派生一个后台运行的 SubAgent，返回 agent_id。
@@ -229,6 +249,7 @@ class SubAgentManager:
             branch = f"agent-{uuid.uuid4().hex[:8]}"
             worktree_path = await self._worktree_manager.create(branch)
 
+        type_def = get_agent_type(agent_type) if agent_type else None
         agent = SubAgent(
             task=task,
             llm=self._llm,
@@ -239,6 +260,7 @@ class SubAgentManager:
             worktree_path=worktree_path,
             allowed_tools=allowed_tools,
             model_name=self._model_name,
+            agent_type=type_def,
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(
@@ -252,13 +274,21 @@ class SubAgentManager:
         tasks: list[str],
         isolation: str = "none",
         allowed_tools: list[str] | None = None,
+        agent_type: str | None = None,
     ) -> list[str]:
         """Spawn multiple sub-agents concurrently. Returns agent_ids.
         并发派生多个 SubAgent，返回 agent_id 列表。
         """
         ids = []
         for task in tasks:
-            ids.append(await self.spawn(task, isolation=isolation, allowed_tools=allowed_tools))
+            ids.append(
+                await self.spawn(
+                    task,
+                    isolation=isolation,
+                    allowed_tools=allowed_tools,
+                    agent_type=agent_type,
+                )
+            )
         return ids
 
     async def wait(self, agent_id: str, timeout: float | None = None) -> SubAgentResult:

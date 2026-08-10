@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from mini_agent.core.agent_types import get_agent_type
 from mini_agent.core.subagent import SubAgent, SubAgentManager
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
@@ -175,3 +176,68 @@ async def test_subagent_isolated_registry(tmp_path):
     )
     # Parent registry untouched 父级注册表未受影响
     assert registry.get("write_file") is not None
+
+
+# --- Agent type integration (P48) ---
+
+
+async def test_subagent_with_explore_type(tmp_path):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    registry.register(WriteFileTool())
+
+    agent = SubAgent(
+        task="explore the codebase",
+        llm=MockLLM([text_response("found it")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+        agent_type=get_agent_type("explore"),
+    )
+    assert agent._loop._tools.get("read_file") is not None
+    assert agent._loop._tools.get("write_file") is None
+    assert "read-only" in agent._conversation.system_prompt.lower()
+
+
+async def test_subagent_type_intersects_with_caller_tools(tmp_path):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    registry.register(WriteFileTool())
+
+    agent = SubAgent(
+        task="test",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+        allowed_tools=["read_file"],
+        agent_type=get_agent_type("explore"),
+    )
+    assert agent._loop._tools.get("read_file") is not None
+    assert agent._loop._tools.get("glob") is None
+
+
+async def test_subagent_type_overrides_max_iterations(tmp_path):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    agent = SubAgent(
+        task="verify something",
+        llm=MockLLM([text_response("PASS")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+        agent_type=get_agent_type("verify"),
+    )
+    assert "20" in agent._conversation.system_prompt
+
+
+async def test_spawn_parallel_with_agent_type(tmp_path):
+    mgr = make_manager([text_response("found it")], tmp_path)
+    ids = await mgr.spawn_parallel(["search A", "search B"], agent_type="explore")
+    assert len(ids) == 2
+    results = await mgr.wait_all(ids)
+    assert all(r.success for r in results)
