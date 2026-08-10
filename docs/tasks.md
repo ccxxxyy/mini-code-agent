@@ -1076,3 +1076,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - type_overrides_max_iterations、spawn_parallel_with_agent_type
 - [x] `tests/unit/test_tools.py` 适配 spawn_agents schema 新增 agent_type 字段
 - [x] 559 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 49: Plan 模式只读 (P49)
+
+### P49.1 实现
+- [x] `core/agent_loop.py` — `_WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})`
+- [x] `AgentLoop.plan_mode: bool = False` — 运行时切换开关
+- [x] `_think()` — plan_mode 时过滤 `get_schemas()` 排除写工具 schema
+- [x] `_act()` — plan_mode 时写工具调用直接返回 `DENIED`（双保险）
+- [x] 流式工具执行 — plan_mode 时延迟写工具到 `_act()` 拦截
+- [x] `extensions/builtin_commands.py` — `/plan [on|off]` 命令注册
+- [x] `/plan on` 注入只读 system prompt，`/plan off` 移除
+- [x] bash 不在 _WRITE_TOOLS 中（由权限系统和沙箱控制）
+
+### P49.2 测试
+- [x] `tests/unit/test_agent_loop.py` 新增 3 个测试：
+  - test_plan_mode_hides_write_schemas — schema 过滤
+  - test_plan_mode_blocks_write_tool_call — 写工具拦截
+  - test_plan_mode_off_allows_write — 正常模式不影响
+- [x] 562 个测试全过，ruff lint + format clean

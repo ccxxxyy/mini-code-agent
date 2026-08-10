@@ -15,7 +15,7 @@ from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import Conversation, Role
 from mini_agent.tools.base import ToolRegistry
-from mini_agent.tools.builtin import ReadFileTool
+from mini_agent.tools.builtin import EditFileTool, ReadFileTool, WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -366,3 +366,61 @@ async def test_no_retry_on_normal_finish(tool_context):
     conv = Conversation()
     await loop.run(conv)
     assert len(llm.calls) == 1
+
+
+# --- Plan mode (P49) ---
+
+
+def test_plan_mode_hides_write_schemas(tool_context):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    registry.register(WriteFileTool())
+    registry.register(EditFileTool())
+    loop = make_loop([text_response("ok")], tool_context, registry=registry)
+
+    loop.plan_mode = False
+    schemas_normal = loop._tools.get_schemas()
+    names_normal = {s["function"]["name"] for s in schemas_normal}
+    assert "write_file" in names_normal
+    assert "edit_file" in names_normal
+
+    loop.plan_mode = True
+    from mini_agent.core.agent_loop import _WRITE_TOOLS
+
+    filtered = [s for s in loop._tools.get_schemas() if s["function"]["name"] not in _WRITE_TOOLS]
+    names_filtered = {s["function"]["name"] for s in filtered}
+    assert "write_file" not in names_filtered
+    assert "edit_file" not in names_filtered
+    assert "read_file" in names_filtered
+
+
+async def test_plan_mode_blocks_write_tool_call(tool_context):
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    registry.register(WriteFileTool())
+    scripts = [
+        tool_call_response("write_file", {"file_path": "x.txt", "content": "bad"}),
+        text_response("denied"),
+    ]
+    loop = make_loop(scripts, tool_context, registry=registry)
+    loop.plan_mode = True
+    conv = Conversation()
+    await loop.run(conv)
+    tool_msgs = [m for m in conv.messages if m.tool_result is not None]
+    assert any("Permission denied" in m.tool_result.output for m in tool_msgs)
+
+
+async def test_plan_mode_off_allows_write(tool_context):
+    target = tool_context.working_dir / "new.txt"
+    registry = ToolRegistry()
+    registry.register(WriteFileTool())
+    scripts = [
+        tool_call_response("write_file", {"file_path": str(target), "content": "hello"}),
+        text_response("done"),
+    ]
+    loop = make_loop(scripts, tool_context, registry=registry)
+    loop.plan_mode = False
+    conv = Conversation()
+    await loop.run(conv)
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "hello"

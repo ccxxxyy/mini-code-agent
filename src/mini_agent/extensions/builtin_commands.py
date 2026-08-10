@@ -113,6 +113,13 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="plan",
+            description="Toggle plan mode — read-only (usage: /plan [on|off])",
+            handler=_make_plan(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="spawn",
             description="SubAgent dispatch (usage: /spawn <task> | /spawn list|wait|cancel)",
             handler=_make_spawn(app),
@@ -914,6 +921,38 @@ def _make_theme(app: Application) -> HandlerFn:
             pass
 
         return f"Theme switched to: `{arg}` (persisted across restarts)"
+
+    return handler
+
+
+_PLAN_MODE_PROMPT = (
+    "\n\n[PLAN MODE] You are in read-only planning mode. "
+    "You can ONLY use read_file, glob, grep, bash for research. "
+    "write_file, edit_file, delete_file are disabled. "
+    "Analyze and plan, do NOT attempt to modify files."
+)
+
+
+def _make_plan(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        loop = app.agent_loop
+        sub = args.strip().lower()
+
+        if sub in ("", "on"):
+            loop.plan_mode = True
+            conv = app.session.conversation
+            if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
+                conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
+            return "Plan mode **ON** — write tools disabled (read-only)."
+
+        if sub == "off":
+            loop.plan_mode = False
+            conv = app.session.conversation
+            if conv.system_prompt:
+                conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
+            return "Plan mode **OFF** — all tools re-enabled."
+
+        return "Usage: `/plan [on|off]` — toggle read-only planning mode."
 
     return handler
 
