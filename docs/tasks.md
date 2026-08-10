@@ -977,3 +977,40 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P45.2 测试
 - [x] `tests/unit/test_team.py` 新增 3 个测试（prompt 注入验证 / max_steps 放宽 / 深度扫描），521 个测试全过
+
+---
+
+## Phase 46: Pydantic Schema 生成 (P46)
+
+### P46.1 实现
+- [x] `pyproject.toml` — pydantic>=2.0 从可选依赖移到主依赖（现在是核心功能）
+- [x] `tools/base.py` — _schema_from_model()：从 Pydantic BaseModel 自动生成 ToolSchema；Tool.params_model/._name/._description 属性；schema 属性改为自动生成或手写覆盖
+- [x] `tools/base.py` — Tool.validate_args() 升级：params_model 时用 Pydantic 验证含类型转换；否则走手写 schema 验证（向后兼容）
+- [x] 7 个核心工具 Pydantic 化（P2 阶段 6 个工具 + P24 delete_file）：
+  - [x] ReadFileParams — read_file（已完成，在先前改动中）
+  - [x] WriteFileParams — write_file
+  - [x] EditFileParams — edit_file（含 boolean replace_all）
+  - [x] DeleteFileParams — delete_file
+  - [x] GlobParams — glob（可选 path）
+  - [x] GrepParams — grep（含 context: int）
+  - [x] SpawnAgentsParams — spawn_agents（含 tasks: list[str]）
+- [x] BashTool 保持手写 schema（向后兼容示例）
+
+### P46.2 测试
+- [x] `tests/unit/test_tools.py` 补充导入 DeleteFileTool, SpawnAgentsTool
+- [x] 新增 7 个测试：write_file / edit_file / glob / grep / delete_file / spawn_agents schema 验证（各验证 name/param_names/required/default/type）
+- [x] test_pydantic_schema_all_tools_json_format()：批量验证 7 个工具 JSON schema 格式合法
+- [x] 已有测试覆盖：
+  - test_pydantic_schema_generation() — ReadFile schema 生成
+  - test_pydantic_schema_json_output() — JSON 格式验证
+  - test_pydantic_validate_args_type_coercion() — 字符串→int 类型转换
+  - test_pydantic_validate_args_missing_required() — 缺少必需参数报错
+  - test_handwritten_schema_still_works() — BashTool 向后兼容
+  - test_registry_mixed_pydantic_and_handwritten() — 混用验证
+- [x] 543 个测试全过（新增 17 个）
+
+### P46.3 优势
+- 减少重复：从手写 7×(name + description + 参数列表) 减为 7 个 Pydantic 类
+- 类型安全：Pydantic 自动验证和转换参数类型（数字字符串→int）
+- LLM 友好：JSON schema 格式直接来自 Pydantic，无手工维护
+- 向后兼容：BashTool 等可继续手写 schema，无破坏变更

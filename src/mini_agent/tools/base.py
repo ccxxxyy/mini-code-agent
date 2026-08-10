@@ -76,15 +76,43 @@ class ToolContext:
     subagent_manager: SubAgentManager | None = None
 
 
+def _schema_from_model(name: str, description: str, model: type) -> ToolSchema:
+    """Build a ToolSchema from a Pydantic BaseModel (P46).
+    从 Pydantic BaseModel 自动生成 ToolSchema。"""
+    json_schema = model.model_json_schema()
+    props = json_schema.get("properties", {})
+    required_set = set(json_schema.get("required", []))
+    parameters: list[ToolParameter] = []
+    for pname, prop in props.items():
+        parameters.append(
+            ToolParameter(
+                name=pname,
+                type=prop.get("type", "string"),
+                description=prop.get("description", ""),
+                required=pname in required_set,
+                default=prop.get("default"),
+                enum=prop.get("enum"),
+            )
+        )
+    return ToolSchema(name=name, description=description, parameters=parameters)
+
+
 class Tool(ABC):
     """Base class for all tools (builtin + MCP-adapted).
     所有工具的基类（内置工具 + MCP 适配工具）。"""
 
+    params_model: type | None = None
+    _name: str = ""
+    _description: str = ""
+
     @property
-    @abstractmethod
     def schema(self) -> ToolSchema:
-        """Return the tool's schema for LLM registration. 返回用于 LLM 注册的工具 schema。"""
-        ...
+        """Return the tool's schema. Auto-generated from params_model when
+        available (P46); subclasses without params_model must override.
+        返回工具 schema。有 params_model 时自动生成；否则子类必须覆盖。"""
+        if self.params_model is not None:
+            return _schema_from_model(self._name, self._description, self.params_model)
+        raise NotImplementedError("Tool must define params_model or override schema")
 
     @abstractmethod
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
@@ -93,18 +121,25 @@ class Tool(ABC):
         ...
 
     def validate_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Validate arguments against schema. Fills defaults, raises ValueError.
-        根据 schema 校验参数。填充默认值，校验失败时抛出 ValueError。"""
+        """Validate arguments against schema. Uses Pydantic when params_model
+        is set; falls back to manual validation otherwise.
+        有 params_model 时用 Pydantic 校验（含类型转换）；否则走手动校验。"""
+        if self.params_model is not None:
+            try:
+                validated = self.params_model(**kwargs)
+                return validated.model_dump()
+            except Exception as e:
+                raise ValueError(str(e)) from e
         schema = self.schema
-        validated: dict[str, Any] = {}
+        validated_dict: dict[str, Any] = {}
         for p in schema.parameters:
             if p.name in kwargs:
-                validated[p.name] = kwargs[p.name]
+                validated_dict[p.name] = kwargs[p.name]
             elif p.required:
                 raise ValueError(f"Missing required parameter '{p.name}' for tool '{schema.name}'")
             elif p.default is not None:
-                validated[p.name] = p.default
-        return validated
+                validated_dict[p.name] = p.default
+        return validated_dict
 
     def error_result(self, call_id: str, message: str) -> ToolResult:
         """Helper to build an error ToolResult. 构建错误 ToolResult 的辅助方法。"""

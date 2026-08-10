@@ -7,10 +7,12 @@ import pytest
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import (
     BashTool,
+    DeleteFileTool,
     EditFileTool,
     GlobTool,
     GrepTool,
     ReadFileTool,
+    SpawnAgentsTool,
     WriteFileTool,
 )
 
@@ -69,6 +71,75 @@ def test_validate_args_fills_defaults():
     validated = tool.validate_args({"file_path": "/tmp/x"})
     assert validated["offset"] == 0
     assert validated["limit"] == 2000
+
+
+# --- Pydantic Schema generation (P46) ---
+
+
+def test_pydantic_schema_generation():
+    tool = ReadFileTool()
+    s = tool.schema
+    assert s.name == "read_file"
+    assert "file" in s.description.lower()
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"file_path", "offset", "limit"}
+    fp = next(p for p in s.parameters if p.name == "file_path")
+    assert fp.required is True
+    assert fp.type == "string"
+    off = next(p for p in s.parameters if p.name == "offset")
+    assert off.required is False
+    assert off.default == 0
+    assert off.type == "integer"
+
+
+def test_pydantic_schema_json_output():
+    tool = ReadFileTool()
+    js = tool.schema.to_json_schema()
+    assert js["type"] == "function"
+    assert js["function"]["name"] == "read_file"
+    props = js["function"]["parameters"]["properties"]
+    assert "file_path" in props
+    assert props["offset"]["type"] == "integer"
+    assert "file_path" in js["function"]["parameters"]["required"]
+    assert "offset" not in js["function"]["parameters"]["required"]
+
+
+def test_pydantic_validate_args_type_coercion():
+    tool = ReadFileTool()
+    result = tool.validate_args({"file_path": "/tmp/x", "offset": "5", "limit": "100"})
+    assert result["offset"] == 5
+    assert result["limit"] == 100
+    assert isinstance(result["offset"], int)
+
+
+def test_pydantic_validate_args_missing_required():
+    tool = ReadFileTool()
+    with pytest.raises(ValueError):
+        tool.validate_args({})
+
+
+def test_handwritten_schema_still_works():
+    tool = BashTool()
+    assert tool.params_model is None
+    s = tool.schema
+    assert s.name == "bash"
+    assert any(p.name == "command" for p in s.parameters)
+    validated = tool.validate_args({"command": "echo hi"})
+    assert validated["command"] == "echo hi"
+    assert validated["timeout"] == 120
+
+
+def test_registry_mixed_pydantic_and_handwritten():
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())  # Pydantic
+    registry.register(BashTool())  # handwritten
+    schemas = registry.get_schemas()
+    assert len(schemas) == 2
+    names = {s["function"]["name"] for s in schemas}
+    assert names == {"read_file", "bash"}
+    for s in schemas:
+        assert s["type"] == "function"
+        assert "properties" in s["function"]["parameters"]
 
 
 # --- ReadFile ---
@@ -263,3 +334,95 @@ async def test_grep_context_lines(tool_context):
 async def test_grep_invalid_regex(tool_context):
     result = await GrepTool().execute(tool_context, pattern="[invalid")
     assert result.is_error
+
+
+# --- Pydantic schema for all other tools (P46) ---
+
+
+def test_write_file_pydantic_schema():
+    tool = WriteFileTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "write_file"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"file_path", "content"}
+    assert all(p.required for p in s.parameters)
+
+
+def test_edit_file_pydantic_schema():
+    tool = EditFileTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "edit_file"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"file_path", "old_text", "new_text", "replace_all"}
+    replace_all_param = next(p for p in s.parameters if p.name == "replace_all")
+    assert replace_all_param.required is False
+    assert replace_all_param.default is False
+
+
+def test_glob_pydantic_schema():
+    tool = GlobTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "glob"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"pattern", "path"}
+    pattern_param = next(p for p in s.parameters if p.name == "pattern")
+    assert pattern_param.required is True
+    path_param = next(p for p in s.parameters if p.name == "path")
+    assert path_param.required is False
+
+
+def test_grep_pydantic_schema():
+    tool = GrepTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "grep"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"pattern", "path", "include", "context"}
+    context_param = next(p for p in s.parameters if p.name == "context")
+    assert context_param.default == 0
+
+
+def test_delete_file_pydantic_schema():
+    tool = DeleteFileTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "delete_file"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"file_path"}
+    assert s.parameters[0].required is True
+
+
+def test_spawn_agents_pydantic_schema():
+    tool = SpawnAgentsTool()
+    assert tool.params_model is not None
+    s = tool.schema
+    assert s.name == "spawn_agents"
+    param_names = {p.name for p in s.parameters}
+    assert param_names == {"tasks", "isolated"}
+    tasks_param = next(p for p in s.parameters if p.name == "tasks")
+    assert tasks_param.required is True
+    assert tasks_param.type == "array"
+
+
+def test_pydantic_schema_all_tools_json_format():
+    """Verify all Pydantic tools generate valid JSON schema format."""
+    tools = [
+        ReadFileTool(),
+        WriteFileTool(),
+        EditFileTool(),
+        GlobTool(),
+        GrepTool(),
+        DeleteFileTool(),
+        SpawnAgentsTool(),
+    ]
+    for tool in tools:
+        js = tool.schema.to_json_schema()
+        assert js["type"] == "function"
+        assert "function" in js
+        assert "name" in js["function"]
+        assert "parameters" in js["function"]
+        assert "properties" in js["function"]["parameters"]
+        assert "required" in js["function"]["parameters"]

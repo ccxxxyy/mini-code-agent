@@ -7,44 +7,33 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
+
+
+class EditFileParams(BaseModel):
+    """Pydantic model for edit_file parameters (P46). Auto-generates ToolSchema."""
+
+    file_path: str = Field(
+        description="Path to the file to edit (absolute or relative to working dir)"
+    )
+    old_text: str = Field(description="Exact text to find and replace")
+    new_text: str = Field(description="Text to replace old_text with")
+    replace_all: bool = Field(
+        default=False,
+        description="Replace all occurrences (default false: exactly one match)",
+    )
 
 
 class EditFileTool(Tool):
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="edit_file",
-            description=(
-                "Replace an exact string in a file with a new string. "
-                "old_text must appear exactly once in the file unless replace_all is true."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="Path to the file to edit (absolute or relative to working dir)",
-                ),
-                ToolParameter(
-                    name="old_text",
-                    type="string",
-                    description="Exact text to find and replace",
-                ),
-                ToolParameter(
-                    name="new_text",
-                    type="string",
-                    description="Text to replace old_text with",
-                ),
-                ToolParameter(
-                    name="replace_all",
-                    type="boolean",
-                    description="Replace all occurrences (default false: exactly one match)",
-                    required=False,
-                    default=False,
-                ),
-            ],
-        )
+    _name = "edit_file"
+    _description = (
+        "Replace an exact string in a file with a new string. "
+        "old_text must appear exactly once in the file unless replace_all is true."
+    )
+    params_model = EditFileParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         file_path = Path(kwargs["file_path"])

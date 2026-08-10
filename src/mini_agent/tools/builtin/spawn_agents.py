@@ -5,38 +5,35 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mini_agent.models.message import ToolResult
-from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
+from mini_agent.tools.base import Tool, ToolContext
+
+
+class SpawnAgentsParams(BaseModel):
+    """Pydantic model for spawn_agents parameters (P46). Auto-generates ToolSchema."""
+
+    tasks: list[str] = Field(
+        description="List of task descriptions, one per sub-agent"
+    )
+    isolated: bool = Field(
+        default=False,
+        description="Run each sub-agent in a Git worktree",
+    )
 
 
 class SpawnAgentsTool(Tool):
     """Lets the LLM spawn independent sub-agents for parallel work.
     允许 LLM 派生独立子代理进行并行工作。"""
 
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="spawn_agents",
-            description=(
-                "Spawn independent sub-agents to execute tasks in parallel. "
-                "Each sub-agent has its own tools and conversation context. "
-                "Returns a combined report of all sub-agent results."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="tasks",
-                    type="array",
-                    description="List of task descriptions, one per sub-agent",
-                ),
-                ToolParameter(
-                    name="isolated",
-                    type="boolean",
-                    description="Run each sub-agent in a Git worktree",
-                    required=False,
-                    default=False,
-                ),
-            ],
-        )
+    _name = "spawn_agents"
+    _description = (
+        "Spawn independent sub-agents to execute tasks in parallel. "
+        "Each sub-agent has its own tools and conversation context. "
+        "Returns a combined report of all sub-agent results."
+    )
+    params_model = SpawnAgentsParams
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         mgr = ctx.subagent_manager
