@@ -2,8 +2,12 @@
 
 from pathlib import Path
 
+import pytest
+
 from mini_agent.extensions.skills import SkillRegistry
 from mini_agent.models.message import Conversation
+
+pytestmark = pytest.mark.asyncio
 
 
 def make_skill_dir(tmp_path: Path, name: str, front_matter: str, body: str) -> Path:
@@ -119,3 +123,56 @@ def test_missing_name_skipped(tmp_path):
     reg = SkillRegistry(skill_dirs=[tmp_path])
     reg.load_all()
     assert len(reg.list_skills()) == 0
+
+
+# --- Install / Uninstall (P55) ---
+
+
+def _reg_for(target: Path) -> SkillRegistry:
+    return SkillRegistry(skill_dirs=[target])
+
+
+async def test_install_from_local_path(tmp_path):
+    (tmp_path / "source").mkdir()
+    src = make_skill_dir(tmp_path / "source", "my-skill", "name: my-skill\ndescription: M", "P")
+    target = tmp_path / "installed"
+    reg = _reg_for(target)
+    name = await reg.install(str(src), target)
+    assert name == "my-skill"
+    assert (target / "my-skill" / "SKILL.md").is_file()
+    assert reg.get("my-skill") is not None
+
+
+async def test_install_invalid_no_skill_md(tmp_path):
+    src = tmp_path / "no-skill"
+    src.mkdir()
+    (src / "README.md").write_text("not a skill", encoding="utf-8")
+    target = tmp_path / "installed"
+    with pytest.raises(ValueError, match="no SKILL.md"):
+        await _reg_for(target).install(str(src), target)
+    assert not (target / "no-skill").exists()
+
+
+async def test_install_invalid_no_name(tmp_path):
+    src = tmp_path / "bad-skill"
+    src.mkdir()
+    (src / "SKILL.md").write_text("---\ndescription: no name\n---\nbody", encoding="utf-8")
+    target = tmp_path / "installed"
+    with pytest.raises(ValueError, match="missing 'name'"):
+        await _reg_for(target).install(str(src), target)
+    assert not (target / "bad-skill").exists()
+
+
+def test_uninstall_removes_dir(tmp_path):
+    d = make_skill_dir(tmp_path, "removeme", "name: removeme\ndescription: R", "P")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    assert reg.get("removeme") is not None
+    assert reg.uninstall("removeme", tmp_path)
+    assert not d.exists()
+    assert reg.get("removeme") is None
+
+
+def test_uninstall_not_found(tmp_path):
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    assert not reg.uninstall("nonexistent", tmp_path)

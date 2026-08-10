@@ -79,7 +79,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="skill",
-            description="Manage skills (usage: /skill [list|activate <name>|deactivate <name>])",
+            description="Manage skills (/skill [list|activate|deactivate|install|uninstall])",
             handler=_make_skill(app),
         )
     )
@@ -831,6 +831,22 @@ def _make_skill(app: Application) -> HandlerFn:
             if sr.deactivate(name, app.session.conversation):
                 return f"Skill deactivated: {name}"
             return f"Skill not active or not found: {name}"
+
+        if subcmd == "install" and len(parts) > 1:
+            source = parts[1].strip()
+            target = Path.home() / ".mini-agent" / "skills"
+            try:
+                name = await sr.install(source, target)
+                return f"Installed skill: **{name}**"
+            except ValueError as e:
+                return f"Install failed: {e}"
+
+        if subcmd == "uninstall" and len(parts) > 1:
+            name = parts[1].strip()
+            target = Path.home() / ".mini-agent" / "skills"
+            if sr.uninstall(name, target):
+                return f"Uninstalled skill: {name}"
+            return f"Skill not found in user directory: {name}"
 
         # Default: list skills
         skills = sr.list_skills()

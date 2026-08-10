@@ -1961,12 +1961,35 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **单个失败跳过**：一个损坏的 worktree（如手动删了目录但 git 元数据还在）不能阻断其他清理和应用启动
 - **mtime 而非创建时间**：目录 mtime 反映最后活动时间——最近被 Agent 使用过的 worktree 即使创建很久也不清
 
+# 第五十五部分：Skill 安装命令（P55）
+
+## 55.1 为什么需要：手动复制目录太原始
+
+4 个内置 skill 开箱即用，但要加第三方 skill 必须手动找到 `~/.mini-agent/skills/` 然后 `cp -r`，还要确保目录结构对——不友好。mewcode 有 `/skill install` 一键安装。
+
+## 55.2 实现：install + uninstall
+
+**`SkillRegistry.install(source, target_dir)`**：
+- 本地路径 → `shutil.copytree` 复制整个 skill 目录
+- git URL → `git clone --depth 1`（浅克隆省空间）
+- 安装后验证：目标必须含 `SKILL.md` 且 `name` 字段可解析——验证失败自动 `shutil.rmtree` 清理（不留垃圾）
+- 目标已存在 → 拒绝覆盖 → ValueError
+
+**`SkillRegistry.uninstall(name, target_dir)`**：遍历 target_dir 的子目录，解析每个 `SKILL.md` 找到 `name` 匹配的 → `shutil.rmtree` + 内存注册表移除
+
+## 55.3 设计权衡
+
+- **install 是异步的**（`async def`）：git clone 是外部进程调用，必须 await
+- **验证-回滚模式**：先复制/克隆 → 验证 → 失败才删——不做预验证（源路径可能没有 SKILL.md 但 git repo 的子目录有）
+- **uninstall 按 name 不按目录名**：skill 名和目录名可能不同（如目录叫 `code_review/` 但 SKILL.md 里 name 是 `code-review`）
+- **不支持热重载**：install 后调 `load_all()` 重新扫描全部目录——简单可靠。热重载是 8.2 的范围
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——616 个测试约 58 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——621 个测试约 60 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
