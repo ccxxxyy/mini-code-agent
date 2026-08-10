@@ -24,6 +24,7 @@ mini-code-agent/
 │       │   ├── __init__.py
 │       │   ├── agent_loop.py        # ReAct agent loop state machine
 │       │   ├── agent_state.py       # AgentState dataclass + state transitions
+│       │   ├── agent_types.py       # Agent type definitions (explore/plan/worker/verify) (P48)
 │       │   ├── planner.py           # Plan mode — structured task decomposition
 │       │   ├── subagent.py          # SubAgent spawning and lifecycle
 │       │   ├── team.py              # Agent Teams — multi-agent coordination

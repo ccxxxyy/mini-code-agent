@@ -878,3 +878,20 @@
 - [x] 循环引用防护（保留原始 $ref 不死循环）
 - [x] BashTool / MCP adapter 无需改动，后备路径正常工作
 - [x] 改写 7 个旧测试 + 新增 10 个测试，总计 544 个全过
+
+---
+
+## Phase 48 检查项：Agent Type Definition
+
+- [x] `AgentTypeDefinition` frozen dataclass 定义：name/system_prompt/allowed_tools/max_iterations/description
+- [x] 4 种内置类型：explore（只读搜索）、plan（只读规划）、worker（全工具）、verify（PASS/FAIL）
+- [x] explore/plan/verify 工具白名单仅含 read_file/glob/grep/bash
+- [x] worker 的 allowed_tools 为 None（全部工具）
+- [x] verify 迭代上限（20）< worker（50）
+- [x] `_intersect_tools` 正确处理 4 种组合（both None / one None / both set）
+- [x] `SubAgent.__init__` agent_type 参数切换 prompt + 工具过滤 + config 覆盖
+- [x] `SubAgentManager.spawn/spawn_parallel` 名称解析 + 透传
+- [x] `SpawnAgentsTool` 新增 agent_type 字段，无效类型名返回错误
+- [x] `/spawn --type <name>` 命令行解析
+- [x] 向后兼容：不指定 agent_type 时行为不变
+- [x] 15 个新测试（test_agent_types.py 11 个 + test_subagent.py 4 个），总计 559 个全过

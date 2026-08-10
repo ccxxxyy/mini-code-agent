@@ -19,6 +19,13 @@ class SpawnAgentsParams(BaseModel):
         default=False,
         description="Run each sub-agent in a Git worktree",
     )
+    agent_type: str | None = Field(
+        default=None,
+        description=(
+            "Agent type: 'explore' (read-only research), 'plan' (read-only planning), "
+            "'worker' (full tools, default), 'verify' (read-only, PASS/FAIL judgment)"
+        ),
+    )
 
 
 class SpawnAgentsTool(Tool):
@@ -43,8 +50,12 @@ class SpawnAgentsTool(Tool):
             return self.error_result("", "No tasks provided")
 
         isolation = "worktree" if kwargs.get("isolated") else "none"
+        agent_type = kwargs.get("agent_type")
 
-        ids = await mgr.spawn_parallel(tasks, isolation=isolation)
+        try:
+            ids = await mgr.spawn_parallel(tasks, isolation=isolation, agent_type=agent_type)
+        except ValueError as e:
+            return self.error_result("", str(e))
         results = await mgr.wait_all(ids, timeout=300)
 
         lines: list[str] = []

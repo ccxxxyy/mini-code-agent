@@ -1807,12 +1807,36 @@ P46 的 `_schema_from_model()` 只提取 `type/description/default/enum` 四个�
 - **为什么去 title？** Pydantic 给每个 property 加 `title`（默认为字段名的 Title Case），LLM 不用它且浪费 token
 - **循环引用**：理论上 Pydantic 递归类型会产生循环 `$ref`。`_resolve_refs` 用 `seen` 集合检测，遇到循环保留原始 `$ref` 不死循环。工具参数实际不会出现递归类型，但防护零成本
 
+# 第四十八部分：Agent Type Definition（P48）
+
+## 48.1 为什么需要：SubAgent 无差异化
+
+所有 SubAgent 共用同一个 `SUBAGENT_SYSTEM_PROMPT`、同一套工具集、同一个迭代上限。搜索 Agent 带着 write_file 能力上场、验证 Agent 跟执行 Agent 一样的 50 轮预算——浪费且不安全。mewcode 的 4 种 Agent 类型（Explore/Plan/Worker/Verify）是明显更好的设计。
+
+## 48.2 实现：AgentTypeDefinition dataclass + 参数透传
+
+**不做文件加载**：comparison 原方案提到 `.md` 定义文件 + loader，但当前只有 4 种类型且不需要用户自定义，Python dataclass hardcode 更简单、可测、无解析器依赖。
+
+`AgentTypeDefinition(frozen=True)` 包含三个控制维度：
+1. **system_prompt** — 专属 prompt 模板（explore 强调只读、verify 要求 PASS/FAIL 结尾）
+2. **allowed_tools** — 工具白名单 tuple（explore/plan/verify 只含 read_file/glob/grep/bash；worker 为 None 表示全部）
+3. **max_iterations** — 迭代上限覆盖（explore/plan=30, verify=20, worker=50）
+
+参数透传链：`SubAgent.__init__(agent_type=)` → 选择 prompt + 合并工具白名单 + 浅拷贝 config 覆盖迭代上限。`SubAgentManager.spawn(agent_type="explore")` 名称解析为 `AgentTypeDefinition`。`SpawnAgentsTool` 和 `/spawn --type` 暴露给 LLM 和用户。
+
+## 48.3 设计权衡
+
+- **`_intersect_tools` 取交集而非覆盖**：agent_type 的 `allowed_tools` 与调用方传入的 `allowed_tools` 取交集——Team 系统的 `writes_files` 工具剥离不会被 agent_type 绕过
+- **浅拷贝 config**：`copy.copy(config)` 只覆盖 `max_agent_iterations`（int 不可变），子 dataclass 引用共享但 SubAgent 不会修改它们
+- **不与 Team 系统耦合**：`TeamMember.role` 是自由字符串，由 Planner 输出匹配——连接到 agent_type 会要求 Planner 输出类型名，耦合两个独立系统
+- **bash 保留在只读类型中**：安全由权限系统（沙箱/Hook）保障，类型系统只控制工具可见性
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——544 个测试约 56 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——559 个测试约 56 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
