@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **582 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **595 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -346,22 +346,19 @@
 2. **CJK 感知估算**（`llm/token_counter.py`）：按字符统计——CJK 字符（汉字/假名/谚文/全角符号）1 token/字，其余 4 字符/token；比原方案的"占比 >30% 则 len//2"更准且无阈值跳变。真实 API 实测校准：中文从 -56% 低估（危险方向）修正为 +76% 高估（安全方向——低估导致压缩不触发直至崩溃，高估只是压缩稍早），混合文本 +12%
 3. **顺带修复两个真实 bug**：①assistant 消息的 `token_count` 原来存 `usage.total_tokens`（含整个 prompt），按消息累加会把对话重复算 N 遍——改存 `completion_tokens`（消息自身大小）；②`assemble_response` 的 usage 直接覆盖，Anthropic 把 prompt/completion 拆在两个事件里会丢 prompt 计数——改按字段合并
 
-### 4.4 选择性记忆召回
+### 4.4 选择性记忆召回 ✅ 已实现（P52）
 
 | | mini | mewcode |
 |---|---|---|
-| 记忆注入方式 | 全部注入（最多 10 条） | **LLM 选择性召回**——先让 LLM 挑最相关的 ≤5 条 |
+| 记忆注入方式 | **LLM 选择性召回**——记忆 >10 条时 LLM 挑最相关的 ≤5 条注入 (P52) | **LLM 选择性召回**——先让 LLM 挑最相关的 ≤5 条 |
 
-**差距**：记忆条目多了以后全部注入浪费 token，且无关信息可能干扰 LLM。
-
-**增强方案**：
-1. 当记忆条目 >10 条时，启用选择性召回
-2. 构造一个轻量级 LLM 请求：把所有记忆的 `id + content 前 50 字符` 列表 + 用户最新消息发给 LLM，让它返回最相关的 ≤5 个 ID
-3. 只注入这 5 条完整内容
-4. ≤10 条时保持现有行为（全部注入，不额外调 LLM）
-5. 可选优化：召回请求与主 LLM 请求并行发起（非阻塞预取）
-
-代码改动：`memory/persistent.py` ~30 行 + `app.py` ~10 行。
+**已完成**（P52）：
+- `memory/recall.py` 新模块：`MemoryRecall.select_relevant()`——轻量 LLM 调用挑选相关记忆
+- 召回 prompt：所有记忆的 `id + content 前 50 字符` + 用户最新消息 → LLM 返回相关 ID 的 JSON 数组
+- `MemoryConfig` 新增 `recall_threshold=10` / `recall_top_k=5` 配置
+- ≤ threshold 时保持现有行为（全部注入，零额外调用）
+- fail-safe：LLM 失败/解析失败/幻觉 ID → 静默回退头部截断 `entries[:10]`
+- 保持 LLM 返回的相关性排序注入
 
 ### 4.5 记忆合并
 
@@ -647,7 +644,7 @@
 | ✅ 完成 | 7.1 | Hook 事件类型扩充（P50） | Hook 灵活性 | 已完成 |
 | ✅ 完成 | 2.1 | Pydantic Schema 生成（P46+P47） | 工具开发效率 | 已完成 |
 | ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
-| 🔵 P3 | 4.4 | 选择性记忆召回 | 记忆多时省 token | 半天 |
+| ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
 | 🔵 P3 | 4.5 | 记忆合并 | 记忆质量 | 半天 |
 | 🔵 P3 | 5.2 | 远程/浏览器模式 | 新使用场景 | 2 天 |
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |

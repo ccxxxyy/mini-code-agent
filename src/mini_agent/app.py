@@ -587,11 +587,32 @@ class Application:
                 entries += await pm.load_project_memory(app.session.metadata.project_dir)
             entries += await pm.load_user_memory()
             if entries and app.session.conversation.messages:
-                memory_text = "\n".join(f"- {e.content}" for e in entries[:10])
                 marker = "\n\n--- Relevant memories ---\n"
                 sp = app.session.conversation.system_prompt
                 if marker not in sp:
-                    app.session.conversation.system_prompt = sp + marker + memory_text
+                    mem_cfg = app.config.memory
+                    if len(entries) > mem_cfg.recall_threshold:
+                        # Selective recall: LLM picks the most relevant (P52)
+                        # 选择性召回：LLM 挑选最相关的记忆
+                        from mini_agent.memory.recall import MemoryRecall
+
+                        last_user = next(
+                            (
+                                m.content
+                                for m in reversed(app.session.conversation.messages)
+                                if m.role == Role.USER and m.content
+                            ),
+                            "",
+                        )
+                        recall = MemoryRecall(app._llm)
+                        selected = await recall.select_relevant(
+                            entries, last_user, top_k=mem_cfg.recall_top_k
+                        )
+                    else:
+                        selected = entries[:10]
+                    if selected:
+                        memory_text = "\n".join(f"- {e.content}" for e in selected)
+                        app.session.conversation.system_prompt = sp + marker + memory_text
             return HookResult()
 
         async def _session_end_extract_memory(ctx: HookContext) -> HookResult:

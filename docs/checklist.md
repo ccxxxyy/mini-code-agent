@@ -937,3 +937,17 @@
 - [x] 10 个内置工具（原 8 + tool_search + mcp_call）
 - [x] eager 模式行为完全不变（向后兼容）
 - [x] 13 个新测试（test_tool_search.py），总计 582 个全过
+
+---
+
+## Phase 52 检查项：选择性记忆召回
+
+- [x] `MemoryConfig.recall_threshold`（默认 10）/ `recall_top_k`（默认 5）
+- [x] 记忆 ≤ threshold 时行为完全不变（全部注入，零额外 LLM 调用）
+- [x] 记忆 > threshold 时轻量 LLM 调用挑选 ≤ top_k 条
+- [x] 召回 prompt 只发 `id + content 前 50 字符`（省 token）+ 用户消息截断 500 字符
+- [x] 按 LLM 返回顺序注入（保持相关性排序）
+- [x] fail-safe：llm=None / 异常 / 解析失败 / 非 list JSON → 回退 `entries[:10]`
+- [x] 幻觉 ID 静默忽略
+- [x] LLM 返回 `[]`（无相关记忆）时不注入
+- [x] 13 个新测试（test_memory_recall.py），总计 595 个全过

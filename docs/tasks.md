@@ -1149,3 +1149,26 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - mcp_call_executes/tool_search_tool_returns_results/tool_search_no_results
 - [x] `tests/integration/test_agent_e2e.py` 适配 10 工具集
 - [x] 582 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 52: 选择性记忆召回 (P52)
+
+### P52.1 实现
+- [x] `models/config.py` — MemoryConfig 新增 `recall_threshold: int = 10` / `recall_top_k: int = 5`
+- [x] `memory/recall.py` 新模块 — `MemoryRecall.select_relevant()`：轻量 LLM 调用挑选相关记忆
+- [x] RECALL_PROMPT：记忆列表（`id: content[:50]`）+ 用户最新消息（截断 500 字符）→ LLM 返回相关 ID JSON 数组
+- [x] `_parse_ids()`：去 markdown fence → json.loads → 校验 list 类型，失败返回 None
+- [x] 按 LLM 返回的 ID 顺序注入（保持相关性排序），截断到 top_k
+- [x] fail-safe 回退链：llm=None / stream 异常 / 解析失败 → `entries[:10]`（现有行为）
+- [x] 幻觉 ID 静默忽略（`by_id` 字典过滤）
+- [x] `app.py` — `_pre_llm_inject_memory` hook 接入：>threshold 走召回，≤threshold 走原逻辑
+- [x] marker 一次性注入机制保持不变（每会话注入一次）
+
+### P52.2 测试
+- [x] `tests/unit/test_memory_recall.py` 新文件，13 个测试：
+  - selects_by_ids / preserves_llm_order / caps_at_top_k
+  - invalid_json_fallback / llm_none_fallback / llm_exception_fallback / non_list_json_fallback
+  - unknown_ids_ignored / empty_result / empty_entries
+  - markdown_fenced_json / parse_ids_valid / parse_ids_invalid
+- [x] 595 个测试全过，ruff lint + format clean

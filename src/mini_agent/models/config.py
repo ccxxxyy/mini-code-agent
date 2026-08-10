@@ -65,6 +65,11 @@ class MemoryConfig:
     # Tool results above this size are spilled to disk (0 = disabled)
     # 超过此字符数的工具结果溢写磁盘（0 = 禁用）
     spill_threshold_chars: int = 50_000
+    # Selective recall: above this many memories, an LLM picks the most
+    # relevant ones instead of injecting the first N
+    # 选择性召回：记忆超过此数量时用 LLM 挑选最相关的，而非注入前 N 条
+    recall_threshold: int = 10
+    recall_top_k: int = 5
 
 
 @dataclass
