@@ -288,7 +288,7 @@ mini-code-agent/
 - [x] P40：权限规则文件（用户级/项目级 permissions.toml 自定义 allow/deny + 修复项目内 PATH deny 短路盲区）
 - [x] P41：OS 级沙箱（Linux bubblewrap + macOS Seatbelt 内核隔离：只读 rootfs + 可写白名单 + 可选禁网；sandbox_auto_allow 免确认但 deny 规则仍拦）
 
-**全部阶段已完成，595 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，611 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

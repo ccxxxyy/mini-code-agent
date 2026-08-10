@@ -37,9 +37,15 @@ class MemoryExtractor:
     """Extracts learnings from conversations via LLM and persists them.
     通过 LLM 从对话中提取学习内容并持久化。"""
 
-    def __init__(self, persistent_memory: PersistentMemory, llm: Any = None) -> None:
+    def __init__(
+        self,
+        persistent_memory: PersistentMemory,
+        llm: Any = None,
+        consolidation_threshold: int = 20,
+    ) -> None:
         self._memory = persistent_memory
         self._llm = llm
+        self._consolidation_threshold = consolidation_threshold
 
     async def maybe_extract(
         self,
@@ -68,7 +74,31 @@ class MemoryExtractor:
             else:
                 await self._memory.add_user_memory(entry)
 
+        await self._maybe_consolidate(project_dir)
         return new_entries
+
+    async def _maybe_consolidate(self, project_dir: Path | None) -> None:
+        """Consolidate memories when they grow beyond the threshold (P53).
+        记忆超过阈值时触发合并。Fail-safe: never raises. 绝不抛异常。"""
+        try:
+            if project_dir:
+                entries = await self._memory.load_project_memory(project_dir)
+            else:
+                entries = await self._memory.load_user_memory()
+            if len(entries) <= self._consolidation_threshold:
+                return
+
+            from mini_agent.memory.consolidation import MemoryConsolidator
+
+            merged = await MemoryConsolidator(self._llm).consolidate(entries)
+            if merged is None:
+                return
+            if project_dir:
+                await self._memory.save_project_memory(project_dir, merged)
+            else:
+                await self._memory.save_user_memory(merged)
+        except Exception:
+            pass
 
     async def _extract_candidates(self, conversation: Conversation) -> list[MemoryEntry]:
         """Call LLM to extract structured memories from recent messages.

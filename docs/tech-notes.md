@@ -1917,12 +1917,37 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **幻觉 ID 处理**：LLM 可能返回不存在的 ID，`by_id` 字典过滤自动忽略——不报错不重试
 - **不做并行预取**：comparison 提的可选优化（召回与主请求并行）会让 hook 结构复杂化，且 marker 机制每会话只注入一次，收益仅一次调用的延迟——不值得
 
+# 第五十三部分：记忆合并（P53）
+
+## 53.1 为什么需要：词重叠去重抓不住语义冗余
+
+提取时的 `_is_similar`（60% 词重叠）只能挡住表面相似的新条目。"喜欢 tabs" 和 "讨厌 spaces" 语义相关但零词重叠，会作为两条独立记忆累积。长期使用后记忆库充满这类语义冗余——每条都占注入配额（P52 召回也一样按条算）。
+
+## 53.2 实现：MemoryConsolidator + 双触发
+
+**`memory/consolidation.py`**（第三个轻量 LLM 调用模块，与 extraction/recall 同模式）：
+- CONSOLIDATION_PROMPT 发全部记忆的 `id: content` 全文（合并需要完整信息，不像召回只需要预览）
+- LLM 返回合并组 JSON：`[{"merge_ids": [...], "merged_content": "..."}]`
+- 合并规则：保留组内最新 `created_at`（信息新鲜度）、tags 并集保序去重、source="extracted"
+- 未合并条目原样保留，整个列表 bulk `save_*_memory` 替换
+
+**双触发**：
+1. **自动**：`MemoryExtractor.maybe_extract()` 末尾（SESSION_END），记忆 > `consolidation_threshold`（默认 20）
+2. **手动**：`/memory consolidate` 子命令，≥2 条即可跑（用户主动清理不受阈值限制）
+
+## 53.3 设计权衡
+
+- **返回 None 而非原列表**：`consolidate()` 无合并/失败时返回 None，调用方 no-op——避免无意义的整库重写（save 是全量替换，写坏了丢所有记忆）
+- **consumed 集合防重复消费**：LLM 可能让同一 ID 出现在多个合并组，只处理首组——否则一条记忆被合并两次会凭空复制信息
+- **有效 ID <2 的组直接忽略**：LLM 返回单 ID 组或全幻觉 ID 组时不产生合并条目——合并至少要两条真实记忆
+- **与 `_is_similar` 分工**：词重叠去重继续做提取时的廉价预过滤（挡住明显重复的新条目），LLM 合并做周期性深度清理（语义级）——两层互补而非替代
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——595 个测试约 56 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——611 个测试约 58 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

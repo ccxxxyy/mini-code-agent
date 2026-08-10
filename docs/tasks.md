@@ -1172,3 +1172,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - unknown_ids_ignored / empty_result / empty_entries
   - markdown_fenced_json / parse_ids_valid / parse_ids_invalid
 - [x] 595 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 53: 记忆合并 (P53)
+
+### P53.1 实现
+- [x] `models/config.py` — MemoryConfig 新增 `consolidation_threshold: int = 20`
+- [x] `memory/consolidation.py` 新模块 — `MemoryConsolidator.consolidate()`：LLM 识别语义相关的记忆组并合并
+- [x] CONSOLIDATION_PROMPT：全部记忆（`id: content` 全文）→ LLM 返回合并组 JSON（merge_ids + merged_content）
+- [x] `_parse_groups()`：去 fence → json.loads → 逐项校验（merge_ids 是 list、merged_content 非空 str）
+- [x] 合并规则：保留组内最新 created_at、tags 并集（保序去重）、source="extracted"
+- [x] 防护：幻觉 ID 过滤、有效 ID <2 的组忽略、跨组重复 ID 只处理首组（consumed 集合）
+- [x] 未合并条目原样保留
+- [x] fail-safe：llm=None / <2 条 / 异常 / 解析失败 / 无有效合并组 → 返回 None（调用方 no-op）
+- [x] `memory/extraction.py` — `MemoryExtractor.__init__` 新增 `consolidation_threshold` 参数；`maybe_extract()` 末尾调 `_maybe_consolidate()`（超阈值触发，try/except 包裹）
+- [x] `app.py` — 传 `config.memory.consolidation_threshold` 给 MemoryExtractor
+- [x] `extensions/builtin_commands.py` — `/memory consolidate` 手动子命令（≥2 条即可跑，无阈值限制）
+
+### P53.2 测试
+- [x] `tests/unit/test_memory_consolidation.py` 新文件，16 个测试：
+  - merges_group / keeps_newest_created_at / merges_tags / unmerged_preserved
+  - single_id_group_ignored / hallucinated_ids_filtered / duplicate_id_across_groups
+  - empty_result / invalid_json / llm_none / exception / fewer_than_two_entries → 全部返回 None
+  - markdown_fenced / parse_groups_valid / parse_groups_invalid / parse_groups_skips_malformed
+- [x] 611 个测试全过，ruff lint + format clean

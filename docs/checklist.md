@@ -951,3 +951,19 @@
 - [x] 幻觉 ID 静默忽略
 - [x] LLM 返回 `[]`（无相关记忆）时不注入
 - [x] 13 个新测试（test_memory_recall.py），总计 595 个全过
+
+---
+
+## Phase 53 检查项：记忆合并
+
+- [x] `MemoryConfig.consolidation_threshold`（默认 20，可配置）
+- [x] 记忆 ≤ threshold 时不触发合并（零额外 LLM 调用）
+- [x] LLM 识别语义相关组（词重叠去重抓不住的"喜欢 tabs"vs"讨厌 spaces"场景）
+- [x] 合并条目保留组内最新 created_at
+- [x] tags 并集（保序去重），source="extracted"
+- [x] 未合并条目原样保留
+- [x] 幻觉 ID 过滤 / 单 ID 组忽略 / 跨组重复 ID 只处理首组
+- [x] fail-safe：任何失败静默 no-op（合并绝不破坏现有记忆）
+- [x] `/memory consolidate` 手动触发（≥2 条即可）
+- [x] 自动触发点：SESSION_END 记忆提取后
+- [x] 16 个新测试（test_memory_consolidation.py），总计 611 个全过

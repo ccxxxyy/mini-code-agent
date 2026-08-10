@@ -620,7 +620,11 @@ class Application:
                 return HookResult()
             try:
                 pm = PersistentMemory()
-                extractor = MemoryExtractor(pm, app._llm)
+                extractor = MemoryExtractor(
+                    pm,
+                    app._llm,
+                    consolidation_threshold=app.config.memory.consolidation_threshold,
+                )
                 await extractor.maybe_extract(
                     app.session.conversation, app.session.metadata.project_dir
                 )

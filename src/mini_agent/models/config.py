@@ -70,6 +70,10 @@ class MemoryConfig:
     # 选择性召回：记忆超过此数量时用 LLM 挑选最相关的，而非注入前 N 条
     recall_threshold: int = 10
     recall_top_k: int = 5
+    # Memory consolidation: above this many entries, an LLM merges
+    # semantically related memories into one
+    # 记忆合并：条目超过此数量时用 LLM 语义合并相关记忆
+    consolidation_threshold: int = 20
 
 
 @dataclass
