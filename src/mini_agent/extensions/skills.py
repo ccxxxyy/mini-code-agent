@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -93,6 +95,71 @@ class SkillRegistry:
                     matched.append(skill)
                     break
         return matched
+
+    async def install(self, source: str, target_dir: Path) -> str:
+        """Install a skill from a local path or git URL into target_dir (P55).
+        从本地路径或 git URL 安装技能到 target_dir。"""
+        target_dir.mkdir(parents=True, exist_ok=True)
+        src_path = Path(source).expanduser()
+
+        if src_path.is_dir():
+            dir_name = src_path.name
+            dest = target_dir / dir_name
+            if dest.exists():
+                raise ValueError(f"Destination already exists: {dest}")
+            shutil.copytree(str(src_path), str(dest))
+        elif source.startswith("https://") or source.endswith(".git"):
+            dir_name = source.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+            dest = target_dir / dir_name
+            if dest.exists():
+                raise ValueError(f"Destination already exists: {dest}")
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                source,
+                str(dest),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                shutil.rmtree(str(dest), ignore_errors=True)
+                raise ValueError(f"git clone failed: {stderr.decode(errors='replace').strip()}")
+        else:
+            raise ValueError(f"Invalid source: {source} (expected a directory path or git URL)")
+
+        skill_file = dest / "SKILL.md"
+        if not skill_file.is_file():
+            shutil.rmtree(str(dest), ignore_errors=True)
+            raise ValueError(f"Invalid skill: no SKILL.md found in {dest.name}")
+        skill = self._parse_skill_file(skill_file)
+        if skill is None:
+            shutil.rmtree(str(dest), ignore_errors=True)
+            raise ValueError(f"Invalid SKILL.md in {dest.name}: missing 'name' field")
+
+        self.load_all()
+        return skill.name
+
+    def uninstall(self, name: str, target_dir: Path) -> bool:
+        """Uninstall a skill by removing its directory from target_dir (P55).
+        通过删除 target_dir 中的目录来卸载技能。"""
+        if not target_dir.is_dir():
+            return False
+        for child in target_dir.iterdir():
+            if not child.is_dir():
+                continue
+            skill_file = child / "SKILL.md"
+            if not skill_file.is_file():
+                continue
+            skill = self._parse_skill_file(skill_file)
+            if skill and skill.name == name:
+                shutil.rmtree(str(child), ignore_errors=True)
+                self._skills.pop(name, None)
+                self._active.discard(name)
+                return True
+        return False
 
     @staticmethod
     def _parse_skill_file(path: Path) -> Skill | None:

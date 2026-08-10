@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **616 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **621 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -546,17 +546,17 @@
 
 ## 八、Skill 系统
 
-### 8.1 Skill 安装
+### 8.1 Skill 安装 ✅ 已实现（P55）
 
 | | mini | mewcode |
 |---|---|---|
-| Skill 来源 | 内置 4 个 + 手动复制 | 内置 + **`/skill install <path>` 命令安装** |
+| Skill 来源 | 内置 4 个 + **`/skill install <path_or_url>` 命令安装** + `/skill uninstall` 卸载 (P55) | 内置 + **`/skill install <path>` 命令安装** |
 
-**增强方案**：
-1. `/skill install <path_or_url>`——从本地路径或 git URL 安装 skill 到 `~/.mini-agent/skills/`
-2. 安装时验证 skill 格式（有 `prompt.md` 或合法的 .md 文件）
-
-代码改动：`extensions/builtin_commands.py` ~20 行。
+**已完成**（P55）：
+- `SkillRegistry.install(source, target_dir)` — 本地路径 → `shutil.copytree`；git URL → `git clone --depth 1`
+- 安装后验证：SKILL.md 存在 + `name` 字段解析通过；验证失败自动清理
+- `SkillRegistry.uninstall(name, target_dir)` — 遍历匹配 SKILL.md 中的 name 字段后删除目录
+- `/skill install <path_or_url>` / `/skill uninstall <name>` 子命令
 
 ### 8.2 Skill 热重载
 
@@ -648,7 +648,7 @@
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
-| ⚪ P4 | 8.1 | Skill 安装命令 | 扩展性 | 2 小时 |
+| ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
 | ⚪ P4 | 8.2 | Skill 热重载 | 开发效率 | 2 小时 |
 | ⚪ P4 | 9.1 | 会话自动清理 | 磁盘管理 | 2 小时 |
 | ⚪ P4 | 9.2 | 会话压缩边界 | 恢复性能 | 半天 |

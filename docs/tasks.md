@@ -1217,3 +1217,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - has_uncommitted_changes（干净 False / 脏 True）
   - cleanup_stale_removes_old_clean / keeps_dirty / keeps_recent / disabled
 - [x] 616 个测试全过（1 skip：Windows symlink 权限），ruff lint + format clean
+
+---
+
+## Phase 55: Skill 安装命令 (P55)
+
+### P55.1 实现
+- [x] `extensions/skills.py` — `SkillRegistry.install(source, target_dir)` 安装方法
+  - 本地路径 → `shutil.copytree`
+  - git URL → `git clone --depth 1`
+  - 安装后验证 SKILL.md 存在 + name 字段解析通过；验证失败自动清理已复制目录
+- [x] `extensions/skills.py` — `SkillRegistry.uninstall(name, target_dir)` 卸载方法
+  - 遍历 target_dir 匹配 SKILL.md 中的 name 字段 → `shutil.rmtree` + 从内存注册表移除
+- [x] `extensions/builtin_commands.py` — `/skill install <path_or_url>` / `/skill uninstall <name>` 子命令
+  - 安装目标固定为 `~/.mini-agent/skills/`
+- [x] 已有安装拒绝（目标目录已存在 → 报错）
+
+### P55.2 测试
+- [x] `tests/unit/test_skills.py` 新增 5 个测试：
+  - install_from_local_path / install_invalid_no_skill_md / install_invalid_no_name
+  - uninstall_removes_dir / uninstall_not_found
+- [x] 621 个测试全过，ruff lint + format clean

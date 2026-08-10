@@ -984,3 +984,15 @@
 - [x] `has_uncommitted_changes()` 变更检测
 - [x] `/spawn wait` 结果显示 worktree 路径 + git merge 提示
 - [x] 6 个新测试（test_worktree.py），总计 616 个全过（1 skip）
+
+---
+
+## Phase 55 检查项：Skill 安装命令
+
+- [x] `/skill install <local_path>` 安装本地 skill（copytree + 验证 SKILL.md + name）
+- [x] `/skill install <git_url>` 安装远程 skill（git clone --depth 1 + 验证）
+- [x] 验证失败自动清理已复制/克隆的目录
+- [x] 目标已存在时拒绝覆盖
+- [x] `/skill uninstall <name>` 按 SKILL.md 中的 name 匹配删除
+- [x] 卸载同时从内存注册表移除
+- [x] 5 个新测试（test_skills.py），总计 621 个全过
