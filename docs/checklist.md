@@ -851,3 +851,30 @@
 - [x] 非 coordinator 模式行为不变（回归安全）
 - [x] Workers 保持完整工具集不受影响
 - [x] 3 个新测试，总计 521 个全过
+
+---
+
+## Phase 46 检查项：Pydantic Schema 生成
+
+- [x] 7/8 工具定义 `ParamsModel(BaseModel)`，`_schema_from_model()` 自动生成 ToolSchema
+- [x] BashTool 保留手写 schema（向后兼容验证）
+- [x] `validate_args()` Pydantic 路径支持类型自动转换（字符串→int）
+- [x] `pydantic>=2.0` 加入主依赖
+- [x] 17 个新测试，总计 543 个全过
+
+---
+
+## Phase 47 检查项：Pydantic Schema 全面增强
+
+- [x] `_resolve_refs()` 递归解引用 `$ref/$defs`，去除 `title` 噪声，`seen` 防循环
+- [x] `ToolSchema.raw_parameters` 字段：Pydantic 路径直通完整 JSON Schema
+- [x] `to_json_schema()` 双路径：`raw_parameters` 优先直通 / ToolParameter 后备（含 default 输出）
+- [x] `str | None`（anyOf）完整传递
+- [x] `list[str]`（array + items）完整传递
+- [x] 嵌套 Pydantic 模型（$ref 解引用内联）
+- [x] `Field(ge=0, le=100)` 约束（minimum/maximum/minLength/maxLength）
+- [x] `Literal["a","b"]`（enum）、`dict[str, int]`（additionalProperties）
+- [x] `default` 值出现在 JSON schema 输出中
+- [x] 循环引用防护（保留原始 $ref 不死循环）
+- [x] BashTool / MCP adapter 无需改动，后备路径正常工作
+- [x] 改写 7 个旧测试 + 新增 10 个测试，总计 544 个全过

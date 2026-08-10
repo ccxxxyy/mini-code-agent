@@ -679,15 +679,28 @@ class ToolParameter:
     enum: list[str] | None = None
 
 
+def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline all $ref pointers and strip Pydantic metadata (title).
+    Resolves $defs references, guards against circular refs with seen set."""
+    ...
+
+def _schema_from_model(name: str, description: str, model: type) -> ToolSchema:
+    """Build ToolSchema from Pydantic BaseModel via raw JSON Schema passthrough.
+    Calls model.model_json_schema() → _resolve_refs() → stores in raw_parameters."""
+    ...
+
+
 @dataclass
 class ToolSchema:
     """JSON Schema-like description of a tool."""
     name: str
     description: str
     parameters: list[ToolParameter]
+    raw_parameters: dict[str, Any] | None = None  # Pydantic 路径直通完整 JSON Schema
 
     def to_json_schema(self) -> dict[str, Any]:
-        """Convert to JSON Schema for LLM function calling."""
+        """Convert to JSON Schema for LLM function calling.
+        raw_parameters 非空时直通；否则从 ToolParameter 列表构建（后备路径）。"""
         ...
 
 
@@ -704,10 +717,13 @@ class ToolContext:
 class Tool(ABC):
     """Base class for all tools (builtin + MCP-adapted)."""
 
+    params_model: type | None = None  # Pydantic BaseModel for auto schema (P46)
+
     @property
-    @abstractmethod
     def schema(self) -> ToolSchema:
-        """Return the tool's schema for LLM registration."""
+        """Return the tool's schema. Auto-generated from params_model (P46)
+        via raw JSON Schema passthrough (P47); subclasses without
+        params_model must override."""
         ...
 
     @abstractmethod
@@ -716,7 +732,9 @@ class Tool(ABC):
         ...
 
     def validate_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Validate and coerce arguments against schema. Raises ValueError."""
+        """Validate and coerce arguments against schema.
+        Pydantic path (params_model set): full type coercion.
+        Manual path: basic required/default checks. Raises ValueError."""
         ...
 
 
@@ -730,7 +748,7 @@ class ToolRegistry:
     def unregister(self, name: str) -> None: ...
     def get(self, name: str) -> Tool: ...
     def list_tools(self) -> list[Tool]: ...
-    def get_schemas(self) -> list[ToolSchema]: ...
+    def get_schemas(self) -> list[dict[str, Any]]: ...
     def clone(self) -> ToolRegistry:
         """Create an independent copy (for sub-agents)."""
         ...
@@ -1542,33 +1560,17 @@ ProviderRegistry.register("anthropic", AnthropicProvider)
 ```python
 # tools/builtin/read_file.py
 
-class ReadFileTool(Tool):
+class ReadFileParams(BaseModel):
+    """Pydantic model for read_file parameters (P46). Auto-generates ToolSchema."""
+    file_path: str = Field(description="Path to the file to read")
+    offset: int = Field(default=0, description="Line number to start reading from (0-based)")
+    limit: int = Field(default=2000, description="Maximum number of lines to read")
 
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="read_file",
-            description=(
-                "Read the contents of a file at the given path. "
-                "Returns file content with line numbers."
-            ),
-            parameters=[
-                ToolParameter(
-                    name="file_path", type="string",
-                    description="Absolute path to the file to read",
-                ),
-                ToolParameter(
-                    name="offset", type="integer",
-                    description="Line number to start reading from (0-based)",
-                    required=False, default=0,
-                ),
-                ToolParameter(
-                    name="limit", type="integer",
-                    description="Maximum number of lines to read",
-                    required=False, default=2000,
-                ),
-            ],
-        )
+
+class ReadFileTool(Tool):
+    _name = "read_file"
+    _description = "Read the contents of a file at the given path. ..."
+    params_model = ReadFileParams  # schema auto-generated via _schema_from_model (P46/P47)
 
     async def execute(self, ctx: ToolContext, **kwargs) -> ToolResult:
         file_path = Path(kwargs["file_path"])
@@ -2532,7 +2534,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 
 **3. 全异步到底。** 所有 I/O 操作（LLM 调用、工具执行、MCP 调用、文件 I/O）均为异步。这使得通过 `asyncio.gather()` 并行执行工具成为可能，并在长时间操作期间保持 UI 响应。prompt_toolkit 的异步支持（`run_async()`）可自然集成。
 
-**4. dataclass 优先的数据模型。** 所有数据结构使用 `@dataclass`（多数为 `frozen=True` 以保证不可变）。核心模型不使用 Pydantic 以保持依赖图精简。Pydantic 仅用于配置验证（`config/schema.py`），发挥其验证优势。
+**4. dataclass 优先的数据模型。** 核心数据结构使用 `@dataclass`（多数为 `frozen=True` 以保证不可变）。Pydantic 用于两个场景：工具参数定义（`params_model`，P46/P47，自动生成 JSON Schema + 类型校验）和配置验证（`config/schema.py`）。其余模型不使用 Pydantic 以保持依赖图精简。
 
 **5. Provider 抽象使用直接 HTTP。** LLM Provider 使用 `httpx.AsyncClient`，而非依赖供应商 SDK（`openai`、`anthropic`）。这消除了重量级的传递依赖，完全掌控流式行为，并且轻松支持任何 OpenAI 兼容端点。供应商 SDK 可作为可选安装项，用于更精确的 token 计数。
 

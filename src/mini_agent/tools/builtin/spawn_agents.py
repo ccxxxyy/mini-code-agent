@@ -14,9 +14,7 @@ from mini_agent.tools.base import Tool, ToolContext
 class SpawnAgentsParams(BaseModel):
     """Pydantic model for spawn_agents parameters (P46). Auto-generates ToolSchema."""
 
-    tasks: list[str] = Field(
-        description="List of task descriptions, one per sub-agent"
-    )
+    tasks: list[str] = Field(description="List of task descriptions, one per sub-agent")
     isolated: bool = Field(
         default=False,
         description="Run each sub-agent in a Git worktree",

@@ -36,9 +36,19 @@ class ToolSchema:
     name: str
     description: str
     parameters: list[ToolParameter]
+    raw_parameters: dict[str, Any] | None = None
 
     def to_json_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function calling format. 转换为 OpenAI function calling 格式。"""
+        if self.raw_parameters is not None:
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": self.raw_parameters,
+                },
+            }
         properties: dict[str, Any] = {}
         required: list[str] = []
         for p in self.parameters:
@@ -48,6 +58,8 @@ class ToolSchema:
             }
             if p.enum:
                 prop["enum"] = p.enum
+            if p.default is not None:
+                prop["default"] = p.default
             properties[p.name] = prop
             if p.required:
                 required.append(p.name)
@@ -76,25 +88,41 @@ class ToolContext:
     subagent_manager: SubAgentManager | None = None
 
 
+def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline all $ref pointers and strip Pydantic metadata (title).
+    内联所有 $ref 引用并去除 Pydantic 元数据（title）。"""
+    defs = schema.get("$defs", {})
+
+    def _resolve(node: Any, seen: frozenset[str] = frozenset()) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref_name = node["$ref"].rsplit("/", 1)[-1]
+                if ref_name in defs and ref_name not in seen:
+                    resolved = _resolve(defs[ref_name], seen | {ref_name})
+                    extra = {k: v for k, v in node.items() if k != "$ref"}
+                    if extra:
+                        resolved = {**resolved, **extra}
+                    return resolved
+                return node
+            return {k: _resolve(v, seen) for k, v in node.items() if k not in ("title", "$defs")}
+        if isinstance(node, list):
+            return [_resolve(item, seen) for item in node]
+        return node
+
+    return _resolve(schema)
+
+
 def _schema_from_model(name: str, description: str, model: type) -> ToolSchema:
     """Build a ToolSchema from a Pydantic BaseModel (P46).
     从 Pydantic BaseModel 自动生成 ToolSchema。"""
-    json_schema = model.model_json_schema()
-    props = json_schema.get("properties", {})
-    required_set = set(json_schema.get("required", []))
-    parameters: list[ToolParameter] = []
-    for pname, prop in props.items():
-        parameters.append(
-            ToolParameter(
-                name=pname,
-                type=prop.get("type", "string"),
-                description=prop.get("description", ""),
-                required=pname in required_set,
-                default=prop.get("default"),
-                enum=prop.get("enum"),
-            )
-        )
-    return ToolSchema(name=name, description=description, parameters=parameters)
+    raw_schema = model.model_json_schema()
+    resolved = _resolve_refs(raw_schema)
+    return ToolSchema(
+        name=name,
+        description=description,
+        parameters=[],
+        raw_parameters=resolved,
+    )
 
 
 class Tool(ABC):

@@ -180,7 +180,7 @@ PyCharm 对 `dict[Type[Event], ...]` 报"不可哈希类型不能做字典键"�
 ### 设计权衡
 
 - **优先级实现为"分层字典按序覆盖"**：`env_layers` 列表低优先级在前、高优先级在后，遍历时后写覆盖先写，代码即文档。
-- **配置全部是 dataclass**（`models/config.py`）：AgentConfig 聚合 LLMConfig/ToolConfig/MCPConfig/MemoryConfig/SecurityConfig，类型安全 + IDE 补全，不用 Pydantic（核心模型保持零依赖，Pydantic 只留给未来的配置文件校验场景）。
+- **配置全部是 dataclass**（`models/config.py`）：AgentConfig 聚合 LLMConfig/ToolConfig/MCPConfig/MemoryConfig/SecurityConfig，类型安全 + IDE 补全。Pydantic 专用于工具参数定义（`params_model`，P46/P47 自动生成 JSON Schema + 类型校验）和配置文件校验，核心消息模型不使用 Pydantic。
 
 ---
 
@@ -202,7 +202,7 @@ class Tool(ABC):
     async def execute(ctx, **kwargs) -> ToolResult        # 怎么执行
 ```
 
-`ToolSchema` 是中立的内部表示（名称+描述+参数列表），通过 `to_json_schema()` 转成 OpenAI function calling 格式。这个中间层是关键设计——未来接 Anthropic 只需再写一个转换方法，工具本身零改动。
+`ToolSchema` 是中立的内部表示，通过 `to_json_schema()` 转成 OpenAI function calling 格式。Pydantic 工具（P46）通过 `params_model` 定义参数，`_schema_from_model()` 调用 `model_json_schema()` 后经 `_resolve_refs()` 解引用 `$ref/$defs`，完整 JSON Schema 存入 `ToolSchema.raw_parameters` 直通输出（P47）；手写 schema 工具（BashTool）和 MCP 适配工具走 ToolParameter 后备路径。Anthropic Provider 转换 OpenAI 格式为 Anthropic 格式，工具本身零改动。
 
 `ToolRegistry` 是扁平字典 `dict[str, Tool]`：
 
@@ -567,7 +567,7 @@ SessionStore:
     delete(session_id) → bool
 ```
 
-**序列化的关键挑战**：Message 中嵌套了 frozen dataclass（ToolCall/ToolResult）、datetime、Path——全部手动转换为 JSON 兼容类型（isoformat/str），不用 Pydantic 的 `.model_dump()` 以保持零依赖。
+**序列化的关键挑战**：Message 中嵌套了 frozen dataclass（ToolCall/ToolResult）、datetime、Path——全部手动转换为 JSON 兼容类型（isoformat/str），不用 Pydantic 的 `.model_dump()`（核心消息模型是 dataclass 不是 Pydantic model）。
 
 **反序列化重建完整对象图**：JSON → `_deserialize_session` → SessionMetadata + Conversation（含重建的 ToolCall/ToolResult 列表）。datetime 用 `fromisoformat` 还原，Role 用枚举构造。
 
@@ -742,7 +742,7 @@ You are a code reviewer. Follow these steps: ...
 - `MCPServerConnection.initialize()`：MCP 握手三步——initialize 请求（带 protocolVersion + clientInfo）→ initialized 通知 → tools/list 发现工具
 - `MCPManager`：多服务器连接管理（connect/disconnect/call_tool），`call_tool` 解析 MCP 响应的 content 数组提取 text 块拼接为输出
 
-**Adapter 层**（`adapter.py`）：`MCPToolAdapter` 实现内部 Tool ABC——这是关键设计。MCP 工具的 inputSchema（JSON Schema）转换为内部 ToolParameter 列表，工具名加 `mcp_{server}_` 前缀防冲突。适配后 MCP 工具**注册进同一个 ToolRegistry**，AgentLoop 调用它和调用内置工具零区别——权限检查、Hook 链、错误处理全部自动生效。
+**Adapter 层**（`adapter.py`）：`MCPToolAdapter` 实现内部 Tool ABC——这是关键设计。MCP 工具的 inputSchema（JSON Schema）转换为内部 ToolParameter 列表（走 `to_json_schema()` 的 ToolParameter 后备路径，与 Pydantic 工具的 `raw_parameters` 直通路径共存），工具名加 `mcp_{server}_` 前缀防冲突。适配后 MCP 工具**注册进同一个 ToolRegistry**，AgentLoop 调用它和调用内置工具零区别——权限检查、Hook 链、错误处理全部自动生效。
 
 ### 设计权衡
 
@@ -1771,12 +1771,48 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 
 入口：`/team --coordinator <task>` flag 解析（同 `--isolated` 的模式），通过 `TeamConfig.coordinator` 和 `Planner(coordinator=True)` 贯穿数据流。
 
+# 第四十六部分：Pydantic Schema 生成（P46）
+
+## 46.1 为什么需要：手写 schema 的维护成本
+
+每个工具手写 `ToolSchema(name=..., parameters=[ToolParameter(...), ...])` 容易出错（参数名拼错、漏字段、类型不对），且 JSON Schema 只反映了 Pydantic 能自动生成的信息子集。mewcode-python 用 Pydantic model 直接生成 JSON Schema 是明显更好的方案。
+
+## 46.2 实现：params_model + _schema_from_model
+
+每个工具定义 `ParamsModel(BaseModel)` 类（约 5 行），`Tool.params_model` 指向它。`_schema_from_model()` 调用 `model.model_json_schema()` 自动提取 properties/required，7/8 个工具完成转换，BashTool 保留手写 schema 作为向后兼容验证。`validate_args()` 在有 `params_model` 时走 Pydantic 路径（自动类型转换，字符串→int），否则走原手动校验。
+
+## 46.3 设计权衡
+
+- **为什么不全转？** BashTool schema 极简（两个参数），保留它验证手写路径始终可用
+- **pydantic 升级为主依赖**：P46 之前是可选依赖，但 schema 自动生成是核心功能，不应降级
+
+# 第四十七部分：Pydantic Schema 全面增强（P47）
+
+## 47.1 为什么需要：P46 的 _schema_from_model 丢信息
+
+P46 的 `_schema_from_model()` 只提取 `type/description/default/enum` 四个字段，Pydantic `model_json_schema()` 能产出的其他信息全部丢失：`str | None` 的 `anyOf` 结构、`list[str]` 的 `items` 子 schema、嵌套模型的 `$ref/$defs`、`Field(ge=0)` 约束、`Literal` 类型等。当前工具参数恰好都简单所以"碰巧能用"，但 schema 输出对 LLM 来说是不完整的。
+
+## 47.2 实现：Raw JSON Schema Passthrough
+
+**核心思路**：Pydantic 已经产出了正确完整的 JSON Schema，我们不应该拆解再重建，只需解引用 + 清理后直通。
+
+1. **`_resolve_refs(schema)`**：递归遍历 JSON Schema dict，遇到 `{"$ref": "#/$defs/X"}` 用 `$defs[X]` 内容替换；`seen: frozenset` 追踪已访问定义防循环引用；去除所有 `title` 和 `$defs` 键（LLM 不用，浪费 token）
+2. **`ToolSchema.raw_parameters`**：新增 `dict | None` 字段，Pydantic 路径存完整 JSON Schema
+3. **`to_json_schema()` 双路径**：`raw_parameters` 非空时直通输出；否则从 ToolParameter 列表构建（BashTool/MCP adapter 后备路径，同时补上 `default` 值输出）
+4. **`_schema_from_model()` 重写**：`model_json_schema()` → `_resolve_refs()` → 存入 `raw_parameters`，`parameters` 传空列表
+
+## 47.3 设计权衡
+
+- **为什么不扩充 ToolParameter？** 要加 `items/anyOf/properties/minimum/maximum/minLength/maxLength/pattern/additionalProperties/...` 等无穷字段，每增加 JSON Schema 特性就要改 ToolParameter + `_schema_from_model` + `to_json_schema` 三处。Raw Passthrough 一劳永逸——Pydantic 支持什么我们就支持什么
+- **为什么去 title？** Pydantic 给每个 property 加 `title`（默认为字段名的 Title Case），LLM 不用它且浪费 token
+- **循环引用**：理论上 Pydantic 递归类型会产生循环 `$ref`。`_resolve_refs` 用 `seen` 集合检测，遇到循环保留原始 `$ref` 不死循环。工具参数实际不会出现递归类型，但防护零成本
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——496 个测试约 58 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——544 个测试约 56 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
