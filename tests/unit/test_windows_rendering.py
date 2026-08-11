@@ -12,8 +12,6 @@ import io
 import pytest
 from rich.console import Console
 
-pytestmark = pytest.mark.asyncio
-
 
 def legacy_console(**kwargs) -> Console:
     """A console configured like legacy Windows CMD. 模拟 legacy CMD 的 Console。"""
@@ -30,6 +28,7 @@ def legacy_console(**kwargs) -> Console:
 # --- diff rendering on legacy console legacy 控制台的 diff 渲染 ---
 
 
+@pytest.mark.asyncio
 async def test_diff_renders_on_legacy_console():
     from mini_agent.ui.terminal import Terminal
 
@@ -46,6 +45,7 @@ async def test_diff_renders_on_legacy_console():
 # --- cost dashboard on legacy console ---
 
 
+@pytest.mark.asyncio
 async def test_cost_summary_renders_on_legacy():
     from mini_agent.core.cost_tracker import CostTracker
     from mini_agent.models.config import CostConfig
@@ -116,6 +116,7 @@ def test_esc_watcher_stop_joins(monkeypatch):
 # --- ask_yes_no fallback ---
 
 
+@pytest.mark.asyncio
 async def test_ask_yes_no_falls_back_to_input(monkeypatch):
     from mini_agent.ui.terminal import Terminal
 
@@ -132,6 +133,7 @@ async def test_ask_yes_no_falls_back_to_input(monkeypatch):
 # --- todo emoji fallback on legacy ---
 
 
+@pytest.mark.asyncio
 async def test_todo_labels_ascii_on_legacy(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
