@@ -45,6 +45,11 @@ class RemoteServer:
         self._pending_confirms: dict[str, asyncio.Future] = {}
         self._running_turn: asyncio.Task | None = None
 
+        # Wrap terminal to intercept UI calls and send to WebSocket
+        from mini_agent.remote.terminal import RemoteTerminalAdapter
+        self._original_terminal = app.terminal
+        app.terminal = RemoteTerminalAdapter(app.terminal, self._safe_send)
+
     async def start(self) -> None:
         """Start the WebSocket server and block until stopped.
         启动 WebSocket 服务器并阻塞直到停止。"""
@@ -124,6 +129,8 @@ class RemoteServer:
                         await self._running_turn
                     except asyncio.CancelledError:
                         await self._send("info", message="(cancelled)")
+                    except Exception as e:
+                        await self._send("error", message=f"Error: {str(e)}")
                     finally:
                         self._running_turn = None
 
@@ -163,7 +170,10 @@ class RemoteServer:
             asyncio.ensure_future(self._send("stream_end"))
 
         def on_tool_start(tc: Any) -> None:
-            args_preview = json.dumps(tc.arguments, ensure_ascii=False)[:200]
+            try:
+                args_preview = json.dumps(tc.arguments, ensure_ascii=False)[:200]
+            except (TypeError, ValueError):
+                args_preview = str(tc.arguments)[:200]
             asyncio.ensure_future(self._send("tool_call", name=tc.name, args=args_preview))
 
         def on_tool_end(tr: Any) -> None:
@@ -192,6 +202,11 @@ class RemoteServer:
         self._pending_confirms[req_id] = future
         await self._send("permission_request", id=req_id, prompt=prompt)
         return await future
+
+    def _safe_send(self, event_type: str, **data: Any) -> None:
+        """Non-async wrapper for _send, used by RemoteTerminalAdapter.
+        用于 RemoteTerminalAdapter 的非异步包装器。"""
+        asyncio.ensure_future(self._send(event_type, **data))
 
     async def _send(self, event_type: str, **data: Any) -> None:
         """Send a NDJSON event to the connected browser.

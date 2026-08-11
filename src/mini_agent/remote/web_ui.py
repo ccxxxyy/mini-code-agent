@@ -208,6 +208,12 @@ function connect() {
       case 'info':
         addMsg('info', msg.message);
         break;
+      case 'error':
+        addMsg('error', msg.message);
+        break;
+      case 'file_changes':
+        addMsg('info', 'Files changed:\\n' + (msg.items || []).join('\\n'));
+        break;
       case 'permission_request':
         const el = document.createElement('div');
         el.className = 'msg permission';

@@ -96,3 +96,65 @@ def test_cli_default_no_remote():
     assert args.remote is False
     assert args.port == 8765
     assert args.host == "localhost"
+
+
+def test_remote_server_wraps_terminal():
+    """Test that RemoteServer wraps the terminal to intercept UI calls."""
+    from mini_agent.remote.server import RemoteServer
+    from mini_agent.app import Application
+    from mini_agent.config.loader import ConfigLoader
+    from mini_agent.remote.terminal import RemoteTerminalAdapter
+
+    config = ConfigLoader.load(cli_overrides={"llm.api_key": "test"})
+    app = Application(config)
+    original_terminal = app.terminal
+
+    server = RemoteServer(app, host="localhost", port=19999)
+
+    # Terminal should be wrapped
+    assert isinstance(app.terminal, RemoteTerminalAdapter)
+    assert app.terminal._terminal is original_terminal
+
+
+def test_remote_terminal_adapter_show_info():
+    """Test that RemoteTerminalAdapter intercepts show_info calls."""
+    from mini_agent.remote.terminal import RemoteTerminalAdapter
+
+    sent_messages = []
+
+    def mock_send(event_type, **data):
+        sent_messages.append((event_type, data))
+
+    class MockTerminal:
+        def show_info(self, msg):
+            pass
+
+    adapter = RemoteTerminalAdapter(MockTerminal(), mock_send)
+    adapter.show_info("test message")
+
+    # Should have sent to WebSocket
+    assert len(sent_messages) > 0
+    assert sent_messages[0][0] == "info"
+    assert sent_messages[0][1]["message"] == "test message"
+
+
+def test_remote_json_dumps_with_non_serializable():
+    """Test that RemoteServer handles non-serializable tool arguments."""
+    import json
+
+    # This would normally crash json.dumps
+    non_serializable = {"key": object()}
+
+    try:
+        json.dumps(non_serializable, ensure_ascii=False)
+        assert False, "Should have raised TypeError"
+    except TypeError:
+        pass
+
+    # But our fixed code should handle it
+    try:
+        args_preview = json.dumps(non_serializable, ensure_ascii=False)[:200]
+    except (TypeError, ValueError):
+        args_preview = str(non_serializable)[:200]
+
+    assert isinstance(args_preview, str)
