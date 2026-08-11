@@ -1007,3 +1007,17 @@
 - [x] 磁盘删除的活跃 skill 报告为 lost
 - [x] `/skill reload` 子命令
 - [x] 5 个新测试（test_skills.py），总计 626 个全过
+
+---
+
+## Phase 57 检查项：远程/浏览器模式
+
+- [x] `websockets>=12.0` 可选依赖（`[remote]` 组），终端用户不受影响
+- [x] `--remote` / `--port` / `--host` CLI 参数
+- [x] WebSocket 服务器启动，首次 HTTP GET 返回嵌入式 HTML
+- [x] NDJSON 协议 7+2 种事件类型
+- [x] AgentLoop 6 个回调替换为 ws.send（不改 AgentLoop 代码）
+- [x] 权限确认通过 WebSocket 请求-响应（asyncio.Future）
+- [x] 浏览器 UI：深色主题、流式渲染、工具调用、权限按钮、自动重连
+- [x] websockets 未安装时优雅报错
+- [x] 8 个新测试（test_remote.py），总计 634 个全过

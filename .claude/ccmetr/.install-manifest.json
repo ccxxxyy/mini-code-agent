@@ -1,7 +1,7 @@
 {
   "mode": "replace",
   "target": "D:\\PythonProjects\\mini-code-agent\\.claude",
-  "timestamp": "2026-08-10T05:54:25Z",
+  "timestamp": "2026-08-11T06:57:02Z",
   "added": [
     "ccmetr/bin",
     "skills/metr-bug",
@@ -28,6 +28,7 @@
   "statusLine_was_set": true,
   "prior_statusLine": null,
   "schema_was_added": true,
+  "automode_env_added": false,
   "gitignore_created": true,
   "gitignore_lines_appended": [
     "settings.local.json",

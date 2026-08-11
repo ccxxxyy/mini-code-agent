@@ -1255,3 +1255,32 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - reload_updates_active_prompt / reload_reports_lost_skills
   - load_all_clears_stale
 - [x] 626 个测试全过，ruff lint + format clean
+
+---
+
+## Phase 57: 远程/浏览器模式 (P57)
+
+### P57.1 实现
+- [x] `pyproject.toml` — `websockets>=12.0` 可选依赖组 `[remote]`
+- [x] `remote/__init__.py` 新目录
+- [x] `remote/server.py` — RemoteServer 类
+  - WebSocket 服务器（`websockets.serve`），首次 HTTP GET 返回 HTML
+  - NDJSON 协议：7 种服务端事件 + 2 种客户端消息
+  - 替换 AgentLoop 的 6 个回调为 ws.send
+  - 权限确认通过 asyncio.Future 请求-响应
+  - 消息循环：user_input → _handle_turn / 斜杠命令
+- [x] `remote/web_ui.py` — 嵌入式 HTML 前端
+  - 深色主题（Catppuccin Mocha 色系）
+  - 流式文本渲染、工具调用折叠、权限 Allow/Always/Deny 按钮
+  - WebSocket 自动重连（2 秒）
+- [x] `cli.py` — `--remote` / `--port 8765` / `--host localhost` 参数
+  - remote 模式启动 RemoteServer 而非 app.run()
+  - websockets 未安装时优雅报错
+
+### P57.2 测试
+- [x] `tests/unit/test_remote.py` 新文件，8 个测试：
+  - ndjson_event_format / client_message_format
+  - permission_future_flow（3 种决策）
+  - web_ui_builds / web_ui_port_embedded
+  - remote_server_class_exists / cli_remote_args / cli_default_no_remote
+- [x] 634 个测试全过，ruff lint + format clean

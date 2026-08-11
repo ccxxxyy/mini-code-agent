@@ -33,6 +33,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Custom API base URL (for OpenAI-compatible endpoints)",
     )
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="Start in remote/browser mode (WebSocket server)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="WebSocket server port (default: 8765)",
+    )
+    parser.add_argument(
+        "--host",
+        default="localhost",
+        help="WebSocket server host (default: localhost)",
+    )
     from mini_agent import __version__
 
     parser.add_argument(
@@ -93,7 +109,13 @@ def main(argv: list[str] | None = None) -> None:
     app = Application(config)
 
     try:
-        asyncio.run(app.run())
+        if args.remote:
+            from mini_agent.remote.server import RemoteServer
+
+            server = RemoteServer(app, host=args.host, port=args.port)
+            asyncio.run(server.start())
+        else:
+            asyncio.run(app.run())
     except KeyboardInterrupt:
         pass
     finally:

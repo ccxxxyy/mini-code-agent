@@ -39,7 +39,7 @@ PLACEHOLDER_TOKEN = "PASTE-YOUR-STUDY-KEY-HERE"
 METR_TOKEN_ENV = "METR_AUTH_TOKEN"
 # Sent as X-CCMETR-Client-Version; the gateway 403s { code: client_outdated } if
 # this is too old. Bump per release (raise MAJOR for a breaking change).
-CLIENT_VERSION = "1.1.0"
+CLIENT_VERSION = "1.2.0"
 
 
 def base_url() -> str:
@@ -124,13 +124,30 @@ def read_stdin() -> dict:
         return {}
 
 
-def emit_additional_context(text: str) -> None:
-    """Hand text to the model as non-blocking context (the prompt still runs)."""
+# The only event this client is wired into whose contract accepts injected context
+# or a block decision. The same bin also runs for SubagentStart/SubagentStop, and
+# both outputs mean something different — or nothing — there.
+CONTEXT_EVENTS = frozenset({"UserPromptSubmit"})
+
+
+def emit_additional_context(text: str, event_name: str = "UserPromptSubmit") -> None:
+    """Hand text to the model as non-blocking context (the prompt still runs).
+
+    Only for an event that accepts it. Claude Code rejects a hookSpecificOutput
+    whose hookEventName does not match the event it fired for ("Hook returned
+    incorrect event name"), discards the payload and shows the participant a hook
+    error containing our stdout — so hardcoding the name broke the Subagent*
+    events deterministically, including a sub-agent finishing after /metr-finish
+    and driving its own upload. On any other event we stay silent: a sub-agent
+    stopping is not a turn anything should be injected into.
+    """
+    if event_name not in CONTEXT_EVENTS:
+        return
     print(
         json.dumps(
             {
                 "hookSpecificOutput": {
-                    "hookEventName": "UserPromptSubmit",
+                    "hookEventName": event_name,
                     "additionalContext": text,
                 }
             }
@@ -138,9 +155,21 @@ def emit_additional_context(text: str) -> None:
     )
 
 
-def emit_block(reason: str) -> None:
+def emit_block(reason: str, event_name: str = "UserPromptSubmit") -> None:
     """Block this prompt and show `reason` to the user (no model turn) — for auth
-    failures, where a model call would just 401 anyway."""
+    failures, where a model call would just 401 anyway.
+
+    NEVER on a Stop-family event. There {"decision": "block"} does not mean "drop
+    this prompt": it means "do NOT let this stop", so Claude Code resumes the
+    sub-agent with `reason` as its instruction, up to its stop-hook cap. An expired
+    key would then bill extra model turns inside the study's measured active time
+    and tell the agent to go open a URL and edit settings.local.json. For those
+    events the reason goes to stderr, where it lands in the hook log without
+    touching the run.
+    """
+    if event_name not in CONTEXT_EVENTS:
+        sys.stderr.write("[ccmetr] " + reason.replace("\n", " ")[:400] + "\n")
+        return
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
@@ -183,7 +212,10 @@ def ensure_settings_local() -> tuple[pathlib.Path, bool, bool]:
     data.setdefault("$schema", "https://json.schemastore.org/claude-code-settings.json")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
+        # Pid-unique: this PR makes the client re-entrant for the first time
+        # (SubagentStart/Stop fire in parallel), and a fixed ".tmp" name lets one
+        # writer truncate another's inode mid-write.
+        tmp = path.with_name(path.name + ".tmp." + str(os.getpid()))
         tmp.write_text(json.dumps(data, indent=2) + "\n")
         try:
             os.chmod(tmp, 0o600)  # the study key is a secret once pasted
@@ -191,7 +223,10 @@ def ensure_settings_local() -> tuple[pathlib.Path, bool, bool]:
             pass
         os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
     return path, created, filled_from_stash
 
 
@@ -318,7 +353,8 @@ def run_hook(event_name: str) -> int:
         emit_additional_context(
             "[ccmetr] The task tracker returned an unexpected (non-JSON) "
             "response. The gateway may be an incompatible version, so /metr-* "
-            "commands won't work until it's updated. Please report this."
+            "commands won't work until it's updated. Please report this.",
+            event_name,
         )
         return 0
     except urllib.error.HTTPError as e:
@@ -330,14 +366,28 @@ def run_hook(event_name: str) -> int:
                 info = {}
         except Exception:
             info = {}
-        if e.code == 403 and info.get("code") == "client_outdated":
+        # Only build the message on an event that can actually show it. Python
+        # evaluates the argument first, and auth_help_message() REWRITES
+        # settings.local.json as a side effect — so calling it unconditionally
+        # rewrote the participant's settings for a message that emit_block then
+        # discarded to stderr, on every sub-agent that happened to run while a key
+        # was expired. Gating the output was not enough; the work has to be gated.
+        if event_name not in CONTEXT_EVENTS:
+            sys.stderr.write(
+                "[ccmetr] gateway rejected the "
+                + event_name
+                + " hook with HTTP "
+                + str(e.code)
+                + " (auth or client version) - not shown to the model here\n"
+            )
+        elif e.code == 403 and info.get("code") == "client_outdated":
             # Refused version → block with the gateway's update message.
-            emit_block(upgrade_message(info))
+            emit_block(upgrade_message(info), event_name)
         elif e.code in (401, 403):
             # Not authenticated (fresh worktree, or expired/rotated key): block with
             # fix-it steps and (re)create the file. Renders directly (a model turn
             # would 401 too).
-            emit_block(auth_help_message())
+            emit_block(auth_help_message(), event_name)
         # Other HTTP errors stay quiet — never block the participant's prompt.
         return 0
     except Exception as e:
@@ -351,7 +401,7 @@ def run_hook(event_name: str) -> int:
     if summary:
         context = (context + "\n" + summary) if context else summary
     if context:
-        emit_additional_context(context)
+        emit_additional_context(context, event_name)
     return 0
 
 

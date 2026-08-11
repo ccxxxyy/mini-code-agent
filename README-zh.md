@@ -181,13 +181,57 @@ uv tool uninstall mini-code-agent
 
 各系统各终端的打开方法、兼容等级、问题排查见 [docs/terminal-guide.md](docs/terminal-guide.md)。
 
-### 6. 常用 CLI 参数
+### 6. 远程/浏览器模式
+
+在浏览器中使用 Agent——适用于远程服务器、iPad 等无终端场景。
+
+```bash
+# 安装远程模式依赖
+pip install mini-code-agent[remote]
+# 或从源码：
+uv sync --extra remote
+
+# 在任意工作目录启动
+cd /path/to/your/project
+mini --remote
+
+# 终端会显示：
+#   WebSocket: ws://localhost:8765
+#   Browser:   http://localhost:8766
+# 浏览器打开 http://localhost:8766 即可使用
+```
+
+工作目录就是你运行命令时所在的目录——和终端模式完全一样。
+
+**在任意目录使用**（全局安装）：
+
+```bash
+# 一次性全局安装（在项目目录执行）
+uv tool install . --extra remote
+
+# 之后在任何目录直接启动
+cd ~/my-project
+mini-agent --remote
+# 浏览器打开 http://localhost:8766
+```
+
+**自定义主机和端口：**
+
+```bash
+mini --remote --host 0.0.0.0 --port 9000
+# WebSocket: ws://0.0.0.0:9000
+# 浏览器:    http://0.0.0.0:9001
+```
+
+### 7. 常用 CLI 参数
 
 ```bash
 mini --help              # 查看所有可用参数
 mini --model gpt-4o      # 指定模型
 mini --provider openai   # 指定 Provider
 mini --base-url URL      # 自定义 API 地址
+mini --remote            # 远程/浏览器模式
+mini --port 9000         # 自定义 WebSocket 端口
 mini --version           # 查看版本
 ```
 
@@ -288,7 +332,7 @@ mini-code-agent/
 - [x] P40：权限规则文件（用户级/项目级 permissions.toml 自定义 allow/deny + 修复项目内 PATH deny 短路盲区）
 - [x] P41：OS 级沙箱（Linux bubblewrap + macOS Seatbelt 内核隔离：只读 rootfs + 可写白名单 + 可选禁网；sandbox_auto_allow 免确认但 deny 规则仍拦）
 
-**全部阶段已完成，626 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，634 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

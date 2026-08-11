@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **626 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **634 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -407,23 +407,20 @@
 1. **可折叠工具调用块**——Rich Panel + 用户按键切换展开/折叠（`/trace on` 已有类似信息，改为默认显示简略版、Ctrl+O 展开详情）
 2. **内联权限对话框**——当前的 `confirm()` 已经是 Panel 形式，足够好
 
-### 5.2 远程/浏览器模式
+### 5.2 远程/浏览器模式 ✅ 已实现（P57）
 
 | | mini | mewcode |
 |---|---|---|
-| 远程访问 | ❌ 只能本地终端 | ✅ WebSocket 服务器 + 浏览器 UI |
+| 远程访问 | ✅ `--remote` WebSocket 服务器 + 嵌入式浏览器 UI (P57) | ✅ WebSocket 服务器 + 浏览器 UI |
 
-**差距**：mewcode 可以 `--remote` 启动后在浏览器里用，适合远程服务器/iPad 等场景。
-
-**增强方案**：
-1. 新建 `remote/` 目录
-2. `ws_server.py`：用 `websockets` 库起 WebSocket 服务器（端口可配）
-3. `web_ui.py`：内嵌 HTML+CSS+JS 的浏览器前端（单文件，~300 行）
-4. 协议：NDJSON 事件流（stream_text / tool_call / tool_result / permission_request / user_input）
-5. `cli.py` 新增 `--remote` 参数
-6. 新增依赖：`websockets`
-
-代码改动：新增 ~400 行。优先级较低——大多数用户场景用终端就够了。
+**已完成**（P57）：
+- `remote/server.py` — RemoteServer：WebSocket 服务器，NDJSON 事件协议
+- `remote/web_ui.py` — 嵌入式 HTML+CSS+JS 浏览器前端（深色主题，流式文本/工具调用/权限对话框）
+- `cli.py` — `--remote` / `--port` / `--host` 参数
+- NDJSON 协议：7 种服务端事件（stream_start/text/end、tool_call/result、permission_request、info）+ 2 种客户端消息（user_input、permission_response）
+- 权限确认通过 WebSocket 请求-响应（asyncio.Future）
+- `websockets>=12.0` 可选依赖（`[remote]` 组，不影响终端用户）
+- 首次 HTTP GET 直接返回 HTML（无需单独 HTTP 服务器）
 
 ### 5.3 输入补全增强 ✅ 已实现
 
@@ -642,7 +639,7 @@
 | ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
 | ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
 | ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
-| 🔵 P3 | 5.2 | 远程/浏览器模式 | 新使用场景 | 2 天 |
+| ✅ 完成 | 5.2 | 远程/浏览器模式（P57） | 新使用场景 | 已完成 |
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |
