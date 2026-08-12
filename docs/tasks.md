@@ -1272,7 +1272,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - 新连接时 `_replay_history()` 回放对话历史
 - [x] `remote/web_ui.py` — 嵌入式 HTML 前端
   - 深色主题（Catppuccin Mocha 色系）
-  - Markdown 渲染（h1-h4、粗体、代码块、有序/无序列表、表格）
+  - Markdown 渲染（h1-h4、粗体、代码块、有序/无序列表、表格、链接+裸 URL、图片）
   - 流式文本渲染、工具调用（暗灰样式）、权限 Allow/Always/Deny 按钮（点击反馈+禁用）
   - Thinking 旋转指示器（荧光黄脉冲，工具调用间自动显示）
   - 用户输入框效果、起始引导（模型名+版本）

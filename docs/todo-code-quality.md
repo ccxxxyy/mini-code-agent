@@ -246,11 +246,11 @@ class ContextManager:
 ### 仍存在的已知局限
 - **单客户端**：`self._ws` 是单变量，新连接覆盖旧连接。多标签页同时打开会互相干扰
 - **无认证/TLS**：明文 `ws://`，无 token 验证，`Access-Control-Allow-Origin: *`。`--host 0.0.0.0` 时任何人可连
-- **浏览器刷新丢失会话**：无历史回放机制，刷新后对话丢失（服务端 Conversation 仍在内存）
-- **Markdown 不支持链接和图片**：`[text](url)` 和 `![alt](url)` 未实现
+- ~~浏览器刷新丢失会话~~ ✅ 已完成（`_replay_history()` 回放对话历史，服务器重启仍丢失）
+- ~~Markdown 不支持图片~~ ✅ 已支持（`![alt](url)` → `<img>`，仅公网 URL 可加载）
 
 ### 建议改进优先级
-1. 刷新时重放历史（从 `session.conversation` 提取已有消息发送给新连接）
-2. 链接渲染（renderMd 加 `[text](url)` → `<a>` 转换）
+1. ~~刷新时重放历史~~ ✅ 已完成（`_replay_history()`）
+2. ~~链接渲染~~ ✅ 已完成（`[text](url)` + 裸 URL 自动识别 + 图片）
 3. 简单 token 认证（`--remote-token` 参数，连接时验证）
 4. 多客户端支持（`self._ws` 改为 `set`，广播事件）
