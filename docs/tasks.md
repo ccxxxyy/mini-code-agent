@@ -1282,8 +1282,9 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - 拦截 show_info/show_error/show_file_changes 转发到浏览器
   - 内部 Python 异常过滤不推送到浏览器
   - show_file_changes 类型修复（list[tuple] 替代 dict）
-- [x] `cli.py` — `--remote` / `--port 8765` / `--host localhost` 参数
+- [x] `cli.py` — `--remote` / `--port 8765` / `--host localhost` / `--remote-token` 参数
   - remote 模式启动 RemoteServer 而非 app.run()
+  - `--remote-token` 可选认证（WS 首条消息验证 + HTTP 端点参数验证）
   - websockets 未安装时优雅报错
 - [x] `llm/base.py` — StreamChunk 加 `thinking` 字段
 - [x] `llm/openai_provider.py` — 捕获 `reasoning_content`
@@ -1291,7 +1292,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `core/agent_loop.py` — `on_thinking_delta` 回调 + `turn_start`/`turn_end` 事件
 
 ### P57.2 测试
-- [x] `tests/unit/test_remote.py`，20 个测试：
+- [x] `tests/unit/test_remote.py`，21 个测试：
   - NDJSON 格式：ndjson_event_format / client_message_format / turn_start_end / thinking_delta
   - 权限：permission_future_flow（3 种决策）
   - UI 构建：web_ui_builds / web_ui_port_embedded / web_ui_has_thinking_indicator

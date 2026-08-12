@@ -49,6 +49,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="localhost",
         help="WebSocket server host (default: localhost)",
     )
+    parser.add_argument(
+        "--remote-token",
+        default="",
+        help="Token for remote mode authentication (optional)",
+    )
     from mini_agent import __version__
 
     parser.add_argument(
@@ -112,7 +117,12 @@ def main(argv: list[str] | None = None) -> None:
         if args.remote:
             from mini_agent.remote.server import RemoteServer
 
-            server = RemoteServer(app, host=args.host, port=args.port)
+            server = RemoteServer(
+                app,
+                host=args.host,
+                port=args.port,
+                token=args.remote_token,
+            )
             asyncio.run(server.start())
         else:
             asyncio.run(app.run())

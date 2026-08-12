@@ -1013,7 +1013,7 @@
 ## Phase 57 检查项：远程/浏览器模式
 
 - [x] `websockets>=12.0` 可选依赖（`[remote]` 组），终端用户不受影响
-- [x] `--remote` / `--port` / `--host` CLI 参数
+- [x] `--remote` / `--port` / `--host` / `--remote-token` CLI 参数
 - [x] WebSocket 服务器 + HTTP 服务器（UI + `/cancel` + `/permission` 端点）
 - [x] NDJSON 协议 12 种服务端事件 + 2 种 WS 客户端消息
 - [x] 回调通过 `_ws_send()` 发送，多连接竞态安全
@@ -1024,4 +1024,4 @@
 - [x] `StreamChunk.thinking` + OpenAI/Anthropic Provider 捕获 reasoning/thinking
 - [x] 刷新时 `_replay_history()` 回放对话历史
 - [x] websockets 未安装时优雅报错
-- [x] 20 个新测试（test_remote.py），总计 649 个全过
+- [x] 21 个新测试（test_remote.py），总计 650 个全过
