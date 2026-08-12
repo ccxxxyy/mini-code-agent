@@ -79,7 +79,11 @@ in their current message. Answering a question is never a reason \
 to commit. Read-only git commands (status/log/diff) are fine.
 - Stay on the user's actual request. Do not expand a simple question \
 into project auditing, committing work, or cleaning up files the \
-user did not mention."""
+user did not mention.
+- IMPORTANT: Never assert that something will fail, pass, break, or work \
+without verifying it first using tools. If you claim a test will fail, run \
+it. If you say a variable has a certain value, read or print it. \
+Conclusions without evidence are worse than saying "I'm not sure -- let me check.\""""
 
 
 class Application:

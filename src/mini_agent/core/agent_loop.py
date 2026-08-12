@@ -40,6 +40,13 @@ ToolEndCallback = Callable[[ToolResult], None]
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 
+VERIFY_NUDGE = (
+    "Before finalizing: check if your response contains any unverified claims "
+    "(e.g., 'this test will fail', 'this variable is X'). "
+    "If so, use tools to verify now. If everything is already verified, "
+    "repeat your conclusion briefly."
+)
+
 
 class IncrementalAssembler:
     """Detects completed tool calls mid-stream.
@@ -179,6 +186,7 @@ class AgentLoop:
         tools_called = 0
         tokens_used = 0
         final_content = ""
+        verified = False
 
         try:
             await self._hooks.run(
@@ -217,11 +225,32 @@ class AgentLoop:
 
             # No tool calls -> final answer
             if not response.tool_calls:
+                # Self-verify: one chance to check unverified claims
+                # 自检：给 LLM 一次机会检查未验证的断言
+                if (
+                    self._config.self_verify
+                    and not verified
+                    and self._state.iteration > 1
+                ):
+                    verified = True
+                    conversation.append(
+                        Message(role=Role.USER, content=VERIFY_NUDGE)
+                    )
+                    continue
+
                 # Cancel orphan streaming tasks (partial stream after cancel)
                 # 取消孤儿流式任务（中断后流不完整时可能残留）
                 for task in self._streaming_tasks.values():
                     task.cancel()
                 self._streaming_tasks = {}
+                # Clean up verify nudge from conversation history
+                # 从会话历史中清理自检消息
+                if verified:
+                    conversation.messages = [
+                        m
+                        for m in conversation.messages
+                        if not (m.role == Role.USER and m.content == VERIFY_NUDGE)
+                    ]
                 final_content = response.content
                 await self._transition(AgentPhase.RESPONDING)
                 break

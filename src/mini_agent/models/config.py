@@ -138,6 +138,7 @@ class AgentConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 50
+    self_verify: bool = True
     # Execute tool calls as they finish assembling during streaming
     # 流式期间工具调用一组装完成就开始执行
     streaming_tool_execution: bool = True

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from mini_agent.core.agent_loop import AgentLoop
+from mini_agent.core.agent_loop import VERIFY_NUDGE, AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
@@ -66,8 +66,9 @@ def tool_call_response(name: str, arguments: dict) -> list[StreamChunk]:
     ]
 
 
-def make_loop(scripts, tool_context, registry=None):
-    config = AgentConfig()
+def make_loop(scripts, tool_context, registry=None, config=None):
+    if config is None:
+        config = AgentConfig(self_verify=False)
     if registry is None:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
@@ -424,3 +425,58 @@ async def test_plan_mode_off_allows_write(tool_context):
     await loop.run(conv)
     assert target.exists()
     assert target.read_text(encoding="utf-8") == "hello"
+
+
+async def test_self_verify_triggers_on_tool_turn(tool_context):
+    """After a tool-using turn, the loop injects a verify nudge before accepting."""
+    f = tool_context.working_dir / "x.txt"
+    f.write_text("data", encoding="utf-8")
+
+    scripts = [
+        tool_call_response("read_file", {"file_path": str(f)}),
+        text_response("The file has data"),
+        text_response("Verified: the file has data"),
+    ]
+    config = AgentConfig(self_verify=True)
+    llm = MockLLM(scripts)
+    loop = make_loop(scripts, tool_context, config=config)
+    loop._llm = llm
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert llm._call_count == 3
+    assert "Verified" in result or "data" in result
+    assert all(m.content != VERIFY_NUDGE for m in conv.messages)
+
+
+async def test_self_verify_skips_simple_answer(tool_context):
+    """Direct answers (no tool calls, iteration==1) skip self-verify."""
+    scripts = [text_response("42")]
+    llm = MockLLM(scripts)
+    loop = make_loop(scripts, tool_context)
+    loop._llm = llm
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert result == "42"
+    assert llm._call_count == 1
+
+
+async def test_self_verify_disabled(tool_context):
+    """self_verify=False skips the verify nudge."""
+    f = tool_context.working_dir / "y.txt"
+    f.write_text("content", encoding="utf-8")
+
+    scripts = [
+        tool_call_response("read_file", {"file_path": str(f)}),
+        text_response("done"),
+    ]
+    config = AgentConfig(self_verify=False)
+    llm = MockLLM(scripts)
+    loop = make_loop(scripts, tool_context, config=config)
+    loop._llm = llm
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert llm._call_count == 2
+    assert result == "done"
