@@ -69,6 +69,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             padding: 3px 8px; text-align: left; }
 .msg.assistant th { background: #313244; color: #cba6f7; }
 .msg.assistant strong { color: #f9e2af; }
+.msg.assistant a { color: #89b4fa; text-decoration: none; }
+.msg.assistant a:hover { text-decoration: underline; }
 .msg.assistant hr { display: none; }
 .msg.tool { color: #585b70; font-size: 12px; padding: 1px 0;
             margin-bottom: 2px; line-height: 1.4; }
@@ -200,7 +202,14 @@ function renderMd(text) {
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  h = h.replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g,
+    '<img src="$2" alt="$1" style="max-width:100%;border-radius:6px">');
+  h = h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
   h = h.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+  h = h.replace(/(https?:\\/\\/[^\\s<)]+)/g, (m) =>
+    m.startsWith('<a') ? m :
+    '<a href="' + m + '" target="_blank" rel="noopener">' + m + '</a>');
   h = h.replace(/^---$/gm, '<hr>');
   h = h.replace(/^\\d+\\.\\s+(.+)$/gm, '<oli>$1</oli>');
   h = h.replace(/(<oli>.*<\\/oli>)/gs, (m) =>

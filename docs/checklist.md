@@ -1019,7 +1019,7 @@
 - [x] 回调通过 `_ws_send()` 发送，多连接竞态安全
 - [x] 权限确认通过 HTTP POST + `call_soon_threadsafe`（绕过 WS 阻塞）
 - [x] Stop 通过 HTTP POST `/cancel`（独立线程即时生效）
-- [x] 浏览器 UI：深色主题、流式渲染、Markdown（h1-h4/列表/表格）、工具调用、权限按钮（点击反馈）、Thinking 指示器、自动重连
+- [x] 浏览器 UI：深色主题、流式渲染、Markdown（h1-h4/列表/表格/链接+裸URL/图片）、工具调用、权限按钮（点击反馈）、Thinking 指示器、自动重连
 - [x] `RemoteTerminalAdapter` 拦截 show_info/show_error/show_file_changes，内部异常过滤
 - [x] `StreamChunk.thinking` + OpenAI/Anthropic Provider 捕获 reasoning/thinking
 - [x] 刷新时 `_replay_history()` 回放对话历史
