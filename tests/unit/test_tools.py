@@ -24,8 +24,6 @@ from mini_agent.tools.builtin import (
     WriteFileTool,
 )
 
-pytestmark = pytest.mark.asyncio
-
 # --- ToolRegistry ---
 
 
@@ -153,6 +151,7 @@ def test_registry_mixed_pydantic_and_handwritten():
 # --- ReadFile ---
 
 
+@pytest.mark.asyncio
 async def test_read_file(tool_context):
     f = tool_context.working_dir / "hello.txt"
     f.write_text("line one\nline two\n", encoding="utf-8")
@@ -163,12 +162,14 @@ async def test_read_file(tool_context):
     assert result.metadata["total_lines"] == 2
 
 
+@pytest.mark.asyncio
 async def test_read_file_not_found(tool_context):
     result = await ReadFileTool().execute(tool_context, file_path="missing.txt")
     assert result.is_error
     assert "not found" in result.output.lower()
 
 
+@pytest.mark.asyncio
 async def test_read_file_offset_limit(tool_context):
     f = tool_context.working_dir / "many.txt"
     f.write_text("\n".join(f"line {i}" for i in range(100)), encoding="utf-8")
@@ -182,6 +183,7 @@ async def test_read_file_offset_limit(tool_context):
 # --- WriteFile ---
 
 
+@pytest.mark.asyncio
 async def test_write_file_creates(tool_context):
     target = tool_context.working_dir / "sub" / "new.txt"
     result = await WriteFileTool().execute(tool_context, file_path=str(target), content="hello")
@@ -190,6 +192,7 @@ async def test_write_file_creates(tool_context):
     assert "Created" in result.output
 
 
+@pytest.mark.asyncio
 async def test_write_file_overwrites(tool_context):
     target = tool_context.working_dir / "exists.txt"
     target.write_text("old", encoding="utf-8")
@@ -202,6 +205,7 @@ async def test_write_file_overwrites(tool_context):
 # --- EditFile ---
 
 
+@pytest.mark.asyncio
 async def test_edit_file_single_replace(tool_context):
     f = tool_context.working_dir / "code.py"
     f.write_text("x = 1\ny = 2\n", encoding="utf-8")
@@ -213,6 +217,7 @@ async def test_edit_file_single_replace(tool_context):
     assert "x = 42" in f.read_text(encoding="utf-8")
 
 
+@pytest.mark.asyncio
 async def test_edit_file_ambiguous_match(tool_context):
     f = tool_context.working_dir / "dup.txt"
     f.write_text("aaa\naaa\n", encoding="utf-8")
@@ -224,6 +229,7 @@ async def test_edit_file_ambiguous_match(tool_context):
     assert "2 times" in result.output
 
 
+@pytest.mark.asyncio
 async def test_edit_file_replace_all(tool_context):
     f = tool_context.working_dir / "dup.txt"
     f.write_text("aaa\naaa\n", encoding="utf-8")
@@ -235,6 +241,7 @@ async def test_edit_file_replace_all(tool_context):
     assert f.read_text(encoding="utf-8") == "bbb\nbbb\n"
 
 
+@pytest.mark.asyncio
 async def test_edit_file_not_found_text(tool_context):
     f = tool_context.working_dir / "x.txt"
     f.write_text("content", encoding="utf-8")
@@ -245,6 +252,7 @@ async def test_edit_file_not_found_text(tool_context):
     assert result.is_error
 
 
+@pytest.mark.asyncio
 async def test_edit_file_returns_diff_in_metadata(tool_context):
     f = tool_context.working_dir / "diff_test.py"
     f.write_text("x = 1\ny = 2\nz = 3\n", encoding="utf-8")
@@ -263,6 +271,7 @@ async def test_edit_file_returns_diff_in_metadata(tool_context):
 # --- Bash ---
 
 
+@pytest.mark.asyncio
 async def test_bash_echo(tool_context):
     result = await BashTool().execute(tool_context, command="echo hello")
     assert not result.is_error
@@ -270,6 +279,7 @@ async def test_bash_echo(tool_context):
     assert result.metadata["exit_code"] == 0
 
 
+@pytest.mark.asyncio
 async def test_bash_nonzero_exit(tool_context):
     cmd = "exit 3" if sys.platform != "win32" else "cmd /c exit 3"
     result = await BashTool().execute(tool_context, command=cmd)
@@ -277,6 +287,7 @@ async def test_bash_nonzero_exit(tool_context):
     assert result.metadata["exit_code"] == 3
 
 
+@pytest.mark.asyncio
 async def test_bash_timeout(tool_context):
     if sys.platform == "win32":
         cmd = "ping -n 30 127.0.0.1 >nul"
@@ -290,6 +301,7 @@ async def test_bash_timeout(tool_context):
 # --- Glob ---
 
 
+@pytest.mark.asyncio
 async def test_glob_finds_files(tool_context):
     (tool_context.working_dir / "a.py").write_text("", encoding="utf-8")
     (tool_context.working_dir / "b.py").write_text("", encoding="utf-8")
@@ -301,6 +313,7 @@ async def test_glob_finds_files(tool_context):
     assert "a.py" in result.output
 
 
+@pytest.mark.asyncio
 async def test_glob_no_match(tool_context):
     result = await GlobTool().execute(tool_context, pattern="*.nonexistent")
     assert not result.is_error
@@ -310,6 +323,7 @@ async def test_glob_no_match(tool_context):
 # --- Grep ---
 
 
+@pytest.mark.asyncio
 async def test_grep_finds_matches(tool_context):
     f = tool_context.working_dir / "code.py"
     f.write_text("def foo():\n    pass\n\ndef bar():\n    pass\n", encoding="utf-8")
@@ -320,6 +334,7 @@ async def test_grep_finds_matches(tool_context):
     assert "foo" in result.output
 
 
+@pytest.mark.asyncio
 async def test_grep_include_filter(tool_context):
     (tool_context.working_dir / "x.py").write_text("TODO fix", encoding="utf-8")
     (tool_context.working_dir / "y.txt").write_text("TODO fix", encoding="utf-8")
@@ -328,6 +343,7 @@ async def test_grep_include_filter(tool_context):
     assert result.metadata["matches"] == 1
 
 
+@pytest.mark.asyncio
 async def test_grep_context_lines(tool_context):
     f = tool_context.working_dir / "ctx.txt"
     f.write_text("before\ntarget\nafter\n", encoding="utf-8")
@@ -339,6 +355,7 @@ async def test_grep_context_lines(tool_context):
     assert "after" in result.output
 
 
+@pytest.mark.asyncio
 async def test_grep_invalid_regex(tool_context):
     result = await GrepTool().execute(tool_context, pattern="[invalid")
     assert result.is_error

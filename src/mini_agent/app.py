@@ -79,7 +79,11 @@ in their current message. Answering a question is never a reason \
 to commit. Read-only git commands (status/log/diff) are fine.
 - Stay on the user's actual request. Do not expand a simple question \
 into project auditing, committing work, or cleaning up files the \
-user did not mention."""
+user did not mention.
+- Verify before you claim: run a test before asserting it passes/fails, \
+count items before stating a number, read a function before describing its \
+signature. State each fact only ONCE in your final answer — never output \
+a draft followed by corrections. If you cannot verify, say "unverified".\""""
 
 
 class Application:
@@ -709,6 +713,11 @@ class Application:
 
         try:
             await self.agent_loop.run(self.session.conversation)
+            if self.agent_loop.stopped_early:
+                self.terminal.show_error(
+                    "⚠ Agent stopped early (iteration/loop limit reached). "
+                    "Try a more specific question to reduce tool calls."
+                )
             self.terminal.show_file_changes(self.agent_loop.last_turn_file_changes)
             turn_tokens = self.agent_loop.last_turn_tokens
             self.session.metadata.total_tokens_used += turn_tokens

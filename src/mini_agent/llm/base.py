@@ -34,6 +34,7 @@ class StreamChunk:
     """A single chunk from a streaming LLM response. 流式 LLM 响应中的单个 chunk。"""
 
     delta: str = ""
+    thinking: str = ""
     tool_call_deltas: list[ToolCallDelta] = field(default_factory=list)
     finish_reason: str | None = None
     usage: TokenUsage | None = None

@@ -31,8 +31,41 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/ccmetr/bin/ccmetr-client.py",
+              "hook",
+              "SubagentStart"
+            ],
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/ccmetr/bin/ccmetr-client.py",
+              "hook",
+              "SubagentStop"
+            ],
+            "timeout": 15000
+          }
+        ]
+      }
     ]
   },
+  "cleanupPeriodDays": 365,
   "statusLine": {
     "type": "command",
     "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/ccmetr/bin/ccmetr-client.py\" statusline",

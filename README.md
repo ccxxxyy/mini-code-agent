@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-626%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-634%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -85,6 +85,48 @@ mini --help   # see all options
 
 See [docs/terminal-guide.md](docs/terminal-guide.md) for how to open each terminal per OS and their compatibility levels.
 
+### Remote / Browser Mode
+
+Use the agent from a browser instead of the terminal — works on remote servers, iPads, or any device with a browser.
+
+```bash
+# 1. Install with remote support
+pip install mini-code-agent[remote]
+# Or from source:
+uv sync --extra remote
+
+# 2. Start in remote mode (from any working directory)
+cd /path/to/your/project
+mini --remote
+
+# 3. Open browser
+#    Terminal shows: Browser: http://localhost:8766
+#    Open that URL in your browser
+```
+
+The agent works on whatever directory you run the command from — just like terminal mode.
+
+**Running from any directory** (if installed globally):
+
+```bash
+# Global install (once)
+cd /path/to/mini-code-agent
+uv tool install . --extra remote
+
+# Then use anywhere
+cd ~/my-project
+mini-agent --remote
+# Browser: http://localhost:8766
+```
+
+**Custom host/port:**
+
+```bash
+mini --remote --host 0.0.0.0 --port 9000
+# WebSocket: ws://0.0.0.0:9000
+# Browser:   http://0.0.0.0:9001
+```
+
 ## Commands
 
 | Command | What it does |
@@ -98,15 +140,16 @@ See [docs/terminal-guide.md](docs/terminal-guide.md) for how to open each termin
 | `/fork [N]` | Branch conversation into a new session |
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |
-| `/spawn <task>` | Dispatch background sub-agent |
+| `/plan [on\|off]` | Toggle read-only plan mode (write tools disabled) |
+| `/spawn <task>` | Dispatch background sub-agent (`--type explore\|plan\|worker\|verify`) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
 | `/trace [on\|off]` | Show agent internals (phases, permissions, timing) |
 | `/explain [on\|off]` | Show tool usage explanations |
 | `/audit [on\|off\|verify]` | Audit logging with hash-chain integrity |
 | `/theme [dark\|light\|default]` | Switch color theme |
-| `/memory [add\|delete <text>]` | View, add or delete persistent memories |
+| `/memory [add\|delete\|consolidate]` | View, add, delete or consolidate memories |
 | `/session save\|list\|load\|delete` | Session management |
-| `/skill [activate\|deactivate]` | Manage skill packs |
+| `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | Manage skill packs |
 | `/compact` | Compress conversation history |
 | `/clear` | Clear conversation |
 | `/exit` | Exit |
@@ -140,15 +183,16 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 mini-code-agent/
 ├── src/mini_agent/
 │   ├── core/        # Agent loop, sub-agents, teams, planner, cost tracker
-│   ├── tools/       # 8 built-in tools + MCP protocol (stdio + HTTP)
+│   ├── tools/       # 10 built-in tools + MCP protocol (stdio + HTTP)
 │   ├── memory/      # Context compression, persistent memory, file snapshots
 │   ├── security/    # Permissions, path guard, git worktree isolation
 │   ├── ui/          # Rich terminal rendering, themes, prompt toolkit
+│   ├── remote/      # WebSocket server + browser UI (--remote mode)
 │   ├── extensions/  # Slash commands, skills, hooks
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 626 tests, 83%+ coverage
+├── tests/           # 634 tests, 83%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
 └── docs/            # 12 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -168,12 +212,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 626 tests
+uv run pytest tests/           # 634 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P56, 56 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P57, 57 phases).
 
 ## Publishing to PyPI
 

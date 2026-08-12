@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **626 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **634 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -407,23 +407,52 @@
 1. **可折叠工具调用块**——Rich Panel + 用户按键切换展开/折叠（`/trace on` 已有类似信息，改为默认显示简略版、Ctrl+O 展开详情）
 2. **内联权限对话框**——当前的 `confirm()` 已经是 Panel 形式，足够好
 
-### 5.2 远程/浏览器模式
+### 5.2 远程/浏览器模式 ✅ 已实现（P57）
 
 | | mini | mewcode |
 |---|---|---|
-| 远程访问 | ❌ 只能本地终端 | ✅ WebSocket 服务器 + 浏览器 UI |
+| 远程访问 | ✅ `--remote` WebSocket 服务器 + 嵌入式浏览器 UI (P57) | ✅ WebSocket 服务器 + 浏览器 UI |
 
-**差距**：mewcode 可以 `--remote` 启动后在浏览器里用，适合远程服务器/iPad 等场景。
+**已完成**（P57，经代码验证）：
 
-**增强方案**：
-1. 新建 `remote/` 目录
-2. `ws_server.py`：用 `websockets` 库起 WebSocket 服务器（端口可配）
-3. `web_ui.py`：内嵌 HTML+CSS+JS 的浏览器前端（单文件，~300 行）
-4. 协议：NDJSON 事件流（stream_text / tool_call / tool_result / permission_request / user_input）
-5. `cli.py` 新增 `--remote` 参数
-6. 新增依赖：`websockets`
+架构：
+- `remote/server.py` — RemoteServer：WebSocket 服务器（事件推送）+ HTTP 服务器（UI 托管 + `/cancel` + `/permission` 端点）
+- `remote/web_ui.py` — 嵌入式 HTML+CSS+JS 浏览器前端（`build_html()` 返回自包含页面，零外部依赖）
+- `remote/terminal.py` — RemoteTerminalAdapter：拦截 `show_info`/`show_error`/`show_file_changes` 三个方法转发到浏览器
+- `cli.py` — `--remote` / `--port` / `--host` 三个 CLI 参数
 
-代码改动：新增 ~400 行。优先级较低——大多数用户场景用终端就够了。
+NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP 端点）：
+- 服务端事件：`turn_start` / `turn_end` / `stream_start` / `stream_text` / `stream_end` / `thinking_delta` / `tool_call` / `tool_result` / `permission_request` / `info` / `error` / `file_changes`
+- WS 客户端消息：`user_input` / `cancel`（cancel 同时走 HTTP POST `/cancel` 绕过 WS 阻塞）
+- HTTP 端点：`POST /cancel`（通过独立 HTTP 线程设置 `agent_loop._cancelled`）/ `POST /permission?id=&decision=`（通过 `loop.call_soon_threadsafe` 线程安全解析 asyncio.Future）
+
+浏览器 UI 功能：
+- 深色主题（Catppuccin Mocha 色系）
+- 流式文本渲染 + Markdown 渲染（h1-h4 标题、**粗体**、`代码`、代码块、有序/无序列表、表格）
+- 工具调用/结果显示（暗灰色低调样式）
+- 权限确认对话框（Allow/Always/Deny 按钮，点击后高亮+禁用+左侧状态条反馈）
+- Thinking 旋转指示器（荧光黄脉冲动画，工具调用间自动显示）
+- 用户输入泡泡框（蓝色左边框 + 深灰背景，与输出明确区分）
+- 欢迎引导（显示当前模型名 + 可切换模型数量）
+- 斜杠命令自动补全下拉框
+- 自动滚动（底部 300px 阈值，用户上滚时不抢夺，info 消息强制滚到底）
+- Stop 按钮（HTTP POST `/cancel`，绕过 WS 阻塞即时生效）
+- 自动重连（断线 2 秒后重试）
+- `Cache-Control: no-cache` + meta 标签禁缓存
+
+安全与容错：
+- `websockets>=12.0` 可选依赖（`[remote]` 组），未安装时优雅报错
+- 内部 Python 异常（AttributeError/TypeError/Traceback 等）不推送到浏览器
+- 多连接竞态处理：`_ws_send()` 运行时读 `self._ws`（始终最新连接），旧连接退出不影响新连接
+
+测试：
+- 19 个单元测试覆盖：NDJSON 格式、权限 Future 流程、UI 构建、CLI 参数解析、终端适配器、StreamChunk.thinking 字段、Provider 解析 reasoning_content/thinking_delta、内部错误过滤、show_file_changes 类型修复
+
+**仍存在的局限**（已确认）：
+- 仅支持单客户端（`self._ws` 单变量，新连接覆盖旧连接）
+- 无认证/TLS（明文 `ws://`，无 token 验证，`Access-Control-Allow-Origin: *`）
+- 浏览器刷新丢失会话（无历史回放机制，刷新后需重新对话）
+- Markdown 渲染不支持链接（`[text](url)`）和图片（`![alt](url)`）
 
 ### 5.3 输入补全增强 ✅ 已实现
 
@@ -642,7 +671,7 @@
 | ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
 | ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
 | ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
-| 🔵 P3 | 5.2 | 远程/浏览器模式 | 新使用场景 | 2 天 |
+| ✅ 完成 | 5.2 | 远程/浏览器模式（P57） | 新使用场景 | 已完成 |
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |

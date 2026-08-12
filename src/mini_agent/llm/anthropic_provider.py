@@ -122,6 +122,8 @@ class AnthropicProvider(LLMProvider):
 
             if delta_type == "text_delta":
                 return StreamChunk(delta=delta.get("text", ""))
+            if delta_type == "thinking_delta":
+                return StreamChunk(thinking=delta.get("thinking", ""))
             if delta_type == "input_json_delta":
                 index = event.get("index", 0)
                 return StreamChunk(
@@ -254,7 +256,9 @@ class AnthropicProvider(LLMProvider):
         return anthropic_tools
 
     def count_tokens(self, text: str) -> int:
-        return max(1, len(text) // 4) if text else 0
+        from mini_agent.llm.token_counter import count_tokens
+
+        return count_tokens(text)
 
     @property
     def context_window(self) -> int:

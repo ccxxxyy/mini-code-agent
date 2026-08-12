@@ -35,6 +35,7 @@
 - **Worktree lifecycle** — new worktrees auto-symlink `node_modules`/`.venv`/`vendor` (skip reinstalls); stale clean worktrees older than `worktree_max_age_days` (7) are removed at startup (dirty ones kept); `/spawn wait` shows the worktree path with a `git merge` hint. Worktree 生命周期：依赖目录符号链接、过期干净 worktree 启动清理（脏的保留）、结果显示合并提示。
 - **Skill install/uninstall** — `/skill install <path_or_url>` installs a skill from a local directory or git URL into `~/.mini-agent/skills/` with SKILL.md validation (auto-cleanup on failure); `/skill uninstall <name>` removes by name. Skill 安装/卸载：从本地路径或 git URL 安装 skill，验证格式后自动清理失败项。
 - **Skill hot reload** — `/skill reload` rescans disk, updates active skill prompts in-place (strips old, injects new), and reports lost skills whose files were deleted. `load_all()` now clears before rescan so stale entries don't accumulate. Skill 热重载：`/skill reload` 重扫描磁盘，自动更新活跃 skill 的 prompt，报告磁盘已删除的 skill。
+- **Remote/Browser mode** — `--remote` starts a WebSocket server; open `http://localhost:8765` in a browser to use the agent remotely. NDJSON protocol (7 server events + 2 client messages), embedded dark-theme UI, permission dialogs via WebSocket request-response. Optional dependency: `websockets` (`uv sync --extra remote`). 远程/浏览器模式：`--remote` 启动 WebSocket 服务器，浏览器打开即用，NDJSON 协议通信，嵌入式深色主题 UI。
 
 ### Fixed 修复（P36 实战补修）
 
