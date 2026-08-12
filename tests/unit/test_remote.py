@@ -63,7 +63,7 @@ def test_web_ui_builds():
     assert "Mini-Code-Agent" in html
     assert "WebSocket" in html
     assert "user_input" in html
-    assert "permission_response" in html
+    assert "/permission?id=" in html
     assert "stream_text" in html
 
 
@@ -100,16 +100,16 @@ def test_cli_default_no_remote():
 
 def test_remote_server_wraps_terminal():
     """Test that RemoteServer wraps the terminal to intercept UI calls."""
-    from mini_agent.remote.server import RemoteServer
     from mini_agent.app import Application
     from mini_agent.config.loader import ConfigLoader
+    from mini_agent.remote.server import RemoteServer
     from mini_agent.remote.terminal import RemoteTerminalAdapter
 
     config = ConfigLoader.load(cli_overrides={"llm.api_key": "test"})
     app = Application(config)
     original_terminal = app.terminal
 
-    server = RemoteServer(app, host="localhost", port=19999)
+    RemoteServer(app, host="localhost", port=19999)
 
     # Terminal should be wrapped
     assert isinstance(app.terminal, RemoteTerminalAdapter)
@@ -195,8 +195,8 @@ def test_web_ui_has_thinking_indicator():
     assert "turn_start" in html
     assert "turn_end" in html
     assert "thinking_delta" in html
-    assert "id=\"thinking\"" in html
-    assert "Thinking..." in html
+    assert "thinking-indicator" in html
+    assert "showSpinner" in html
 
 
 def test_openai_parse_reasoning_content():

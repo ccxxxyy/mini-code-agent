@@ -4,15 +4,23 @@
 from __future__ import annotations
 
 
-def build_html(port: int = 8765) -> str:
+def build_html(
+    port: int = 8765,
+    version: str = "",
+    model: str = "",
+) -> str:
     """Return a self-contained HTML page that connects to the WS server.
     返回连接到 WS 服务器的自包含 HTML 页面。"""
-    return """\
+    return (
+        """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Mini-Code-Agent</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -32,28 +40,42 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 #messages::-webkit-scrollbar-track { background: transparent; }
 #messages::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
 #messages:hover::-webkit-scrollbar-thumb { background: rgba(166,173,200,0.3); }
-.msg { margin-bottom: 16px; line-height: 1.6; word-wrap: break-word;
+.msg { margin-bottom: 4px; line-height: 1.5; word-wrap: break-word;
        font-size: 14px; }
-.msg.user { color: #89b4fa; border-top: 1px solid #45475a;
-            border-bottom: 1px solid #45475a;
-            padding: 10px 0; margin-top: 8px; }
-.msg.assistant { color: #cdd6f4; }
-.msg.assistant h1 { font-size: 1.4em; margin: 12px 0 6px; color: #cba6f7; }
-.msg.assistant h2 { font-size: 1.2em; margin: 10px 0 4px; color: #cba6f7; }
-.msg.assistant h3 { font-size: 1.05em; margin: 8px 0 4px; color: #cba6f7; }
+.msg.user { color: #89b4fa; background: #313244; padding: 10px 16px;
+            border-radius: 8px; margin: 20px 0 16px;
+            border-left: 3px solid #89b4fa; }
+.msg.assistant { color: #cdd6f4; margin-bottom: 2px; }
+.msg.assistant h1 { font-size: 1.3em; margin: 0; color: #cba6f7; }
+.msg.assistant h2 { font-size: 1.15em; margin: 0; color: #cba6f7; }
+.msg.assistant h3 { font-size: 1.05em; margin: 0; color: #cba6f7; }
+.msg.assistant h4 { font-size: 1em; margin: 0; color: #cba6f7; }
 .msg.assistant code { background: #313244; padding: 2px 6px;
                       border-radius: 3px; font-size: 13px; }
 .msg.assistant pre { background: #313244; padding: 10px 14px;
                      border-radius: 6px; overflow-x: auto;
-                     margin: 8px 0; font-size: 13px; }
+                     margin: 4px 0; font-size: 13px; }
 .msg.assistant pre code { background: none; padding: 0; }
-.msg.assistant ul, .msg.assistant ol { margin: 6px 0 6px 20px; }
+.msg.assistant ul, .msg.assistant ol { margin: 1px 0 1px 0;
+            padding: 0; list-style: none; }
+.msg.assistant li { margin: 0; padding: 0; }
+.msg.assistant ul li::before { content: "\\2022  "; color: #a6adc8; }
+.msg.assistant ol { counter-reset: li; }
+.msg.assistant ol li::before { counter-increment: li;
+            content: counter(li) ". "; color: #cba6f7; }
+.msg.assistant table { border-collapse: collapse; margin: 4px 0;
+            font-size: 13px; }
+.msg.assistant th, .msg.assistant td { border: 1px solid #45475a;
+            padding: 3px 8px; text-align: left; }
+.msg.assistant th { background: #313244; color: #cba6f7; }
 .msg.assistant strong { color: #f9e2af; }
-.msg.assistant hr { border: none; border-top: 1px solid #45475a;
-                    margin: 12px 0; }
+.msg.assistant hr { display: none; }
 .msg.tool { color: #585b70; font-size: 12px; padding: 1px 0;
             margin-bottom: 2px; line-height: 1.4; }
-.msg.info { color: #94e2d5; font-style: italic; }
+.msg.info { color: #94e2d5; font-style: italic;
+            white-space: pre-wrap;
+            font-family: 'Cascadia Code', 'Consolas', monospace;
+            font-size: 13px; }
 .msg.error { color: #f38ba8; }
 .msg.permission { background: #45475a; padding: 10px 14px;
                   border-radius: 6px; }
@@ -88,12 +110,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #45475a; }
 #cmd-list div span { color: #a6adc8; margin-left: 8px;
                      font-size: 12px; }
-#thinking { display: none; padding: 8px 20px; color: #a6adc8;
-            font-size: 13px; font-style: italic; }
-#thinking .dot { display: inline-block; animation: pulse 1.4s infinite; }
-#thinking .dot:nth-child(2) { animation-delay: 0.2s; }
-#thinking .dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes pulse { 0%,80%,100% { opacity: 0.3; } 40% { opacity: 1; } }
+.msg.thinking-indicator { font-size: 20px; font-weight: 600;
+            color: #f9e2af; padding: 6px 0;
+            animation: pulse-text 1.5s ease-in-out infinite; }
+.msg.thinking-indicator .spinner { display: inline-block;
+            width: 18px; height: 18px;
+            border: 2px solid #585b70; border-top-color: #f9e2af;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            vertical-align: middle; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-text { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 .msg.thinking { color: #6c7086; font-size: 12px;
                 padding: 2px 0; margin-bottom: 4px; }
 .msg.thinking summary { cursor: pointer; color: #6c7086; }
@@ -104,14 +130,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 </head>
 <body>
 <div id="header">
-  <span>Mini-Code-Agent</span> Remote Mode
+  <span>Mini-Code-Agent</span> v"""
+        + (version or "dev")
+        + """
   <div id="status" class="disconnected">Disconnected</div>
 </div>
 <div id="messages"></div>
-<div id="thinking">
-  <span class="dot">&#x25CF;</span><span class="dot">&#x25CF;</span
-  ><span class="dot">&#x25CF;</span> Thinking...
-</div>
 <div id="cmd-list"></div>
 <div id="input-area">
   <input id="input" placeholder="Type a message... (/ for commands)"
@@ -126,14 +150,26 @@ const sendBtn = document.getElementById('send');
 const stopBtn = document.getElementById('stop');
 const cmdList = document.getElementById('cmd-list');
 const status = document.getElementById('status');
-const thinkingIndicator = document.getElementById('thinking');
 let ws = null;
 let streamEl = null;
 let streamBuf = '';
 let thinkingEl = null;
 let thinkingBuf = '';
+let spinnerEl = null;
 let isRunning = false;
 let cmdIdx = -1;
+
+function showSpinner() {
+  removeSpinner();
+  spinnerEl = document.createElement('div');
+  spinnerEl.className = 'msg thinking-indicator';
+  spinnerEl.innerHTML = '<span class="spinner"></span>Thinking...';
+  msgs.appendChild(spinnerEl);
+  autoScroll();
+}
+function removeSpinner() {
+  if (spinnerEl) { spinnerEl.remove(); spinnerEl = null; }
+}
 
 const CMDS = [
   ['/help', 'List all commands'],
@@ -160,20 +196,45 @@ function renderMd(text) {
   let h = text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
   h = h.replace(/```([\\s\\S]*?)```/g, '<pre><code>$1</code></pre>');
   h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  h = h.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
   h = h.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
   h = h.replace(/^---$/gm, '<hr>');
+  h = h.replace(/^\\d+\\.\\s+(.+)$/gm, '<oli>$1</oli>');
+  h = h.replace(/(<oli>.*<\\/oli>)/gs, (m) =>
+    '<ol>' + m.replace(/<\\/?oli>/g, (t) =>
+      t === '<oli>' ? '<li>' : '</li>') + '</ol>');
+  h = h.replace(/<\\/ol>\\s*<ol>/g, '');
   h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\\/li>)/gs, '<ul>$1</ul>');
   h = h.replace(/<\\/ul>\\s*<ul>/g, '');
+  // tables
+  h = h.replace(/(^\\|.+\\|\\n?)+/gm, (block) => {
+    const rows = block.trim().split('\\n').filter(r => r.trim());
+    if (rows.length < 2) return block;
+    const sep = rows[1];
+    if (!/^[\\s|:-]+$/.test(sep)) return block;
+    const parse = r => r.split('|').slice(1, -1).map(c => c.trim());
+    const hdr = parse(rows[0]);
+    let t = '<table><tr>' +
+      hdr.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+    for (let i = 2; i < rows.length; i++) {
+      const cells = parse(rows[i]);
+      t += '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+    }
+    return t + '</table>';
+  });
   h = h.replace(/\\n/g, '<br>');
+  h = h.replace(/(<br>){2,}/g, '<br>');
+  h = h.replace(/<br>(<(?:h[1234]|ul|ol|pre|table|li)>)/g, '$1');
+  h = h.replace(/(<\/(?:h[1234]|ul|ol|pre|table|li)>)<br>/g, '$1');
   return h;
 }
 
 function nearBottom() {
-  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 300;
 }
 function autoScroll() {
   if (nearBottom()) msgs.scrollTop = msgs.scrollHeight;
@@ -204,16 +265,15 @@ function connect() {
     status.className = 'disconnected';
     setTimeout(connect, 2000);
   };
-  ws.onmessage = (e) => {
+  ws.onmessage = (e) => { try {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
       case 'turn_start':
         setRunning(true);
-        thinkingIndicator.style.display = 'block';
-        autoScroll();
+        showSpinner();
         break;
       case 'turn_end':
-        thinkingIndicator.style.display = 'none';
+        removeSpinner();
         thinkingEl = null;
         thinkingBuf = '';
         streamEl = null;
@@ -221,7 +281,7 @@ function connect() {
         setRunning(false);
         break;
       case 'thinking_delta':
-        thinkingIndicator.style.display = 'none';
+        removeSpinner();
         if (!thinkingEl) {
           thinkingEl = document.createElement('div');
           thinkingEl.className = 'msg thinking';
@@ -240,7 +300,7 @@ function connect() {
         autoScroll();
         break;
       case 'stream_start':
-        thinkingIndicator.style.display = 'none';
+        removeSpinner();
         streamBuf = '';
         streamEl = addMsg('assistant', '');
         break;
@@ -254,16 +314,22 @@ function connect() {
       case 'stream_end':
         streamEl = null;
         streamBuf = '';
+        showSpinner();
         break;
       case 'tool_call':
+        removeSpinner();
         addMsg('tool', '\\u2699 ' + msg.name + ' ' + (msg.args || ''));
+        showSpinner();
         break;
       case 'tool_result':
+        removeSpinner();
         const prefix = msg.is_error ? '\\u2718 ' : '\\u2714 ';
         addMsg('tool', prefix + msg.name + ': ' + msg.output);
+        showSpinner();
         break;
       case 'info':
         addMsg('info', msg.message);
+        msgs.scrollTop = msgs.scrollHeight;
         break;
       case 'error':
         addMsg('error', msg.message);
@@ -272,25 +338,45 @@ function connect() {
         addMsg('info', 'Files changed:\\n' + (msg.items || []).join('\\n'));
         break;
       case 'permission_request':
-        const el = document.createElement('div');
-        el.className = 'msg permission';
-        const btns = '<br>' +
+        const pel = document.createElement('div');
+        pel.className = 'msg permission';
+        pel.setAttribute('data-perm-id', msg.id);
+        pel.innerHTML = msg.prompt + '<br>' +
           '<button class="btn-y" onclick="respond(\\'' +
-          msg.id + '\\',\\'y\\')">Allow</button>' +
+          msg.id + '\\',\\'y\\',this)">Allow</button>' +
           '<button class="btn-a" onclick="respond(\\'' +
-          msg.id + '\\',\\'a\\')">Always</button>' +
+          msg.id + '\\',\\'a\\',this)">Always</button>' +
           '<button class="btn-n" onclick="respond(\\'' +
-          msg.id + '\\',\\'n\\')">Deny</button>';
-        el.innerHTML = msg.prompt + btns;
-        msgs.appendChild(el);
+          msg.id + '\\',\\'n\\',this)">Deny</button>';
+        if (spinnerEl && spinnerEl.parentNode === msgs) {
+          msgs.insertBefore(pel, spinnerEl);
+        } else { msgs.appendChild(pel); }
         msgs.scrollTop = msgs.scrollHeight;
         break;
     }
-  };
+  } catch(err) { addMsg('error', 'JS ERROR: ' + err.message); } };
 }
 
-function respond(id, decision) {
-  if (ws) ws.send(JSON.stringify({type: 'permission_response', id, decision}));
+function respond(id, decision, btn) {
+  const p = parseInt(location.port);
+  fetch('http://' + location.hostname + ':' + p +
+    '/permission?id=' + id + '&decision=' + decision,
+    {method: 'POST'}).catch(() => {});
+  const perm = document.querySelector('[data-perm-id="' + id + '"]');
+  if (perm) {
+    perm.querySelectorAll('button').forEach(b => {
+      b.disabled = true;
+      b.style.opacity = '0.3';
+      b.style.cursor = 'default';
+    });
+    if (btn) {
+      btn.style.opacity = '1';
+      btn.style.fontWeight = 'bold';
+      btn.style.boxShadow = '0 0 4px currentColor';
+    }
+    perm.style.borderLeft = '3px solid ' +
+      (decision === 'y' || decision === 'a' ? '#a6e3a1' : '#f38ba8');
+  }
 }
 
 function setRunning(v) {
@@ -310,7 +396,9 @@ function send() {
 }
 
 function cancelRun() {
-  if (ws) ws.send(JSON.stringify({type: 'cancel'}));
+  const p = parseInt(location.port);
+  fetch('http://' + location.hostname + ':' + p + '/cancel',
+    {method: 'POST'}).catch(() => {});
   setRunning(false);
 }
 
@@ -368,3 +456,4 @@ connect();
 </script>
 </body>
 </html>"""
+    )

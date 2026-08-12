@@ -21,16 +21,10 @@ if TYPE_CHECKING:
     from mini_agent.app import Application
 
 
-_WEB_UI_HTML: str | None = None
+def _get_html(port: int, version: str = "", model: str = "") -> str:
+    from mini_agent.remote.web_ui import build_html
 
-
-def _get_html(port: int) -> str:
-    global _WEB_UI_HTML
-    if _WEB_UI_HTML is None:
-        from mini_agent.remote.web_ui import build_html
-
-        _WEB_UI_HTML = build_html(port)
-    return _WEB_UI_HTML
+    return build_html(port, version=version, model=model)
 
 
 class RemoteServer:
@@ -47,6 +41,7 @@ class RemoteServer:
 
         # Wrap terminal to intercept UI calls and send to WebSocket
         from mini_agent.remote.terminal import RemoteTerminalAdapter
+
         self._original_terminal = app.terminal
         app.terminal = RemoteTerminalAdapter(app.terminal, self._safe_send)
 
@@ -62,7 +57,9 @@ class RemoteServer:
             )
 
         http_port = self._port + 1
-        html = _get_html(self._port)
+        version = getattr(self._app, "version", "") or "1.0.0"
+        model = self._app.agent_loop.model_name or "unknown"
+        html = _get_html(self._port, version=version, model=model)
         self._start_http_server(html, self._host, http_port)
 
         print("Mini-Code-Agent remote mode")
@@ -73,18 +70,48 @@ class RemoteServer:
         async with websockets.serve(self._handler, self._host, self._port):
             await asyncio.Future()
 
-    @staticmethod
-    def _start_http_server(html: str, host: str, port: int) -> None:
+    def _start_http_server(self, html: str, host: str, port: int) -> None:
         """Start a background HTTP server to serve the browser UI.
         启动后台 HTTP 服务器提供浏览器 UI。"""
         html_bytes = html.encode("utf-8")
+        remote_server = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store")
                 self.end_headers()
                 self.wfile.write(html_bytes)
+
+            def do_POST(self) -> None:
+                if self.path == "/cancel":
+                    remote_server._app.agent_loop.cancel()
+                    self._ok()
+                elif self.path.startswith("/permission"):
+                    import urllib.parse as up
+
+                    qs = up.parse_qs(up.urlparse(self.path).query)
+                    req_id = qs.get("id", [""])[0]
+                    decision = qs.get("decision", ["n"])[0]
+                    remote_server._resolve_permission(req_id, decision)
+                    self._ok()
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def _ok(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def do_OPTIONS(self) -> None:
+                self.send_response(200)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "POST")
+                self.end_headers()
 
             def log_message(self, format: str, *args: Any) -> None:
                 pass
@@ -93,12 +120,32 @@ class RemoteServer:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
+    async def _ws_send(self, event_type: str, **data: Any) -> None:
+        """Send via the latest active WebSocket connection.
+        通过最新的活跃 WebSocket 连接发送。"""
+        ws = self._ws
+        if ws is None:
+            return
+        try:
+            await ws.send(json.dumps({"type": event_type, **data}, ensure_ascii=False))
+        except Exception:
+            pass
+
     async def _handler(self, websocket: Any) -> None:
         """Handle a single WebSocket connection.
         处理单个 WebSocket 连接。"""
         self._ws = websocket
         self._wire_callbacks()
-        await self._send("info", message="Connected to Mini-Code-Agent")
+
+        model = self._app.agent_loop.model_name or "unknown"
+        provider = self._app.config.llm.provider or "openai"
+        profiles = self._app.config.llm_profiles
+        model_count = max(1, len(profiles))
+        switch_hint = f"  |  {model_count} models, /model to switch" if model_count > 1 else ""
+        await self._ws_send(
+            "info",
+            message=(f"Welcome! Type a message to start.\nLLM: {model} ({provider}){switch_hint}"),
+        )
 
         try:
             async for raw in websocket:
@@ -114,73 +161,52 @@ class RemoteServer:
                     if not text:
                         continue
                     if text.lower() in ("exit", "quit"):
-                        await self._send("info", message="Goodbye!")
+                        await self._ws_send("info", message="Goodbye!")
                         break
                     if self._app.slash_commands.is_slash_command(text):
                         try:
                             result = await self._app.slash_commands.execute(text, self._app)
                             if result:
-                                await self._send("info", message=result)
+                                await self._ws_send("info", message=result)
                         except SystemExit:
                             break
                         continue
-                    await self._send("turn_start")
-                    self._running_turn = asyncio.create_task(self._app._handle_turn(text))
+                    await self._ws_send("turn_start")
                     try:
-                        await self._running_turn
-                    except asyncio.CancelledError:
-                        await self._send("info", message="(cancelled)")
+                        await self._app._handle_turn(text)
                     except Exception as e:
-                        await self._send("error", message=f"Error: {str(e)}")
+                        await self._ws_send("error", message=f"Error: {str(e)}")
                     finally:
-                        self._running_turn = None
-                        await self._send("turn_end")
+                        await self._ws_send("turn_end")
 
                 elif msg_type == "cancel":
-                    if self._running_turn and not self._running_turn.done():
-                        self._app.agent_loop.cancel()
-                        self._running_turn.cancel()
-
-                elif msg_type == "permission_response":
-                    req_id = msg.get("id", "")
-                    decision = msg.get("decision", "n")
-                    future = self._pending_confirms.pop(req_id, None)
-                    if future and not future.done():
-                        if decision == "y":
-                            future.set_result(True)
-                        elif decision == "a":
-                            future.set_result("always")
-                        else:
-                            future.set_result(False)
+                    self._app.agent_loop.cancel()
         except Exception:
             pass
-        finally:
-            self._ws = None
 
     def _wire_callbacks(self) -> None:
-        """Replace AgentLoop and PermissionManager callbacks to send over WS.
-        替换 AgentLoop 和 PermissionManager 的回调为 WS 发送。"""
-        loop = self._app.agent_loop
+        """Replace AgentLoop and PermissionManager callbacks.
+        回调通过 self._ws_send 发送，始终用最新连接。"""
+        al = self._app.agent_loop
 
-        def on_stream_start() -> None:
-            asyncio.ensure_future(self._send("stream_start"))
+        def fire(coro: Any) -> None:
+            asyncio.get_running_loop().create_task(coro)
 
-        def on_stream_delta(delta: str) -> None:
-            asyncio.ensure_future(self._send("stream_text", delta=delta))
-
-        def on_stream_end() -> None:
-            asyncio.ensure_future(self._send("stream_end"))
+        al.on_stream_start = lambda: fire(self._ws_send("stream_start"))
+        al.on_stream_delta = lambda d: fire(self._ws_send("stream_text", delta=d))
+        al.on_stream_end = lambda: fire(self._ws_send("stream_end"))
+        al.on_thinking_delta = lambda d: fire(self._ws_send("thinking_delta", delta=d))
 
         def on_tool_start(tc: Any) -> None:
             try:
-                args_preview = json.dumps(tc.arguments, ensure_ascii=False)[:200]
+                ap = json.dumps(tc.arguments, ensure_ascii=False)[:200]
             except (TypeError, ValueError):
-                args_preview = str(tc.arguments)[:200]
-            asyncio.ensure_future(self._send("tool_call", name=tc.name, args=args_preview))
+                ap = str(tc.arguments)[:200]
+            fire(self._ws_send("tool_call", name=tc.name, args=ap))
 
         def on_tool_end(tr: Any) -> None:
-            asyncio.ensure_future(
-                self._send(
+            fire(
+                self._ws_send(
                     "tool_result",
                     name=tr.name,
                     output=tr.output[:500],
@@ -188,39 +214,51 @@ class RemoteServer:
                 )
             )
 
-        def on_thinking_delta(delta: str) -> None:
-            asyncio.ensure_future(self._send("thinking_delta", delta=delta))
-
-        loop.on_stream_start = on_stream_start
-        loop.on_stream_delta = on_stream_delta
-        loop.on_stream_end = on_stream_end
-        loop.on_thinking_delta = on_thinking_delta
-        loop.on_tool_start = on_tool_start
-        loop.on_tool_end = on_tool_end
-
-        self._app.permission_manager.confirm_callback = self._confirm_via_ws
+        al.on_tool_start = on_tool_start
+        al.on_tool_end = on_tool_end
+        self._app.permission_manager._confirm = self._confirm_via_ws
 
     async def _confirm_via_ws(self, prompt: str) -> bool | str:
         """Send a permission request and await the browser's response.
         发送权限请求并等待浏览器的响应。"""
         req_id = uuid.uuid4().hex[:8]
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
         self._pending_confirms[req_id] = future
-        await self._send("permission_request", id=req_id, prompt=prompt)
+        self._event_loop = loop
+        ws = self._ws
+        if ws:
+            try:
+                event = json.dumps(
+                    {
+                        "type": "permission_request",
+                        "id": req_id,
+                        "prompt": prompt,
+                    },
+                    ensure_ascii=False,
+                )
+                await ws.send(event)
+            except Exception:
+                pass
         return await future
 
-    def _safe_send(self, event_type: str, **data: Any) -> None:
-        """Non-async wrapper for _send, used by RemoteTerminalAdapter.
-        用于 RemoteTerminalAdapter 的非异步包装器。"""
-        asyncio.ensure_future(self._send(event_type, **data))
-
-    async def _send(self, event_type: str, **data: Any) -> None:
-        """Send a NDJSON event to the connected browser.
-        发送 NDJSON 事件到浏览器。"""
-        if self._ws is None:
+    def _resolve_permission(self, req_id: str, decision: str) -> None:
+        """Called from HTTP thread to resolve a permission Future.
+        从 HTTP 线程调用，解析权限 Future。"""
+        future = self._pending_confirms.pop(req_id, None)
+        if not future or future.done():
             return
-        event = {"type": event_type, **data}
-        try:
-            await self._ws.send(json.dumps(event, ensure_ascii=False))
-        except Exception:
-            pass
+        loop = getattr(self, "_event_loop", None)
+        if not loop:
+            return
+        if decision == "y":
+            loop.call_soon_threadsafe(future.set_result, True)
+        elif decision == "a":
+            loop.call_soon_threadsafe(future.set_result, "always")
+        else:
+            loop.call_soon_threadsafe(future.set_result, False)
+
+    def _safe_send(self, event_type: str, **data: Any) -> None:
+        """Non-async wrapper used by RemoteTerminalAdapter.
+        RemoteTerminalAdapter 用的非异步包装器。"""
+        asyncio.get_running_loop().create_task(self._ws_send(event_type, **data))

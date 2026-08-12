@@ -256,7 +256,9 @@ class AnthropicProvider(LLMProvider):
         return anthropic_tools
 
     def count_tokens(self, text: str) -> int:
-        return max(1, len(text) // 4) if text else 0
+        from mini_agent.llm.token_counter import count_tokens
+
+        return count_tokens(text)
 
     @property
     def context_window(self) -> int:

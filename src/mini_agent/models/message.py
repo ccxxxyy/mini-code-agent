@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -81,8 +82,7 @@ class Conversation:
                             "type": "function",
                             "function": {
                                 "name": tc.name,
-                                "arguments": tc.raw_arguments
-                                or __import__("json").dumps(tc.arguments),
+                                "arguments": tc.raw_arguments or json.dumps(tc.arguments),
                             },
                         }
                         for tc in msg.tool_calls

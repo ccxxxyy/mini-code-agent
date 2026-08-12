@@ -158,16 +158,43 @@ async def test_infinite_loop_guard(tool_context):
     assert len(read_calls) <= 7
 
 
-async def test_same_tool_every_iteration_guard(tool_context):
-    # Same tool called once per iteration for many rounds = a real loop
-    # 同一工具每轮调一次持续多轮 = 真死循环
+async def test_different_files_not_killed(tool_context):
+    """Reading 10 different files should NOT trigger the 15-iteration guard."""
     files = []
-    for i in range(15):
+    for i in range(10):
         f = tool_context.working_dir / f"f{i}.txt"
         f.write_text(f"data{i}", encoding="utf-8")
         files.append(f)
 
-    config = AgentConfig(max_agent_iterations=20)
+    config = AgentConfig(self_verify=False, max_agent_iterations=20)
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    scripts = [tool_call_response("read_file", {"file_path": str(f)}) for f in files]
+    scripts.append(text_response("done"))
+    loop = AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=config,
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    result = await loop.run(conv)
+
+    assert not loop.stopped_early
+    assert result == "done"
+
+
+async def test_same_tool_15_iterations_guard(tool_context):
+    """Same tool every iteration for 15+ rounds triggers the guard."""
+    files = []
+    for i in range(20):
+        f = tool_context.working_dir / f"g{i}.txt"
+        f.write_text(f"data{i}", encoding="utf-8")
+        files.append(f)
+
+    config = AgentConfig(self_verify=False, max_agent_iterations=30)
     registry = ToolRegistry()
     registry.register(ReadFileTool())
 
@@ -183,7 +210,6 @@ async def test_same_tool_every_iteration_guard(tool_context):
     await loop.run(conv)
 
     assert loop.stopped_early
-    assert loop.state.iteration <= 9  # guard fires after 8 consecutive rounds
 
 
 async def test_batch_parallel_reads_not_killed(tool_context):

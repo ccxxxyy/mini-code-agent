@@ -185,7 +185,9 @@ class OpenAIProvider(LLMProvider):
         return chunk
 
     def count_tokens(self, text: str) -> int:
-        return len(text) // 4
+        from mini_agent.llm.token_counter import count_tokens
+
+        return count_tokens(text)
 
     @property
     def context_window(self) -> int:

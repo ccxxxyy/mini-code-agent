@@ -41,10 +41,10 @@ ToolEndCallback = Callable[[ToolResult], None]
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 
 VERIFY_NUDGE = (
-    "Before finalizing: check if your response contains any unverified claims "
-    "(e.g., 'this test will fail', 'this variable is X'). "
-    "If so, use tools to verify now. If everything is already verified, "
-    "repeat your conclusion briefly."
+    "Spot-check 2-3 key numbers or claims in your response using tools. "
+    "If all correct, reply with one sentence: 'Verified, no corrections.' "
+    "If any are wrong, reply with ONLY the corrections (e.g., "
+    "'Correction: X is actually Y'). Do NOT rewrite or repeat the full answer."
 )
 
 
@@ -227,15 +227,9 @@ class AgentLoop:
             if not response.tool_calls:
                 # Self-verify: one chance to check unverified claims
                 # 自检：给 LLM 一次机会检查未验证的断言
-                if (
-                    self._config.self_verify
-                    and not verified
-                    and self._state.iteration > 1
-                ):
+                if self._config.self_verify and not verified and self._state.iteration > 1:
                     verified = True
-                    conversation.append(
-                        Message(role=Role.USER, content=VERIFY_NUDGE)
-                    )
+                    conversation.append(Message(role=Role.USER, content=VERIFY_NUDGE))
                     continue
 
                 # Cancel orphan streaming tasks (partial stream after cancel)
@@ -698,15 +692,13 @@ class AgentLoop:
         recent = self._state.recent_tool_names[-6:]
         if len(recent) >= 6 and len(set(recent)) == 1:
             return False
-        # Infinite loop guard 2: the same tool name appears in EVERY one of
-        # the last 8 iterations (args ignored). Per-iteration granularity --
-        # reading 10 files in parallel within one iteration is normal batch
-        # work; calling read_file every iteration for 8 rounds is a loop.
-        # 死循环保护 2：同一工具名连续 8 轮迭代每轮都出现（不看参数）。
-        # 按轮统计——一轮内并行读 10 个文件是正常批量；连续 8 轮每轮都在
-        # read_file 才是死循环。
-        window = self._state.iteration_tools[-8:]
-        if len(window) >= 8:
+        # Infinite loop guard 2: same tool in every one of the last 15
+        # iterations. Generous threshold allows multi-file analysis while
+        # still catching real loops.
+        # 死循环保护 2：连续 15 轮每轮都有同一工具。
+        # 宽松阈值允许多文件分析，仍能捕获真死循环。
+        window = self._state.iteration_tools[-15:]
+        if len(window) >= 15:
             common = frozenset.intersection(*window)
             if common:
                 return False

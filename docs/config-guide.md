@@ -87,6 +87,85 @@
 
 ---
 
+## 快速上手：在任意目录使用 mini-agent
+
+默认情况下，API key 只在有 `.env` 文件的项目目录下生效。要在**任意目录**启动 `mini`，需要做以下**任一**配置：
+
+### 方法一：设置系统环境变量（推荐，一次设置永久生效）
+
+**Windows（PowerShell）**：
+
+```powershell
+# 设置 API key（必填）
+[System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-你的key", "User")
+
+# 如果使用第三方 API（DeepSeek、智谱、硅基流动等），还需设置 base URL
+[System.Environment]::SetEnvironmentVariable("OPENAI_BASE_URL", "https://你的api地址/v1", "User")
+
+# 可选：设置默认模型
+[System.Environment]::SetEnvironmentVariable("MINI_AGENT_MODEL", "deepseek-chat", "User")
+```
+
+设置后**重启终端**生效。之后在任何目录执行 `mini` 都可以正常启动。
+
+**macOS / Linux**：
+
+```bash
+# 添加到 ~/.bashrc 或 ~/.zshrc
+echo 'export OPENAI_API_KEY="sk-你的key"' >> ~/.bashrc
+echo 'export OPENAI_BASE_URL="https://你的api地址/v1"' >> ~/.bashrc
+echo 'export MINI_AGENT_MODEL="deepseek-chat"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 方法二：用户级配置文件（跨项目共用，不进 git）
+
+创建 `~/.mini-agent/config.toml`：
+
+```bash
+# Windows
+mkdir "%USERPROFILE%\.mini-agent"
+# macOS / Linux
+mkdir -p ~/.mini-agent
+```
+
+写入内容：
+
+```toml
+[llm]
+api_key = "sk-你的key"
+base_url = "https://你的api地址/v1"
+model = "deepseek-chat"
+```
+
+### 方法三：项目级 .env 文件（仅当前项目生效）
+
+在目标项目根目录创建 `.env` 文件：
+
+```bash
+OPENAI_API_KEY=sk-你的key
+OPENAI_BASE_URL=https://你的api地址/v1
+MINI_AGENT_MODEL=deepseek-chat
+```
+
+> **优先级提醒**：CLI 参数 > 环境变量 > .env > 项目 config.toml > 用户 config.toml > 默认值。高优先级覆盖低优先级。
+
+### 验证配置
+
+在目标目录执行：
+
+```bash
+mini --version    # 确认安装成功
+mini              # 启动 Agent
+```
+
+如果仍报错"未配置 API key"，检查：
+1. 终端是否重启过（环境变量需要重启终端生效）
+2. 环境变量名是否拼写正确（`OPENAI_API_KEY`，不是 `OPENAI_KEY`）
+3. 是否有更高优先级的配置覆盖（如 `.env` 中设了空值）
+
+---
+
 ## 三、config.toml 使用说明
 
 ### 创建
