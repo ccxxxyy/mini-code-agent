@@ -239,6 +239,28 @@ def test_anthropic_parse_thinking_delta():
     assert chunk.delta == ""
 
 
+def test_remote_terminal_adapter_suppresses_internal_errors():
+    """Internal Python errors are not sent to the browser."""
+    from mini_agent.remote.terminal import RemoteTerminalAdapter
+
+    sent = []
+
+    def mock_send(event_type, **data):
+        sent.append((event_type, data))
+
+    class MockTerminal:
+        def show_error(self, msg):
+            pass
+
+    adapter = RemoteTerminalAdapter(MockTerminal(), mock_send)
+    adapter.show_error("'list' object has no attribute 'items'")
+    assert len(sent) == 0
+
+    adapter.show_error("API 请求失败 (401)")
+    assert len(sent) == 1
+    assert sent[0][0] == "error"
+
+
 def test_remote_terminal_adapter_show_file_changes():
     """RemoteTerminalAdapter.show_file_changes handles list[tuple[str, str]]."""
     from mini_agent.remote.terminal import RemoteTerminalAdapter

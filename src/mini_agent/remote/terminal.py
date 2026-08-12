@@ -37,13 +37,16 @@ class RemoteTerminalAdapter:
         # Also log to terminal as fallback
         self._terminal.show_info(message)
 
+    _INTERNAL_MARKERS = ("object has no attribute", "Traceback", "TypeError", "KeyError")
+
     def show_error(self, message: str) -> None:
-        """Show error message in browser instead of terminal.
-        在浏览器中显示错误而不是终端。"""
-        try:
-            self._send_func("error", message=message)
-        except Exception:
-            pass
+        """Show error message in browser; suppress internal Python errors.
+        在浏览器中显示错误；抑制内部 Python 异常，不推送给用户。"""
+        if not any(m in message for m in self._INTERNAL_MARKERS):
+            try:
+                self._send_func("error", message=message)
+            except Exception:
+                pass
         self._terminal.show_error(message)
 
     def show_file_changes(self, changes: list[tuple[str, str]]) -> None:

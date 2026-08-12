@@ -260,7 +260,7 @@ function connect() {
         break;
       case 'tool_result':
         const prefix = msg.is_error ? '\\u2718 ' : '\\u2714 ';
-        addMsg(msg.is_error ? 'error' : 'tool', prefix + msg.name + ': ' + msg.output);
+        addMsg('tool', prefix + msg.name + ': ' + msg.output);
         break;
       case 'info':
         addMsg('info', msg.message);
