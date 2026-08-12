@@ -42,7 +42,7 @@ class RemoteServer:
         self._host = host
         self._port = port
         self._token = token
-        self._ws: Any = None
+        self._clients: set[Any] = set()
         self._pending_confirms: dict[str, asyncio.Future] = {}
         self._running_turn: asyncio.Task | None = None
 
@@ -144,15 +144,19 @@ class RemoteServer:
         thread.start()
 
     async def _ws_send(self, event_type: str, **data: Any) -> None:
-        """Send via the latest active WebSocket connection.
-        通过最新的活跃 WebSocket 连接发送。"""
-        ws = self._ws
-        if ws is None:
+        """Broadcast to all connected clients.
+        广播给所有已连接的客户端。"""
+        if not self._clients:
             return
-        try:
-            await ws.send(json.dumps({"type": event_type, **data}, ensure_ascii=False))
-        except Exception:
-            pass
+        payload = json.dumps({"type": event_type, **data}, ensure_ascii=False)
+        dead: list[Any] = []
+        for ws in list(self._clients):
+            try:
+                await ws.send(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._clients.discard(ws)
 
     async def _handler(self, websocket: Any) -> None:
         """Handle a single WebSocket connection.
@@ -171,7 +175,7 @@ class RemoteServer:
                 await websocket.close()
                 return
 
-        self._ws = websocket
+        self._clients.add(websocket)
         self._wire_callbacks()
 
         model = self._app.agent_loop.model_name or "unknown"
@@ -179,10 +183,19 @@ class RemoteServer:
         profiles = self._app.config.llm_profiles
         model_count = max(1, len(profiles))
         switch_hint = f"  |  {model_count} models, /model to switch" if model_count > 1 else ""
-        await self._ws_send(
-            "info",
-            message=(f"Welcome! Type a message to start.\nLLM: {model} ({provider}){switch_hint}"),
-        )
+        try:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "info",
+                        "message": f"Welcome! Type a message to start.\n"
+                        f"LLM: {model} ({provider}){switch_hint}",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            pass
         await self._replay_history()
 
         try:
@@ -221,6 +234,8 @@ class RemoteServer:
                     self._app.agent_loop.cancel()
         except Exception:
             pass
+        finally:
+            self._clients.discard(websocket)
 
     async def _replay_history(self) -> None:
         """Send existing conversation history to a newly connected browser.
@@ -293,20 +308,7 @@ class RemoteServer:
         future: asyncio.Future = loop.create_future()
         self._pending_confirms[req_id] = future
         self._event_loop = loop
-        ws = self._ws
-        if ws:
-            try:
-                event = json.dumps(
-                    {
-                        "type": "permission_request",
-                        "id": req_id,
-                        "prompt": prompt,
-                    },
-                    ensure_ascii=False,
-                )
-                await ws.send(event)
-            except Exception:
-                pass
+        await self._ws_send("permission_request", id=req_id, prompt=prompt)
         return await future
 
     def _resolve_permission(self, req_id: str, decision: str) -> None:
