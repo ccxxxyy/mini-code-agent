@@ -89,6 +89,16 @@ def test_cli_remote_args():
     assert args.host == "0.0.0.0"
 
 
+def test_cli_remote_token():
+    from mini_agent.cli import parse_args
+
+    args = parse_args(["--remote", "--remote-token", "secret123"])
+    assert args.remote_token == "secret123"
+
+    args2 = parse_args(["--remote"])
+    assert args2.remote_token == ""
+
+
 def test_cli_default_no_remote():
     from mini_agent.cli import parse_args
 

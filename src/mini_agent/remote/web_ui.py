@@ -262,10 +262,15 @@ function addMsg(cls, text) {
   return el;
 }
 
+const urlToken = new URLSearchParams(location.search).get('token') || '';
+
 function connect() {
   const wsPort = parseInt(location.port) - 1;
   ws = new WebSocket('ws://' + location.hostname + ':' + wsPort);
   ws.onopen = () => {
+    if (urlToken) {
+      ws.send(JSON.stringify({type: 'auth', token: urlToken}));
+    }
     status.textContent = 'Connected';
     status.className = 'connected';
   };
@@ -381,8 +386,9 @@ function connect() {
 
 function respond(id, decision, btn) {
   const p = parseInt(location.port);
+  const tk = urlToken ? '&token=' + urlToken : '';
   fetch('http://' + location.hostname + ':' + p +
-    '/permission?id=' + id + '&decision=' + decision,
+    '/permission?id=' + id + '&decision=' + decision + tk,
     {method: 'POST'}).catch(() => {});
   const perm = document.querySelector('[data-perm-id="' + id + '"]');
   if (perm) {
@@ -419,7 +425,8 @@ function send() {
 
 function cancelRun() {
   const p = parseInt(location.port);
-  fetch('http://' + location.hostname + ':' + p + '/cancel',
+  const tk = urlToken ? '?token=' + urlToken : '';
+  fetch('http://' + location.hostname + ':' + p + '/cancel' + tk,
     {method: 'POST'}).catch(() => {});
   setRunning(false);
 }

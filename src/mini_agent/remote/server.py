@@ -31,10 +31,17 @@ class RemoteServer:
     """WebSocket server bridging the agent to a browser UI.
     连接 Agent 和浏览器 UI 的 WebSocket 服务器。"""
 
-    def __init__(self, app: Application, host: str = "localhost", port: int = 8765) -> None:
+    def __init__(
+        self,
+        app: Application,
+        host: str = "localhost",
+        port: int = 8765,
+        token: str = "",
+    ) -> None:
         self._app = app
         self._host = host
         self._port = port
+        self._token = token
         self._ws: Any = None
         self._pending_confirms: dict[str, asyncio.Future] = {}
         self._running_turn: asyncio.Task | None = None
@@ -64,7 +71,11 @@ class RemoteServer:
 
         print("Mini-Code-Agent remote mode")
         print(f"  WebSocket: ws://{self._host}:{self._port}")
-        print(f"  Browser:   http://{self._host}:{http_port}")
+        if self._token:
+            print(f"  Browser:   http://{self._host}:{http_port}?token={self._token}")
+            print("  Auth:      token required")
+        else:
+            print(f"  Browser:   http://{self._host}:{http_port}")
         print("  Waiting for browser connection...")
 
         async with websockets.serve(self._handler, self._host, self._port):
@@ -84,8 +95,20 @@ class RemoteServer:
                 self.end_headers()
                 self.wfile.write(html_bytes)
 
+            def _check_token(self) -> bool:
+                if not remote_server._token:
+                    return True
+                import urllib.parse as up
+
+                qs = up.parse_qs(up.urlparse(self.path).query)
+                return qs.get("token", [""])[0] == remote_server._token
+
             def do_POST(self) -> None:
-                if self.path == "/cancel":
+                if not self._check_token():
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+                if self.path.startswith("/cancel"):
                     remote_server._app.agent_loop.cancel()
                     self._ok()
                 elif self.path.startswith("/permission"):
@@ -134,6 +157,20 @@ class RemoteServer:
     async def _handler(self, websocket: Any) -> None:
         """Handle a single WebSocket connection.
         处理单个 WebSocket 连接。"""
+        if self._token:
+            try:
+                raw = await asyncio.wait_for(websocket.recv(), timeout=10)
+                msg = json.loads(raw)
+                if msg.get("type") != "auth" or msg.get("token") != self._token:
+                    await websocket.send(
+                        json.dumps({"type": "error", "message": "Authentication failed"})
+                    )
+                    await websocket.close()
+                    return
+            except Exception:
+                await websocket.close()
+                return
+
         self._ws = websocket
         self._wire_callbacks()
 

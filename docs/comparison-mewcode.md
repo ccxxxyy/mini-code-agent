@@ -450,7 +450,7 @@ NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP �
 
 **仍存在的局限**（已确认）：
 - 仅支持单客户端（`self._ws` 单变量，新连接覆盖旧连接）
-- 无认证/TLS（明文 `ws://`，无 token 验证，`Access-Control-Allow-Origin: *`）
+- 无 TLS（明文 `ws://`）。可选 token 认证（`--remote-token`），未设时无认证
 - 浏览器刷新可恢复对话历史（`_replay_history()`），但服务器重启后丢失（远程模式未接入 SessionStore）
 - Markdown 图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
 

@@ -245,12 +245,12 @@ class ContextManager:
 
 ### 仍存在的已知局限
 - **单客户端**：`self._ws` 是单变量，新连接覆盖旧连接。多标签页同时打开会互相干扰
-- **无认证/TLS**：明文 `ws://`，无 token 验证，`Access-Control-Allow-Origin: *`。`--host 0.0.0.0` 时任何人可连
+- ~~无认证~~ ✅ 已完成（`--remote-token` 可选 token 认证，WS+HTTP 双通道验证）。仍无 TLS（明文 `ws://`）
 - ~~浏览器刷新丢失会话~~ ✅ 已完成（`_replay_history()` 回放对话历史，服务器重启仍丢失）
 - ~~Markdown 不支持图片~~ ✅ 已支持（`![alt](url)` → `<img>`，仅公网 URL 可加载）
 
 ### 建议改进优先级
 1. ~~刷新时重放历史~~ ✅ 已完成（`_replay_history()`）
 2. ~~链接渲染~~ ✅ 已完成（`[text](url)` + 裸 URL 自动识别 + 图片）
-3. 简单 token 认证（`--remote-token` 参数，连接时验证）
+3. ~~简单 token 认证~~ ✅ 已完成（`--remote-token`，WS 首条消息验证 + HTTP 端点验证）
 4. 多客户端支持（`self._ws` 改为 `set`，广播事件）
