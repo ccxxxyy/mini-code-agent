@@ -127,6 +127,7 @@ class AgentLoop:
         self.on_stream_delta: StreamCallback | None = None
         self.on_stream_start: Callable[[], None] | None = None
         self.on_stream_end: Callable[[], None] | None = None
+        self.on_thinking_delta: Callable[[str], None] | None = None
         self.on_tool_start: ToolStartCallback | None = None
         self.on_tool_end: ToolEndCallback | None = None
         self.on_tool_call_assembling: Callable[[str], None] | None = None
@@ -342,6 +343,13 @@ class AgentLoop:
             if self._cancelled:
                 break
             chunks.append(chunk)
+            if chunk.thinking:
+                if not stream_started:
+                    stream_started = True
+                    if self.on_stream_start:
+                        self.on_stream_start()
+                if self.on_thinking_delta:
+                    self.on_thinking_delta(chunk.thinking)
             if chunk.delta:
                 if not stream_started:
                     stream_started = True

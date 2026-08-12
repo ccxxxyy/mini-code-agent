@@ -124,6 +124,7 @@ class RemoteServer:
                         except SystemExit:
                             break
                         continue
+                    await self._send("turn_start")
                     self._running_turn = asyncio.create_task(self._app._handle_turn(text))
                     try:
                         await self._running_turn
@@ -133,6 +134,7 @@ class RemoteServer:
                         await self._send("error", message=f"Error: {str(e)}")
                     finally:
                         self._running_turn = None
+                        await self._send("turn_end")
 
                 elif msg_type == "cancel":
                     if self._running_turn and not self._running_turn.done():
@@ -186,9 +188,13 @@ class RemoteServer:
                 )
             )
 
+        def on_thinking_delta(delta: str) -> None:
+            asyncio.ensure_future(self._send("thinking_delta", delta=delta))
+
         loop.on_stream_start = on_stream_start
         loop.on_stream_delta = on_stream_delta
         loop.on_stream_end = on_stream_end
+        loop.on_thinking_delta = on_thinking_delta
         loop.on_tool_start = on_tool_start
         loop.on_tool_end = on_tool_end
 

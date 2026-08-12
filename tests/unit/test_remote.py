@@ -158,3 +158,103 @@ def test_remote_json_dumps_with_non_serializable():
         args_preview = str(non_serializable)[:200]
 
     assert isinstance(args_preview, str)
+
+
+def test_turn_start_end_events_format():
+    """turn_start / turn_end events round-trip through JSON."""
+    for event in [{"type": "turn_start"}, {"type": "turn_end"}]:
+        parsed = json.loads(json.dumps(event))
+        assert parsed["type"] == event["type"]
+
+
+def test_thinking_delta_event_format():
+    """thinking_delta event round-trips through JSON."""
+    event = {"type": "thinking_delta", "delta": "Let me reason..."}
+    parsed = json.loads(json.dumps(event, ensure_ascii=False))
+    assert parsed["type"] == "thinking_delta"
+    assert parsed["delta"] == "Let me reason..."
+
+
+def test_stream_chunk_thinking_field():
+    """StreamChunk supports the thinking field."""
+    from mini_agent.llm.base import StreamChunk
+
+    default = StreamChunk()
+    assert default.thinking == ""
+
+    chunk = StreamChunk(thinking="reasoning step")
+    assert chunk.thinking == "reasoning step"
+    assert chunk.delta == ""
+
+
+def test_web_ui_has_thinking_indicator():
+    """Browser frontend handles turn_start, turn_end, thinking_delta."""
+    from mini_agent.remote.web_ui import build_html
+
+    html = build_html(8765)
+    assert "turn_start" in html
+    assert "turn_end" in html
+    assert "thinking_delta" in html
+    assert "id=\"thinking\"" in html
+    assert "Thinking..." in html
+
+
+def test_openai_parse_reasoning_content():
+    """OpenAI provider captures reasoning_content into chunk.thinking."""
+    from mini_agent.llm.openai_provider import OpenAIProvider
+    from mini_agent.models.config import LLMConfig
+
+    config = LLMConfig(api_key="test", model="deepseek-r1")
+    provider = OpenAIProvider(config)
+
+    chunk_data = {
+        "choices": [
+            {
+                "delta": {"reasoning_content": "Let me think about this"},
+                "finish_reason": None,
+            }
+        ]
+    }
+    chunk = provider._parse_chunk(chunk_data)
+    assert chunk.thinking == "Let me think about this"
+    assert chunk.delta == ""
+
+
+def test_anthropic_parse_thinking_delta():
+    """Anthropic provider captures thinking_delta into chunk.thinking."""
+    from mini_agent.llm.anthropic_provider import AnthropicProvider
+    from mini_agent.models.config import LLMConfig
+
+    config = LLMConfig(api_key="test", model="claude-sonnet-4-20250514")
+    provider = AnthropicProvider(config)
+
+    event = {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "thinking_delta", "thinking": "Analyzing the code"},
+    }
+    chunk = provider._parse_event(event)
+    assert chunk is not None
+    assert chunk.thinking == "Analyzing the code"
+    assert chunk.delta == ""
+
+
+def test_remote_terminal_adapter_show_file_changes():
+    """RemoteTerminalAdapter.show_file_changes handles list[tuple[str, str]]."""
+    from mini_agent.remote.terminal import RemoteTerminalAdapter
+
+    sent = []
+
+    def mock_send(event_type, **data):
+        sent.append((event_type, data))
+
+    class MockTerminal:
+        def show_file_changes(self, changes):
+            pass
+
+    adapter = RemoteTerminalAdapter(MockTerminal(), mock_send)
+    adapter.show_file_changes([("created", "new.py"), ("modified", "old.py")])
+    assert len(sent) == 1
+    assert sent[0][0] == "file_changes"
+    assert "+ new.py" in sent[0][1]["items"]
+    assert "~ old.py" in sent[0][1]["items"]

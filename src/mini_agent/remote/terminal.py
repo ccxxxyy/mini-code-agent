@@ -46,14 +46,13 @@ class RemoteTerminalAdapter:
             pass
         self._terminal.show_error(message)
 
-    def show_file_changes(self, changes: dict[str, str]) -> None:
+    def show_file_changes(self, changes: list[tuple[str, str]]) -> None:
         """Show file changes in browser instead of terminal.
         在浏览器中显示文件变更而不是终端。"""
         if not changes:
             return
-        # Format for display
         display_items = []
-        for path, change_type in changes.items():
+        for change_type, path in changes:
             if change_type == "created":
                 display_items.append(f"+ {path}")
             elif change_type == "modified":

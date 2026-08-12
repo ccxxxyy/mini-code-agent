@@ -51,8 +51,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .msg.assistant strong { color: #f9e2af; }
 .msg.assistant hr { border: none; border-top: 1px solid #45475a;
                     margin: 12px 0; }
-.msg.tool { color: #a6adc8; font-size: 13px; background: #313244;
-            padding: 8px 12px; border-radius: 6px; }
+.msg.tool { color: #585b70; font-size: 12px; padding: 1px 0;
+            margin-bottom: 2px; line-height: 1.4; }
 .msg.info { color: #94e2d5; font-style: italic; }
 .msg.error { color: #f38ba8; }
 .msg.permission { background: #45475a; padding: 10px 14px;
@@ -88,6 +88,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #45475a; }
 #cmd-list div span { color: #a6adc8; margin-left: 8px;
                      font-size: 12px; }
+#thinking { display: none; padding: 8px 20px; color: #a6adc8;
+            font-size: 13px; font-style: italic; }
+#thinking .dot { display: inline-block; animation: pulse 1.4s infinite; }
+#thinking .dot:nth-child(2) { animation-delay: 0.2s; }
+#thinking .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%,80%,100% { opacity: 0.3; } 40% { opacity: 1; } }
+.msg.thinking { color: #6c7086; font-size: 12px;
+                padding: 2px 0; margin-bottom: 4px; }
+.msg.thinking summary { cursor: pointer; color: #6c7086; }
+.msg.thinking pre { white-space: pre-wrap; margin: 2px 0 0;
+                    font-size: 11px; color: #585b70;
+                    max-height: 200px; overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -96,6 +108,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   <div id="status" class="disconnected">Disconnected</div>
 </div>
 <div id="messages"></div>
+<div id="thinking">
+  <span class="dot">&#x25CF;</span><span class="dot">&#x25CF;</span
+  ><span class="dot">&#x25CF;</span> Thinking...
+</div>
 <div id="cmd-list"></div>
 <div id="input-area">
   <input id="input" placeholder="Type a message... (/ for commands)"
@@ -110,9 +126,12 @@ const sendBtn = document.getElementById('send');
 const stopBtn = document.getElementById('stop');
 const cmdList = document.getElementById('cmd-list');
 const status = document.getElementById('status');
+const thinkingIndicator = document.getElementById('thinking');
 let ws = null;
 let streamEl = null;
 let streamBuf = '';
+let thinkingEl = null;
+let thinkingBuf = '';
 let isRunning = false;
 let cmdIdx = -1;
 
@@ -153,6 +172,13 @@ function renderMd(text) {
   return h;
 }
 
+function nearBottom() {
+  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+}
+function autoScroll() {
+  if (nearBottom()) msgs.scrollTop = msgs.scrollHeight;
+}
+
 function addMsg(cls, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + cls;
@@ -162,7 +188,7 @@ function addMsg(cls, text) {
     el.textContent = text;
   }
   msgs.appendChild(el);
-  msgs.scrollTop = msgs.scrollHeight;
+  autoScroll();
   return el;
 }
 
@@ -181,22 +207,53 @@ function connect() {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
+      case 'turn_start':
+        setRunning(true);
+        thinkingIndicator.style.display = 'block';
+        autoScroll();
+        break;
+      case 'turn_end':
+        thinkingIndicator.style.display = 'none';
+        thinkingEl = null;
+        thinkingBuf = '';
+        streamEl = null;
+        streamBuf = '';
+        setRunning(false);
+        break;
+      case 'thinking_delta':
+        thinkingIndicator.style.display = 'none';
+        if (!thinkingEl) {
+          thinkingEl = document.createElement('div');
+          thinkingEl.className = 'msg thinking';
+          const det = document.createElement('details');
+          const sum = document.createElement('summary');
+          sum.textContent = 'Thinking...';
+          const pre = document.createElement('pre');
+          det.appendChild(sum);
+          det.appendChild(pre);
+          thinkingEl.appendChild(det);
+          thinkingEl._pre = pre;
+          msgs.appendChild(thinkingEl);
+        }
+        thinkingBuf += msg.delta;
+        thinkingEl._pre.textContent = thinkingBuf;
+        autoScroll();
+        break;
       case 'stream_start':
+        thinkingIndicator.style.display = 'none';
         streamBuf = '';
         streamEl = addMsg('assistant', '');
-        setRunning(true);
         break;
       case 'stream_text':
         if (streamEl) {
           streamBuf += msg.delta;
           streamEl.innerHTML = renderMd(streamBuf);
         }
-        msgs.scrollTop = msgs.scrollHeight;
+        autoScroll();
         break;
       case 'stream_end':
         streamEl = null;
         streamBuf = '';
-        setRunning(false);
         break;
       case 'tool_call':
         addMsg('tool', '\\u2699 ' + msg.name + ' ' + (msg.args || ''));

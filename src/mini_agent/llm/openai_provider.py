@@ -167,6 +167,9 @@ class OpenAIProvider(LLMProvider):
         if "content" in delta and delta["content"]:
             chunk.delta = delta["content"]
 
+        if "reasoning_content" in delta and delta["reasoning_content"]:
+            chunk.thinking = delta["reasoning_content"]
+
         if "tool_calls" in delta:
             for tc_delta in delta["tool_calls"]:
                 tcd = ToolCallDelta(index=tc_delta.get("index", 0))
