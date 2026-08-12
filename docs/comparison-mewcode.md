@@ -449,7 +449,7 @@ NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP �
 - 19 个单元测试覆盖：NDJSON 格式、权限 Future 流程、UI 构建、CLI 参数解析、终端适配器、StreamChunk.thinking 字段、Provider 解析 reasoning_content/thinking_delta、内部错误过滤、show_file_changes 类型修复
 
 **仍存在的局限**（已确认）：
-- 仅支持单客户端（`self._ws` 单变量，新连接覆盖旧连接）
+- 多客户端支持（`self._clients: set` 广播），但所有客户端共享同一会话（无独立会话）
 - 无 TLS（明文 `ws://`）。可选 token 认证（`--remote-token`），未设时无认证
 - 浏览器刷新可恢复对话历史（`_replay_history()`），但服务器重启后丢失（远程模式未接入 SessionStore）
 - Markdown 图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）

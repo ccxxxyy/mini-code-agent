@@ -314,7 +314,7 @@ async def test_replay_history_sends_messages():
             sent.append(json.loads(data))
 
     server = RemoteServer(app, host="localhost", port=29999)
-    server._ws = MockWS()
+    server._clients.add(MockWS())
     await server._replay_history()
 
     types = [m["type"] for m in sent]

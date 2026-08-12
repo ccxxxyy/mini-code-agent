@@ -244,7 +244,7 @@ class ContextManager:
 以下问题与本任务（Remote/Browser mode #113）直接相关。
 
 ### 仍存在的已知局限
-- **单客户端**：`self._ws` 是单变量，新连接覆盖旧连接。多标签页同时打开会互相干扰
+- ~~单客户端~~ ✅ 已完成（`self._clients: set` 广播，多标签页同步输出）
 - ~~无认证~~ ✅ 已完成（`--remote-token` 可选 token 认证，WS+HTTP 双通道验证）。仍无 TLS（明文 `ws://`）
 - ~~浏览器刷新丢失会话~~ ✅ 已完成（`_replay_history()` 回放对话历史，服务器重启仍丢失）
 - ~~Markdown 不支持图片~~ ✅ 已支持（`![alt](url)` → `<img>`，仅公网 URL 可加载）
@@ -253,4 +253,69 @@ class ContextManager:
 1. ~~刷新时重放历史~~ ✅ 已完成（`_replay_history()`）
 2. ~~链接渲染~~ ✅ 已完成（`[text](url)` + 裸 URL 自动识别 + 图片）
 3. ~~简单 token 认证~~ ✅ 已完成（`--remote-token`，WS 首条消息验证 + HTTP 端点验证）
-4. 多客户端支持（`self._ws` 改为 `set`，广播事件）
+4. ~~多客户端支持~~ ✅ 已完成（`self._clients: set` 广播，断连自动清理）
+
+### 与 mewcode 对比后的增强待做（按价值排序）
+
+以下功能 mewcode 已实现但 mini 尚未支持，经代码对比验证。
+
+#### 高价值
+
+☐ **多行输入**
+- 当前：`<input>` 单行输入框，无法粘贴多行代码
+- mewcode：`<textarea>` + Shift+Enter 换行 + 自动高度调整
+- 改动：`web_ui.py` 将 `<input>` 换成 `<textarea>`，JS 监听 Shift+Enter 换行、Enter 发送，CSS `resize: none` + `auto-grow`
+
+☐ **工具调用折叠**
+- 当前：工具调用和结果作为平铺暗灰色文本，多工具调用时页面很长
+- mewcode：工具调用块可展开/收起，默认收起只显示工具名+耗时
+- 改动：`web_ui.py` 用 `<details><summary>` 包装工具调用和结果，默认收起
+
+☐ **Token 用量显示**
+- 当前：浏览器不显示 token 用量（只在终端显示）
+- mewcode：状态栏显示 input/output token 数
+- 改动：`server.py` 在 `turn_end` 事件中附带 `tokens` 字段（从 `agent_loop.last_turn_tokens` 读取），`web_ui.py` 在 turn 结束后显示
+
+#### 中价值
+
+☐ **工具耗时显示**
+- 当前：`tool_result` 事件不含耗时
+- mewcode：每个工具结果附带 `elapsed` 秒数
+- 改动：`agent_loop.py` `_execute_single_tool` 已有 `duration_ms`（在 `ToolCallEndEvent` 中），将其传到 `on_tool_end` 回调 → `server.py` 附到 `tool_result` 事件 → `web_ui.py` 显示
+
+☐ **动态命令列表**
+- 当前：`web_ui.py` 硬编码 18 个命令到 JS 的 `CMDS` 数组
+- mewcode：服务端连接时发送完整命令注册表，前端动态构建菜单
+- 改动：`server.py` 连接时从 `self._app.slash_commands` 读取所有命令名+描述，发送 `commands` 事件 → `web_ui.py` 收到后替换硬编码列表
+
+☐ **`<think>` 标签解析**
+- 当前：只处理 `thinking_delta` 事件（DeepSeek R1 的 `reasoning_content`）
+- mewcode：前端还解析助手文本中的 `<think>...</think>` XML 标签，渲染为折叠块
+- 改动：`web_ui.py` 的 `renderMd()` 或 `stream_text` 处理中检测 `<think>` 标签，渲染为 `<details class="thinking">`
+
+#### 低价值
+
+☐ **CSS 变量主题**
+- 当前：所有色值硬编码（`#1e1e2e`、`#89b4fa` 等散落各处）
+- mewcode：`:root` 定义 CSS 变量，切换主题只需修改变量
+- 改动：`web_ui.py` 将所有色值抽成 CSS 变量，预留 light mode
+
+☐ **应用层 ping/pong**
+- 当前：无心跳机制，依赖 websockets 库底层 ping
+- mewcode：每 10 秒发 `ping`，前端回 `pong`
+- 改动：`server.py` 启动后台任务定时 `_ws_send("ping")`，`web_ui.py` 收到后回 `pong`
+
+☐ **turn 完成摘要**
+- 当前：`turn_end` 不携带数据
+- mewcode：`loop_complete` 携带 `totalTurns` + `elapsed` 秒数
+- 改动：`server.py` 在 `turn_end` 中附带迭代数和耗时
+
+☐ **重连状态优化**
+- 当前：断连后显示"Disconnected"，重连后切回"Connected"，有闪烁
+- mewcode：显示"Reconnecting..."，重连成功后才切回"Connected"
+- 改动：`web_ui.py` `ws.onclose` 中显示"Reconnecting..."替代"Disconnected"
+
+☐ **`stream_end` 携带完整文本**
+- 当前：`stream_end` 无数据，前端依赖增量拼接的 `streamBuf`
+- mewcode：`stream_end` 携带完整累积文本，前端可用于最终渲染修正
+- 改动：`agent_loop.py` `on_stream_end` 回调增加 `full_text` 参数

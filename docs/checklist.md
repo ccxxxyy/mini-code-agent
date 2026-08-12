@@ -1016,7 +1016,7 @@
 - [x] `--remote` / `--port` / `--host` / `--remote-token` CLI 参数
 - [x] WebSocket 服务器 + HTTP 服务器（UI + `/cancel` + `/permission` 端点）
 - [x] NDJSON 协议 12 种服务端事件 + 2 种 WS 客户端消息
-- [x] 回调通过 `_ws_send()` 发送，多连接竞态安全
+- [x] 多客户端支持（`self._clients: set` 广播），`_ws_send()` 广播给所有客户端
 - [x] 权限确认通过 HTTP POST + `call_soon_threadsafe`（绕过 WS 阻塞）
 - [x] Stop 通过 HTTP POST `/cancel`（独立线程即时生效）
 - [x] 浏览器 UI：深色主题、流式渲染、Markdown（h1-h4/列表/表格/链接+裸URL/图片）、工具调用、权限按钮（点击反馈）、Thinking 指示器、自动重连

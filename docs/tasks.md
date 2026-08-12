@@ -1266,7 +1266,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `remote/server.py` — RemoteServer 类
   - WebSocket 服务器 + HTTP 服务器（UI 托管 + `/cancel` + `/permission` 端点）
   - NDJSON 协议：12 种服务端事件 + 2 种 WS 客户端消息
-  - 回调通过 `_ws_send()` 发送（运行时读最新连接，解决多连接竞态）
+  - 多客户端支持（`self._clients: set` 广播），回调通过 `_ws_send()` 广播给所有客户端
   - 权限确认通过 HTTP POST `/permission` + `call_soon_threadsafe` 解析 Future
   - Stop 通过 HTTP POST `/cancel`（绕过 WS 阻塞即时生效）
   - 新连接时 `_replay_history()` 回放对话历史
