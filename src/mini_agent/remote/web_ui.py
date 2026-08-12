@@ -337,6 +337,19 @@ function connect() {
       case 'file_changes':
         addMsg('info', 'Files changed:\\n' + (msg.items || []).join('\\n'));
         break;
+      case 'history_user':
+        addMsg('user', msg.text);
+        break;
+      case 'history_assistant':
+        addMsg('assistant', msg.text);
+        break;
+      case 'history_tool_call':
+        addMsg('tool', '\\u2699 ' + msg.name + ' ' + (msg.args || ''));
+        break;
+      case 'history_tool_result':
+        const hp = msg.is_error ? '\\u2718 ' : '\\u2714 ';
+        addMsg('tool', hp + msg.name + ': ' + msg.output);
+        break;
       case 'permission_request':
         const pel = document.createElement('div');
         pel.className = 'msg permission';

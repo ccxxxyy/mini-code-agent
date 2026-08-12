@@ -1014,10 +1014,14 @@
 
 - [x] `websockets>=12.0` 可选依赖（`[remote]` 组），终端用户不受影响
 - [x] `--remote` / `--port` / `--host` CLI 参数
-- [x] WebSocket 服务器启动，首次 HTTP GET 返回嵌入式 HTML
-- [x] NDJSON 协议 7+2 种事件类型
-- [x] AgentLoop 6 个回调替换为 ws.send（不改 AgentLoop 代码）
-- [x] 权限确认通过 WebSocket 请求-响应（asyncio.Future）
-- [x] 浏览器 UI：深色主题、流式渲染、工具调用、权限按钮、自动重连
+- [x] WebSocket 服务器 + HTTP 服务器（UI + `/cancel` + `/permission` 端点）
+- [x] NDJSON 协议 12 种服务端事件 + 2 种 WS 客户端消息
+- [x] 回调通过 `_ws_send()` 发送，多连接竞态安全
+- [x] 权限确认通过 HTTP POST + `call_soon_threadsafe`（绕过 WS 阻塞）
+- [x] Stop 通过 HTTP POST `/cancel`（独立线程即时生效）
+- [x] 浏览器 UI：深色主题、流式渲染、Markdown（h1-h4/列表/表格）、工具调用、权限按钮（点击反馈）、Thinking 指示器、自动重连
+- [x] `RemoteTerminalAdapter` 拦截 show_info/show_error/show_file_changes，内部异常过滤
+- [x] `StreamChunk.thinking` + OpenAI/Anthropic Provider 捕获 reasoning/thinking
+- [x] 刷新时 `_replay_history()` 回放对话历史
 - [x] websockets 未安装时优雅报错
-- [x] 8 个新测试（test_remote.py），总计 634 个全过
+- [x] 20 个新测试（test_remote.py），总计 649 个全过

@@ -1264,23 +1264,41 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `pyproject.toml` — `websockets>=12.0` 可选依赖组 `[remote]`
 - [x] `remote/__init__.py` 新目录
 - [x] `remote/server.py` — RemoteServer 类
-  - WebSocket 服务器（`websockets.serve`），首次 HTTP GET 返回 HTML
-  - NDJSON 协议：7 种服务端事件 + 2 种客户端消息
-  - 替换 AgentLoop 的 6 个回调为 ws.send
-  - 权限确认通过 asyncio.Future 请求-响应
-  - 消息循环：user_input → _handle_turn / 斜杠命令
+  - WebSocket 服务器 + HTTP 服务器（UI 托管 + `/cancel` + `/permission` 端点）
+  - NDJSON 协议：12 种服务端事件 + 2 种 WS 客户端消息
+  - 回调通过 `_ws_send()` 发送（运行时读最新连接，解决多连接竞态）
+  - 权限确认通过 HTTP POST `/permission` + `call_soon_threadsafe` 解析 Future
+  - Stop 通过 HTTP POST `/cancel`（绕过 WS 阻塞即时生效）
+  - 新连接时 `_replay_history()` 回放对话历史
 - [x] `remote/web_ui.py` — 嵌入式 HTML 前端
   - 深色主题（Catppuccin Mocha 色系）
-  - 流式文本渲染、工具调用折叠、权限 Allow/Always/Deny 按钮
-  - WebSocket 自动重连（2 秒）
+  - Markdown 渲染（h1-h4、粗体、代码块、有序/无序列表、表格）
+  - 流式文本渲染、工具调用（暗灰样式）、权限 Allow/Always/Deny 按钮（点击反馈+禁用）
+  - Thinking 旋转指示器（荧光黄脉冲，工具调用间自动显示）
+  - 用户输入框效果、起始引导（模型名+版本）
+  - 自动滚动（300px 阈值）、info 等宽字体强制滚底
+  - WebSocket 自动重连（2 秒）、Cache-Control 禁缓存
+- [x] `remote/terminal.py` — RemoteTerminalAdapter
+  - 拦截 show_info/show_error/show_file_changes 转发到浏览器
+  - 内部 Python 异常过滤不推送到浏览器
+  - show_file_changes 类型修复（list[tuple] 替代 dict）
 - [x] `cli.py` — `--remote` / `--port 8765` / `--host localhost` 参数
   - remote 模式启动 RemoteServer 而非 app.run()
   - websockets 未安装时优雅报错
+- [x] `llm/base.py` — StreamChunk 加 `thinking` 字段
+- [x] `llm/openai_provider.py` — 捕获 `reasoning_content`
+- [x] `llm/anthropic_provider.py` — 捕获 `thinking_delta`
+- [x] `core/agent_loop.py` — `on_thinking_delta` 回调 + `turn_start`/`turn_end` 事件
 
 ### P57.2 测试
-- [x] `tests/unit/test_remote.py` 新文件，8 个测试：
-  - ndjson_event_format / client_message_format
-  - permission_future_flow（3 种决策）
-  - web_ui_builds / web_ui_port_embedded
-  - remote_server_class_exists / cli_remote_args / cli_default_no_remote
-- [x] 634 个测试全过，ruff lint + format clean
+- [x] `tests/unit/test_remote.py`，20 个测试：
+  - NDJSON 格式：ndjson_event_format / client_message_format / turn_start_end / thinking_delta
+  - 权限：permission_future_flow（3 种决策）
+  - UI 构建：web_ui_builds / web_ui_port_embedded / web_ui_has_thinking_indicator
+  - 服务器：remote_server_class_exists / remote_server_wraps_terminal
+  - CLI：cli_remote_args / cli_default_no_remote
+  - 终端适配器：show_info / suppresses_internal_errors / show_file_changes
+  - Provider：openai_parse_reasoning_content / anthropic_parse_thinking_delta
+  - StreamChunk：stream_chunk_thinking_field
+  - 历史回放：replay_history_sends_messages
+- [x] 649 个测试全过，ruff lint + format clean
