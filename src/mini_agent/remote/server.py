@@ -146,6 +146,7 @@ class RemoteServer:
             "info",
             message=(f"Welcome! Type a message to start.\nLLM: {model} ({provider}){switch_hint}"),
         )
+        await self._replay_history()
 
         try:
             async for raw in websocket:
@@ -183,6 +184,35 @@ class RemoteServer:
                     self._app.agent_loop.cancel()
         except Exception:
             pass
+
+    async def _replay_history(self) -> None:
+        """Send existing conversation history to a newly connected browser.
+        向新连接的浏览器发送已有的对话历史。"""
+        from mini_agent.models.message import Role
+
+        messages = self._app.session.conversation.messages
+        if not messages:
+            return
+        for msg in messages:
+            if msg.role == Role.USER:
+                await self._ws_send("history_user", text=msg.content)
+            elif msg.role == Role.ASSISTANT:
+                if msg.content:
+                    await self._ws_send("history_assistant", text=msg.content)
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.dumps(tc.arguments, ensure_ascii=False)[:200]
+                    except (TypeError, ValueError):
+                        args = str(tc.arguments)[:200]
+                    await self._ws_send("history_tool_call", name=tc.name, args=args)
+            elif msg.role == Role.TOOL and msg.tool_result:
+                tr = msg.tool_result
+                await self._ws_send(
+                    "history_tool_result",
+                    name=tr.name,
+                    output=tr.output[:500],
+                    is_error=tr.is_error,
+                )
 
     def _wire_callbacks(self) -> None:
         """Replace AgentLoop and PermissionManager callbacks.

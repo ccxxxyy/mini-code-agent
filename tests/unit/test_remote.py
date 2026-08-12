@@ -197,6 +197,8 @@ def test_web_ui_has_thinking_indicator():
     assert "thinking_delta" in html
     assert "thinking-indicator" in html
     assert "showSpinner" in html
+    assert "history_user" in html
+    assert "history_assistant" in html
 
 
 def test_openai_parse_reasoning_content():
@@ -280,3 +282,35 @@ def test_remote_terminal_adapter_show_file_changes():
     assert sent[0][0] == "file_changes"
     assert "+ new.py" in sent[0][1]["items"]
     assert "~ old.py" in sent[0][1]["items"]
+
+
+@pytest.mark.asyncio
+async def test_replay_history_sends_messages():
+    """_replay_history sends existing conversation as history events."""
+    from mini_agent.app import Application
+    from mini_agent.config.loader import ConfigLoader
+    from mini_agent.models.message import Message, Role
+    from mini_agent.remote.server import RemoteServer
+
+    config = ConfigLoader.load(cli_overrides={"llm.api_key": "test"})
+    app = Application(config)
+    app.session.conversation.append(Message(role=Role.USER, content="hello"))
+    app.session.conversation.append(Message(role=Role.ASSISTANT, content="hi there"))
+
+    sent = []
+
+    class MockWS:
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+    server = RemoteServer(app, host="localhost", port=29999)
+    server._ws = MockWS()
+    await server._replay_history()
+
+    types = [m["type"] for m in sent]
+    assert "history_user" in types
+    assert "history_assistant" in types
+    user_msg = next(m for m in sent if m["type"] == "history_user")
+    assert user_msg["text"] == "hello"
+    asst_msg = next(m for m in sent if m["type"] == "history_assistant")
+    assert asst_msg["text"] == "hi there"
