@@ -23,7 +23,7 @@ def build_html(
 <meta http-equiv="Expires" content="0">
 <title>Mini-Code-Agent</title>
 <style>
-:root {
+:root, [data-theme="dark"] {
   --bg-base: #1e1e2e;
   --bg-surface: #313244;
   --bg-overlay: #45475a;
@@ -42,6 +42,25 @@ def build_html(
   --border: #45475a;
   --scrollbar: rgba(166,173,200,0.3);
 }
+[data-theme="light"] {
+  --bg-base: #eff1f5;
+  --bg-surface: #dce0e8;
+  --bg-overlay: #ccd0da;
+  --text-primary: #4c4f69;
+  --text-secondary: #6c6f85;
+  --text-muted: #8c8fa1;
+  --text-faint: #9ca0b0;
+  --accent-blue: #1e66f5;
+  --accent-blue-hover: #2a6ef6;
+  --accent-green: #40a02b;
+  --accent-red: #d20f39;
+  --accent-red-hover: #e33e5a;
+  --accent-purple: #8839ef;
+  --accent-yellow: #df8e1d;
+  --accent-teal: #179299;
+  --border: #bcc0cc;
+  --scrollbar: rgba(76,79,105,0.2);
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
        background: var(--bg-base); color: var(--text-primary); height: 100vh;
@@ -50,6 +69,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
            border-bottom: 1px solid var(--border); }
 #header span { color: var(--accent-blue); font-weight: 600; }
 #status { float: right; font-size: 12px; }
+#theme-toggle { float: right; margin-right: 12px; background: none;
+            border: none; color: var(--text-primary); cursor: pointer;
+            font-size: 16px; padding: 0 4px; line-height: 1; }
+#theme-toggle:hover { opacity: 0.7; }
 .connected { color: var(--accent-green); }
 .disconnected { color: var(--accent-red); }
 .reconnecting { color: var(--accent-yellow); }
@@ -180,6 +203,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         + (version or "dev")
         + """
   <div id="status" class="disconnected">Disconnected</div>
+  <button id="theme-toggle"></button>
 </div>
 <div id="messages"></div>
 <div id="cmd-list"></div>
@@ -190,6 +214,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   <button id="stop">Stop</button>
 </div>
 <script>
+const themeBtn = document.getElementById('theme-toggle');
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  themeBtn.textContent = t === 'dark' ? '\\u2600' : '\\u263d';
+  localStorage.setItem('theme', t);
+}
+setTheme(localStorage.getItem('theme') || 'dark');
+themeBtn.onclick = () => {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  setTheme(cur === 'dark' ? 'light' : 'dark');
+};
+
 const msgs = document.getElementById('messages');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -478,6 +514,9 @@ function connect() {
       case 'ping':
         if (ws && ws.readyState === 1)
           ws.send(JSON.stringify({type: 'pong'}));
+        break;
+      case 'theme':
+        if (msg.theme) setTheme(msg.theme);
         break;
       case 'permission_request':
         const pel = document.createElement('div');
