@@ -44,6 +44,8 @@ def test_application_tools_registered(monkeypatch, tmp_path):
         "glob",
         "grep",
         "spawn_agents",
+        "send_message",
+        "wait_message",
         "tool_search",
         "mcp_call",
     }

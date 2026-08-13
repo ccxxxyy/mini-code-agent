@@ -16,6 +16,7 @@ from pathlib import Path
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.core.agent_types import AgentTypeDefinition, get_agent_type
+from mini_agent.core.mailbox import Mailbox
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider
 from mini_agent.models.config import AgentConfig
@@ -49,6 +50,28 @@ paths outside the working directory.
 NOT ls/cat/grep.
 - If a file or resource the task mentions does not exist, report that fact \
 and stop -- do NOT retry in a loop."""
+
+MAILBOX_NOTICE = """
+
+You are agent '{agent_id}'.{peers_line} Incoming messages from other agents \
+appear as "[Message from agent '<id>']" and may contain findings or \
+coordination requests -- take them into account. Use the send_message tool \
+to message 'main' (the orchestrator) or a peer agent id mid-task when you \
+have findings worth sharing; otherwise just finish and report normally. \
+Always use the EXACT peer ids listed above -- never invent ids like \
+'agent-2' or 'subagent_1'.
+If your task says to WAIT for information from another agent, use the \
+wait_message tool -- it blocks until a message arrives. Do NOT finish \
+early or busy-wait with shell sleeps: once you finish, your inbox is \
+closed and peers can no longer reach you.
+If send_message to a peer fails because it already finished, send your \
+message to 'main' instead so the information is not lost."""
+
+
+def _task_snippet(task: str, limit: int = 80) -> str:
+    """One-line task preview for peer listings. 同伴列表用的单行任务摘要。"""
+    flat = " ".join(task.split())
+    return flat[:limit] + ("..." if len(flat) > limit else "")
 
 
 def _intersect_tools(
@@ -93,10 +116,14 @@ class SubAgent:
         allowed_tools: list[str] | None = None,
         model_name: str = "",
         agent_type: AgentTypeDefinition | None = None,
+        mailbox: Mailbox | None = None,
+        agent_id: str | None = None,
+        peers: list[tuple[str, str]] | None = None,
     ) -> None:
-        self.agent_id = uuid.uuid4().hex[:8]
+        self.agent_id = agent_id or uuid.uuid4().hex[:8]
         self.task = task
         self._worktree_path = worktree_path
+        self._mailbox = mailbox
         effective_dir = worktree_path or working_dir
 
         if agent_type is not None:
@@ -121,6 +148,8 @@ class SubAgent:
             session=Session(),
             event_bus=event_bus,
             config=effective_config,
+            mailbox=mailbox,
+            agent_id=self.agent_id,
         )
 
         self._loop = AgentLoop(
@@ -131,6 +160,10 @@ class SubAgent:
             tool_context=tool_context,
         )
         self._loop.model_name = model_name
+        if mailbox is not None:
+            mailbox.register(self.agent_id)
+            self._loop.mailbox = mailbox
+            self._loop.agent_id = self.agent_id
 
         from mini_agent.memory.tool_result_cache import ToolResultCache
 
@@ -142,14 +175,21 @@ class SubAgent:
 
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
         shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
-        self._conversation = Conversation(
-            system_prompt=prompt_template.format(
-                working_dir=effective_dir,
-                platform=platform,
-                shell=shell,
-                iteration_budget=effective_config.max_agent_iterations,
-            )
+        system_prompt = prompt_template.format(
+            working_dir=effective_dir,
+            platform=platform,
+            shell=shell,
+            iteration_budget=effective_config.max_agent_iterations,
         )
+        if mailbox is not None and registry.get("send_message") is not None:
+            peers_line = ""
+            if peers:
+                peer_bits = "; ".join(
+                    f"'{pid}' (task: {_task_snippet(ptask)})" for pid, ptask in peers
+                )
+                peers_line = f" Peer agents running alongside you: {peer_bits}."
+            system_prompt += MAILBOX_NOTICE.format(agent_id=self.agent_id, peers_line=peers_line)
+        self._conversation = Conversation(system_prompt=system_prompt)
         self._conversation.append(Message(role=Role.USER, content=task))
 
     @property
@@ -187,6 +227,8 @@ class SubAgent:
             )
         finally:
             self._result_cache.cleanup()
+            if self._mailbox is not None:
+                self._mailbox.unregister(self.agent_id)
 
 
 @dataclass
@@ -222,6 +264,7 @@ class SubAgentManager:
         working_dir: Path,
         worktree_manager=None,
         model_name: str = "",
+        mailbox: Mailbox | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
@@ -231,6 +274,7 @@ class SubAgentManager:
         self._worktree_manager = worktree_manager
         self._model_name = model_name
         self._active: dict[str, _ActiveAgent] = {}
+        self.mailbox = mailbox or Mailbox(working_dir / ".mini-agent" / "mailboxes")
 
     async def spawn(
         self,
@@ -238,6 +282,8 @@ class SubAgentManager:
         isolation: str = "none",
         allowed_tools: list[str] | None = None,
         agent_type: str | None = None,
+        agent_id: str | None = None,
+        peers: list[tuple[str, str]] | None = None,
     ) -> str:
         """Spawn a sub-agent running in the background. Returns agent_id.
         派生一个后台运行的 SubAgent，返回 agent_id。
@@ -261,6 +307,9 @@ class SubAgentManager:
             allowed_tools=allowed_tools,
             model_name=self._model_name,
             agent_type=type_def,
+            mailbox=self.mailbox,
+            agent_id=agent_id,
+            peers=peers,
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(
@@ -278,16 +327,20 @@ class SubAgentManager:
     ) -> list[str]:
         """Spawn multiple sub-agents concurrently. Returns agent_ids.
         并发派生多个 SubAgent，返回 agent_id 列表。
+
+        Ids are pre-generated so each agent's MAILBOX_NOTICE can name its
+        peers -- siblings can message each other without discovery.
+        id 预生成，MAILBOX_NOTICE 直接告知同伴 id——兄弟 Agent 无需探测即可互发消息。
         """
-        ids = []
-        for task in tasks:
-            ids.append(
-                await self.spawn(
-                    task,
-                    isolation=isolation,
-                    allowed_tools=allowed_tools,
-                    agent_type=agent_type,
-                )
+        ids = [uuid.uuid4().hex[:8] for _ in tasks]
+        for task, agent_id in zip(tasks, ids):
+            await self.spawn(
+                task,
+                isolation=isolation,
+                allowed_tools=allowed_tools,
+                agent_type=agent_type,
+                agent_id=agent_id,
+                peers=[(pid, pt) for pid, pt in zip(ids, tasks) if pid != agent_id],
             )
         return ids
 

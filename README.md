@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-651%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-671%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,13 +19,13 @@
 | **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~10,200 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~12,800 lines of readable Python, MIT licensed |
 
 ## Features
 
-🔧 **10 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, tool_search, mcp_call
+🔧 **12 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call
 
-🤖 **Multi-Agent** — `/spawn` parallel agents, `/team` auto-planned orchestration, strong/weak model mixing
+🤖 **Multi-Agent** — `/spawn` parallel agents, `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message)
 
 💰 **Cost Dashboard** — per-model input/output pricing, session + all-time ledger, budget warnings at 80%/100%
 
@@ -192,7 +192,7 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 651 tests, 80%+ coverage
+├── tests/           # 671 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
 └── docs/            # 12 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -212,7 +212,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 651 tests
+uv run pytest tests/           # 671 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

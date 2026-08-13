@@ -159,6 +159,10 @@ class AgentLoop:
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
         self.plan_mode: bool = False
+        # Cross-agent mailbox: drained at the start of each iteration (app/subagent injects)
+        # 跨 Agent 收件箱——每轮开始前 drain（app/subagent 注入）
+        self.mailbox = None
+        self.agent_id: str = "main"
 
     @property
     def state(self) -> AgentState:
@@ -200,6 +204,10 @@ class AgentLoop:
 
         while True:
             self._state.iteration += 1
+
+            # Deliver incoming cross-agent messages before thinking
+            # 思考前投递跨 Agent 消息
+            self._deliver_mail(conversation)
 
             # THINK
             await self._transition(AgentPhase.THINKING)
@@ -296,6 +304,23 @@ class AgentLoop:
         except Exception:
             pass
         return final_content
+
+    def _deliver_mail(self, conversation: Conversation) -> None:
+        """Drain this agent's inbox and append messages to the conversation.
+        清空本 Agent 收件箱，将消息追加进会话。"""
+        if self.mailbox is None:
+            return
+        try:
+            incoming = self.mailbox.drain(self.agent_id)
+        except Exception:
+            return
+        for mail in incoming:
+            conversation.append(
+                Message(
+                    role=Role.USER,
+                    content=f"[Message from agent '{mail.sender}']: {mail.content}",
+                )
+            )
 
     async def _think(self, conversation: Conversation) -> LLMResponse:
         """Call LLM with streaming; assemble the full response.

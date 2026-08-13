@@ -1326,3 +1326,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] Cancel/Permission 改走 WS 消息
 - [x] 主题切换 — 深/浅色（Catppuccin Mocha/Latte），header 按钮 + localStorage + `/theme` 命令联动
 - [x] 651 个测试全过，ruff lint + format clean
+
+## Phase 58: Mailbox 跨 Agent 通信 (P58)
+
+> comparison-mewcode.md 6.2。SubAgent 从"派出去等结果"升级为运行中可互发消息。
+
+### P58.1 实现
+- [x] `core/mailbox.py` — MailMessage dataclass + Mailbox 类，每 Agent 一个 JSON 收件箱（`.mini-agent/mailboxes/<agent_id>.json`），register 总是重置避免跨会话残留
+- [x] `send_message` 工具 — 发消息给指定 Agent（'main' = 主 Agent），收件人未注册报错并列出已知 Agent
+- [x] `wait_message` 工具 — 阻塞等消息（0.5s 轮询，默认 120s / 上限 600s 超时），超时返回信息而非报错
+- [x] `AgentLoop._deliver_mail()` — 每轮 THINK 前 drain 收件箱，消息以 `[Message from agent '<id>']` 前缀注入为 USER 消息
+- [x] SubAgent 生命周期 — 构造时注册收件箱、system prompt 追加 MAILBOX_NOTICE、run() 结束注销
+- [x] `ToolContext` 增加 mailbox / agent_id 字段；app.py 注册 'main' 收件箱并注入主循环
+- [x] read-only agent 类型（explore/plan/verify）白名单含 send_message / wait_message
+
+### P58.2 迭代修复
+- [x] 兄弟 Agent 互不知 id → `spawn_parallel` 预生成全部 id，MAILBOX_NOTICE 列出同伴 id + 任务摘要（80 字符）
+- [x] 主 LLM 分两次 spawn_agents 导致串行 → 工具描述明示"并发任务必须一次调用传入"
+- [x] 接收方无等待原语、提前结束致 Unknown recipient → wait_message 工具 + notice 禁止 shell sleep 磨蹭
+- [x] LLM 幻觉收件人 id（'agent-2'）→ notice 明令使用列出的精确 id + 同伴任务摘要消除角色歧义
+
+### P58.3 测试
+- [x] test_mailbox.py — 18 个单测：收发/清空/陈旧重置/peers/工具错误路径/AgentLoop 投递/SubAgent 注册注销/兄弟互见/wait_message 四路径
+- [x] test_mailbox_e2e.py — 2 个端到端（Mock LLM 脚本化）：运行中互传、慢发送方时序下 wait_message 存活等待
+- [x] 真实 LLM 验证 4 类拓扑：1→1 单向、2→1 汇聚多轮、1→2 判别寻址、1↔1 双向 5 轮乒乓
+- [x] 671 个测试全过，ruff lint + format clean
