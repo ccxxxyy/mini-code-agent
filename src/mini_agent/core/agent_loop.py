@@ -40,6 +40,18 @@ ToolEndCallback = Callable[[ToolResult, float], None]
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 
+
+def _mail_prefix(mail) -> str:
+    """Format the injection prefix by message type (P58.4 structured protocol).
+    按消息类型格式化注入前缀（结构化协议）。"""
+    if mail.type == "request":
+        return f"[Request from agent '{mail.sender}' request_id={mail.request_id}]"
+    if mail.type == "response":
+        approve = "" if mail.approve is None else f" approve={str(mail.approve).lower()}"
+        return f"[Response from agent '{mail.sender}' request_id={mail.request_id}{approve}]"
+    return f"[Message from agent '{mail.sender}']"
+
+
 VERIFY_NUDGE = (
     "Spot-check 2-3 key numbers or claims in your response using tools. "
     "If all correct, reply with one sentence: 'Verified, no corrections.' "
@@ -316,10 +328,7 @@ class AgentLoop:
             return
         for mail in incoming:
             conversation.append(
-                Message(
-                    role=Role.USER,
-                    content=f"[Message from agent '{mail.sender}']: {mail.content}",
-                )
+                Message(role=Role.USER, content=f"{_mail_prefix(mail)}: {mail.content}")
             )
 
     async def _think(self, conversation: Conversation) -> LLMResponse:

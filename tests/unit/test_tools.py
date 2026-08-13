@@ -427,7 +427,7 @@ def test_spawn_agents_pydantic_schema():
     props = js["function"]["parameters"]["properties"]
     req = js["function"]["parameters"]["required"]
     assert js["function"]["name"] == "spawn_agents"
-    assert set(props.keys()) == {"tasks", "isolated", "agent_type"}
+    assert set(props.keys()) == {"tasks", "names", "isolated", "agent_type"}
     assert "tasks" in req
     assert props["tasks"]["type"] == "array"
     assert props["tasks"]["items"]["type"] == "string"

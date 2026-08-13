@@ -1040,3 +1040,16 @@
 - [x] app.py 注册 'main' 收件箱，主循环与 ToolContext 注入 mailbox
 - [x] 真实 LLM 四类拓扑验证通过：1→1、2→1 汇聚、1→2 判别寻址、1↔1 五轮乒乓（零死锁/丢消息/幻觉 id）
 - [x] 20 个新测试（test_mailbox.py 18 + test_mailbox_e2e.py 2），总计 671 个全过
+
+## Phase 58.4 检查项：Mailbox 增强（拉平 mewcode 差距）
+
+- [x] `to='*'` 广播——排除发送者、返回收件人列表、空团队报错
+- [x] `type=request` 自动分配 request_id 并在工具输出回显；`type=response` 缺 request_id 报错；非法 type 报错列出合法值
+- [x] approve 表态字段贯通（send → 落盘 → 投递前缀 approve=true/false）
+- [x] 投递前缀按类型区分：[Message ...] / [Request ... request_id=x] / [Response ... request_id=x approve=y]
+- [x] 名字寻址：register 别名、resolve id/名字双解析、别名随 unregister 失效、describe_peers 显示 "name (id)"
+- [x] spawn_agents `names` 参数校验：长度匹配、唯一、禁 'main'/'*'
+- [x] MAILBOX_NOTICE 自身标签带名字，同伴列表 'name' (id xxx, task: ...)
+- [x] 审计留痕：drain 标记已读留盘、unregister 保留文件、reset_all 会话启动清理
+- [x] 无锁架构边界保持成立并文档化（单进程 asyncio；6.4 前置为文件锁+唤醒）
+- [x] 13 个新测试，总计 684 个全过，覆盖率 80.85%
