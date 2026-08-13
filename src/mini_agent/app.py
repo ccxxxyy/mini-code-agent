@@ -440,6 +440,15 @@ class Application:
                     self.terminal.show_info(f"Cleaned {len(removed)} stale worktree(s)")
             except Exception:
                 pass
+        # Stale session cleanup (9.1): remove sessions older than N days
+        # 过期会话清理：删除超龄的已正常关闭会话
+        if self.config.memory.session_cleanup_days > 0:
+            try:
+                n = await self.session_store.cleanup_stale(self.config.memory.session_cleanup_days)
+                if n:
+                    self.terminal.show_info(f"Cleaned {n} stale session(s)")
+            except Exception:
+                pass
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
         try:

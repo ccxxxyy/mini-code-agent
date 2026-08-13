@@ -1053,3 +1053,13 @@
 - [x] 审计留痕：drain 标记已读留盘、unregister 保留文件、reset_all 会话启动清理
 - [x] 无锁架构边界保持成立并文档化（单进程 asyncio；6.4 前置为文件锁+唤醒）
 - [x] 13 个新测试，总计 684 个全过，覆盖率 80.85%
+
+## 会话自动清理检查项（comparison 9.1）
+
+- [x] `SessionStore.cleanup_stale(max_age_days)` 删除超龄且已正常关闭的会话
+- [x] 未正常关闭（`closed_cleanly=False`）的会话跳过——崩溃恢复保留
+- [x] `MemoryConfig.session_cleanup_days = 30`，0 禁用
+- [x] `app.py` 启动顺序：worktree 清理 → 会话清理 → 崩溃恢复
+- [x] 4 个测试：过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录
+- [x] config-guide 补 `session_cleanup_days` 配置说明
+- [x] comparison 9.1 标记 ✅ + 优先级表更新

@@ -76,6 +76,9 @@ class MemoryConfig:
     # semantically related memories into one
     # 记忆合并：条目超过此数量时用 LLM 语义合并相关记忆
     consolidation_threshold: int = 20
+    # Sessions older than this many days are auto-removed at startup (0 = off)
+    # 超过此天数的旧会话启动时自动清理（0 = 禁用）
+    session_cleanup_days: int = 30
 
 
 @dataclass

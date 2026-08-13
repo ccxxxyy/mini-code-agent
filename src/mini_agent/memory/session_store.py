@@ -4,12 +4,15 @@ session 持久化——以 JSON 文件形式保存/加载/列出/删除 session�
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from mini_agent.models.message import Conversation, Message, Role, ToolCall, ToolResult
 from mini_agent.models.session import Session, SessionMetadata
+
+log = logging.getLogger(__name__)
 
 DEFAULT_SESSION_DIR = "~/.mini-agent/sessions"
 
@@ -79,6 +82,35 @@ class SessionStore:
             path.unlink()
             return True
         return False
+
+    async def cleanup_stale(self, max_age_days: int = 30) -> int:
+        """Delete sessions older than *max_age_days*. Sessions that were
+        NOT closed cleanly are skipped (they may be needed for crash
+        recovery). Returns the number of sessions removed.
+        删除超过 max_age_days 天的会话；未正常关闭的保留（可能用于崩溃恢复）。
+        返回删除数量。"""
+        if max_age_days <= 0:
+            return 0
+        self._ensure_dir()
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        removed = 0
+        for f in list(self._dir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                meta = data.get("metadata", {})
+                if not meta.get("closed_cleanly", True):
+                    continue
+                last_active = meta.get("last_active", "")
+                if not last_active:
+                    continue
+                if datetime.fromisoformat(last_active) < cutoff:
+                    f.unlink()
+                    removed += 1
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        if removed:
+            log.debug("Cleaned up %d stale session(s) older than %d days", removed, max_age_days)
+        return removed
 
 
 def _serialize_session(session: Session) -> dict[str, Any]:
