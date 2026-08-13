@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **688 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **699 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -593,17 +593,31 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - 全部触发 try/except 包裹——hook 异常不破坏主流程
 - 对照 mewcode 的 pre_send/post_receive → mini 的 PRE_LLM/POST_LLM 等价
 
-### 7.2 Hook 拒绝工具执行
+### 7.2 Hook 拒绝工具执行 ✅ 已实现
 
 | | mini | mewcode |
 |---|---|---|
-| Pre-tool hook 拒绝 | Hook 只能观察，不能阻止 | ✅ Pre-tool hook 可以抛 `ToolRejectedError` 阻止执行 |
+| Pre-tool hook 拒绝 | ✅ 代码层 `HookAction.BLOCK`（P50 起已接线）+ **`[[hooks]]` 配置声明式拒绝规则**（fnmatch 工具名 + 参数子串/正则匹配） | ✅ 配置文件 hook `reject: true` 抛 `ToolRejectedError` 阻止执行 |
 
-**增强方案**：
-1. `PRE_TOOL` hook 回调返回值新增 `reject` 选项
-2. hook 返回 `{"reject": true, "reason": "..."}` 时，工具不执行，LLM 收到拒绝原因
+**实现前的勘误**：本条原描述"Hook 只能观察，不能阻止"已陈旧——`HookAction.BLOCK` 在 `_run_tool_pipeline` 早已接线（工具不执行，LLM 收到 "Blocked by hook: <reason>"）。对照 mewcode 源码后确认**真实差距是用户入口**：mewcode 的拒绝 hook 从配置文件加载（event/条件/reject/reason），mini 只能写 Python 代码注册。
 
-代码改动：`tools/hooks.py` ~10 行 + `core/agent_loop.py` ~5 行。
+**已完成**（声明式规则）：
+1. `tools/hooks.py` — `HookRule` dataclass + `parse_hook_rules()`（非法条目告警跳过，不阻断启动）+ `register_hook_rules()`（注册为 PRE_TOOL BLOCK hook）
+2. 匹配语义：`tool`（fnmatch 模式，默认 `*`）+ `contains`（参数值子串，可选）+ `regex`（re.search 正则，可选，与 contains 同时给则须同时命中；非法正则告警跳过）+ `arg`（限定只查某参数，可选）；命中即 BLOCK，`reason` 回给 LLM
+3. `AgentConfig.hooks` 字段——TOML `[[hooks]]` 经 `_merge` 自动落入；`app.py` 启动时注册并提示数量
+4. 配置示例（给 docs/spec.md 加只读锁，5 行配置替代 10 行 Python）：
+
+   ```toml
+   [[hooks]]
+   tool = "write_file"
+   arg = "file_path"
+   contains = "docs/spec"
+   reason = "docs/spec.md is read-only by project policy"
+   ```
+
+5. 11 个测试：工具名匹配 / fnmatch 模式 / arg 限定 / 任意参数子串 / regex（含 AND 语义与非法正则跳过）/ 默认 reason / 非法条目跳过 / TOML 往返 / **端到端**（AgentLoop 流水线内拦截，文件未写入且 LLM 收到原因）
+
+**与 mewcode 的差异**：mewcode 的 hook 还支持 command/prompt/http/agent 四种动作类型和条件表达式引擎；mini 只做拒绝规则（7.2 的主题），观察类扩展已有 EventBus 订阅者机制覆盖，不重复建设。
 
 ---
 
@@ -714,6 +728,6 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 9.1 | 会话自动清理 | 磁盘管理 | 已完成 |
 | ⚪ P4 | 9.2 | 会话压缩边界 | 恢复性能 | 半天 |
 | ⚪ P4 | 4.6 | 记忆导出/导入 | 互操作 | 半天 |
-| ⚪ P4 | 7.2 | Hook 拒绝工具执行 | 自动化控制 | 2 小时 |
+| ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
 
 **总工作量估算**：约 15-20 个工作日。全部完成后 mini-code-agent 在每一个维度都 ≥ mewcode-python，同时保持自身的差异化优势（/undo、/fork、/record、/cost、/explain、实验框架）。

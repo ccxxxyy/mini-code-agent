@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，688 个测试全部通过。
+> 当前版本 v1.0.0，699 个测试全部通过。
 
 ---
 
@@ -110,8 +110,9 @@
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
+- 声明式拒绝规则（comparison 7.2）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason），命中即拒绝工具执行——给某目录加只读锁只需 5 行配置，无需写 Python
 
-**验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）
+**验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）+ 11 个声明式规则测试（含 AgentLoop 端到端拦截）
 
 ---
 
@@ -257,7 +258,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 688 个测试全部通过（约 62 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
+| 测试 | 699 个测试全部通过（约 62 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

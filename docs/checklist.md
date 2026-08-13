@@ -1063,3 +1063,15 @@
 - [x] 4 个测试：过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录
 - [x] config-guide 补 `session_cleanup_days` 配置说明
 - [x] comparison 9.1 标记 ✅ + 优先级表更新
+
+## Hook 拒绝工具执行检查项（comparison 7.2）
+
+- [x] `[[hooks]]` TOML 声明式规则：tool（fnmatch）+ arg（限定参数）+ contains（子串）+ reason
+- [x] 命中即 BLOCK：工具不执行，LLM 收到 "Blocked by hook: <reason>"
+- [x] 非法条目（非表 / 不支持的 event / reject=false）告警跳过，不阻断启动
+- [x] 无 reason 时给默认原因（含工具名）
+- [x] `AgentConfig.hooks` 经 loader 顶层 setattr 自动合并，零 loader 改动
+- [x] app.py 启动注册并提示数量
+- [x] 11 个测试含 AgentLoop 端到端拦截 + regex 三例（含非法正则跳过）
+- [x] comparison 7.2 勘误陈旧描述 + 标记 ✅ + 优先级表更新
+- [x] config-guide 补 [[hooks]] 配置段（含 TOML 顶级键位置警告）
