@@ -311,7 +311,7 @@ async def test_tool_callbacks(tool_context):
     ]
     loop = make_loop(scripts, tool_context)
     loop.on_tool_start = lambda tc: started.append(tc.name)
-    loop.on_tool_end = lambda tr: ended.append(tr.name)
+    loop.on_tool_end = lambda tr, _d=0.0: ended.append(tr.name)
     conv = Conversation()
     await loop.run(conv)
 

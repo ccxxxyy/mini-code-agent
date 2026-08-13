@@ -57,7 +57,7 @@ while True:
 - 循环代码**永不修改**——只改注册表
 - 工具的 schema 必须：描述清晰、参数简洁、边界明确、错误处理完善
 
-**工具设计四原则**（从本项目 8 个内置工具中提炼）：
+**工具设计四原则**（从本项目 10 个内置工具中提炼）：
 
 | 原则 | 正例 | 反例 |
 |---|---|---|
@@ -66,7 +66,7 @@ while True:
 | **边界明确** | edit_file 要求 old_text 唯一匹配，否则报错让 LLM 加上下文 | 静默替换第一个匹配（LLM 不知道改对了没有） |
 | **错误处理完善** | "old_text appears 3 times, provide more context" | 抛 Python 异常让 LLM 看到堆栈（无法理解） |
 
-**本项目实现**：`tools/base.py` Tool ABC + ToolRegistry dispatch。8 个工具各自独立文件，注册到 registry 后循环通过名字分发，零耦合。
+**本项目实现**：`tools/base.py` Tool ABC + ToolRegistry dispatch。10 个工具各自独立文件，注册到 registry 后循环通过名字分发，零耦合。
 
 **判断标准**：框架是否允许"零改动加工具"？工具 schema 是否对 LLM 友好（不是对程序员友好）？
 

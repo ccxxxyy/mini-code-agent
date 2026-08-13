@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-649%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-651%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,11 +19,11 @@
 | **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~4,600 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~10,200 lines of readable Python, MIT licensed |
 
 ## Features
 
-🔧 **8 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents
+🔧 **10 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, tool_search, mcp_call
 
 🤖 **Multi-Agent** — `/spawn` parallel agents, `/team` auto-planned orchestration, strong/weak model mixing
 
@@ -100,7 +100,7 @@ cd /path/to/your/project
 mini --remote
 
 # 3. Open browser
-#    Terminal shows: Browser: http://localhost:8766
+#    Terminal shows: Browser: http://localhost:8765
 #    Open that URL in your browser
 ```
 
@@ -116,15 +116,14 @@ uv tool install . --extra remote
 # Then use anywhere
 cd ~/my-project
 mini-agent --remote
-# Browser: http://localhost:8766
+# Browser: http://localhost:8765
 ```
 
 **Custom host/port:**
 
 ```bash
 mini --remote --host 0.0.0.0 --port 9000
-# WebSocket: ws://0.0.0.0:9000
-# Browser:   http://0.0.0.0:9001
+# Browser: http://0.0.0.0:9000
 ```
 
 ## Commands
@@ -141,6 +140,7 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |
 | `/plan [on\|off]` | Toggle read-only plan mode (write tools disabled) |
+| `/tools` | List all registered tools (built-in + MCP) |
 | `/spawn <task>` | Dispatch background sub-agent (`--type explore\|plan\|worker\|verify`) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
 | `/trace [on\|off]` | Show agent internals (phases, permissions, timing) |
@@ -192,7 +192,7 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 649 tests, 83%+ coverage
+├── tests/           # 651 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
 └── docs/            # 12 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -212,7 +212,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 649 tests
+uv run pytest tests/           # 651 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

@@ -1341,7 +1341,7 @@ TOML 解析后是嵌套 dict（如 `{"llm": {"model": "x"}}`），需要映射�
 
 ## 22.2 覆盖率门禁的排除策略
 
-总覆盖率 77%，排除 TTY/MCP 层后 81.62%。排除的理由：
+总覆盖率 77%，排除 TTY/MCP 层后 80.36%（P22 时为 81.62%）。排除的理由：
 
 - `ui/terminal.py`（36%）、`ui/input_handler.py`（34%）：prompt_toolkit 的输入循环需要真实 TTY，CI 环境无 TTY。这些代码只能手动验证
 - `ui/esc_watcher.py`（48%）：后台线程 + stdin 轮询，同样需要 TTY
@@ -1779,7 +1779,7 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 
 ## 46.2 实现：params_model + _schema_from_model
 
-每个工具定义 `ParamsModel(BaseModel)` 类（约 5 行），`Tool.params_model` 指向它。`_schema_from_model()` 调用 `model.model_json_schema()` 自动提取 properties/required，7/8 个工具完成转换，BashTool 保留手写 schema 作为向后兼容验证。`validate_args()` 在有 `params_model` 时走 Pydantic 路径（自动类型转换，字符串→int），否则走原手动校验。
+每个工具定义 `ParamsModel(BaseModel)` 类（约 5 行），`Tool.params_model` 指向它。`_schema_from_model()` 调用 `model.model_json_schema()` 自动提取 properties/required，7/10 个工具完成转换，BashTool 保留手写 schema 作为向后兼容验证。`validate_args()` 在有 `params_model` 时走 Pydantic 路径（自动类型转换，字符串→int），否则走原手动校验。
 
 ## 46.3 设计权衡
 
@@ -1990,6 +1990,6 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——649 个测试约 60 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——651 个测试约 60 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

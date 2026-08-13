@@ -335,7 +335,7 @@ class Application:
                 self.agent_loop.cancel()
             self.terminal.feed_stream(delta)
 
-        def _on_stream_end() -> None:
+        def _on_stream_end(_full_text: str = "") -> None:
             self._esc_watcher.stop()
             self.terminal.finish_stream()
 
@@ -369,7 +369,7 @@ class Application:
             else:
                 self.terminal.show_tool_call(tc.name, tc.arguments)
 
-        def _on_tool_end(tr) -> None:
+        def _on_tool_end(tr, _duration_ms=0.0) -> None:
             _assembling_shown.discard(tr.name)
             self.terminal.show_tool_result(tr.name, tr.output, tr.is_error, tr.metadata)
 

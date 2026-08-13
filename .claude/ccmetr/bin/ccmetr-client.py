@@ -39,7 +39,7 @@ PLACEHOLDER_TOKEN = "PASTE-YOUR-STUDY-KEY-HERE"
 METR_TOKEN_ENV = "METR_AUTH_TOKEN"
 # Sent as X-CCMETR-Client-Version; the gateway 403s { code: client_outdated } if
 # this is too old. Bump per release (raise MAJOR for a breaking change).
-CLIENT_VERSION = "1.2.0"
+CLIENT_VERSION = "1.3.0"
 
 
 def base_url() -> str:

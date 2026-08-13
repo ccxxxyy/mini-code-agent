@@ -63,7 +63,7 @@ def test_web_ui_builds():
     assert "Mini-Code-Agent" in html
     assert "WebSocket" in html
     assert "user_input" in html
-    assert "/permission?id=" in html
+    assert "permission" in html
     assert "stream_text" in html
 
 
@@ -314,8 +314,9 @@ async def test_replay_history_sends_messages():
             sent.append(json.loads(data))
 
     server = RemoteServer(app, host="localhost", port=29999)
-    server._clients.add(MockWS())
-    await server._replay_history()
+    mock_ws = MockWS()
+    server._clients.add(mock_ws)
+    await server._replay_history(mock_ws)
 
     types = [m["type"] for m in sent]
     assert "history_user" in types

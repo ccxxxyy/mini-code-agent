@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
+import time
 import uuid
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -63,85 +62,54 @@ class RemoteServer:
                 "Install with: uv sync --extra remote  or  pip install websockets"
             )
 
-        http_port = self._port + 1
         version = getattr(self._app, "version", "") or "1.0.0"
         model = self._app.agent_loop.model_name or "unknown"
-        html = _get_html(self._port, version=version, model=model)
-        self._start_http_server(html, self._host, http_port)
+        self._html_bytes = _get_html(self._port, version=version, model=model).encode("utf-8")
 
         print("Mini-Code-Agent remote mode")
-        print(f"  WebSocket: ws://{self._host}:{self._port}")
         if self._token:
-            print(f"  Browser:   http://{self._host}:{http_port}?token={self._token}")
+            print(f"  Browser:   http://{self._host}:{self._port}?token={self._token}")
             print("  Auth:      token required")
         else:
-            print(f"  Browser:   http://{self._host}:{http_port}")
+            print(f"  Browser:   http://{self._host}:{self._port}")
         print("  Waiting for browser connection...")
 
-        async with websockets.serve(self._handler, self._host, self._port):
+        async with websockets.serve(
+            self._handler,
+            self._host,
+            self._port,
+            process_request=self._process_http,
+        ):
+            asyncio.create_task(self._ping_loop())
             await asyncio.Future()
 
-    def _start_http_server(self, html: str, host: str, port: int) -> None:
-        """Start a background HTTP server to serve the browser UI.
-        启动后台 HTTP 服务器提供浏览器 UI。"""
-        html_bytes = html.encode("utf-8")
-        remote_server = self
+    def _process_http(self, connection: Any, request: Any) -> Any:
+        """Serve HTML for GET /, let /ws proceed to WebSocket upgrade."""
+        import websockets as _ws
+        from websockets.http11 import Response
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-store")
-                self.end_headers()
-                self.wfile.write(html_bytes)
+        if request.path == "/":
+            return Response(
+                200,
+                "OK",
+                _ws.Headers(
+                    {
+                        "Content-Type": "text/html; charset=utf-8",
+                        "Cache-Control": "no-cache, no-store",
+                    }
+                ),
+                self._html_bytes,
+            )
+        if not request.path.startswith("/ws"):
+            return Response(404, "Not Found", _ws.Headers(), b"Not Found")
+        return None
 
-            def _check_token(self) -> bool:
-                if not remote_server._token:
-                    return True
-                import urllib.parse as up
-
-                qs = up.parse_qs(up.urlparse(self.path).query)
-                return qs.get("token", [""])[0] == remote_server._token
-
-            def do_POST(self) -> None:
-                if not self._check_token():
-                    self.send_response(403)
-                    self.end_headers()
-                    return
-                if self.path.startswith("/cancel"):
-                    remote_server._app.agent_loop.cancel()
-                    self._ok()
-                elif self.path.startswith("/permission"):
-                    import urllib.parse as up
-
-                    qs = up.parse_qs(up.urlparse(self.path).query)
-                    req_id = qs.get("id", [""])[0]
-                    decision = qs.get("decision", ["n"])[0]
-                    remote_server._resolve_permission(req_id, decision)
-                    self._ok()
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-
-            def _ok(self) -> None:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(b"ok")
-
-            def do_OPTIONS(self) -> None:
-                self.send_response(200)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "POST")
-                self.end_headers()
-
-            def log_message(self, format: str, *args: Any) -> None:
-                pass
-
-        server = HTTPServer((host, port), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+    async def _ping_loop(self) -> None:
+        """Send application-level ping every 10 seconds."""
+        while True:
+            await asyncio.sleep(10)
+            if self._clients:
+                await self._ws_send("ping")
 
     async def _ws_send(self, event_type: str, **data: Any) -> None:
         """Broadcast to all connected clients.
@@ -196,7 +164,8 @@ class RemoteServer:
             )
         except Exception:
             pass
-        await self._replay_history()
+        await self._replay_history(websocket)
+        await self._send_commands(websocket)
 
         try:
             async for raw in websocket:
@@ -222,49 +191,82 @@ class RemoteServer:
                         except SystemExit:
                             break
                         continue
+                    await self._ws_send("user_message", text=text)
                     await self._ws_send("turn_start")
+                    _turn_t0 = time.monotonic()
                     try:
                         await self._app._handle_turn(text)
                     except Exception as e:
                         await self._ws_send("error", message=f"Error: {str(e)}")
                     finally:
-                        await self._ws_send("turn_end")
+                        al = self._app.agent_loop
+                        elapsed = time.monotonic() - _turn_t0
+                        await self._ws_send(
+                            "turn_end",
+                            tokens=al.last_turn_tokens,
+                            iterations=al._state.iteration,
+                            elapsed=elapsed,
+                        )
 
                 elif msg_type == "cancel":
                     self._app.agent_loop.cancel()
+
+                elif msg_type == "permission":
+                    req_id = msg.get("id", "")
+                    decision = msg.get("decision", "n")
+                    self._resolve_permission(req_id, decision)
         except Exception:
             pass
         finally:
             self._clients.discard(websocket)
 
-    async def _replay_history(self) -> None:
-        """Send existing conversation history to a newly connected browser.
-        向新连接的浏览器发送已有的对话历史。"""
+    async def _replay_history(self, websocket: Any) -> None:
+        """Send existing conversation history to a single newly connected client."""
         from mini_agent.models.message import Role
 
         messages = self._app.session.conversation.messages
         if not messages:
             return
+
+        async def _send(event_type: str, **data: Any) -> None:
+            try:
+                await websocket.send(json.dumps({"type": event_type, **data}, ensure_ascii=False))
+            except Exception:
+                pass
+
         for msg in messages:
             if msg.role == Role.USER:
-                await self._ws_send("history_user", text=msg.content)
+                await _send("history_user", text=msg.content)
             elif msg.role == Role.ASSISTANT:
                 if msg.content:
-                    await self._ws_send("history_assistant", text=msg.content)
+                    await _send("history_assistant", text=msg.content)
                 for tc in msg.tool_calls:
                     try:
                         args = json.dumps(tc.arguments, ensure_ascii=False)[:200]
                     except (TypeError, ValueError):
                         args = str(tc.arguments)[:200]
-                    await self._ws_send("history_tool_call", name=tc.name, args=args)
+                    await _send("history_tool_call", name=tc.name, args=args)
             elif msg.role == Role.TOOL and msg.tool_result:
                 tr = msg.tool_result
-                await self._ws_send(
+                await _send(
                     "history_tool_result",
                     name=tr.name,
                     output=tr.output[:500],
                     is_error=tr.is_error,
                 )
+
+    async def _send_commands(self, websocket: Any) -> None:
+        """Send the full slash command list to a newly connected client."""
+        cmds = sorted(
+            [[f"/{c.name}", c.description] for c in self._app.slash_commands.list_commands()],
+            key=lambda c: c[0],
+        )
+        try:
+            await websocket.send(
+                json.dumps({"type": "commands", "commands": cmds}, ensure_ascii=False)
+            )
+        except Exception:
+            pass
 
     def _wire_callbacks(self) -> None:
         """Replace AgentLoop and PermissionManager callbacks.
@@ -276,7 +278,7 @@ class RemoteServer:
 
         al.on_stream_start = lambda: fire(self._ws_send("stream_start"))
         al.on_stream_delta = lambda d: fire(self._ws_send("stream_text", delta=d))
-        al.on_stream_end = lambda: fire(self._ws_send("stream_end"))
+        al.on_stream_end = lambda ft: fire(self._ws_send("stream_end", full_text=ft))
         al.on_thinking_delta = lambda d: fire(self._ws_send("thinking_delta", delta=d))
 
         def on_tool_start(tc: Any) -> None:
@@ -286,13 +288,19 @@ class RemoteServer:
                 ap = str(tc.arguments)[:200]
             fire(self._ws_send("tool_call", name=tc.name, args=ap))
 
-        def on_tool_end(tr: Any) -> None:
+        def on_tool_end(tr: Any, duration_ms: float = 0.0) -> None:
+            elapsed = ""
+            if duration_ms >= 1000:
+                elapsed = f"{duration_ms / 1000:.1f}s"
+            elif duration_ms > 0:
+                elapsed = f"{duration_ms:.0f}ms"
             fire(
                 self._ws_send(
                     "tool_result",
                     name=tr.name,
                     output=tr.output[:500],
                     is_error=tr.is_error,
+                    elapsed=elapsed,
                 )
             )
 
@@ -312,20 +320,16 @@ class RemoteServer:
         return await future
 
     def _resolve_permission(self, req_id: str, decision: str) -> None:
-        """Called from HTTP thread to resolve a permission Future.
-        从 HTTP 线程调用，解析权限 Future。"""
+        """Resolve a permission Future (called from WS handler)."""
         future = self._pending_confirms.pop(req_id, None)
         if not future or future.done():
             return
-        loop = getattr(self, "_event_loop", None)
-        if not loop:
-            return
         if decision == "y":
-            loop.call_soon_threadsafe(future.set_result, True)
+            future.set_result(True)
         elif decision == "a":
-            loop.call_soon_threadsafe(future.set_result, "always")
+            future.set_result("always")
         else:
-            loop.call_soon_threadsafe(future.set_result, False)
+            future.set_result(False)
 
     def _safe_send(self, event_type: str, **data: Any) -> None:
         """Non-async wrapper used by RemoteTerminalAdapter.
