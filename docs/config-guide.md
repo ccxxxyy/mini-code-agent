@@ -55,7 +55,7 @@
 | `~/.mini-agent/.theme` | 用户级 | `/theme` 命令写入的主题偏好 |
 | `~/.mini-agent/memory/user_memory.json` | 用户级 | 跨项目记忆（SESSION_END 自动提取 + `/memory add`） |
 | `<项目>/.mini-agent/memory.json` | 项目级 | 项目记忆 |
-| `~/.mini-agent/sessions/` | 用户级 | 会话持久化（自动保存/崩溃恢复） |
+| `~/.mini-agent/sessions/` | 用户级 | 会话持久化（自动保存/崩溃恢复），超过 `session_cleanup_days` 天的已正常关闭会话启动时自动清理 |
 | `~/.mini-agent/audit.jsonl` | 用户级 | 审计日志（`/audit on` 开启后） |
 | `~/.mini-agent/recordings/` | 用户级 | 工具链录制（`/record` 保存，`/replay` 读取） |
 | `~/.mini-agent/cost_ledger.json` | 用户级 | 成本累计总账（每轮自动写入；`/cost reset` 确认后清零并重置起始日期，删文件等效） |
@@ -202,6 +202,7 @@ context_window = 128000      # 上下文窗口 token 数（压缩触发用；溢
 compression_threshold = 0.75 # 压缩触发阈值（75% 时压缩）
 auto_extract = true          # 会话结束自动提取记忆
 spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留预览（0 = 禁用）——防大文件撑爆上下文
+session_cleanup_days = 30    # 超过此天数的旧会话启动时自动清理（0 = 禁用）——未正常关闭的保留供崩溃恢复
 
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）

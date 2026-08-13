@@ -1,5 +1,6 @@
 """Tests for session persistence. session 持久化的测试。"""
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -90,3 +91,65 @@ async def test_delete_nonexistent(tmp_path: Path):
 async def test_load_nonexistent(tmp_path: Path):
     store = SessionStore(session_dir=str(tmp_path))
     assert await store.load("nonexistent") is None
+
+
+# --- cleanup_stale ---
+
+
+def _backdate_session(store: SessionStore, session: Session, days_ago: int) -> None:
+    """Save a session then overwrite its last_active to simulate age.
+    保存 session 后改写 last_active 模拟过期。"""
+    import json as _json
+
+    path = store._path_for(session.metadata.session_id)
+    data = _json.loads(path.read_text(encoding="utf-8"))
+    data["metadata"]["last_active"] = (datetime.now() - timedelta(days=days_ago)).isoformat()
+    path.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+async def test_cleanup_stale_removes_old_sessions(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    old = Session()
+    old.metadata.closed_cleanly = True
+    await store.save(old)
+    _backdate_session(store, old, days_ago=45)
+
+    recent = Session()
+    recent.metadata.closed_cleanly = True
+    await store.save(recent)
+    _backdate_session(store, recent, days_ago=5)
+
+    removed = await store.cleanup_stale(max_age_days=30)
+    assert removed == 1
+    assert await store.load(old.metadata.session_id) is None
+    assert await store.load(recent.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_skips_unclean_sessions(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    crashed = Session()
+    crashed.metadata.closed_cleanly = False
+    await store.save(crashed)
+    _backdate_session(store, crashed, days_ago=60)
+
+    removed = await store.cleanup_stale(max_age_days=30)
+    assert removed == 0
+    assert await store.load(crashed.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_disabled_with_zero(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    old = Session()
+    old.metadata.closed_cleanly = True
+    await store.save(old)
+    _backdate_session(store, old, days_ago=999)
+
+    removed = await store.cleanup_stale(max_age_days=0)
+    assert removed == 0
+    assert await store.load(old.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_empty_dir(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    removed = await store.cleanup_stale(max_age_days=30)
+    assert removed == 0

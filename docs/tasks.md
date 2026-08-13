@@ -1359,3 +1359,11 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 审计留痕 — drain 标记已读留盘（会话级）、unregister 保留收件箱文件、SubAgentManager 持有默认 Mailbox 时初始化 `reset_all()` 清理上一会话
 - [x] 架构边界保持文档化不实现：跨进程文件锁 + 推送唤醒是 6.4 的前置（comparison 6.2）
 - [x] 13 个新测试（test_mailbox.py 共 31 个），684 个全过，覆盖率 80.85%，ruff clean
+
+## 会话自动清理 (comparison 9.1)
+
+- [x] `SessionStore.cleanup_stale(max_age_days)` — 扫描 `~/.mini-agent/sessions/`，删除超过 N 天且 `closed_cleanly=True` 的会话；未正常关闭的跳过（崩溃恢复保留）
+- [x] `MemoryConfig.session_cleanup_days = 30`（0 = 禁用）
+- [x] `app.py` 启动时调用（worktree 清理之后、崩溃恢复之前），有清理时显示提示
+- [x] 与 mewcode 差异：mini 跳过 `closed_cleanly=False`（崩溃会话保留），mewcode 直接按 `last_active` 删
+- [x] 4 个测试（过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录），688 个全过，ruff clean

@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，684 个测试全部通过。
+> 当前版本 v1.0.0，688 个测试全部通过。
 
 ---
 
@@ -141,8 +141,9 @@
 - 自动提取：MemoryExtractor 从对话中提取 "always/prefer/don't" 类偏好，自动去重入库
 - 手动管理：`/memory add <内容>` 添加、`/memory` 查看
 - 会话持久化：`/session save/list/load/delete` — 完整对话（含工具调用）JSON 序列化，重启后恢复继续
+- 会话自动清理（comparison 9.1）：启动时 `cleanup_stale` 删除超过 N 天的旧会话（默认 30 天，`session_cleanup_days` 可配），未正常关闭的跳过（崩溃恢复保留）
 
-**验证**：15 个单测（CRUD/搜索/提取/去重/序列化往返）
+**验证**：15 个单测（CRUD/搜索/提取/去重/序列化往返） + 4 个清理测试
 
 ---
 
@@ -227,7 +228,7 @@
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
 | 跨会话记忆 | 项目级 + 用户级双层 JSON 存储 + 关键词/标签搜索 |
-| 会话持久化 | SessionStore 完整序列化（含 ToolCall/ToolResult），/session 全套命令 |
+| 会话持久化 | SessionStore 完整序列化（含 ToolCall/ToolResult），/session 全套命令，启动时自动清理超龄会话（保留崩溃会话） |
 | 记忆提取 | MemoryExtractor 从对话自动提取偏好/约定/约束，去重入库 |
 
 ### ✅ 层面 5：多 Agent 协作
@@ -256,7 +257,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 684 个测试全部通过（约 70 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
+| 测试 | 688 个测试全部通过（约 62 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

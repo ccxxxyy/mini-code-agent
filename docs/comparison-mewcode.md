@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **684 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **688 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -637,18 +637,17 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 ## 九、会话管理
 
-### 9.1 会话自动清理
+### 9.1 会话自动清理 ✅ 已实现
 
 | | mini | mewcode |
 |---|---|---|
-| 旧会话清理 | 无（永远保留） | **30 天自动清理**（可配） |
+| 旧会话清理 | ✅ **N 天自动清理**（默认 30 天，可配 `session_cleanup_days`），跳过未正常关闭的会话（崩溃恢复保留） | **30 天自动清理**（可配） |
 
-**增强方案**：
-1. `SessionStore` 启动时扫描 `~/.mini-agent/sessions/`
-2. 删除超过 N 天的会话文件（默认 30 天，可配 `[session] cleanup_days = 30`）
-3. 清理前检查 `closed_cleanly=True`——未正常关闭的不删（可能是崩溃恢复用的）
-
-代码改动：`memory/session_store.py` ~15 行。
+**已完成**：
+1. `SessionStore.cleanup_stale(max_age_days)` — 启动时扫描 `~/.mini-agent/sessions/`，删除超过 N 天且 `closed_cleanly=True` 的会话文件；未正常关闭的跳过（可能需要崩溃恢复）
+2. `MemoryConfig.session_cleanup_days = 30`（0 = 禁用），可通过 `config.toml` 的 `[memory]` 段配置
+3. `app.py` 启动时调用（在崩溃恢复检查之前），清理后显示 "Cleaned N stale session(s)"
+4. 4 个测试：过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录
 
 ### 9.2 会话压缩边界记录
 
@@ -712,7 +711,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
 | ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |
-| ⚪ P4 | 9.1 | 会话自动清理 | 磁盘管理 | 2 小时 |
+| ✅ 完成 | 9.1 | 会话自动清理 | 磁盘管理 | 已完成 |
 | ⚪ P4 | 9.2 | 会话压缩边界 | 恢复性能 | 半天 |
 | ⚪ P4 | 4.6 | 记忆导出/导入 | 互操作 | 半天 |
 | ⚪ P4 | 7.2 | Hook 拒绝工具执行 | 自动化控制 | 2 小时 |
