@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，671 个测试全部通过。
+> 当前版本 v1.0.0，684 个测试全部通过。
 
 ---
 
@@ -155,6 +155,7 @@
 - SubAgentManager：spawn（asyncio.create_task 后台启动）/ spawn_parallel（批量并发）/ wait_all（gather 收集）/ cancel / timeout 超时取消
 - 失败即数据：子 Agent 异常转 SubAgentResult(success=False)，不炸编排
 - Mailbox 跨 Agent 通信（P58）：共享文件式收件箱，SubAgent 运行中通过 send_message 互发消息、wait_message 阻塞等待；spawn_parallel 预生成 id 让兄弟 Agent 互见（id + 任务摘要）
+- Mailbox 增强（P58.4）：`to='*'` 广播、request/response 结构化协议（request_id 配对 + approve 表态）、名字寻址（spawn_agents names 参数）、会话级审计留痕（drain 标记已读留盘）
 
 **验证**：8 个单测含并行计时断言（3 个 0.1s Agent 并行 <0.35s）；真实 API E2E：2 个 Agent 并行读不同文件 2.3 秒各自正确报告
 
@@ -236,7 +237,7 @@
 | SubAgent 子任务分发 | asyncio 真并行（E2E 计时验证），独立上下文/工具表/工作目录 |
 | Git Worktree 并行隔离 | spawn(isolation="worktree") 自动建树，脏树保护，合并回主分支 |
 | Agent Teams 团队协作 | Planner 分解 + 角色匹配 + 并行编排 + 报告汇总 |
-| Mailbox 跨 Agent 通信 | 文件式 JSON 收件箱 + send_message/wait_message 工具，Agent 运行中互发消息（P58），真实 LLM 验证 4 类拓扑（单向/汇聚/判别寻址/双向乒乓） |
+| Mailbox 跨 Agent 通信 | 文件式 JSON 收件箱 + send_message/wait_message 工具，Agent 运行中互发消息（P58）；广播/结构化协议/名字寻址/审计留痕（P58.4）；真实 LLM 验证 4 类拓扑（单向/汇聚/判别寻址/双向乒乓） |
 
 ### ✅ 层面 6：Spec 开发模式 + CLAUDE 项目指令
 
@@ -255,7 +256,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 671 个测试全部通过（约 60 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
+| 测试 | 684 个测试全部通过（约 70 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

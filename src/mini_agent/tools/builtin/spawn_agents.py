@@ -15,6 +15,13 @@ class SpawnAgentsParams(BaseModel):
     """Pydantic model for spawn_agents parameters (P46). Auto-generates ToolSchema."""
 
     tasks: list[str] = Field(description="List of task descriptions, one per sub-agent")
+    names: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional short role names, one per task (e.g. ['explorer', 'summarizer']). "
+            "Agents can then message each other by name instead of hex id."
+        ),
+    )
     isolated: bool = Field(
         default=False,
         description="Run each sub-agent in a Git worktree",
@@ -54,11 +61,24 @@ class SpawnAgentsTool(Tool):
         if not tasks:
             return self.error_result("", "No tasks provided")
 
+        names: list[str] | None = kwargs.get("names")
+        if names is not None:
+            if len(names) != len(tasks):
+                return self.error_result(
+                    "", f"names length ({len(names)}) must match tasks ({len(tasks)})"
+                )
+            cleaned = [n.strip() for n in names]
+            if len(set(cleaned)) != len(cleaned) or any(n in ("main", "*") for n in cleaned):
+                return self.error_result("", "names must be unique and must not be 'main' or '*'")
+            names = cleaned
+
         isolation = "worktree" if kwargs.get("isolated") else "none"
         agent_type = kwargs.get("agent_type")
 
         try:
-            ids = await mgr.spawn_parallel(tasks, isolation=isolation, agent_type=agent_type)
+            ids = await mgr.spawn_parallel(
+                tasks, isolation=isolation, agent_type=agent_type, names=names
+            )
         except ValueError as e:
             return self.error_result("", str(e))
         results = await mgr.wait_all(ids, timeout=300)

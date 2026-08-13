@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **671 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **684 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -106,7 +106,7 @@
 |---|---|---|
 | 文档数量 | **12 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
-| 技术笔记 | tech-notes.md（41 节，设计决策记录） | 无 |
+| 技术笔记 | tech-notes.md（58 个部分，设计决策记录） | 无 |
 | 配置指南 | config-guide.md（全配置文件说明） | config.yaml.example |
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
@@ -515,16 +515,16 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - 未知收件人报错**列出已知 Agent**，LLM 可自行降级转发；mewcode 只回 "Cannot resolve recipient"
 - `register` 总是重置收件箱，杜绝跨会话残留投递；mewcode 靠 `cleanup_all` 手动清
 
-**仍弱于 mewcode 的差距**（P58 完成后逐项对照 `mewcode/teams/mailbox.py` + `protocol.py` + `registry.py` 的诚实结论，按重要性排序）：
+**与 mewcode 的四项差距 ✅ 已拉平（P58.4）**（曾逐项对照 `mewcode/teams/mailbox.py` + `protocol.py` + `registry.py` 记录，现全部实现）：
 
-| # | 差距 | mewcode 实现 | mini 现状 | 影响 |
-|---|---|---|---|---|
-| 1 | **无广播** | `to='*'` 一键广播全队（`Mailbox.broadcast`，可 exclude 自己） | 只能逐个发送。实测汇聚场景中 agent A 发错 id 后被迫手动逐个补发，正是缺这个 | 多接收方场景 LLM 要多轮工具调用，易漏发 |
-| 2 | **无结构化消息协议** | `type` 字段（text / shutdown_request / shutdown_response / plan_approval_request / plan_approval_response）+ `request_id` 请求-应答配对 + `approve` 表态——"请队友收尾""计划审批"是**协议级**协调 | 纯文本消息，协调只能靠 LLM 理解措辞 | 深度差距：复杂协作（生命周期管理、审批流）不可靠；当前 mini 场景够用 |
-| 3 | **无名字寻址** | `AgentNameRegistry` 按人类可读名字或 id 解析收件人 | 只有 8 位 hex id；MAILBOX_NOTICE 附任务摘要缓解但没根治——'researcher' 对 LLM 远比 '83c4985f' 友好 | 幻觉 id 风险靠 prompt 告诫压制，非结构性解决 |
-| 4 | **无审计痕迹** | 消息带 `read` 标记，consume 后**留在磁盘**可事后排查；另有 `read()` 只窥视不消费 | drain 即删除，出问题无消息留痕可查 | 调试多 Agent 时序问题时缺第一手证据 |
+| # | 原差距 | mewcode 实现 | mini 实现（P58.4） |
+|---|---|---|---|
+| 1 | 无广播 | `to='*'` 一键广播全队（可 exclude 自己） | ✅ `Mailbox.broadcast()` + send_message `to='*'`，自动排除发送者，返回收件人列表 |
+| 2 | 无结构化消息协议 | `type`（含 shutdown/plan_approval 等团队生命周期类型）+ `request_id` 配对 + `approve` 表态 | ✅ **mini 适配版**：通用 `type=text/request/response` + `request_id`（request 自动分配并回显）+ `approve`；投递前缀区分 `[Request ...]`/`[Response ...]`。诚实差异：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故采用通用请求-应答而非照搬团队类型 |
+| 3 | 无名字寻址 | `AgentNameRegistry` 按名字或 id 解析 | ✅ `Mailbox.register(id, name)` 别名注册 + `resolve()` id/名字双解析；spawn_agents 新增 `names` 参数（唯一性/保留字校验），MAILBOX_NOTICE 显示 `'explorer' (id xxx, task: ...)` |
+| 4 | 无审计痕迹 | 消息带 `read` 标记 consume 后留盘；`read()` 只窥视 | ✅ `drain` 标记已读并留盘（会话内可 cat 排查）；`unregister` 保留文件；新会话 `SubAgentManager` 初始化时 `reset_all()` 统一清理。诚实差异：审计是**会话级**的，mewcode 留存至手动 cleanup |
 
-**已知架构边界（最重要的一条，实现前必读）**：
+**已知架构边界（P58.4 后仍然成立，做 6.4 前必读）**：
 
 - **无锁设计只在单进程内成立**。mini 的 Mailbox 不加任何锁，依据是"所有 Agent 跑在同一 asyncio 事件循环、send/drain 内部无 await、单文件读改写天然原子"（见 `core/mailbox.py` docstring）。mewcode 的队友跑在 tmux/iTerm2 **独立进程**里，所以它有完整的文件锁体系：`.lock` 锁文件（O_CREAT|O_EXCL）+ 指数退避带随机抖动 + 10s 陈旧锁强制接管 + 5s 获取超时抛异常 + 进程内 threading.Lock 双层——约 40 行只为跨进程互斥。**一旦 mini 实现 6.4（多后端 tmux spawn），单进程假设即失效，必须先补锁再上多进程**，否则并发读改写会静默丢消息。届时 mewcode 的 `_with_lock` 是现成参考。
 - **无推送唤醒**。mewcode 写入后主动 `send_keys_to_pane` 唤醒对方进程（推模式）；mini 靠 wait_message 0.5s 轮询（拉模式）。单进程内轮询开销可忽略，跨进程后同样需要补唤醒机制。

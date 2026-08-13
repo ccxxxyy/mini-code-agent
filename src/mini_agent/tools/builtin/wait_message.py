@@ -47,7 +47,14 @@ class WaitMessageTool(Tool):
         while True:
             messages = ctx.mailbox.drain(ctx.agent_id)
             if messages:
-                lines = [f"[from '{m.sender}' at {m.timestamp}] {m.content}" for m in messages]
+                lines = []
+                for m in messages:
+                    extra = ""
+                    if m.type != "text":
+                        extra = f" {m.type} request_id={m.request_id}"
+                        if m.approve is not None:
+                            extra += f" approve={str(m.approve).lower()}"
+                    lines.append(f"[from '{m.sender}'{extra} at {m.timestamp}] {m.content}")
                 return ToolResult(
                     call_id="",
                     name="wait_message",

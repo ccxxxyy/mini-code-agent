@@ -2015,16 +2015,16 @@ spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字�
 - **read-only 类型也能收发**：send/wait_message 不算写文件，explore/verify 代理可参与协作
 - **主代理在 spawn_agents 期间阻塞**：发给 'main' 的消息在 wait_all 返回后的下一轮才被消费——真正实时的是 Worker↔Worker 这条边，是当前架构的已知边界
 
-## 58.5 与 mewcode 原版的差距（诚实记录）
+## 58.5 已拉平四项
 
-P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 后仍弱于原版的四项 + 一条架构边界：
+P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 曾记录四项差距，P58.4 全部实现：
 
-1. **无广播**——mewcode `to='*'` 一键广播（可 exclude）；mini 逐个发，实测汇聚场景 LLM 发错后手动补发暴露此缺口
-2. **无结构化消息协议**——mewcode 有 type（shutdown_request/response、plan_approval_request/response）+ request_id 配对 + approve 表态，协作是协议级的；mini 纯文本，协调靠 LLM 理解措辞
-3. **无名字寻址**——mewcode AgentNameRegistry 支持按名字解析；mini 只有 8 位 hex id，任务摘要缓解但 'researcher' 远比 '83c4985f' 对 LLM 友好
-4. **无审计痕迹**——mewcode 消息 consume 后带 read 标记留盘、另有 read() 只窥视；mini drain 即删，时序问题无留痕可查
+1. **广播** ✅——`Mailbox.broadcast()` + send_message `to='*'`，自动排除发送者，返回收件人列表
+2. **结构化消息协议** ✅——通用 `type=text/request/response` + request_id 配对（request 自动分配并回显）+ approve 表态，投递前缀区分 [Request]/[Response]。适配说明：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故用通用请求-应答而非照搬团队类型
+3. **名字寻址** ✅——`register(id, name)` 别名注册 + `resolve()` id/名字双解析，spawn_agents 新增 `names` 参数（唯一性/保留字校验），notice 显示 'explorer' (id xxx, task: ...)
+4. **审计痕迹** ✅——drain 标记已读并留盘（会话内可 cat 排查），unregister 保留文件，新会话 SubAgentManager 初始化 `reset_all()` 统一清理。与 mewcode 差异：审计是**会话级**的，mewcode 留存至手动 cleanup
 
-**架构边界（做 6.4 前必读）**：mini 的无锁只在单 asyncio 进程内成立（send/drain 无 await → 天然原子）。mewcode 队友是 tmux 独立进程，故有约 40 行文件锁体系（O_EXCL 锁文件 + 指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时 + threading.Lock 双层）和写入后 send_keys 推送唤醒。**mini 一旦做多后端 spawn（6.4），必须先补文件锁与唤醒，否则跨进程并发读改写会静默丢消息**——mewcode 的 `_with_lock` 是现成参考。
+**架构边界（P58.4 后仍成立，做 6.4 前必读）**：mini 的无锁只在单 asyncio 进程内成立（send/drain 无 await → 天然原子）。mewcode 队友是 tmux 独立进程，故有约 40 行文件锁体系（O_EXCL 锁文件 + 指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时 + threading.Lock 双层）和写入后 send_keys 推送唤醒。**mini 一旦做多后端 spawn（6.4），必须先补文件锁与唤醒，否则跨进程并发读改写会静默丢消息**——mewcode 的 `_with_lock` 是现成参考。
 
 完整对照表见 comparison-mewcode.md 6.2 节。
 
@@ -2034,6 +2034,6 @@ P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始�
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——671 个测试约 60 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——684 个测试约 70 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

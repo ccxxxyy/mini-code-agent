@@ -53,13 +53,16 @@ and stop -- do NOT retry in a loop."""
 
 MAILBOX_NOTICE = """
 
-You are agent '{agent_id}'.{peers_line} Incoming messages from other agents \
-appear as "[Message from agent '<id>']" and may contain findings or \
-coordination requests -- take them into account. Use the send_message tool \
-to message 'main' (the orchestrator) or a peer agent id mid-task when you \
-have findings worth sharing; otherwise just finish and report normally. \
-Always use the EXACT peer ids listed above -- never invent ids like \
-'agent-2' or 'subagent_1'.
+You are agent {self_label}.{peers_line} Incoming messages from other agents \
+appear as "[Message from agent '<id>']" (or [Request ...] / [Response ...]) \
+and may contain findings or coordination requests -- take them into account. \
+Use the send_message tool to message 'main' (the orchestrator), a peer (by \
+name or id), or '*' (broadcast to all) mid-task when you have findings worth \
+sharing; otherwise just finish and report normally. Always use the EXACT \
+names/ids listed above -- never invent ids like 'agent-2' or 'subagent_1'.
+When you need an ANSWER from a peer, send type='request' (a request_id is \
+assigned); the peer replies with type='response' and that request_id \
+(optionally approve=true/false).
 If your task says to WAIT for information from another agent, use the \
 wait_message tool -- it blocks until a message arrives. Do NOT finish \
 early or busy-wait with shell sleeps: once you finish, your inbox is \
@@ -118,9 +121,11 @@ class SubAgent:
         agent_type: AgentTypeDefinition | None = None,
         mailbox: Mailbox | None = None,
         agent_id: str | None = None,
-        peers: list[tuple[str, str]] | None = None,
+        peers: list[tuple[str, str, str]] | None = None,
+        name: str = "",
     ) -> None:
         self.agent_id = agent_id or uuid.uuid4().hex[:8]
+        self.name = name
         self.task = task
         self._worktree_path = worktree_path
         self._mailbox = mailbox
@@ -161,7 +166,7 @@ class SubAgent:
         )
         self._loop.model_name = model_name
         if mailbox is not None:
-            mailbox.register(self.agent_id)
+            mailbox.register(self.agent_id, name=name)
             self._loop.mailbox = mailbox
             self._loop.agent_id = self.agent_id
 
@@ -185,10 +190,16 @@ class SubAgent:
             peers_line = ""
             if peers:
                 peer_bits = "; ".join(
-                    f"'{pid}' (task: {_task_snippet(ptask)})" for pid, ptask in peers
+                    (
+                        f"'{pname}' (id {pid}, task: {_task_snippet(ptask)})"
+                        if pname
+                        else f"'{pid}' (task: {_task_snippet(ptask)})"
+                    )
+                    for pid, pname, ptask in peers
                 )
                 peers_line = f" Peer agents running alongside you: {peer_bits}."
-            system_prompt += MAILBOX_NOTICE.format(agent_id=self.agent_id, peers_line=peers_line)
+            self_label = f"'{name}' (id '{self.agent_id}')" if name else f"'{self.agent_id}'"
+            system_prompt += MAILBOX_NOTICE.format(self_label=self_label, peers_line=peers_line)
         self._conversation = Conversation(system_prompt=system_prompt)
         self._conversation.append(Message(role=Role.USER, content=task))
 
@@ -274,7 +285,12 @@ class SubAgentManager:
         self._worktree_manager = worktree_manager
         self._model_name = model_name
         self._active: dict[str, _ActiveAgent] = {}
-        self.mailbox = mailbox or Mailbox(working_dir / ".mini-agent" / "mailboxes")
+        if mailbox is None:
+            mailbox = Mailbox(working_dir / ".mini-agent" / "mailboxes")
+            # Fresh session owns the default mailbox: wipe last session's
+            # audit files 新会话拥有默认收件箱：清掉上一会话的审计留痕
+            mailbox.reset_all()
+        self.mailbox = mailbox
 
     async def spawn(
         self,
@@ -283,7 +299,8 @@ class SubAgentManager:
         allowed_tools: list[str] | None = None,
         agent_type: str | None = None,
         agent_id: str | None = None,
-        peers: list[tuple[str, str]] | None = None,
+        peers: list[tuple[str, str, str]] | None = None,
+        name: str = "",
     ) -> str:
         """Spawn a sub-agent running in the background. Returns agent_id.
         派生一个后台运行的 SubAgent，返回 agent_id。
@@ -310,6 +327,7 @@ class SubAgentManager:
             mailbox=self.mailbox,
             agent_id=agent_id,
             peers=peers,
+            name=name,
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(
@@ -324,23 +342,34 @@ class SubAgentManager:
         isolation: str = "none",
         allowed_tools: list[str] | None = None,
         agent_type: str | None = None,
+        names: list[str] | None = None,
     ) -> list[str]:
         """Spawn multiple sub-agents concurrently. Returns agent_ids.
         并发派生多个 SubAgent，返回 agent_id 列表。
 
         Ids are pre-generated so each agent's MAILBOX_NOTICE can name its
-        peers -- siblings can message each other without discovery.
-        id 预生成，MAILBOX_NOTICE 直接告知同伴 id——兄弟 Agent 无需探测即可互发消息。
+        peers (with optional human-readable names) -- siblings can message
+        each other without discovery.
+        id 预生成，MAILBOX_NOTICE 直接告知同伴 id（可带人类可读别名）——
+        兄弟 Agent 无需探测即可互发消息。
         """
+        if names is not None and len(names) != len(tasks):
+            raise ValueError(f"names length ({len(names)}) must match tasks ({len(tasks)})")
+        effective_names = names or ["" for _ in tasks]
         ids = [uuid.uuid4().hex[:8] for _ in tasks]
-        for task, agent_id in zip(tasks, ids):
+        for task, agent_id, name in zip(tasks, ids, effective_names):
             await self.spawn(
                 task,
                 isolation=isolation,
                 allowed_tools=allowed_tools,
                 agent_type=agent_type,
                 agent_id=agent_id,
-                peers=[(pid, pt) for pid, pt in zip(ids, tasks) if pid != agent_id],
+                name=name,
+                peers=[
+                    (pid, pname, pt)
+                    for pid, pname, pt in zip(ids, effective_names, tasks)
+                    if pid != agent_id
+                ],
             )
         return ids
 

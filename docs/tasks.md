@@ -1351,3 +1351,11 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] test_mailbox_e2e.py — 2 个端到端（Mock LLM 脚本化）：运行中互传、慢发送方时序下 wait_message 存活等待
 - [x] 真实 LLM 验证 4 类拓扑：1→1 单向、2→1 汇聚多轮、1→2 判别寻址、1↔1 双向 5 轮乒乓
 - [x] 671 个测试全过，ruff lint + format clean
+
+### P58.4 增强：拉平 mewcode 四项差距
+- [x] 广播 — `Mailbox.broadcast()`（排除发送者）+ send_message `to='*'`
+- [x] 结构化消息协议 — `type=text/request/response` + request_id 配对（request 自动分配并回显）+ approve 表态；`_deliver_mail`/wait_message 前缀区分 [Request]/[Response]；response 缺 request_id 报错
+- [x] 名字寻址 — `Mailbox.register(id, name)` 别名 + `resolve()` 双解析 + `describe_peers()`；spawn_agents 新增 `names` 参数（长度/唯一性/保留字 'main'/'*' 校验）；MAILBOX_NOTICE 显示 'explorer' (id xxx, task: ...)
+- [x] 审计留痕 — drain 标记已读留盘（会话级）、unregister 保留收件箱文件、SubAgentManager 持有默认 Mailbox 时初始化 `reset_all()` 清理上一会话
+- [x] 架构边界保持文档化不实现：跨进程文件锁 + 推送唤醒是 6.4 的前置（comparison 6.2）
+- [x] 13 个新测试（test_mailbox.py 共 31 个），684 个全过，覆盖率 80.85%，ruff clean
