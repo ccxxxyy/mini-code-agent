@@ -188,6 +188,11 @@ class RemoteServer:
                             result = await self._app.slash_commands.execute(text, self._app)
                             if result:
                                 await self._ws_send("info", message=result)
+                            parts = text.strip().split(maxsplit=1)
+                            if parts[0].lower() == "/theme" and len(parts) > 1:
+                                t = parts[1].strip().lower()
+                                if t in ("light", "dark"):
+                                    await self._ws_send("theme", theme=t)
                         except SystemExit:
                             break
                         continue

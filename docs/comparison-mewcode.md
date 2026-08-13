@@ -444,7 +444,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - 工具耗时显示（tool_result 附带 elapsed）
 - 动态命令列表（服务端发送，按字母排序）
 - `<think>` 标签解析（渲染为折叠块）
-- CSS 变量主题（18 个 CSS 变量）
+- CSS 变量主题（18 个 CSS 变量）+ 主题切换（深/浅色，header 按钮 + localStorage + `/theme` 联动）
 - 应用层 ping/pong（10 秒心跳）
 - turn 完成摘要（iterations + elapsed + tokens）
 - 重连状态优化（Reconnecting...）

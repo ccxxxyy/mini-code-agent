@@ -1324,4 +1324,5 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 段落换行 — CSS `white-space: pre-line` + `div.pg` 间距块
 - [x] 滚动锁定 — `userScrolled` 标志，turn 结束重置
 - [x] Cancel/Permission 改走 WS 消息
+- [x] 主题切换 — 深/浅色（Catppuccin Mocha/Latte），header 按钮 + localStorage + `/theme` 命令联动
 - [x] 651 个测试全过，ruff lint + format clean

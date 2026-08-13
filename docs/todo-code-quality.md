@@ -239,9 +239,7 @@ class ContextManager:
 
 ---
 
-## ☐ 远程/浏览器模式待做（P57 相关）
-
-以下问题与本任务（Remote/Browser mode #113）直接相关。
+## ✅ 远程/浏览器模式待做（P57）
 
 ### 仍存在的已知局限
 - ~~单客户端~~ ✅ 已完成（`self._clients: set` 广播，多标签页同步输出）
@@ -319,3 +317,4 @@ class ContextManager:
 - ✅ 标题间距：h1-h4 加 margin-top/bottom
 - ✅ 输入框透明滚动条
 - ✅ Cancel/Permission 改走 WS 消息（去掉 HTTP POST 端点）
+- ✅ 主题切换：深色（Catppuccin Mocha）+ 浅色（Catppuccin Latte），header 按钮 + localStorage 持久化 + `/theme light|dark` 命令联动
