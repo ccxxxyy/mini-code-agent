@@ -90,7 +90,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 来源 | `ui/terminal.py` `show_tool_result`（被 `agent_loop.on_tool_end` 回调触发） |
+| 来源 | `ui/terminal.py` `show_tool_result`（被 `agent_loop.on_tool_end` 回调触发，签名为 `(result, duration_ms)`） |
 | 触发 | 每次工具执行完成时 |
 | 成功 | `╰─ ✓ 行数, 字符数`（绿色 ✓） |
 | 失败 | `╰─ ✗ 错误预览`（红色 ✗，截断 300 字符） |
@@ -111,7 +111,7 @@
 |---|---|
 | 来源 | `ui/renderer.py` `StreamRenderer`（Rich Live + Markdown） |
 | 触发 | LLM 返回 text delta 时（非 tool_call 的文本输出） |
-| 机制 | `on_stream_start` → Live 启动；`on_stream_delta` → 逐段提交式渲染；`on_stream_end` → Live 关闭 |
+| 机制 | `on_stream_start` → Live 启动；`on_stream_delta` → 逐段提交式渲染；`on_stream_end(full_text)` → Live 关闭 |
 | 关闭方法 | 不可关闭（关了就看不到 LLM 的回答） |
 
 ### ⑨ Token 统计行

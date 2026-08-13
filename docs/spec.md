@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent：完整架构规格说明
 
-> **历史文档说明**：本规格是项目启动时的原始设计（P1 之前定稿），部分数字反映当时的规划而非现状——如"6 个内置工具"现已扩展为 8 个（新增 delete_file、spawn_agents）。项目当前状态以 README / capabilities.md / tasks.md 为准；本文档保留原貌作为设计基线。
+> **历史文档说明**：本规格是项目启动时的原始设计（P1 之前定稿），部分数字反映当时的规划而非现状——如"6 个内置工具"现已扩展为 10 个（新增 delete_file、spawn_agents）。项目当前状态以 README / capabilities.md / tasks.md 为准；本文档保留原貌作为设计基线。
 
 ## 1. 项目目录结构
 
@@ -49,7 +49,7 @@ mini-code-agent/
 │       ├── tools/                   # === TOOL LAYER ===
 │       │   ├── __init__.py
 │       │   ├── base.py              # Tool ABC, ToolRegistry, ToolContext
-│       │   ├── builtin/             # 6 core tools
+│       │   ├── builtin/             # 10 core tools
 │       │   │   ├── __init__.py
 │       │   │   ├── read_file.py     # ReadFile tool
 │       │   │   ├── write_file.py    # WriteFile tool
@@ -179,7 +179,7 @@ mini-code-agent/
 |  |            Tool Registry                    |  |  Hook     |   |
 |  |  +------------+  +-----------------------+  |  |  Chain    |   |
 |  |  | Built-in   |  |    MCP Client         |  |  | pre/post |   |
-|  |  | (6 tools)  |  | (external servers)    |  |  | confirm  |   |
+|  |  | (10 tools) |  | (external servers)    |  |  | confirm  |   |
 |  |  +------------+  +-----------------------+  |  +-----------+   |
 |  +--------------------------------------------+                  |
 |                                                                   |
@@ -1606,7 +1606,7 @@ class ReadFileTool(Tool):
             )
 ```
 
-All six built-in tools:
+All ten built-in tools:
 
 | Tool | Key Parameters | Security Check |
 |------|---------------|----------------|

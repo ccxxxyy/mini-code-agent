@@ -23,110 +23,154 @@ def build_html(
 <meta http-equiv="Expires" content="0">
 <title>Mini-Code-Agent</title>
 <style>
+:root {
+  --bg-base: #1e1e2e;
+  --bg-surface: #313244;
+  --bg-overlay: #45475a;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-muted: #6c7086;
+  --text-faint: #585b70;
+  --accent-blue: #89b4fa;
+  --accent-blue-hover: #74c7ec;
+  --accent-green: #a6e3a1;
+  --accent-red: #f38ba8;
+  --accent-red-hover: #eba0ac;
+  --accent-purple: #cba6f7;
+  --accent-yellow: #f9e2af;
+  --accent-teal: #94e2d5;
+  --border: #45475a;
+  --scrollbar: rgba(166,173,200,0.3);
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-       background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex;
-       flex-direction: column; }
-#header { background: #313244; padding: 12px 20px; font-size: 14px;
-           border-bottom: 1px solid #45475a; }
-#header span { color: #89b4fa; font-weight: 600; }
+       background: var(--bg-base); color: var(--text-primary); height: 100vh;
+       display: flex; flex-direction: column; }
+#header { background: var(--bg-surface); padding: 12px 20px; font-size: 14px;
+           border-bottom: 1px solid var(--border); }
+#header span { color: var(--accent-blue); font-weight: 600; }
 #status { float: right; font-size: 12px; }
-.connected { color: #a6e3a1; }
-.disconnected { color: #f38ba8; }
+.connected { color: var(--accent-green); }
+.disconnected { color: var(--accent-red); }
+.reconnecting { color: var(--accent-yellow); }
 #messages { flex: 1; overflow-y: auto; padding: 16px 20px;
             scrollbar-width: thin; scrollbar-color: transparent transparent; }
-#messages:hover { scrollbar-color: rgba(166,173,200,0.3) transparent; }
+#messages:hover { scrollbar-color: var(--scrollbar) transparent; }
 #messages::-webkit-scrollbar { width: 6px; }
 #messages::-webkit-scrollbar-track { background: transparent; }
 #messages::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
-#messages:hover::-webkit-scrollbar-thumb { background: rgba(166,173,200,0.3); }
+#messages:hover::-webkit-scrollbar-thumb { background: var(--scrollbar); }
 .msg { margin-bottom: 4px; line-height: 1.5; word-wrap: break-word;
        font-size: 14px; }
-.msg.user { color: #89b4fa; background: #313244; padding: 10px 16px;
-            border-radius: 8px; margin: 20px 0 16px;
-            border-left: 3px solid #89b4fa; }
-.msg.assistant { color: #cdd6f4; margin-bottom: 2px; }
-.msg.assistant h1 { font-size: 1.3em; margin: 0; color: #cba6f7; }
-.msg.assistant h2 { font-size: 1.15em; margin: 0; color: #cba6f7; }
-.msg.assistant h3 { font-size: 1.05em; margin: 0; color: #cba6f7; }
-.msg.assistant h4 { font-size: 1em; margin: 0; color: #cba6f7; }
-.msg.assistant code { background: #313244; padding: 2px 6px;
+.msg.user { color: var(--accent-blue); background: var(--bg-surface);
+            padding: 10px 16px; border-radius: 8px; margin: 20px 0 16px;
+            border-left: 3px solid var(--accent-blue); }
+.msg.assistant { color: var(--text-primary); margin-bottom: 2px;
+                white-space: pre-line; }
+.msg.assistant .pg { display: block; height: 12px; }
+.msg.assistant h1 { font-size: 1.3em; margin: 16px 0 8px; color: var(--accent-purple); }
+.msg.assistant h2 { font-size: 1.15em; margin: 14px 0 6px; color: var(--accent-purple); }
+.msg.assistant h3 { font-size: 1.05em; margin: 12px 0 4px; color: var(--accent-purple); }
+.msg.assistant h4 { font-size: 1em; margin: 10px 0 4px; color: var(--accent-purple); }
+.msg.assistant h1:first-child, .msg.assistant h2:first-child,
+.msg.assistant h3:first-child, .msg.assistant h4:first-child { margin-top: 0; }
+.msg.assistant code { background: var(--bg-surface); padding: 2px 6px;
                       border-radius: 3px; font-size: 13px; }
-.msg.assistant pre { background: #313244; padding: 10px 14px;
+.msg.assistant pre { background: var(--bg-surface); padding: 10px 14px;
                      border-radius: 6px; overflow-x: auto;
                      margin: 4px 0; font-size: 13px; }
 .msg.assistant pre code { background: none; padding: 0; }
 .msg.assistant ul, .msg.assistant ol { margin: 1px 0 1px 0;
             padding: 0; list-style: none; }
 .msg.assistant li { margin: 0; padding: 0; }
-.msg.assistant ul li::before { content: "\\2022  "; color: #a6adc8; }
+.msg.assistant ul li::before { content: "\\2022  "; color: var(--text-secondary); }
 .msg.assistant ol { counter-reset: li; }
 .msg.assistant ol li::before { counter-increment: li;
-            content: counter(li) ". "; color: #cba6f7; }
+            content: counter(li) ". "; color: var(--accent-purple); }
 .msg.assistant table { border-collapse: collapse; margin: 4px 0;
             font-size: 13px; }
-.msg.assistant th, .msg.assistant td { border: 1px solid #45475a;
+.msg.assistant th, .msg.assistant td { border: 1px solid var(--border);
             padding: 3px 8px; text-align: left; }
-.msg.assistant th { background: #313244; color: #cba6f7; }
-.msg.assistant strong { color: #f9e2af; }
-.msg.assistant a { color: #89b4fa; text-decoration: none; }
+.msg.assistant th { background: var(--bg-surface); color: var(--accent-purple); }
+.msg.assistant strong { color: var(--accent-yellow); }
+.msg.assistant a { color: var(--accent-blue); text-decoration: none; }
 .msg.assistant a:hover { text-decoration: underline; }
 .msg.assistant hr { display: none; }
-.msg.tool { color: #585b70; font-size: 12px; padding: 1px 0;
+.msg.tool { color: var(--text-faint); font-size: 12px; padding: 1px 0;
             margin-bottom: 2px; line-height: 1.4; }
-.msg.info { color: #94e2d5; font-style: italic;
+.msg.tool-group { margin-bottom: 4px; }
+.msg.tool-group summary { cursor: pointer; color: var(--text-faint);
+            font-size: 12px; list-style: none; padding: 2px 0; }
+.msg.tool-group summary::-webkit-details-marker { display: none; }
+.msg.tool-group summary::before { content: '\\25b6  '; font-size: 10px; }
+.msg.tool-group[open] summary::before { content: '\\25bc  '; }
+.msg.tool-group .tool-body { color: var(--text-faint); font-size: 12px;
+            padding: 2px 0 2px 16px; white-space: pre-wrap;
+            word-break: break-all; max-height: 300px; overflow-y: auto; }
+.msg.info { color: var(--accent-teal); font-style: italic;
             white-space: pre-wrap;
             font-family: 'Cascadia Code', 'Consolas', monospace;
             font-size: 13px; }
-.msg.error { color: #f38ba8; }
-.msg.permission { background: #45475a; padding: 10px 14px;
+.msg.error { color: var(--accent-red); }
+.msg.turn-summary { color: var(--text-muted); font-size: 11px; padding: 2px 0 8px;
+            border-bottom: 1px solid var(--bg-surface); margin-bottom: 8px; }
+.msg.permission { background: var(--bg-overlay); padding: 10px 14px;
                   border-radius: 6px; }
 .msg.permission button { margin: 4px 6px 0 0; padding: 4px 16px;
                           border: none; border-radius: 4px;
                           cursor: pointer; font-size: 13px; }
-.btn-y { background: #a6e3a1; color: #1e1e2e; }
-.btn-a { background: #89b4fa; color: #1e1e2e; }
-.btn-n { background: #f38ba8; color: #1e1e2e; }
-#input-area { display: flex; padding: 12px 20px; background: #313244;
-              border-top: 1px solid #45475a; }
-#input { flex: 1; background: #1e1e2e; border: 1px solid #585b70;
-         color: #cdd6f4; padding: 10px 14px; border-radius: 6px;
-         font-size: 14px; font-family: inherit; outline: none; }
-#input:focus { border-color: #89b4fa; }
-#send { background: #89b4fa; color: #1e1e2e; border: none;
+.btn-y { background: var(--accent-green); color: var(--bg-base); }
+.btn-a { background: var(--accent-blue); color: var(--bg-base); }
+.btn-n { background: var(--accent-red); color: var(--bg-base); }
+#input-area { display: flex; padding: 12px 20px; background: var(--bg-surface);
+              border-top: 1px solid var(--border); }
+#input { flex: 1; background: var(--bg-base); border: 1px solid var(--text-faint);
+         color: var(--text-primary); padding: 10px 14px; border-radius: 6px;
+         font-size: 14px; font-family: inherit; outline: none;
+         resize: none; min-height: 40px; max-height: 200px;
+         overflow-y: auto; line-height: 1.4;
+         scrollbar-width: thin; scrollbar-color: transparent transparent; }
+#input:hover { scrollbar-color: var(--scrollbar) transparent; }
+#input::-webkit-scrollbar { width: 4px; }
+#input::-webkit-scrollbar-track { background: transparent; }
+#input::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
+#input:hover::-webkit-scrollbar-thumb { background: var(--scrollbar); }
+#input:focus { border-color: var(--accent-blue); }
+#send { background: var(--accent-blue); color: var(--bg-base); border: none;
         padding: 10px 20px; margin-left: 8px; border-radius: 6px;
         cursor: pointer; font-weight: 600; }
-#send:hover { background: #74c7ec; }
-#stop { background: #f38ba8; color: #1e1e2e; border: none;
+#send:hover { background: var(--accent-blue-hover); }
+#stop { background: var(--accent-red); color: var(--bg-base); border: none;
         padding: 10px 16px; margin-left: 6px; border-radius: 6px;
         cursor: pointer; font-weight: 600; display: none; }
-#stop:hover { background: #eba0ac; }
+#stop:hover { background: var(--accent-red-hover); }
 #cmd-list { position: absolute; bottom: 60px; left: 20px;
-            background: #313244; border: 1px solid #585b70;
+            background: var(--bg-surface); border: 1px solid var(--text-faint);
             border-radius: 6px; max-height: 240px; overflow-y: auto;
             display: none; z-index: 10; min-width: 320px;
             scrollbar-width: thin;
-            scrollbar-color: rgba(166,173,200,0.3) transparent; }
+            scrollbar-color: var(--scrollbar) transparent; }
 #cmd-list div { padding: 6px 14px; cursor: pointer; font-size: 13px; }
 #cmd-list div:hover, #cmd-list div.selected {
-  background: #45475a; }
-#cmd-list div span { color: #a6adc8; margin-left: 8px;
+  background: var(--bg-overlay); }
+#cmd-list div span { color: var(--text-secondary); margin-left: 8px;
                      font-size: 12px; }
 .msg.thinking-indicator { font-size: 20px; font-weight: 600;
-            color: #f9e2af; padding: 6px 0;
+            color: var(--accent-yellow); padding: 6px 0;
             animation: pulse-text 1.5s ease-in-out infinite; }
 .msg.thinking-indicator .spinner { display: inline-block;
             width: 18px; height: 18px;
-            border: 2px solid #585b70; border-top-color: #f9e2af;
+            border: 2px solid var(--text-faint);
+            border-top-color: var(--accent-yellow);
             border-radius: 50%; animation: spin 0.8s linear infinite;
             vertical-align: middle; margin-right: 8px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse-text { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
-.msg.thinking { color: #6c7086; font-size: 12px;
+.msg.thinking { color: var(--text-muted); font-size: 12px;
                 padding: 2px 0; margin-bottom: 4px; }
-.msg.thinking summary { cursor: pointer; color: #6c7086; }
+.msg.thinking summary { cursor: pointer; color: var(--text-muted); }
 .msg.thinking pre { white-space: pre-wrap; margin: 2px 0 0;
-                    font-size: 11px; color: #585b70;
+                    font-size: 11px; color: var(--text-faint);
                     max-height: 200px; overflow-y: auto; }
 </style>
 </head>
@@ -140,8 +184,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 <div id="messages"></div>
 <div id="cmd-list"></div>
 <div id="input-area">
-  <input id="input" placeholder="Type a message... (/ for commands)"
-         autocomplete="off" />
+  <textarea id="input" placeholder="Type a message... (/ for commands)"
+            autocomplete="off" rows="1"></textarea>
   <button id="send">Send</button>
   <button id="stop">Stop</button>
 </div>
@@ -160,6 +204,7 @@ let thinkingBuf = '';
 let spinnerEl = null;
 let isRunning = false;
 let cmdIdx = -1;
+let userScrolled = false;
 
 function showSpinner() {
   removeSpinner();
@@ -173,29 +218,18 @@ function removeSpinner() {
   if (spinnerEl) { spinnerEl.remove(); spinnerEl = null; }
 }
 
-const CMDS = [
+let CMDS = [
   ['/help', 'List all commands'],
-  ['/status', 'Session info'],
-  ['/model', 'View or switch model'],
-  ['/plan', 'Toggle read-only mode'],
-  ['/spawn', 'Dispatch sub-agent'],
-  ['/team', 'Auto-plan with sub-agents'],
-  ['/memory', 'View/add/delete memories'],
-  ['/memory consolidate', 'Merge related memories'],
-  ['/skill', 'List skills'],
-  ['/skill install', 'Install a skill'],
-  ['/skill reload', 'Reload skills from disk'],
-  ['/cost', 'Cost dashboard'],
-  ['/todo', 'Task list'],
-  ['/trace', 'Toggle trace mode'],
-  ['/compact', 'Compress history'],
-  ['/session', 'Session management'],
-  ['/clear', 'Clear conversation'],
   ['/exit', 'Exit'],
 ];
+let pendingSend = null;
 
 function renderMd(text) {
+  text = text.replace(/<think>([\s\S]*?)<\/think>/g, (_, inner) =>
+    '```think\\n' + inner.trim() + '\\n```think');
   let h = text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  h = h.replace(/```think([\\s\\S]*?)```think/g,
+    '<details class="msg thinking"><summary>Thinking...</summary><pre>$1</pre></details>');
   h = h.replace(/```([\\s\\S]*?)```/g, '<pre><code>$1</code></pre>');
   h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
   h = h.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
@@ -235,10 +269,9 @@ function renderMd(text) {
     }
     return t + '</table>';
   });
-  h = h.replace(/\\n/g, '<br>');
-  h = h.replace(/(<br>){2,}/g, '<br>');
-  h = h.replace(/<br>(<(?:h[1234]|ul|ol|pre|table|li)>)/g, '$1');
-  h = h.replace(/(<\/(?:h[1234]|ul|ol|pre|table|li)>)<br>/g, '$1');
+  h = h.replace(/\\n{2,}/g, '<div class="pg"></div>');
+  h = h.replace(/(<\/(?:h[1234]|ul|ol|pre|table|li|details)>)\\n/g, '$1');
+  h = h.replace(/\\n(<(?:h[1234]|ul|ol|pre|table|li|details)>)/g, '$1');
   return h;
 }
 
@@ -246,8 +279,11 @@ function nearBottom() {
   return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 300;
 }
 function autoScroll() {
-  if (nearBottom()) msgs.scrollTop = msgs.scrollHeight;
+  if (!userScrolled && nearBottom()) msgs.scrollTop = msgs.scrollHeight;
 }
+msgs.addEventListener('scroll', () => {
+  userScrolled = !nearBottom();
+});
 
 function addMsg(cls, text) {
   const el = document.createElement('div');
@@ -265,23 +301,30 @@ function addMsg(cls, text) {
 const urlToken = new URLSearchParams(location.search).get('token') || '';
 
 function connect() {
-  const wsPort = parseInt(location.port) - 1;
-  ws = new WebSocket('ws://' + location.hostname + ':' + wsPort);
+  ws = new WebSocket('ws://' + location.hostname + ':' + location.port + '/ws');
   ws.onopen = () => {
     if (urlToken) {
       ws.send(JSON.stringify({type: 'auth', token: urlToken}));
     }
+    msgs.innerHTML = '';
+    streamEl = null; streamBuf = '';
+    thinkingEl = null; thinkingBuf = '';
+    spinnerEl = null;
     status.textContent = 'Connected';
     status.className = 'connected';
   };
   ws.onclose = () => {
-    status.textContent = 'Disconnected';
-    status.className = 'disconnected';
+    status.textContent = 'Reconnecting...';
+    status.className = 'reconnecting';
     setTimeout(connect, 2000);
   };
   ws.onmessage = (e) => { try {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
+      case 'user_message':
+        if (pendingSend === msg.text) { pendingSend = null; }
+        else { addMsg('user', msg.text); }
+        break;
       case 'turn_start':
         setRunning(true);
         showSpinner();
@@ -293,6 +336,20 @@ function connect() {
         streamEl = null;
         streamBuf = '';
         setRunning(false);
+        userScrolled = false;
+        { let summary = [];
+          if (msg.tokens) summary.push(msg.tokens.toLocaleString() + ' tokens');
+          if (msg.iterations) summary.push(
+            msg.iterations + (msg.iterations > 1 ? ' iterations' : ' iteration'));
+          if (msg.elapsed) summary.push(msg.elapsed.toFixed(1) + 's');
+          if (summary.length) {
+            const el = document.createElement('div');
+            el.className = 'msg turn-summary';
+            el.textContent = summary.join('  \\u00b7  ');
+            msgs.appendChild(el);
+            autoScroll();
+          }
+        }
         break;
       case 'thinking_delta':
         removeSpinner();
@@ -326,24 +383,51 @@ function connect() {
         autoScroll();
         break;
       case 'stream_end':
+        if (msg.full_text && streamEl) {
+          streamEl.innerHTML = renderMd(msg.full_text);
+        }
         streamEl = null;
         streamBuf = '';
         showSpinner();
         break;
       case 'tool_call':
         removeSpinner();
-        addMsg('tool', '\\u2699 ' + msg.name + ' ' + (msg.args || ''));
+        { const det = document.createElement('details');
+          det.className = 'msg tool-group';
+          det.open = true;
+          det.dataset.toolName = msg.name;
+          const sum = document.createElement('summary');
+          sum.textContent = '\\u2699 ' + msg.name;
+          det.appendChild(sum);
+          const body = document.createElement('div');
+          body.className = 'tool-body';
+          body.textContent = msg.args || '';
+          det.appendChild(body);
+          msgs.appendChild(det);
+          autoScroll(); }
         showSpinner();
         break;
       case 'tool_result':
         removeSpinner();
-        const prefix = msg.is_error ? '\\u2718 ' : '\\u2714 ';
-        addMsg('tool', prefix + msg.name + ': ' + msg.output);
+        { const icon = msg.is_error ? '\\u2718 ' : '\\u2714 ';
+          const groups = msgs.querySelectorAll('.tool-group');
+          const last = groups.length ? groups[groups.length - 1] : null;
+          if (last && !last.dataset.hasResult) {
+            last.dataset.hasResult = '1';
+            const sum = last.querySelector('summary');
+            const elapsed = msg.elapsed ? ' (' + msg.elapsed + ')' : '';
+            sum.textContent = icon + msg.name + elapsed;
+            const body = last.querySelector('.tool-body');
+            body.textContent = msg.output;
+            if (msg.is_error) sum.style.color = 'var(--accent-red)';
+          } else {
+            addMsg('tool', icon + msg.name + ': ' + msg.output);
+          }
+          autoScroll(); }
         showSpinner();
         break;
       case 'info':
         addMsg('info', msg.message);
-        msgs.scrollTop = msgs.scrollHeight;
         break;
       case 'error':
         addMsg('error', msg.message);
@@ -358,11 +442,42 @@ function connect() {
         addMsg('assistant', msg.text);
         break;
       case 'history_tool_call':
-        addMsg('tool', '\\u2699 ' + msg.name + ' ' + (msg.args || ''));
+        { const det = document.createElement('details');
+          det.className = 'msg tool-group';
+          det.open = true;
+          det.dataset.toolName = msg.name;
+          const sum = document.createElement('summary');
+          sum.textContent = '\\u2699 ' + msg.name;
+          det.appendChild(sum);
+          const body = document.createElement('div');
+          body.className = 'tool-body';
+          body.textContent = msg.args || '';
+          det.appendChild(body);
+          msgs.appendChild(det);
+          autoScroll(); }
         break;
       case 'history_tool_result':
-        const hp = msg.is_error ? '\\u2718 ' : '\\u2714 ';
-        addMsg('tool', hp + msg.name + ': ' + msg.output);
+        { const hi = msg.is_error ? '\\u2718 ' : '\\u2714 ';
+          const hg = msgs.querySelectorAll('.tool-group');
+          const hl = hg.length ? hg[hg.length - 1] : null;
+          if (hl && !hl.dataset.hasResult) {
+            hl.dataset.hasResult = '1';
+            const hs = hl.querySelector('summary');
+            hs.textContent = hi + msg.name;
+            const hb = hl.querySelector('.tool-body');
+            hb.textContent = msg.output;
+            if (msg.is_error) hs.style.color = 'var(--accent-red)';
+          } else {
+            addMsg('tool', hi + msg.name + ': ' + msg.output);
+          }
+          autoScroll(); }
+        break;
+      case 'commands':
+        if (msg.commands && msg.commands.length) CMDS = msg.commands;
+        break;
+      case 'ping':
+        if (ws && ws.readyState === 1)
+          ws.send(JSON.stringify({type: 'pong'}));
         break;
       case 'permission_request':
         const pel = document.createElement('div');
@@ -378,18 +493,15 @@ function connect() {
         if (spinnerEl && spinnerEl.parentNode === msgs) {
           msgs.insertBefore(pel, spinnerEl);
         } else { msgs.appendChild(pel); }
-        msgs.scrollTop = msgs.scrollHeight;
+        autoScroll();
         break;
     }
   } catch(err) { addMsg('error', 'JS ERROR: ' + err.message); } };
 }
 
 function respond(id, decision, btn) {
-  const p = parseInt(location.port);
-  const tk = urlToken ? '&token=' + urlToken : '';
-  fetch('http://' + location.hostname + ':' + p +
-    '/permission?id=' + id + '&decision=' + decision + tk,
-    {method: 'POST'}).catch(() => {});
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({type:'permission',id:id,decision:decision}));
   const perm = document.querySelector('[data-perm-id="' + id + '"]');
   if (perm) {
     perm.querySelectorAll('button').forEach(b => {
@@ -403,7 +515,7 @@ function respond(id, decision, btn) {
       btn.style.boxShadow = '0 0 4px currentColor';
     }
     perm.style.borderLeft = '3px solid ' +
-      (decision === 'y' || decision === 'a' ? '#a6e3a1' : '#f38ba8');
+      (decision === 'y' || decision === 'a' ? 'var(--accent-green)' : 'var(--accent-red)');
   }
 }
 
@@ -413,21 +525,26 @@ function setRunning(v) {
   sendBtn.style.display = v ? 'none' : 'inline-block';
 }
 
+function autoGrow() {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+}
+
 function send() {
   const text = input.value.trim();
   if (!text || !ws) return;
   hideCmds();
+  pendingSend = text;
   addMsg('user', text);
   ws.send(JSON.stringify({type: 'user_input', text}));
   input.value = '';
+  input.style.height = 'auto';
   if (!text.startsWith('/')) setRunning(true);
 }
 
 function cancelRun() {
-  const p = parseInt(location.port);
-  const tk = urlToken ? '?token=' + urlToken : '';
-  fetch('http://' + location.hostname + ':' + p + '/cancel' + tk,
-    {method: 'POST'}).catch(() => {});
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({type: 'cancel'}));
   setRunning(false);
 }
 
@@ -474,9 +591,10 @@ input.onkeydown = (e) => {
       }
     }
   }
-  if (e.key === 'Enter') send();
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 };
 input.oninput = () => {
+  autoGrow();
   const v = input.value;
   if (v.startsWith('/') && !v.includes(' ')) { showCmds(v); }
   else { hideCmds(); }

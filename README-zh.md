@@ -3,6 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Tests](https://img.shields.io/badge/tests-651%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -196,9 +197,8 @@ cd /path/to/your/project
 mini --remote
 
 # 终端会显示：
-#   WebSocket: ws://localhost:8765
-#   Browser:   http://localhost:8766
-# 浏览器打开 http://localhost:8766 即可使用
+#   Browser:   http://localhost:8765
+# 浏览器打开 http://localhost:8765 即可使用
 ```
 
 工作目录就是你运行命令时所在的目录——和终端模式完全一样。
@@ -212,15 +212,14 @@ uv tool install . --extra remote
 # 之后在任何目录直接启动
 cd ~/my-project
 mini-agent --remote
-# 浏览器打开 http://localhost:8766
+# 浏览器打开 http://localhost:8765
 ```
 
 **自定义主机和端口：**
 
 ```bash
 mini --remote --host 0.0.0.0 --port 9000
-# WebSocket: ws://0.0.0.0:9000
-# 浏览器:    http://0.0.0.0:9001
+# 浏览器:    http://0.0.0.0:9000
 ```
 
 ### 7. 常用 CLI 参数
@@ -267,7 +266,7 @@ mini-code-agent/
 │       ├── config/             # 分层配置加载
 │       ├── llm/                # LLM Provider 抽象层
 │       ├── ui/                 # TUI 终端界面（主题、补全、流式渲染）
-│       ├── tools/              # 工具系统（8 内置工具 + MCP + Hook）
+│       ├── tools/              # 工具系统（10 内置工具 + MCP + Hook）
 │       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
 │       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
 │       ├── security/           # 安全层（权限、路径守卫、worktree）
@@ -331,8 +330,24 @@ mini-code-agent/
 - [x] P39：@file 内联引用（输入 `@文件名` 自动内联文件内容 + Tab 补全，省掉 read_file 调用）
 - [x] P40：权限规则文件（用户级/项目级 permissions.toml 自定义 allow/deny + 修复项目内 PATH deny 短路盲区）
 - [x] P41：OS 级沙箱（Linux bubblewrap + macOS Seatbelt 内核隔离：只读 rootfs + 可写白名单 + 可选禁网；sandbox_auto_allow 免确认但 deny 规则仍拦）
+- [x] P42：上下文窗口 API 探测
+- [x] P43：Token 计数精度提升
+- [x] P44：max_tokens 恢复
+- [x] P45：Coordinator 模式
+- [x] P46：Pydantic Schema 生成
+- [x] P47：Pydantic Schema 全面增强
+- [x] P48：Agent 类型定义
+- [x] P49：Plan 模式只读
+- [x] P50：Hook 事件类型扩充
+- [x] P51：工具搜索/延迟加载
+- [x] P52：选择性记忆召回
+- [x] P53：记忆合并
+- [x] P54：Worktree 完善
+- [x] P55：Skill 安装命令
+- [x] P56：Skill 热重载
+- [x] P57：远程/浏览器模式
 
-**全部阶段已完成，649 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，651 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -802,6 +817,7 @@ uv run python experiments/deadlock_induction.py --all
 | `/theme [dark\|light\|default]` | 切换颜色主题（持久化） |
 | `/spawn <任务>` | 派生后台 SubAgent（详见上方多 Agent 章节） |
 | `/team <任务>` | LLM 规划 + 并行执行（详见上方多 Agent 章节） |
+| `/plan` | 进入/退出 Plan 模式（只读规划，不执行工具） |
 | `/tools` | 列出已注册工具 |
 | `/skill [activate\|deactivate <名称>]` | 技能包管理 |
 | `/exit` | 退出 |

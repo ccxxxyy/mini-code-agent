@@ -1303,3 +1303,25 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - StreamChunk：stream_chunk_thinking_field
   - 历史回放：replay_history_sends_messages
 - [x] 649 个测试全过，ruff lint + format clean
+
+### P57.3 增强
+- [x] 多行输入 — `<textarea>` + Shift+Enter 换行 + auto-grow
+- [x] 工具调用折叠 — `<details><summary>` 包装，默认展开
+- [x] Token 用量显示 — `turn_end` 附带 tokens 字段
+- [x] 工具耗时显示 — `on_tool_end` 传递 `duration_ms`，格式化显示
+- [x] 动态命令列表 — 服务端发送 `commands` 事件，按字母排序
+- [x] `<think>` 标签解析 — 渲染为折叠块
+- [x] CSS 变量主题 — 18 个 CSS 变量替代硬编码色值
+- [x] 应用层 ping/pong — 10 秒心跳
+- [x] turn 完成摘要 — iterations + elapsed + tokens
+- [x] 重连状态优化 — "Reconnecting..." + 黄色样式
+- [x] `stream_end` 携带完整文本 — `full_text` 参数
+
+### P57.4 修复
+- [x] 单端口合并 — HTTP + WS 共用端口（`process_request` 拦截 GET `/`，`/ws` 走 WS 升级）
+- [x] 多客户端回放修复 — `_replay_history` 只发给当前重连客户端
+- [x] 用户消息多客户端同步 — 广播 `user_message` 事件
+- [x] 段落换行 — CSS `white-space: pre-line` + `div.pg` 间距块
+- [x] 滚动锁定 — `userScrolled` 标志，turn 结束重置
+- [x] Cancel/Permission 改走 WS 消息
+- [x] 651 个测试全过，ruff lint + format clean

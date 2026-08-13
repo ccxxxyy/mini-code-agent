@@ -1024,4 +1024,4 @@
 - [x] `StreamChunk.thinking` + OpenAI/Anthropic Provider 捕获 reasoning/thinking
 - [x] 刷新时 `_replay_history()` 回放对话历史
 - [x] websockets 未安装时优雅报错
-- [x] 21 个新测试（test_remote.py），总计 650 个全过
+- [x] 21 个新测试（test_remote.py），总计 651 个全过

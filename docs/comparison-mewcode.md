@@ -10,12 +10,12 @@
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
-| 源码行数 | ~4,600 行 | ~15,000+ 行 |
+| 源码行数 | ~10,200 行 | ~15,000+ 行 |
 | Python 版本 | 3.11+（用 tomllib、StrEnum 等 3.11 特性） | 3.12+（用 type 语法） |
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量差 3 倍多——主要差在 TUI 框架（Textual vs 手拼）、多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）、沙箱/worktree 等模块。
+**差距**：代码量已接近（10,200 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -56,7 +56,7 @@
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
-- 用户可以审计全部代码（4600 行 vs 15000 行 + SDK 黑盒）
+- 用户可以审计全部代码（10,200 行 vs 15000 行 + SDK 黑盒）
 
 **增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **649 测试，83.4% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **651 测试，80.36% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -198,7 +198,7 @@
 |---|---|---|
 | Schema 定义方式 | **Pydantic model** 自动生成 JSON Schema（P46），Raw Passthrough 全量保留（P47） | **Pydantic model** 自动生成 JSON Schema |
 
-**已完成**（P46）：7/8 个工具定义 `ParamsModel(BaseModel)`，`Tool.params_model` 属性 + `_schema_from_model()` 自动生成。BashTool 保留手写 schema 向后兼容。
+**已完成**（P46）：7/10 个工具定义 `ParamsModel(BaseModel)`，`Tool.params_model` 属性 + `_schema_from_model()` 自动生成。BashTool 保留手写 schema 向后兼容。
 
 **已完成**（P47 增强）：`_schema_from_model()` 重写为 Raw JSON Schema Passthrough——Pydantic `model_json_schema()` 输出经 `_resolve_refs()` 解引用 `$ref/$defs`、去除 `title` 噪声后，完整 JSON Schema dict 直接存入 `ToolSchema.raw_parameters`，`to_json_schema()` 优先使用。全面支持：
 - `str | None`（anyOf）、`list[str]`（array + items）、嵌套 BaseModel（$ref 解引用内联）
@@ -416,15 +416,14 @@
 **已完成**（P57，经代码验证）：
 
 架构：
-- `remote/server.py` — RemoteServer：WebSocket 服务器（事件推送）+ HTTP 服务器（UI 托管 + `/cancel` + `/permission` 端点）
+- `remote/server.py` — RemoteServer：单端口 WebSocket 服务器，通过 `process_request` 回调复用——GET `/` 返回 HTML 页面，`/ws` 路径升级为 WebSocket 连接（事件推送 + 双向消息）
 - `remote/web_ui.py` — 嵌入式 HTML+CSS+JS 浏览器前端（`build_html()` 返回自包含页面，零外部依赖）
 - `remote/terminal.py` — RemoteTerminalAdapter：拦截 `show_info`/`show_error`/`show_file_changes` 三个方法转发到浏览器
 - `cli.py` — `--remote` / `--port` / `--host` 三个 CLI 参数
 
-NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP 端点）：
+NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - 服务端事件：`turn_start` / `turn_end` / `stream_start` / `stream_text` / `stream_end` / `thinking_delta` / `tool_call` / `tool_result` / `permission_request` / `info` / `error` / `file_changes`
-- WS 客户端消息：`user_input` / `cancel`（cancel 同时走 HTTP POST `/cancel` 绕过 WS 阻塞）
-- HTTP 端点：`POST /cancel`（通过独立 HTTP 线程设置 `agent_loop._cancelled`）/ `POST /permission?id=&decision=`（通过 `loop.call_soon_threadsafe` 线程安全解析 asyncio.Future）
+- WS 客户端消息：`user_input` / `cancel`（通过 WS 消息设置 `agent_loop._cancelled`，即时生效）/ `permission_response`（通过 `loop.call_soon_threadsafe` 线程安全解析 asyncio.Future）
 
 浏览器 UI 功能：
 - 深色主题（Catppuccin Mocha 色系）
@@ -436,9 +435,20 @@ NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP �
 - 欢迎引导（显示当前模型名 + 可切换模型数量）
 - 斜杠命令自动补全下拉框
 - 自动滚动（底部 300px 阈值，用户上滚时不抢夺，info 消息强制滚到底）
-- Stop 按钮（HTTP POST `/cancel`，绕过 WS 阻塞即时生效）
+- Stop 按钮（WS 消息 `cancel`，即时生效）
 - 自动重连（断线 2 秒后重试）
 - `Cache-Control: no-cache` + meta 标签禁缓存
+- 多行输入（textarea + Shift+Enter + auto-grow）
+- 工具调用折叠（details/summary，默认展开）
+- Token 用量显示（turn_end 附带 tokens）
+- 工具耗时显示（tool_result 附带 elapsed）
+- 动态命令列表（服务端发送，按字母排序）
+- `<think>` 标签解析（渲染为折叠块）
+- CSS 变量主题（18 个 CSS 变量）
+- 应用层 ping/pong（10 秒心跳）
+- turn 完成摘要（iterations + elapsed + tokens）
+- 重连状态优化（Reconnecting...）
+- stream_end 携带完整文本
 
 安全与容错：
 - `websockets>=12.0` 可选依赖（`[remote]` 组），未安装时优雅报错
@@ -446,7 +456,7 @@ NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP �
 - 多连接竞态处理：`_ws_send()` 运行时读 `self._ws`（始终最新连接），旧连接退出不影响新连接
 
 测试：
-- 19 个单元测试覆盖：NDJSON 格式、权限 Future 流程、UI 构建、CLI 参数解析、终端适配器、StreamChunk.thinking 字段、Provider 解析 reasoning_content/thinking_delta、内部错误过滤、show_file_changes 类型修复
+- 21 个单元测试覆盖：NDJSON 格式、权限 Future 流程、UI 构建、CLI 参数解析、终端适配器、StreamChunk.thinking 字段、Provider 解析 reasoning_content/thinking_delta、内部错误过滤、show_file_changes 类型修复
 
 **仍存在的局限**（已确认）：
 - 多客户端支持（`self._clients: set` 广播），但所有客户端共享同一会话（无独立会话）
@@ -671,7 +681,7 @@ NDJSON 协议（12 种服务端事件 + 2 种 WS 客户端消息 + 2 个 HTTP �
 | ✅ 完成 | 2.3 | 工具搜索/延迟加载（P51） | 大量 MCP 工具场景 | 已完成 |
 | ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
 | ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
-| ✅ 完成 | 5.2 | 远程/浏览器模式（P57） | 新使用场景 | 已完成 |
+| ✅ 完成 | 5.2 | 远程/浏览器模式 + 11 项增强（P57） | 新使用场景 | 已完成 |
 | 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
 | 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |

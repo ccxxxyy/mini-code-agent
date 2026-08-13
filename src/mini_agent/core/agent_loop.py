@@ -35,7 +35,7 @@ StreamCallback = Callable[[str], None]
 # Callbacks invoked when a tool starts / finishes (for UI rendering)
 # 工具开始 / 结束时调用的回调（用于 UI 渲染）
 ToolStartCallback = Callable[[ToolCall], None]
-ToolEndCallback = Callable[[ToolResult], None]
+ToolEndCallback = Callable[[ToolResult, float], None]
 
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
@@ -133,7 +133,7 @@ class AgentLoop:
 
         self.on_stream_delta: StreamCallback | None = None
         self.on_stream_start: Callable[[], None] | None = None
-        self.on_stream_end: Callable[[], None] | None = None
+        self.on_stream_end: Callable[[str], None] | None = None
         self.on_thinking_delta: Callable[[str], None] | None = None
         self.on_tool_start: ToolStartCallback | None = None
         self.on_tool_end: ToolEndCallback | None = None
@@ -358,6 +358,7 @@ class AgentLoop:
         单次流式 LLM 调用，将 chunk 组装为完整响应。"""
         chunks: list[StreamChunk] = []
         stream_started = False
+        _stream_text_parts: list[str] = []
         assembler = IncrementalAssembler()
         streaming_enabled = self._config.streaming_tool_execution
         extra: dict[str, Any] = {"max_tokens": max_tokens} if max_tokens else {}
@@ -378,6 +379,7 @@ class AgentLoop:
                     stream_started = True
                     if self.on_stream_start:
                         self.on_stream_start()
+                _stream_text_parts.append(chunk.delta)
                 if self.on_stream_delta:
                     self.on_stream_delta(chunk.delta)
             if chunk.tool_call_deltas and self.on_tool_call_assembling:
@@ -406,7 +408,7 @@ class AgentLoop:
                     )
 
         if stream_started and self.on_stream_end:
-            self.on_stream_end()
+            self.on_stream_end("".join(_stream_text_parts))
 
         response = assemble_response(chunks)
         usage = response.usage
@@ -540,7 +542,7 @@ class AgentLoop:
         if not result.is_error:
             self._record_file_change(tc.name, tc.arguments, result)
         if self.on_tool_end:
-            self.on_tool_end(result)
+            self.on_tool_end(result, duration_ms)
         return result
 
     def _record_file_change(self, tool_name: str, args: dict, result: ToolResult) -> None:
