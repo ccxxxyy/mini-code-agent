@@ -194,7 +194,7 @@ timeout = 120.0
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
 max_file_size = 10000000     # 文件读取上限（字节）
-enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents"]
+enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call"]
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
 
 [memory]

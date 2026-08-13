@@ -1025,3 +1025,18 @@
 - [x] 刷新时 `_replay_history()` 回放对话历史
 - [x] websockets 未安装时优雅报错
 - [x] 21 个新测试（test_remote.py），总计 651 个全过
+
+## Phase 58 检查项：Mailbox 跨 Agent 通信
+
+- [x] `core/mailbox.py` — 文件式 JSON 收件箱，register/unregister/send/drain/peers，单事件循环内同步读写原子无需文件锁
+- [x] register 总是重置收件箱——上一会话残留消息不会被投递
+- [x] `send_message` 工具注册（默认 enabled_tools），收件人未注册报错并列出已知 Agent
+- [x] `wait_message` 工具注册，阻塞轮询直到消息到达或超时（上限 600s），超时是信息不是错误
+- [x] AgentLoop 每轮 THINK 前 `_deliver_mail()` drain 收件箱注入 USER 消息
+- [x] SubAgent：构造注册收件箱 + MAILBOX_NOTICE（自身 id / 同伴 id + 任务摘要 / 精确 id 告诫 / wait_message 指引 / main 降级），run() 结束注销
+- [x] `spawn_parallel` 预生成 id，兄弟 Agent prompt 中互见（id + 任务摘要）
+- [x] spawn_agents 描述明示阻塞语义："并发任务必须一次调用传入"
+- [x] read-only agent 类型白名单含 send_message / wait_message（收发不算写文件）
+- [x] app.py 注册 'main' 收件箱，主循环与 ToolContext 注入 mailbox
+- [x] 真实 LLM 四类拓扑验证通过：1→1、2→1 汇聚、1→2 判别寻址、1↔1 五轮乒乓（零死锁/丢消息/幻觉 id）
+- [x] 20 个新测试（test_mailbox.py 18 + test_mailbox_e2e.py 2），总计 671 个全过

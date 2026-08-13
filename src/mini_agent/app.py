@@ -256,6 +256,13 @@ class Application:
         # 注入 SubAgentManager 到 ToolContext，供 spawn_agents 工具使用
         tool_context.subagent_manager = self.subagent_manager
 
+        # Cross-agent mailbox: main agent inbox + send_message tool access
+        # 跨 Agent 收件箱：主 Agent 收件箱 + send_message 工具接入
+        self.mailbox = self.subagent_manager.mailbox
+        self.mailbox.register("main")
+        tool_context.mailbox = self.mailbox
+        self.agent_loop.mailbox = self.mailbox
+
         # Trace renderer: /trace shows agent internals in real time
         # Trace 渲染器：/trace 实时展示 Agent 内部状态
         self.trace_renderer = TraceRenderer(self.terminal.console, theme=active_theme)

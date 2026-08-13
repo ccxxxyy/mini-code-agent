@@ -18,7 +18,7 @@ class AgentTypeDefinition:
     description: str = ""
 
 
-_READ_ONLY_TOOLS = ("read_file", "glob", "grep", "bash")
+_READ_ONLY_TOOLS = ("read_file", "glob", "grep", "bash", "send_message", "wait_message")
 
 _EXPLORE_PROMPT = """\
 You are a read-only research agent. Your job is to explore the codebase, \

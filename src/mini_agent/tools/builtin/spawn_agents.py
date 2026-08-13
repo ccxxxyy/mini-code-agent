@@ -36,7 +36,12 @@ class SpawnAgentsTool(Tool):
     _description = (
         "Spawn independent sub-agents to execute tasks in parallel. "
         "Each sub-agent has its own tools and conversation context. "
-        "Returns a combined report of all sub-agent results."
+        "Returns a combined report of all sub-agent results. "
+        "IMPORTANT: this call BLOCKS until all sub-agents finish, so tasks that "
+        "must run concurrently (e.g. agents that message each other via "
+        "send_message) MUST be passed in ONE call -- separate calls run "
+        "sequentially and cannot communicate. Sub-agents spawned together are "
+        "told each other's agent ids and can exchange messages mid-task."
     )
     params_model = SpawnAgentsParams
 

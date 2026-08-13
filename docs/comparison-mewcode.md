@@ -10,12 +10,12 @@
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
-| 源码行数 | ~10,200 行 | ~15,000+ 行 |
+| 源码行数 | ~12,800 行 | ~15,000+ 行 |
 | Python 版本 | 3.11+（用 tomllib、StrEnum 等 3.11 特性） | 3.12+（用 type 语法） |
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量已接近（10,200 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
+**差距**：代码量已接近（12,800 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -56,7 +56,7 @@
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
-- 用户可以审计全部代码（10,200 行 vs 15000 行 + SDK 黑盒）
+- 用户可以审计全部代码（12,800 行 vs 15000 行 + SDK 黑盒）
 
 **增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **651 测试，80.36% 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **671 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -111,7 +111,7 @@
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
-| 开发历史 | tasks.md（P1-P48 完整记录） | 无 |
+| 开发历史 | tasks.md（P1-P58 完整记录） | 无 |
 
 **差距**：此维度 mini **远超** mewcode。
 
@@ -492,21 +492,43 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 4. 项目扫描从 2 级/80 行加深到 3 级/120 行——Coordinator 不能自己读文件，给更丰富的结构上下文
 5. Workers 保持完整工具集，不受影响
 
-### 6.2 跨 Agent 通信
+### 6.2 跨 Agent 通信 ✅ 已实现（P58）
 
 | | mini | mewcode |
 |---|---|---|
-| Agent 间通信 | SubAgent 只返回最终结果 | **Mailbox 消息传递** + **共享 TaskStore** |
+| Agent 间通信 | ✅ **Mailbox 消息传递**——文件式收件箱 + `send_message` 工具，Agent 每轮 THINK 前 drain 收件箱 (P58) | **Mailbox 消息传递** + **共享 TaskStore** |
 
-**差距**：mini 的 SubAgent 是"派出去等结果回来"模式，Agent 之间不能中途交流。
+**原差距**：mini 的 SubAgent 是"派出去等结果回来"模式，Agent 之间不能中途交流。P58 已实现：
 
-**增强方案**：
-1. 新建 `core/mailbox.py`——基于文件的消息队列（JSON 文件，每个 Agent 一个收件箱）
-2. 新增 `SendMessage` 工具——LLM 可以发消息给指定 Agent
-3. Agent 每轮开始前检查收件箱，有消息则追加到对话
-4. 共享 TaskStore 已有（`core/task_store.py`），只需让 SubAgent 也能访问
+1. `core/mailbox.py`——基于文件的消息队列（`.mini-agent/mailboxes/<agent_id>.json`，每个 Agent 一个收件箱；`register` 总是重置收件箱，避免上一会话残留消息被投递）
+2. `send_message` 工具——LLM 可发消息给指定 Agent（`'main'` = 主 Agent），收件人未注册时报错并列出已知 Agent
+3. `AgentLoop` 每轮 THINK 前 `_deliver_mail()` drain 收件箱，消息以 `[Message from agent '<id>']` 前缀追加为 USER 消息
+4. SubAgent 注册收件箱（uuid id），system prompt 追加 MAILBOX_NOTICE 告知自身 id 与通信方式；`run()` 结束后注销
+5. `spawn_parallel` 预生成全部 agent id，MAILBOX_NOTICE 列出同伴 id **及各自任务摘要**（80 字符）——兄弟 Agent 既知道 id 也知道谁是什么角色（实测发现的缺口：只列 id 时 LLM 分不清哪个同伴是收件方，会幻觉 'agent-2' 之类的 id）
+6. `wait_message` 工具——接收方阻塞等消息（轮询 0.5s，超时上限 600s），等待期间保持存活；超时返回信息而非报错。实测发现的缺口：接收方靠 bash sleep 磨蹭会提前结束、收件箱注销，慢速发送方投递时报 Unknown recipient
+7. read-only agent 类型（explore/plan/verify）的工具白名单也包含 `send_message`/`wait_message`——收发消息不算写文件
+8. 共享 TaskStore 已有（`core/task_store.py`），文件式按项目目录共享，无需额外改动
 
-代码改动：新增 `core/mailbox.py` ~50 行 + 新增工具 ~30 行。
+**mini 相对 mewcode 的原创补充**（源自架构差异，非照抄）：
+
+- `wait_message` 等待原语——mewcode 的队友是常驻交互进程天然一直在收消息，不需要它；mini 的 SubAgent 是一次性任务，没有它接收方会提前结束（实测翻车后补上的）
+- 未知收件人报错**列出已知 Agent**，LLM 可自行降级转发；mewcode 只回 "Cannot resolve recipient"
+- `register` 总是重置收件箱，杜绝跨会话残留投递；mewcode 靠 `cleanup_all` 手动清
+
+**仍弱于 mewcode 的差距**（P58 完成后逐项对照 `mewcode/teams/mailbox.py` + `protocol.py` + `registry.py` 的诚实结论，按重要性排序）：
+
+| # | 差距 | mewcode 实现 | mini 现状 | 影响 |
+|---|---|---|---|---|
+| 1 | **无广播** | `to='*'` 一键广播全队（`Mailbox.broadcast`，可 exclude 自己） | 只能逐个发送。实测汇聚场景中 agent A 发错 id 后被迫手动逐个补发，正是缺这个 | 多接收方场景 LLM 要多轮工具调用，易漏发 |
+| 2 | **无结构化消息协议** | `type` 字段（text / shutdown_request / shutdown_response / plan_approval_request / plan_approval_response）+ `request_id` 请求-应答配对 + `approve` 表态——"请队友收尾""计划审批"是**协议级**协调 | 纯文本消息，协调只能靠 LLM 理解措辞 | 深度差距：复杂协作（生命周期管理、审批流）不可靠；当前 mini 场景够用 |
+| 3 | **无名字寻址** | `AgentNameRegistry` 按人类可读名字或 id 解析收件人 | 只有 8 位 hex id；MAILBOX_NOTICE 附任务摘要缓解但没根治——'researcher' 对 LLM 远比 '83c4985f' 友好 | 幻觉 id 风险靠 prompt 告诫压制，非结构性解决 |
+| 4 | **无审计痕迹** | 消息带 `read` 标记，consume 后**留在磁盘**可事后排查；另有 `read()` 只窥视不消费 | drain 即删除，出问题无消息留痕可查 | 调试多 Agent 时序问题时缺第一手证据 |
+
+**已知架构边界（最重要的一条，实现前必读）**：
+
+- **无锁设计只在单进程内成立**。mini 的 Mailbox 不加任何锁，依据是"所有 Agent 跑在同一 asyncio 事件循环、send/drain 内部无 await、单文件读改写天然原子"（见 `core/mailbox.py` docstring）。mewcode 的队友跑在 tmux/iTerm2 **独立进程**里，所以它有完整的文件锁体系：`.lock` 锁文件（O_CREAT|O_EXCL）+ 指数退避带随机抖动 + 10s 陈旧锁强制接管 + 5s 获取超时抛异常 + 进程内 threading.Lock 双层——约 40 行只为跨进程互斥。**一旦 mini 实现 6.4（多后端 tmux spawn），单进程假设即失效，必须先补锁再上多进程**，否则并发读改写会静默丢消息。届时 mewcode 的 `_with_lock` 是现成参考。
+- **无推送唤醒**。mewcode 写入后主动 `send_keys_to_pane` 唤醒对方进程（推模式）；mini 靠 wait_message 0.5s 轮询（拉模式）。单进程内轮询开销可忽略，跨进程后同样需要补唤醒机制。
+- **主 Agent 在 spawn_agents 期间阻塞**，发给 'main' 的消息要等 wait_all 返回后的下一轮才被消费——真正实时的只有 Worker↔Worker 这条边。
 
 ### 6.3 Agent 类型定义 ✅ 已实现（P48）
 
@@ -537,6 +559,8 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 3. 非 tmux/iTerm2 环境保持 in-process
 
 代码改动：新增 `core/spawn_backends.py` ~80 行。优先级较低——进度面板已提供可视化。
+
+> ⚠️ **前置条件（见 6.2 架构边界）**：P58 Mailbox 的无锁设计只在单 asyncio 进程内成立。实现多后端 spawn 前**必须先给 Mailbox 补文件锁与推送唤醒**（参考 mewcode `_with_lock`：O_EXCL 锁文件 + 指数退避 + 陈旧锁接管 + 超时），否则跨进程并发读改写会静默丢消息。
 
 ### 6.5 Worktree 完善 ✅ 已实现（P54）
 
@@ -682,9 +706,9 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 4.4 | 选择性记忆召回（P52） | 记忆多时省 token | 已完成 |
 | ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
 | ✅ 完成 | 5.2 | 远程/浏览器模式 + 11 项增强（P57） | 新使用场景 | 已完成 |
-| 🔵 P3 | 6.2 | Mailbox 跨 Agent 通信 | 多 Agent 协作 | 1 天 |
+| ✅ 完成 | 6.2 | Mailbox 跨 Agent 通信（P58） | 多 Agent 协作 | 已完成 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
-| 🔵 P3 | 6.4 | 多后端 spawn（tmux） | 可视化 | 1 天 |
+| 🔵 P3 | 6.4 | 多后端 spawn（tmux）——前置：Mailbox 补文件锁+唤醒（6.2 架构边界） | 可视化 | 1 天 |
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
 | ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |

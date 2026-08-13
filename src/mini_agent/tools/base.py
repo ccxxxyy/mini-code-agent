@@ -87,6 +87,10 @@ class ToolContext:
     config: AgentConfig
     subagent_manager: SubAgentManager | None = None
     mcp_manager: Any = None
+    # Cross-agent messaging: shared Mailbox + this agent's identity
+    # 跨 Agent 消息：共享 Mailbox + 本 Agent 身份
+    mailbox: Any = None
+    agent_id: str = "main"
 
 
 def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:

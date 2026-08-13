@@ -1984,12 +1984,56 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **uninstall 按 name 不按目录名**：skill 名和目录名可能不同（如目录叫 `code_review/` 但 SKILL.md 里 name 是 `code-review`）
 - **不支持热重载**：install 后调 `load_all()` 重新扫描全部目录——简单可靠。热重载是 8.2 的范围
 
+# 第五十八部分：Mailbox 跨 Agent 通信（P58）
+
+## 58.1 为什么需要：SubAgent 是"派出去等结果"模式
+
+spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字符）——代理之间零交流。两个并行代理重复发现同一事实、或一方基于错误假设跑满全程，只能事后返工。comparison-mewcode.md 6.2 的差距项。
+
+## 58.2 实现：文件收件箱 + 两个工具 + 循环注入
+
+- `core/mailbox.py`：每 Agent 一个 JSON 收件箱文件。所有 Agent 跑在同一事件循环，send/drain 内部无 await，单文件读改写天然原子——**不需要文件锁**
+- `send_message` 工具：发给 'main' 或同伴 id；收件人未注册报错并列出已知 Agent（LLM 可据此降级）
+- `wait_message` 工具：0.5s 轮询阻塞等消息（上限 600s）——接收方的等待原语，超时返回信息而非错误
+- `AgentLoop._deliver_mail()`：每轮 THINK 前 drain 收件箱，消息注入为 USER 消息
+- 生命周期：SubAgent 构造时注册收件箱、结束时注销；register 总是重置文件防跨会话残留
+
+## 58.3 三轮迭代
+
+单测全绿后，真实 LLM 运行连续暴露三个设计缺口，全部当场修复：
+
+1. **兄弟代理互不知 id**——任务文本由主 LLM 事先写好，id 构造时才生成。修复：spawn_parallel 预生成全部 id，MAILBOX_NOTICE 列出同伴 id + 任务摘要（只列 id 仍不够：LLM 分不清哪个同伴是收件方，会幻觉 'agent-2'）
+2. **主 LLM 分两次 spawn_agents 导致串行**——工具描述未说明阻塞语义。修复：描述明示"需要通信的任务必须一次调用传入"
+3. **接收方无等待原语**——靠 bash sleep 磨蹭会提前结束、收件箱注销，慢速发送方投递报 Unknown recipient。修复：wait_message 工具 + notice 禁止 sleep 等待
+
+验证矩阵：4 类拓扑真实 LLM 全通过（1→1 单向 / 2→1 汇聚多轮 wait / 1→2 判别寻址 / 1↔1 双向 5 轮乒乓，零死锁零丢消息）。
+
+## 58.4 设计权衡
+
+- **文件而非内存队列**：符合 comparison 原方案；跨进程可扩展（未来多后端 spawn）；调试时可直接 cat 收件箱
+- **结束即注销、消息丢弃**：发给已结束代理的消息宁可报错也不静默入黑洞——错误信息引导 LLM 转发给 'main'
+- **read-only 类型也能收发**：send/wait_message 不算写文件，explore/verify 代理可参与协作
+- **主代理在 spawn_agents 期间阻塞**：发给 'main' 的消息在 wait_all 返回后的下一轮才被消费——真正实时的是 Worker↔Worker 这条边，是当前架构的已知边界
+
+## 58.5 与 mewcode 原版的差距（诚实记录）
+
+P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 后仍弱于原版的四项 + 一条架构边界：
+
+1. **无广播**——mewcode `to='*'` 一键广播（可 exclude）；mini 逐个发，实测汇聚场景 LLM 发错后手动补发暴露此缺口
+2. **无结构化消息协议**——mewcode 有 type（shutdown_request/response、plan_approval_request/response）+ request_id 配对 + approve 表态，协作是协议级的；mini 纯文本，协调靠 LLM 理解措辞
+3. **无名字寻址**——mewcode AgentNameRegistry 支持按名字解析；mini 只有 8 位 hex id，任务摘要缓解但 'researcher' 远比 '83c4985f' 对 LLM 友好
+4. **无审计痕迹**——mewcode 消息 consume 后带 read 标记留盘、另有 read() 只窥视；mini drain 即删，时序问题无留痕可查
+
+**架构边界（做 6.4 前必读）**：mini 的无锁只在单 asyncio 进程内成立（send/drain 无 await → 天然原子）。mewcode 队友是 tmux 独立进程，故有约 40 行文件锁体系（O_EXCL 锁文件 + 指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时 + threading.Lock 双层）和写入后 send_keys 推送唤醒。**mini 一旦做多后端 spawn（6.4），必须先补文件锁与唤醒，否则跨进程并发读改写会静默丢消息**——mewcode 的 `_with_lock` 是现成参考。
+
+完整对照表见 comparison-mewcode.md 6.2 节。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——651 个测试约 60 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——671 个测试约 60 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
