@@ -143,6 +143,10 @@ class AgentConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 80
+    # Declarative PRE_TOOL rejection rules from `[[hooks]]` TOML (raw dicts,
+    # parsed by tools/hooks.parse_hook_rules)
+    # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）
+    hooks: list = field(default_factory=list)
     self_verify: bool = False
     # Execute tool calls as they finish assembling during streaming
     # 流式期间工具调用一组装完成就开始执行

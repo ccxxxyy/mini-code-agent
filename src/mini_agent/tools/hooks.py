@@ -3,12 +3,17 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from fnmatch import fnmatch
 from typing import Any
 
 from mini_agent.models.message import ToolResult
+
+log = logging.getLogger(__name__)
 
 
 class HookStage(StrEnum):
@@ -51,6 +56,74 @@ class HookResult:
 HookFn = Callable[[HookContext], Awaitable[HookResult]]
 
 
+@dataclass
+class HookRule:
+    """Declarative PRE_TOOL rejection rule from `[[hooks]]` TOML config (7.2).
+    Users block tools by config instead of writing Python hook code --
+    adapted from mewcode's `reject: true` pre_tool_use hooks.
+    来自 `[[hooks]]` TOML 配置的声明式 PRE_TOOL 拒绝规则——用户通过配置
+    而非 Python 代码阻止工具执行（对标 mewcode 的 reject hook）。"""
+
+    tool: str = "*"  # fnmatch pattern on tool name 工具名 fnmatch 模式
+    arg: str = ""  # optional: check only this argument 只检查此参数
+    contains: str = ""  # optional: substring that triggers 触发子串
+    regex: str = ""  # optional: re.search pattern that triggers 触发正则
+    reason: str = ""  # message shown to the LLM 回给 LLM 的原因
+
+    def _value_hits(self, text: str) -> bool:
+        if self.contains and self.contains not in text:
+            return False
+        if self.regex and not re.search(self.regex, text):
+            return False
+        return True
+
+    def matches(self, tool_name: str, args: dict[str, Any] | None) -> bool:
+        if not fnmatch(tool_name, self.tool):
+            return False
+        if not self.contains and not self.regex:
+            return True
+        values = args or {}
+        if self.arg:
+            return self._value_hits(str(values.get(self.arg, "")))
+        return any(self._value_hits(str(v)) for v in values.values())
+
+
+def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
+    """Parse `[[hooks]]` TOML entries into HookRule objects. Invalid
+    entries are skipped with a warning -- config mistakes must not
+    break startup. 解析 `[[hooks]]` 配置条目；非法条目告警跳过，
+    配置错误不能阻断启动。"""
+    rules: list[HookRule] = []
+    for i, entry in enumerate(raw_rules or []):
+        if not isinstance(entry, dict):
+            log.warning("hooks[%d]: not a table, skipped", i)
+            continue
+        event = entry.get("event", "pre_tool")
+        if event != "pre_tool":
+            log.warning("hooks[%d]: unsupported event '%s' (only 'pre_tool'), skipped", i, event)
+            continue
+        if not entry.get("reject", True):
+            log.warning("hooks[%d]: only reject=true rules are supported, skipped", i)
+            continue
+        regex = str(entry.get("regex", ""))
+        if regex:
+            try:
+                re.compile(regex)
+            except re.error as e:
+                log.warning("hooks[%d]: invalid regex '%s' (%s), skipped", i, regex, e)
+                continue
+        rules.append(
+            HookRule(
+                tool=str(entry.get("tool", "*")) or "*",
+                arg=str(entry.get("arg", "")),
+                contains=str(entry.get("contains", "")),
+                regex=regex,
+                reason=str(entry.get("reason", "")),
+            )
+        )
+    return rules
+
+
 class HookManager:
     """Manages registration and execution of lifecycle hooks.
     管理生命周期 hook 的注册与执行。"""
@@ -89,3 +162,22 @@ class HookManager:
                 ctx.tool_args = result.modified_args
                 final = result
         return final
+
+
+def register_hook_rules(manager: HookManager, raw_rules: list[Any]) -> int:
+    """Parse config rules and register them as PRE_TOOL blocking hooks.
+    Returns the number of rules registered.
+    解析配置规则并注册为 PRE_TOOL 阻止 hook，返回注册数量。"""
+    rules = parse_hook_rules(raw_rules)
+    for rule in rules:
+
+        async def _rule_hook(ctx: HookContext, _rule: HookRule = rule) -> HookResult:
+            if ctx.tool_name and _rule.matches(ctx.tool_name, ctx.tool_args):
+                reason = _rule.reason or (
+                    f"tool '{ctx.tool_name}' is blocked by a project hook rule"
+                )
+                return HookResult(action=HookAction.BLOCK, reason=reason)
+            return HookResult(action=HookAction.CONTINUE)
+
+        manager.register(HookStage.PRE_TOOL, _rule_hook)
+    return len(rules)

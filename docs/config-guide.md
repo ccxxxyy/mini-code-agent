@@ -225,9 +225,27 @@ currency = "¥"
 input = 2.0
 output = 8.0
 
-# 顶级配置（不属于任何段）
+# 顶级配置（不属于任何段；注意必须写在所有 [段] 和 [[hooks]] 之前才算顶级）
 max_agent_iterations = 50    # ReAct 循环最大迭代数
 theme = "default"            # "default" | "dark" | "light"
+
+# 声明式 Hook 拒绝规则（comparison 7.2）——命中即拒绝工具执行，reason 回给 LLM
+# 可写多条 [[hooks]]；非法条目告警跳过不阻断启动
+[[hooks]]
+tool = "write_file"          # 工具名 fnmatch 模式（"bash"、"write_*"，默认 "*" 全部）
+arg = "file_path"            # 可选：只检查此参数（缺省检查所有参数值）
+contains = "docs/spec"       # 可选：参数值包含此子串才触发（缺省对该工具的所有调用生效）
+reason = "docs/spec.md 项目策略只读"   # 拒绝原因，LLM 会收到并调整策略
+
+[[hooks]]
+tool = "bash"
+contains = "curl"
+reason = "外网下载被项目策略禁止"
+
+[[hooks]]
+tool = "bash"
+regex = 'rm\s+-rf'           # 可选：re.search 正则（与 contains 同时给则须同时命中；非法正则告警跳过该条）
+reason = "破坏性删除被项目策略禁止"
 
 # MCP 服务器
 [mcp.servers.github]
@@ -267,6 +285,79 @@ transport = "stdio"
 **怎么修改预算**：编辑 `~/.mini-agent/config.toml` 的 `[cost]` 段（没有该文件先从 `config.toml.example` 复制），改 `budget` / `total_budget` 数值，重启 `mini` 生效。设为 0 或删掉该行 = 不限。
 
 **注意**：预算基于金额计算，所以**必须先配置 `[cost.pricing.<模型名>]` 价格**——没有价格时成本恒为 0，预算永远不会触发。
+
+### Hook 拒绝规则详解（[[hooks]] 段）
+
+**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝"。命中的工具**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试。
+
+**写在哪**：用户级 `~/.mini-agent/config.toml`（跨项目生效）或项目级 `.mini-agent/config.toml`（仅本项目）。
+**层级语义（注意）**：项目级定义了 `[[hooks]]` 时**整体替换**用户级的规则列表（不合并）——想两边都生效，把用户级规则复制进项目级。
+
+**全部字段**：
+
+| 字段 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `tool` | 否 | `"*"` | 工具名 fnmatch 模式：`"bash"` 精确、`"write_*"` 前缀族、`"*"` 全部工具 |
+| `arg` | 否 | 空 | 只检查此参数的值（如 `"file_path"`）；缺省检查**所有**参数值 |
+| `contains` | 否 | 空 | 参数值包含此子串才触发 |
+| `regex` | 否 | 空 | 参数值 `re.search` 命中此正则才触发；非法正则**告警跳过该条**，不阻断启动 |
+| `reason` | 建议填 | 自动生成 | 拒绝原因，原样回给 LLM——写清楚"为什么+该怎么办"效果最好 |
+| `event` | 否 | `"pre_tool"` | 目前只支持 `pre_tool`，其他值告警跳过 |
+| `reject` | 否 | `true` | 目前只支持 `true`，`false` 告警跳过 |
+
+**匹配语义**：
+- `contains` 和 `regex` 都不写 = 该工具的**所有调用**都拒绝（等于禁用工具，但带解释）
+- `contains` 和 `regex` 同时写 = **两者都命中**才拒绝（AND）
+- 多条 `[[hooks]]` 规则 = 任一命中即拒绝（OR）
+- 匹配对参数值做 `str()` 后比较，数字/布尔参数也能匹配
+
+**TOML 语法注意**：
+1. `[[hooks]]` 必须写在所有顶级键（`max_agent_iterations`、`theme` 等）**之后**——顶级键出现在 `[[hooks]]` 之后会被归入该规则条目导致解析错乱
+2. `regex` 的值用**单引号**（TOML literal string）：`regex = 'rm\s+-rf'`——双引号里 `\s` 是非法转义会报错
+
+**验证是否生效**：启动时看到 `Loaded N hook rule(s) from config` 即已加载；让 Agent 触发一条规则，工具调用会显示错误 `Blocked by hook: <你的 reason>`。
+
+**常用配方**：
+
+```toml
+# 目录只读锁
+[[hooks]]
+tool = "write_file"
+arg = "file_path"
+contains = "docs/spec"
+reason = "docs/spec.md 项目策略只读，修改请联系维护者"
+
+# 禁外网下载
+[[hooks]]
+tool = "bash"
+contains = "curl"
+reason = "外网下载被项目策略禁止"
+
+# 拦破坏性删除（正则防变体，不误伤 echo 'rm-rf' 之类）
+[[hooks]]
+tool = "bash"
+regex = 'rm\s+-rf'
+reason = "破坏性删除被项目策略禁止"
+
+# 禁直推主干（AND：是 push 且带 --force 或指向 main）
+[[hooks]]
+tool = "bash"
+contains = "git push"
+regex = '--force|main'
+reason = "禁止强推/直推 main，请走 PR"
+
+# 整体禁用一个工具（带解释，LLM 会换路子而不是重试）
+[[hooks]]
+tool = "delete_file"
+reason = "本项目禁止 Agent 删除文件，请让用户手动删"
+
+# 全工具防泄密（tool 缺省 = *，检查一切工具的一切参数）
+[[hooks]]
+contains = "internal.corp.com"
+reason = "内网地址不允许出现在工具调用中"
+```
+
+**边界**：配置层只做"拒绝"。改写参数（MODIFY）、强制确认（CONFIRM）、观察记录需写 Python Hook 或 EventBus 订阅者——见 agent-architecture.md S04。
 
 ---
 

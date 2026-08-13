@@ -98,7 +98,7 @@ while True:
 
 **核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、或只做旁路操作（记日志）。
 
-**本项目实现**：`tools/hooks.py` HookManager 支持 7 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。
+**本项目实现**：`tools/hooks.py` HookManager 支持 7 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式拒绝规则（comparison 7.2）——用户零代码声明"什么工具调用要被拒"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL BLOCK hook，配置方法见 config-guide.md。
 
 **判断标准**：框架是否提供工具执行前后的扩展点？能不能在不改源码的情况下加审计/拦截？
 

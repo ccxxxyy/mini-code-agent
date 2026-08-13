@@ -1367,3 +1367,13 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `app.py` 启动时调用（worktree 清理之后、崩溃恢复之前），有清理时显示提示
 - [x] 与 mewcode 差异：mini 跳过 `closed_cleanly=False`（崩溃会话保留），mewcode 直接按 `last_active` 删
 - [x] 4 个测试（过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录），688 个全过，ruff clean
+
+## Hook 拒绝工具执行 (comparison 7.2)
+
+- [x] 勘误：comparison 原描述"Hook 只能观察"陈旧——`HookAction.BLOCK` 在 `_run_tool_pipeline` 早已接线；真实差距是 mewcode 的拒绝 hook 可从**配置文件**声明，mini 只能写 Python
+- [x] `tools/hooks.py` — `HookRule`（tool fnmatch + arg/contains/regex 匹配，非法正则告警跳过）+ `parse_hook_rules`（非法条目告警跳过）+ `register_hook_rules`（注册为 PRE_TOOL BLOCK）
+- [x] `AgentConfig.hooks` 字段 — TOML `[[hooks]]` 经 loader `_merge` 顶层 setattr 自动落入，零 loader 改动
+- [x] `app.py` 启动注册，提示 "Loaded N hook rule(s) from config"
+- [x] 范围取舍：只做拒绝规则；mewcode 的 command/http/agent 动作类型不做——观察类扩展已有 EventBus 订阅者覆盖
+- [x] regex 字段增量：re.search 匹配、与 contains AND 语义、非法正则告警跳过（parse 期 re.compile 校验）
+- [x] 11 个测试（匹配/fnmatch/arg 限定/任意参数/默认 reason/非法跳过/TOML 往返/AgentLoop 端到端拦截/regex 三例），699 个全过

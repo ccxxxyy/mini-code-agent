@@ -31,7 +31,14 @@ from mini_agent.security.permission import PermissionManager
 from mini_agent.security.worktree import WorktreeManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
-from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookResult, HookStage
+from mini_agent.tools.hooks import (
+    HookAction,
+    HookContext,
+    HookManager,
+    HookResult,
+    HookStage,
+    register_hook_rules,
+)
 from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
@@ -199,6 +206,11 @@ class Application:
 
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
+        # Declarative rejection rules from `[[hooks]]` config (7.2)
+        # `[[hooks]]` 配置的声明式拒绝规则
+        n_rules = register_hook_rules(self.hook_manager, config.hooks)
+        if n_rules:
+            self.terminal.show_info(f"Loaded {n_rules} hook rule(s) from config")
 
         # Memory: context manager + compressor + session store
         # 记忆：上下文管理器 + 压缩器 + 会话存储

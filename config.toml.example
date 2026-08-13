@@ -70,3 +70,17 @@
 # url = "http://localhost:8080/mcp"
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
+
+# 声明式 Hook 拒绝规则（详见 docs/config-guide.md "Hook 拒绝规则详解"）
+# 命中的工具调用被拒绝执行，reason 回给 LLM。可写多条 [[hooks]]。
+# 注意：[[hooks]] 必须写在所有顶级键之后；regex 用单引号（literal string）
+# [[hooks]]
+# tool = "write_file"        # 工具名 fnmatch 模式（"bash"、"write_*"，默认 "*" 全部）
+# arg = "file_path"          # 可选：只检查此参数（缺省检查所有参数值）
+# contains = "docs/spec"     # 可选：参数值包含此子串才触发
+# reason = "docs/spec.md 项目策略只读"
+#
+# [[hooks]]
+# tool = "bash"
+# regex = 'rm\s+-rf'         # 可选：re.search 正则；与 contains 同给须同时命中
+# reason = "破坏性删除被项目策略禁止"
