@@ -1102,3 +1102,16 @@
 - [x] 多报告：总览表 + 编号硬分节 + 交付文件行（仅列真实存在文件，亮橙渲染）
 - [x] slash 输出哨兵机制：仅报告类走 Markdown，/status /cost 纯文本版式不受污染
 - [x] 顺带修复：AgentPhase.ACTING 不存在（面板崩溃）、cli finally 吞 traceback、slash 异常炸会话——三处 + 回归测试
+
+## OpenAI Responses API Provider 检查项（comparison 1.1）
+
+- [x] `openai_responses_provider.py` 消息转换：system→instructions / tool_calls→function_call / tool→function_call_output
+- [x] 工具 schema 扁平化：`{function: {...}}` → 顶层 `{name, parameters}`
+- [x] SSE 事件解析：text delta / reasoning summary / tool call start+args / completed / incomplete / failed
+- [x] 用量：input_tokens_details.cached_tokens 提取；max_tokens→max_output_tokens 映射
+- [x] Thinking round-trip：LLMResponse.thinking + Message.metadata["thinking"] + reasoning 项回传
+- [x] Tool pairing repair：orphan function_call 补 "interrupted" 合成结果
+- [x] 错误分类：LLMAuthenticationError(401) / LLMRateLimitError(429) / LLMNetworkError
+- [x] 注册 "openai-responses" 到 ProviderRegistry
+- [x] 26 个单测，754 全过，覆盖率 80.83%
+- [x] config-guide 补 provider 选项；comparison 1.1 标记 ✅ + 优先级表 ✅

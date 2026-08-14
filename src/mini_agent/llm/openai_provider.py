@@ -228,6 +228,7 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
     将 stream chunk 列表组装为完整的 LLMResponse。
     """
     content_parts: list[str] = []
+    thinking_parts: list[str] = []
     tool_call_builders: dict[int, dict[str, Any]] = {}
     usage = TokenUsage()
     finish_reason = "stop"
@@ -235,6 +236,8 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
     for chunk in chunks:
         if chunk.delta:
             content_parts.append(chunk.delta)
+        if chunk.thinking:
+            thinking_parts.append(chunk.thinking)
         if chunk.finish_reason:
             finish_reason = chunk.finish_reason
         if chunk.usage:
@@ -290,6 +293,7 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
 
     return LLMResponse(
         content="".join(content_parts),
+        thinking="".join(thinking_parts),
         tool_calls=tool_calls,
         usage=usage,
         finish_reason=finish_reason,

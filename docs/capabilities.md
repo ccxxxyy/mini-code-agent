@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，728 个测试全部通过。
+> 当前版本 v1.0.0，754 个测试全部通过。
 
 ---
 
@@ -197,7 +197,7 @@
 | 要求点 | 实现 |
 |---|---|
 | System Prompt 工程 | `app.py` SYSTEM_PROMPT — 动态注入工作目录/平台/shell/当前模型名，平台感知命令指引，工具使用准则 |
-| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI 兼容 + Anthropic 双 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42：GET /models/{model} 递归提取，失败回退内置表） |
+| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI Chat Completions + OpenAI Responses API（o1/o3/o4-mini，含 thinking round-trip + tool pairing repair + 错误分类）+ Anthropic 三 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42） |
 | 流式响应 | SSE 逐行解析 → StreamChunk 统一抽象 → Rich Live 实时渲染；截断恢复——finish_reason="length" 自动翻倍 max_tokens 重试最多 3 次（P44） |
 | 多轮对话 | Conversation 全量重放，工具调用配对协议（tool_calls ↔ tool_call_id） |
 | 对话管理器 | Conversation 类：append / to_api_messages / slice_window / token 累计 |
@@ -259,7 +259,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 728 个测试全部通过（约 70 秒，零网络依赖），单元 51 文件 + 集成 3 文件 |
+| 测试 | 754 个测试全部通过（约 74 秒，零网络依赖），单元 51 文件 + 集成 3 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

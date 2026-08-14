@@ -1415,3 +1415,17 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 429 重试耐心加大（实测再暴露：持续配额限流约几十秒，3 次约 7 秒退避扛不住）——MAX_HTTP_RETRIES 3→5，指数退避 1/2/4/8/16s 约 31 秒总耐心；测试用常量断言自动适配
 - [x] 命令列表按字母排序：list_commands() 源头排序，一处改动覆盖四个消费方（`/` 下拉补全、/help、Unknown command 提示、浏览器端命令列表）
 - [x] 新增 docs/commands-guide.md 命令参考（22 个命令完整语法/参数/示例/注意事项）——此前命令用法只有 /help 一行简述 + README 一行表 + 16 处用错才显示的 Usage 提示，无系统文档；README 双语已加链接，comparison 0.7 文档数 12→13
+
+## OpenAI Responses API Provider (comparison 1.1)
+
+- [x] `llm/openai_responses_provider.py` — 完整实现：消息转换（system→instructions / tool_calls→function_call / tool→function_call_output）、工具 schema 扁平化、SSE 事件解析（text/reasoning/tool call/completed/incomplete）、用量（cached_tokens 提取）、max_tokens→max_output_tokens 映射、上下文窗口探测+推理模型表（默认 200k）、429/5xx 退避重试
+- [x] `llm/registry.py` — 注册 "openai-responses" → OpenAIResponsesProvider
+- [x] 26 个单测（消息转换 4 + 工具扁平化 1 + 事件解析 8 + assemble 集成 1 + 窗口 2 + 注册 1 + 边界 2），747 个全过
+- [x] 与 mewcode 差异：mewcode 依赖 openai SDK；mini 零 SDK（httpx 直连），自己解析 SSE 事件
+- [x] 诚实边界：reasoning round-trip 未做（只影响 o1 会话恢复）；推理模型可能拒绝 temperature!=1（由 API 报错，不静默覆盖）
+
+### 拉平 mewcode 三项差距
+- [x] Thinking round-trip：agent_loop 累积 thinking 存入 Message.metadata["thinking"]，LLMResponse 新增 thinking 字段，assemble_response 组装 thinking；`_convert_to_input` 读 metadata 发出 reasoning 项（id + summary）
+- [x] Tool pairing repair：`_convert_to_input` 跟踪 pending_call_ids，orphan function_call 补合成 "interrupted" 结果
+- [x] 错误分类：LLMAuthenticationError（401）/ LLMRateLimitError（429，含 retry_after）/ LLMNetworkError（ConnectError/Timeout）——stream() 的 except 链在重试穿透后分类包装
+- [x] 754 个测试全过
