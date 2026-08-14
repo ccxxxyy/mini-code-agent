@@ -705,6 +705,7 @@ class Application:
         切换到已加载的会话（同步修复 ToolContext 的过期引用）。"""
         self.session = loaded
         self._tool_context.session = loaded
+        self.context_manager.adopt_boundary(loaded.conversation)
         self.context_manager.update_total(loaded.conversation)
 
     async def _maybe_restore_session(self) -> None:

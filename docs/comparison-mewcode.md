@@ -692,24 +692,38 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 3. `app.py` 启动时调用（在崩溃恢复检查之前），清理后显示 "Cleaned N stale session(s)"
 4. 4 个测试：过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录
 
-### 9.2 会话压缩边界记录
+### 9.2 会话压缩边界记录 ✅ 已实现
 
 | | mini | mewcode |
 |---|---|---|
-| 恢复压缩后的会话 | 加载全部消息（含已压缩的） | **压缩边界标记**——恢复时只加载边界后的消息 + 摘要 |
+| 恢复压缩后的会话 | ✅ **压缩边界标记**——恢复时只加载边界后的消息 + 摘要，同时恢复已读文件状态 | **压缩边界标记**——恢复时只加载边界后的消息 + 摘要 |
+| 边界数据结构 | `compact_boundary` dict（summary + timestamp + read_files） | `CompactBoundary(summary, keep)` + `CompactEvent` |
+| 存储格式 | JSON conversation 段中的 `compact_boundary` 字段（覆写式） | JSONL 中 `type=compact_boundary` 记录（追加式） |
+| 已读文件恢复 | `adopt_boundary()` 恢复文件路径列表到 `_read_files` | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
+| keep 消息处理 | 尾部消息作为普通消息存在 messages 数组中 | `keep` 消息序列化到边界记录内，自包含 |
+| 工具对完整性 | `KEEP_RECENT=6` 固定切分，不保证 tool_use/tool_result 配对 | `_align_keep_start_to_tool_pair()` 确保不切断工具对 |
+| 压缩熔断 | 无 | `CompactCircuitBreaker`——连续失败 3 次后熔断，防死循环 |
 
-**增强方案**：
-1. 压缩时在 session JSONL 文件中写入一条 `{"type": "compact_boundary", "summary": "..."}` 记录
-2. 加载会话时，如果找到 compact_boundary，只加载：摘要 + 边界后的消息
-3. 减少加载时间和内存占用
+**已完成**：
+1. `Conversation.compact_boundary` 字段——压缩后由 `Compressor` 记录摘要文本、时间戳、已读文件列表
+2. `SessionStore` 序列化/反序列化支持——保存时写入 `compact_boundary`，加载时跳过已压缩的 SYSTEM 消息，从边界摘要重建
+3. `ContextManager.adopt_boundary()` —— 会话加载时从边界恢复 `_read_files` 状态，防止压缩-重读膨胀循环
+4. `app.py._adopt_session()` 接入——崩溃恢复、`/session load`、`/fork` 三个入口均自动恢复已读文件状态
+5. 兜底逻辑——纯 `SlidingWindow` 压缩（不产生摘要消息）时从 `_inject_read_files` 插入的消息创建边界（真实 LLM 验证暴露并修复）
+6. 6 个测试（4 单元 + 2 集成）：边界往返 / 跳过压缩 SYSTEM / 保留非压缩消息 / 无边界向后兼容 / 完整链路 E2E / 旧格式兼容 E2E
 
-代码改动：`memory/session_store.py` ~20 行 + `memory/compressor.py` ~5 行。
+**与 mewcode 的诚实差异**（源自架构差异，非照抄）：
+
+| # | 差异点 | mewcode 做法 | mini 做法 | 影响 |
+|---|---|---|---|---|
+| 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | 只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读 | mini 的方式省 token 但恢复后 LLM 对文件内容的记忆更弱；mewcode 的方式恢复质量更高但摘要消息更大 |
+| 2 | keep 消息自包含 | `CompactBoundary.keep` 把尾部消息序列化到边界记录内（JSONL 追加式，边界是自包含的恢复点） | 尾部消息作为普通消息存在 JSON messages 数组中 | mini 用单 JSON 覆写式存储，尾部消息天然与边界同文件，自包含性等价——仅格式层差异 |
+| 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | `KEEP_RECENT=6` 固定切分，可能切断 | 这是压缩策略层的已有问题（早于 9.2），非本次边界功能引入；修复应在 `SummarizeOldest` 中对齐 |
+| 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | 无 | 独立防护机制，可作为后续增强单独实现 |
 
 ---
 
-## 十、mini-code-agent 独有优势（mewcode 没有的）
-
-以下功能是 mini 有而 mewcode 没有的——**必须保持并加强**：
+## 十、mini-code-agent 优势
 
 | 功能 | 说明 | 加强方向 |
 |---|---|---|
@@ -755,8 +769,13 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
 | ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |
 | ✅ 完成 | 9.1 | 会话自动清理 | 磁盘管理 | 已完成 |
-| ⚪ P4 | 9.2 | 会话压缩边界 | 恢复性能 | 半天 |
+| ✅ 完成 | 9.2 | 会话压缩边界 | 恢复性能 | 已完成 |
 | ⚪ P4 | 4.6 | 记忆导出/导入 | 互操作 | 半天 |
 | ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
+| ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
+| ⚪ P4 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1：mewcode 烤入最近 5 文件内容（5000 tokens/个），mini 只记路径 | 半天 |
+| ⚪ P3 | 9.2b | 压缩工具对对齐 | 9.2 诚实差异 #3：`KEEP_RECENT=6` 可能切断 tool_use/tool_result 配对致 API 400 | 2 小时 |
+| ⚪ P4 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4：mewcode 有 `CompactCircuitBreaker` 连续失败 3 次停止，防死循环 | 2 小时 |
+| ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |
 
 **总工作量估算**：约 15-20 个工作日。全部完成后 mini-code-agent 在每一个维度都 ≥ mewcode-python，同时保持自身的差异化优势（/undo、/fork、/record、/cost、/explain、实验框架）。
