@@ -149,8 +149,10 @@
 |---|---|---|
 | 欢迎标题 `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | 启动时 |
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
-| 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串 | 输入 `/xxx` 时 |
+| 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串；默认纯文本原样打印，带 `MARKDOWN_RESULT` 哨兵的（spawn 报告）走 Markdown 渲染，行内代码（文件名/agent id）亮橙色 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
+| 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
+| worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径 |
 | `Goodbye!` | `app.py` `run()` finally | 正常退出时 |
 | `Interrupted.` | `app.py` `_handle_turn` except | Ctrl+C / 双 Esc 中断时 |

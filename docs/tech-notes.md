@@ -1872,8 +1872,6 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **不动 EventBus**：comparison 原文把 Hook 和 EventBus 事件混在一起（改动估算指向 models/events.py），实际 7.1 标题是 Hook 事件——EventBus 已有 SessionStart/TurnComplete 等事件，两套系统职责不同（EventBus 观察渲染，Hook 拦截干预），不需要重复
 - **PRE_SEND/POST_RECEIVE 等价映射**：mewcode 的这两个对应 mini 的 PRE_LLM/POST_LLM，不另加同义枚举
 
-# 附录：贯穿各阶段的通用设计原则
-
 # 第五十一部分：工具搜索/延迟加载（P51）
 
 ## 51.1 为什么需要：100+ MCP 工具全塞上下文
@@ -2024,9 +2022,39 @@ P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始�
 3. **名字寻址** ✅——`register(id, name)` 别名注册 + `resolve()` id/名字双解析，spawn_agents 新增 `names` 参数（唯一性/保留字校验），notice 显示 'explorer' (id xxx, task: ...)
 4. **审计痕迹** ✅——drain 标记已读并留盘（会话内可 cat 排查），unregister 保留文件，新会话 SubAgentManager 初始化 `reset_all()` 统一清理。与 mewcode 差异：审计是**会话级**的，mewcode 留存至手动 cleanup
 
-**架构边界（P58.4 后仍成立，做 6.4 前必读）**：mini 的无锁只在单 asyncio 进程内成立（send/drain 无 await → 天然原子）。mewcode 队友是 tmux 独立进程，故有约 40 行文件锁体系（O_EXCL 锁文件 + 指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时 + threading.Lock 双层）和写入后 send_keys 推送唤醒。**mini 一旦做多后端 spawn（6.4），必须先补文件锁与唤醒，否则跨进程并发读改写会静默丢消息**——mewcode 的 `_with_lock` 是现成参考。
+**架构边界（P58.4 记录，6.4 实现时解除）**：当时 mini 的无锁只在单 asyncio 进程内成立。6.4 落地多后端 spawn 时按此预告补齐——见 58.6。
 
 完整对照表见 comparison-mewcode.md 6.2 节。
+
+## 58.6 多后端 spawn（6.4）：Mailbox 跨进程改造 + 窗格 worker
+
+**为什么**：in-process SubAgent 运行期不可见（只有进度面板）；mewcode 能把队友放进 tmux/iTerm2 窗格实时观看。做窗格意味着 Agent 跨进程，58.5 预告的锁债必须先还。
+
+**前置——Mailbox 跨进程**（`core/mailbox.py` 重写）：
+1. `_with_lock(path, fn)`：O_EXCL 创建 `<file>.lock`（原子原语）+ 指数退避带随机抖动（5ms 起、80ms 封顶，避免多进程同刻醒来对撞）+ 10s 陈旧锁接管（崩溃者遗留）+ 5s 超时抛 TimeoutError——消息没送出去必须让调用方知道
+2. 原子写：temp 文件 + `os.replace`，纯读免锁永不见半截文件
+3. **磁盘注册表** `_registry.json`（id → 别名）替换内存 set/dict——worker 进程能解析父进程注册的同伴。这一步 mewcode 也没做（其注册表是进程内单例），是 mini 的必要发明
+4. 唤醒适配：mewcode send-keys 推送服务常驻队友；mini worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信——无需推送
+5. 单进程代价：每次 send/drain 多两个 syscall（锁建删）+ 注册表小文件读——实测 33 个既有测试从 3.1s 到 6.4s，可接受
+
+**worker 协议**（`core/worker.py`）：WorkerSpec JSON（任务/身份/mailbox 目录/结果路径/hold 秒数）→ `mini-agent --worker <spec>` 无头运行（stdout 流式打窗格）→ 结果原子写 JSON → 父进程轮询。API key 走环境变量继承不落盘
+
+**窗格后端**（`core/spawn_backends.py`）：探测：会话内（TMUX/WT_SESSION）分屏；Windows 装了 wt 但在其他终端（cmd/IDE）降级 `wt -w mini-agents new-tab` 进共享窗口标签页，任意终端可用；tmux `split-window -d` / **Windows Terminal `wt -w 0 split-pane`**——mewcode 在 win32 一律放弃窗格，wt 后端是 mini 的反超点；`_PaneWorkerProxy` 顶替 SubAgent 进活跃表，wait/cancel/list 同构
+
+**顺带修复**：`wait()` 对已 cancel 的 agent 原会抛 CancelledError 炸等待方——补分支返回 error="Cancelled" 的结果（失败即数据原则）
+
+**真实验证**：真 LLM worker 子进程 E2E——父进程注册表实时看到 worker 注册、跨进程 send_message 送达 main、注销、结果收集，全链 PASS；4 进程 × 20 条并发写同一收件箱零丢失
+
+**诚实边界**：iTerm2 未做（无 macOS 环境，不写无法验证的代码）；pane cancel 尽力而为不强杀进程；worker 无权限弹窗（与 in-process SubAgent 一致）
+
+## 58.7 实测迭代：六轮真实使用暴露的坑（每个都有回归测试）
+
+1. **协议隔离（最深）**：worker 的 LLM 在探索项目时读到自己的 spec 文件（曾放在项目 `.mini-agent/workers/`，含 result_path），"好心"提前用 write_file 自己写了一份结果——父进程 0.5s 轮询立刻捡走早产桩（Tokens: 0），真结果 15 秒后写入但已无人收。**教训：父子协调文件绝不能放在 agent 可自由读写的目录里**。修复：协议文件迁 `~/.mini-agent/workers/` + 收集器 schema 7 字段 + agent_id 双校验。讽刺的是另一个并行 worker 的分析报告正确预言了此缺陷（"result 文件缺 schema 校验"）
+2. **崩溃可见性**：worker 崩在写结果之前 → 父进程只能干等超时，原因随窗格关闭消失。修复：顶层护栏任何异常都写失败结果 + traceback + 窗格停留。同类教训：cli 的 `finally: sys.exit(0)` 会吞掉一切崩溃 traceback（一个 AgentPhase.ACTING 枚举笔误曾借此无声杀死整个应用）
+3. **持续限流 ≠ 瞬时抖动**：并行 worker 共用一个 API key，429 是持续配额窗口（几十秒），首版 3 次约 7 秒重试扛不住 → 5 次指数退避约 31 秒；且只在 chunk 产出前重试（流中途重试会产生重复输出）
+4. **超时语义**：/spawn wait 300s 超时会取消收集任务并移出活跃表——大任务（实测 5-15 分钟、0.7-1.8M tokens）完成的报告成孤儿。对齐收集器 900s
+5. **交付物不可截断**：结果格式化的 `output[:200]` 对小任务合理，对整篇分析报告就是自毁交付
+6. **渲染的显式选择**：全量 Markdown 化让 /status /cost 的空格对齐版式被折叠搅碎——修复为哨兵前缀显式 opt-in（MARKDOWN_RESULT），默认纯文本永远安全
 
 # 附录：贯穿各阶段的通用设计原则
 
@@ -2034,6 +2062,6 @@ P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始�
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——699 个测试约 62 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——728 个测试约 70 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，699 个测试全部通过。
+> 当前版本 v1.0.0，728 个测试全部通过。
 
 ---
 
@@ -158,6 +158,7 @@
 - 失败即数据：子 Agent 异常转 SubAgentResult(success=False)，不炸编排
 - Mailbox 跨 Agent 通信（P58）：共享文件式收件箱，SubAgent 运行中通过 send_message 互发消息、wait_message 阻塞等待；spawn_parallel 预生成 id 让兄弟 Agent 互见（id + 任务摘要）
 - Mailbox 增强（P58.4）：`to='*'` 广播、request/response 结构化协议（request_id 配对 + approve 表态）、名字寻址（spawn_agents names 参数）、会话级审计留痕（drain 标记已读留盘）
+- 多后端 spawn（comparison 6.4）：`/spawn --pane` 把 SubAgent 跑进可见终端窗格（tmux 分屏 / **Windows Terminal** 分屏或共享窗口标签页——任意终端装了 wt 即可用，独立进程实时观看）；`--wait` 一条命令派发+进度面板+结果；Mailbox 跨进程改造（O_EXCL 文件锁 + 原子写 + 磁盘注册表，4 进程并发写零丢失实测）；worker 协议（spec JSON 进 → 结果 JSON 出，协议文件隔离在工作目录外 + schema 双校验防 LLM 早产桩）；worker 崩溃护栏 + Provider 429 退避重试；真实 LLM 跨进程 E2E + 六轮交互实测迭代
 
 **验证**：8 个单测含并行计时断言（3 个 0.1s Agent 并行 <0.35s）；真实 API E2E：2 个 Agent 并行读不同文件 2.3 秒各自正确报告
 
@@ -258,7 +259,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 699 个测试全部通过（约 62 秒，零网络依赖），单元 50 文件 + 集成 3 文件 |
+| 测试 | 728 个测试全部通过（约 70 秒，零网络依赖），单元 51 文件 + 集成 3 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

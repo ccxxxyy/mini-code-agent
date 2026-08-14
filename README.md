@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-699%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-728%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,13 +19,13 @@
 | **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~12,800 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~14,000 lines of readable Python, MIT licensed |
 
 ## Features
 
 🔧 **12 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call
 
-🤖 **Multi-Agent** — `/spawn` parallel agents, `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message)
+🤖 **Multi-Agent** — `/spawn` parallel agents, `/spawn --pane` visible terminal-pane workers (tmux / Windows Terminal, separate processes), `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message)
 
 💰 **Cost Dashboard** — per-model input/output pricing, session + all-time ledger, budget warnings at 80%/100%
 
@@ -141,7 +141,7 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |
 | `/plan [on\|off]` | Toggle read-only plan mode (write tools disabled) |
 | `/tools` | List all registered tools (built-in + MCP) |
-| `/spawn <task>` | Dispatch background sub-agent (`--type explore\|plan\|worker\|verify`) |
+| `/spawn <task>` | Dispatch background sub-agent (`--type`, `--pane` visible terminal pane, `--wait` block for result) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
 | `/trace [on\|off]` | Show agent internals (phases, permissions, timing) |
 | `/explain [on\|off]` | Show tool usage explanations |
@@ -153,6 +153,8 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/compact` | Compress conversation history |
 | `/clear` | Clear conversation |
 | `/exit` | Exit |
+
+Full syntax, flags and examples for every command: [docs/commands-guide.md](docs/commands-guide.md)
 
 ## Configuration
 
@@ -183,7 +185,7 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 mini-code-agent/
 ├── src/mini_agent/
 │   ├── core/        # Agent loop, sub-agents, teams, planner, cost tracker
-│   ├── tools/       # 10 built-in tools + MCP protocol (stdio + HTTP)
+│   ├── tools/       # 12 built-in tools + MCP protocol (stdio + HTTP)
 │   ├── memory/      # Context compression, persistent memory, file snapshots
 │   ├── security/    # Permissions, path guard, git worktree isolation
 │   ├── ui/          # Rich terminal rendering, themes, prompt toolkit
@@ -192,10 +194,10 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 699 tests, 80%+ coverage
+├── tests/           # 728 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 3 mechanism experiments (compression A/B, model mixing, deadlock induction)
-└── docs/            # 12 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
+└── docs/            # 13 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
 ```
 
 **Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) decoupled via EventBus. All I/O is async. Zero vendor SDK dependency — just httpx.
@@ -212,7 +214,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 699 tests
+uv run pytest tests/           # 728 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

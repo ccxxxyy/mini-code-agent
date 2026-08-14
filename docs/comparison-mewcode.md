@@ -10,12 +10,12 @@
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
-| 源码行数 | ~12,800 行 | ~15,000+ 行 |
+| 源码行数 | ~14,000 行 | ~15,000+ 行 |
 | Python 版本 | 3.11+（用 tomllib、StrEnum 等 3.11 特性） | 3.12+（用 type 语法） |
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量已接近（12,800 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
+**差距**：代码量已接近（14,000 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -56,7 +56,7 @@
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
-- 用户可以审计全部代码（12,800 行 vs 15000 行 + SDK 黑盒）
+- 用户可以审计全部代码（14,000 行 vs 15000 行 + SDK 黑盒）
 
 **增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **699 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **728 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -104,10 +104,11 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 文档数量 | **12 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
+| 文档数量 | **13 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
 | 技术笔记 | tech-notes.md（58 个部分，设计决策记录） | 无 |
 | 配置指南 | config-guide.md（全配置文件说明） | config.yaml.example |
+| 命令参考 | commands-guide.md（22 个命令完整语法/参数/示例） | 无 |
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
@@ -524,11 +525,11 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | 3 | 无名字寻址 | `AgentNameRegistry` 按名字或 id 解析 | ✅ `Mailbox.register(id, name)` 别名注册 + `resolve()` id/名字双解析；spawn_agents 新增 `names` 参数（唯一性/保留字校验），MAILBOX_NOTICE 显示 `'explorer' (id xxx, task: ...)` |
 | 4 | 无审计痕迹 | 消息带 `read` 标记 consume 后留盘；`read()` 只窥视 | ✅ `drain` 标记已读并留盘（会话内可 cat 排查）；`unregister` 保留文件；新会话 `SubAgentManager` 初始化时 `reset_all()` 统一清理。诚实差异：审计是**会话级**的，mewcode 留存至手动 cleanup |
 
-**已知架构边界（P58.4 后仍然成立，做 6.4 前必读）**：
+**架构边界的演进（P58.4 记录 → 6.4 实现时解除）**：
 
-- **无锁设计只在单进程内成立**。mini 的 Mailbox 不加任何锁，依据是"所有 Agent 跑在同一 asyncio 事件循环、send/drain 内部无 await、单文件读改写天然原子"（见 `core/mailbox.py` docstring）。mewcode 的队友跑在 tmux/iTerm2 **独立进程**里，所以它有完整的文件锁体系：`.lock` 锁文件（O_CREAT|O_EXCL）+ 指数退避带随机抖动 + 10s 陈旧锁强制接管 + 5s 获取超时抛异常 + 进程内 threading.Lock 双层——约 40 行只为跨进程互斥。**一旦 mini 实现 6.4（多后端 tmux spawn），单进程假设即失效，必须先补锁再上多进程**，否则并发读改写会静默丢消息。届时 mewcode 的 `_with_lock` 是现成参考。
-- **无推送唤醒**。mewcode 写入后主动 `send_keys_to_pane` 唤醒对方进程（推模式）；mini 靠 wait_message 0.5s 轮询（拉模式）。单进程内轮询开销可忽略，跨进程后同样需要补唤醒机制。
-- **主 Agent 在 spawn_agents 期间阻塞**，发给 'main' 的消息要等 wait_all 返回后的下一轮才被消费——真正实时的只有 Worker↔Worker 这条边。
+- ~~无锁设计只在单进程内成立~~ **✅ 已解除（6.4 前置）**：Mailbox 现已具备完整跨进程能力——O_EXCL 文件锁（指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时）+ temp/os.replace 原子写 + 磁盘注册表 `_registry.json`。实测 4 进程并发写零丢失。实现细节见 6.4
+- ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
+- **主 Agent 在 spawn_agents 期间阻塞**（仍成立），发给 'main' 的消息要等 wait_all 返回后的下一轮才被消费——真正实时的只有 Worker↔Worker 这条边。
 
 ### 6.3 Agent 类型定义 ✅ 已实现（P48）
 
@@ -545,22 +546,39 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - `_intersect_tools()` 辅助函数：agent_type 工具白名单与调用方 `allowed_tools` 取交集
 - 向后兼容：不指定 agent_type 时行为与 P48 前完全一致
 
-### 6.4 多后端 spawn
+### 6.4 多后端 spawn ✅ 已实现
 
 | | mini | mewcode |
 |---|---|---|
-| SubAgent 运行方式 | in-process 异步 | **in-process + tmux 面板 + iTerm2 面板** |
+| SubAgent 运行方式 | ✅ in-process + **tmux 窗格** + **Windows Terminal 窗格/新窗口**（`/spawn --pane`，wt 装了就能用——不在 WT 会话内降级为共享窗口标签页） | in-process + tmux 面板 + iTerm2 面板（**win32 一律回退 in-process**） |
 
-**差距**：in-process 时用户看不到 SubAgent 的实时输出。
+**已完成**（前置 + 三层实现）：
 
-**增强方案**：
-1. 检测 `tmux` 环境时，`/spawn` 在新面板中启动 SubAgent（`tmux split-window -h "mini --teammate ..."）
-2. iTerm2 通过 AppleScript 新建面板
-3. 非 tmux/iTerm2 环境保持 in-process
+**前置：Mailbox 跨进程改造**（兑现 6.2 架构边界的欠账）：
+1. **文件锁**——`_with_lock`：O_EXCL 锁文件 + 指数退避带随机抖动（5ms 起、80ms 封顶）+ 10s 陈旧锁接管 + 5s 超时抛 TimeoutError（消息没送出去必须让调用方知道，不静默丢）。实测 4 进程 × 20 条并发写同一收件箱零丢失
+2. **原子写**——temp 文件 + os.replace，纯读方永不见半截文件（读免锁）
+3. **磁盘注册表**——`_registry.json`（id → 别名）替代内存 set/dict，worker 进程能解析父进程注册的同伴（mewcode 的注册表在内存里，跨进程要靠 AgentNameRegistry 单例 + 同进程假设，mini 此处更彻底）
+4. **唤醒的适配**：mewcode 用 tmux send-keys 推送唤醒常驻队友；mini 的 worker 是一次性任务，靠 wait_message 0.5s 轮询天然跨进程收信，无需推送通道——投递延迟上界即轮询间隔
 
-代码改动：新增 `core/spawn_backends.py` ~80 行。优先级较低——进度面板已提供可视化。
+**worker 协议**（`core/worker.py`）：父进程写 WorkerSpec JSON（任务/身份/mailbox 目录/结果路径）→ 窗格跑 `mini-agent --worker <spec>`（无头单任务，进度流式打到窗格 stdout）→ 结果原子写 JSON → 父进程轮询收集。API key 经环境变量继承，不落盘。**协议文件放 `~/.mini-agent/workers/`（工作目录之外）**——见下方实测迭代第 4 条的教训
 
-> ⚠️ **前置条件（见 6.2 架构边界）**：P58 Mailbox 的无锁设计只在单 asyncio 进程内成立。实现多后端 spawn 前**必须先给 Mailbox 补文件锁与推送唤醒**（参考 mewcode `_with_lock`：O_EXCL 锁文件 + 指数退避 + 陈旧锁接管 + 超时），否则跨进程并发读改写会静默丢消息。
+**窗格后端**（`core/spawn_backends.py`）：
+- 探测跟随 mewcode 哲学——只在自身已跑在 tmux（`TMUX` env）/ Windows Terminal（`WT_SESSION` env）会话内才启用窗格，否则回退 in-process
+- tmux：`split-window -d`（不抢焦点）；**Windows Terminal**：会话内 `wt -w 0 split-pane` 分屏，会话外只要装了 wt 就降级 `wt -w mini-agents new-tab`——首次派发弹一个共享窗口，后续派发进同一窗口的标签页不轰炸（cmd/PowerShell/IDE 终端都能用）——mewcode 在 win32 直接护栏放弃窗格，**此子项反超**
+- `SubAgentManager.spawn_pane()`：`_PaneWorkerProxy` 顶替 SubAgent 进活跃表，wait/cancel/list 与 in-process 完全同构（收集任务包装为 asyncio.Task）
+- 入口 `/spawn --pane <task>`；spawn_agents 工具不暴露（窗格可视化是给人看的，LLM 不需要）
+
+**实测迭代加固**（六轮真实使用暴露并修复，全部有回归测试）：
+1. **/spawn wait 结果不截断**——原 200 字符截断腰斩交付物；改完整输出（8000 字符病态防线）
+2. **`--wait` 一步到位**——`/spawn --pane --wait <task>` 派发+进度面板+结果一条命令；wt 降级模式改 `-w mini-agents` 命名窗口标签页聚合（不再每 worker 弹一窗）
+3. **worker 顶层崩溃护栏**——曾崩在写结果之前致父进程只能超时、原因随窗格关闭消失；任何异常都写失败结果 + traceback + 窗格停留。`/spawn wait` 超时 300→900s 对齐收集器
+4. **协议隔离**（最深的坑）——worker 的 LLM 读到项目内自己的 spec（含 result_path）后"好心"提前自己写了结果桩，父进程 0.5s 轮询捡走（Tokens: 0），真结果被覆盖成孤儿。修复：协议文件迁至 `~/.mini-agent/workers/` + 收集器 schema/agent_id 双校验拒绝桩文件
+5. **LLM Provider 429/5xx 退避重试**——并行 worker 共用一个 key 触发持续配额限流，一次 429 即零产出死亡；两家 Provider stream 前置重试（尊重 Retry-After，指数退避 1/2/4/8/16s 约 31 秒耐心，chunk 产出后不重试防重复输出）
+6. **多报告排版**——总览表 + `# 报告 i/N` 硬分节 + 交付文件行（自动提取真实存在于工作目录的文件名，亮橙渲染）；slash 输出显式哨兵选择 Markdown 渲染，纯文本版式（/status /cost）不受污染
+
+**验证**：24 个单测（探测含 wt-window 降级/命令构造/失败路径/WorkerSpec 往返/管理器收集/超时/取消/桩文件拒绝/崩溃护栏/worker MockLLM 全链路/4 进程并发零丢失）+ **真实 LLM 跨进程 E2E**：worker 子进程注册（父进程注册表实时可见）→ send_message 跨进程送达 main → 注销 → 结果文件收集，全链路 PASS；另经六轮交互式真实使用验证（多窗格并发、失败路径、大任务长时等待）
+
+**诚实边界**：iTerm2 后端未做（无 macOS 验证环境，照 mewcode 抄 AppleScript 属于无法验证的代码）；pane worker 的 cancel 是尽力而为（停止等待收集，不强杀窗格进程）；worker 进程无权限弹窗（与 in-process SubAgent 一致——本就不接权限管理器）；wait 超时（900s）后完成的结果成孤儿，可手动查 `~/.mini-agent/workers/<id>.result.json`。
 
 ### 6.5 Worktree 完善 ✅ 已实现（P54）
 
@@ -721,7 +739,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 5.2 | 远程/浏览器模式 + 11 项增强（P57） | 新使用场景 | 已完成 |
 | ✅ 完成 | 6.2 | Mailbox 跨 Agent 通信（P58） | 多 Agent 协作 | 已完成 |
 | 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
-| 🔵 P3 | 6.4 | 多后端 spawn（tmux）——前置：Mailbox 补文件锁+唤醒（6.2 架构边界） | 可视化 | 1 天 |
+| ✅ 完成 | 6.4 | 多后端 spawn（tmux + Windows Terminal 窗格，含 Mailbox 跨进程改造） | 可视化 | 已完成 |
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |
 | ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |

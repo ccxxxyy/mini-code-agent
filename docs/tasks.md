@@ -1377,3 +1377,41 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 范围取舍：只做拒绝规则；mewcode 的 command/http/agent 动作类型不做——观察类扩展已有 EventBus 订阅者覆盖
 - [x] regex 字段增量：re.search 匹配、与 contains AND 语义、非法正则告警跳过（parse 期 re.compile 校验）
 - [x] 11 个测试（匹配/fnmatch/arg 限定/任意参数/默认 reason/非法跳过/TOML 往返/AgentLoop 端到端拦截/regex 三例），699 个全过
+
+## 多后端 spawn (comparison 6.4)
+
+### 前置：Mailbox 跨进程改造
+- [x] `_with_lock` 文件锁：O_EXCL 锁文件 + 指数退避带抖动（5ms→80ms）+ 10s 陈旧锁接管 + 5s 超时抛 TimeoutError
+- [x] 原子写：temp + os.replace，纯读免锁
+- [x] 磁盘注册表 `_registry.json`（id→别名）替换内存注册，跨进程 resolve/peers/describe_peers
+- [x] '_registry' 保留 id 守卫；reset_all 连注册表与锁残留清理
+- [x] 唤醒以 wait_message 轮询替代推送（worker 为一次性任务，无需 send-keys 通道）
+- [x] 实测 4 进程 × 20 条并发写同一收件箱零丢失
+
+### worker 协议与窗格后端
+- [x] `core/worker.py` — WorkerSpec（dump/load）+ run_worker：无头单任务，stdout 流式打窗格，结果原子写 JSON，hold_seconds 停留
+- [x] `mini-agent --worker <spec.json>` CLI 入口
+- [x] `core/spawn_backends.py` — 探测（TMUX/WT_SESSION 会话内分屏；装了 wt 但在其他终端 → wt -w -1 new-tab 降级弹新窗口）+ tmux split-window + wt split-pane（mewcode win32 放弃窗格，此为反超点）
+- [x] `SubAgentManager.spawn_pane()` — _PaneWorkerProxy 顶替进活跃表，收集任务包装 asyncio.Task，wait/cancel/list 同构
+- [x] `/spawn --pane <task>` 命令入口；spawn_agents 工具不暴露（窗格可视化给人看）
+- [x] 顺带修复：wait() 对已 cancel agent 返回 error="Cancelled" 结果而非抛 CancelledError
+- [x] 22 个新测试（探测含 wt-window 降级/命令构造/失败路径/WorkerSpec 往返/worker MockLLM 全链路/管理器收集/超时/取消/跨进程零丢失）
+- [x] 真实 LLM 跨进程 E2E：worker 子进程注册可见 → send_message 跨进程送达 → 注销 → 结果收集 PASS
+- [x] 实测踩坑修复：_PaneWorkerProxy.status 用了不存在的 AgentPhase.ACTING → /spawn wait 进度面板 AttributeError；cli 的 finally: sys.exit(0) 吞掉 traceback 让崩溃变无声 Goodbye；slash 命令异常缺兜底会炸整个会话——三处全修 + 回归测试
+- [x] 728 个测试全过，ruff clean
+
+### 实测反馈迭代（三轮真实使用暴露的问题）
+- [x] `/spawn wait` 结果 200 字符截断腰斩交付物 → 完整输出（8000 字符防病态上限）
+- [x] wt-window 降级每派发弹一个独立窗口轰炸 → `-w mini-agents` 命名窗口聚合，后续派发进同一窗口标签页
+- [x] 两段式（派发+wait）对单任务多余 → `/spawn --wait` 一条命令派发+进度面板+结果（可与 --pane 组合）
+- [x] slash 命令结果按 Markdown 渲染（app.py 打印处包 Markdown()）——worker 报告的 ##/表格/加粗此前按纯文本打印不渲染；_format_agent_result 改为 Markdown 友好结构（元数据列表 + 输出独立成段）
+- [x] LLM Provider 429/5xx 退避重试（并行 pane worker 暴露：4 个 agent 同 key 打限流，一次 429 即零产出死亡）——两家 Provider stream 前置重试（尊重 Retry-After，指数退避带抖动，最多 3 次，chunk 产出后不重试防重复输出）+ 2 个 MockTransport 测试
+- [x] worker 顶层崩溃护栏（实测暴露：崩在写结果之前 → 父进程只能超时、原因随窗格关闭消失）——任何异常都写失败结果文件 + 打印 traceback + 窗格停留
+- [x] /spawn wait 超时 300→900 秒对齐收集器（实测暴露：大任务跑 5-15 分钟，300 秒超时后收集任务被取消，worker 后续完成的报告成孤儿）
+- [x] 协议隔离修复（实测最深的坑）：worker 的 LLM 读到项目内自己的 spec（含 result_path）后"好心"提前自己写了结果桩，父进程 0.5s 轮询捡走（Tokens: 0），真结果被覆盖成孤儿——① spec/result 移到 ~/.mini-agent/workers/（工作目录外，agent 探索不到）② 收集器 schema+agent_id 双校验拒绝桩文件；2 个回归测试
+- [x] 多 Agent wait 输出排版：总览表（状态/Tokens/Tools/任务）+ 逐份编号分节——worker 输出自带标题/分隔线，无硬边界糊成一片
+- [x] 交付文件凸显：结果块自动提取输出中真实存在于工作目录的文件名列为"交付文件"行；slash 命令输出的行内代码（文件名/agent id）以亮橙色渲染（markdown.code 主题作用域覆盖）
+- [x] 渲染回归修复（实测暴露：全量 Markdown 化把 /status /cost 的空格对齐版式搅碎）——改为显式哨兵 MARKDOWN_RESULT：只有 spawn 报告类输出走 Markdown 渲染（亮橙行内代码），其余命令恢复纯文本原样打印；remote 侧剥离哨兵
+- [x] 429 重试耐心加大（实测再暴露：持续配额限流约几十秒，3 次约 7 秒退避扛不住）——MAX_HTTP_RETRIES 3→5，指数退避 1/2/4/8/16s 约 31 秒总耐心；测试用常量断言自动适配
+- [x] 命令列表按字母排序：list_commands() 源头排序，一处改动覆盖四个消费方（`/` 下拉补全、/help、Unknown command 提示、浏览器端命令列表）
+- [x] 新增 docs/commands-guide.md 命令参考（22 个命令完整语法/参数/示例/注意事项）——此前命令用法只有 /help 一行简述 + README 一行表 + 16 处用错才显示的 Usage 提示，无系统文档；README 双语已加链接，comparison 0.7 文档数 12→13

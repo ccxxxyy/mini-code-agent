@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-651%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-728%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -266,7 +266,7 @@ mini-code-agent/
 │       ├── config/             # 分层配置加载
 │       ├── llm/                # LLM Provider 抽象层
 │       ├── ui/                 # TUI 终端界面（主题、补全、流式渲染）
-│       ├── tools/              # 工具系统（10 内置工具 + MCP + Hook）
+│       ├── tools/              # 工具系统（12 内置工具 + MCP + Hook）
 │       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
 │       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
 │       ├── security/           # 安全层（权限、路径守卫、worktree）
@@ -347,7 +347,7 @@ mini-code-agent/
 - [x] P56：Skill 热重载
 - [x] P57：远程/浏览器模式
 
-**全部阶段已完成，651 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，728 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -821,6 +821,8 @@ uv run python experiments/deadlock_induction.py --all
 | `/tools` | 列出已注册工具 |
 | `/skill [activate\|deactivate <名称>]` | 技能包管理 |
 | `/exit` | 退出 |
+
+全部命令的完整语法、参数与示例见 [docs/commands-guide.md](docs/commands-guide.md)。
 
 > 终端输出的详细来源和开关说明见 [docs/output-guide.md](docs/output-guide.md)。
 

@@ -4,19 +4,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from mini_agent.llm.base import (
+    MAX_HTTP_RETRIES,
+    RETRYABLE_HTTP_STATUSES,
     LLMProvider,
     StreamChunk,
     TokenUsage,
     ToolCallDelta,
+    compute_retry_delay,
 )
 from mini_agent.models.config import LLMConfig
+
+logger = logging.getLogger(__name__)
 
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-sonnet-4-20250514": 200_000,
@@ -96,22 +103,40 @@ class AnthropicProvider(LLMProvider):
             body["tools"] = tools_list
         _mark_last_user_for_cache(api_messages)
 
-        async with self._client.stream("POST", "/v1/messages", json=body) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
+        # Retry rate limits / transient 5xx with backoff, only before any
+        # chunk was yielded (see openai_provider for rationale).
+        # 限流/瞬时 5xx 带退避重试，仅限任何 chunk 产出之前（理由同 openai_provider）。
+        attempt = 0
+        while True:
+            async with self._client.stream("POST", "/v1/messages", json=body) as response:
+                if response.status_code in RETRYABLE_HTTP_STATUSES and attempt < MAX_HTTP_RETRIES:
+                    delay = compute_retry_delay(attempt, response.headers.get("retry-after"))
+                    attempt += 1
+                    logger.warning(
+                        "LLM request got %d, retry %d/%d in %.1fs",
+                        response.status_code,
+                        attempt,
+                        MAX_HTTP_RETRIES,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
-                data = line[6:]
-                if data == "[DONE]":
-                    break
-                try:
-                    event = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
 
-                chunk = self._parse_event(event)
-                if chunk:
-                    yield chunk
+                    chunk = self._parse_event(event)
+                    if chunk:
+                        yield chunk
+            return
 
     def _parse_event(self, event: dict[str, Any]) -> StreamChunk | None:
         event_type = event.get("type", "")

@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mini_agent.extensions.slash_commands import SlashCommand
+from mini_agent.extensions.slash_commands import MARKDOWN_RESULT, SlashCommand
 from mini_agent.llm.registry import ProviderRegistry
 
 if TYPE_CHECKING:
@@ -1009,6 +1009,11 @@ def _make_spawn(app: Application) -> HandlerFn:
                 "  `/spawn <task>` — dispatch a single SubAgent\n"
                 "  `/spawn -p <task1> | <task2>` — parallel dispatch\n"
                 "  `/spawn --isolated <task>` — run in git worktree\n"
+                "  `/spawn --pane <task>` — run in a visible terminal pane "
+                "(tmux/WT session: split pane; wt installed elsewhere: tab in "
+                "a shared window)\n"
+                "  `/spawn --wait <task>` — dispatch AND block for the result "
+                "in one command (combines with --pane)\n"
                 "  `/spawn --type <name> <task>` — use agent type "
                 "(explore/plan/worker/verify)\n"
                 "  `/spawn list` — show active agents\n"
@@ -1036,12 +1041,14 @@ def _make_spawn(app: Application) -> HandlerFn:
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
             if agent_id:
-                result = await board.run_while(mgr.wait(agent_id, timeout=300))
-                return _format_agent_result(result)
-            results = await board.run_while(mgr.wait_all(timeout=300))
+                result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                return MARKDOWN_RESULT + _format_agent_result(result)
+            results = await board.run_while(mgr.wait_all(timeout=900))
             if not results:
                 return "No agents to wait for."
-            return "\n\n".join(_format_agent_result(r) for r in results)
+            if len(results) == 1:
+                return MARKDOWN_RESULT + _format_agent_result(results[0])
+            return MARKDOWN_RESULT + _format_agent_results_overview(results)
 
         if first == "cancel":
             parts = raw.split(maxsplit=1)
@@ -1061,6 +1068,16 @@ def _make_spawn(app: Application) -> HandlerFn:
             isolation = "worktree"
             task_text = task_text.replace("--isolated", "").strip()
 
+        pane = False
+        if "--pane" in task_text:
+            pane = True
+            task_text = task_text.replace("--pane", "").strip()
+
+        auto_wait = False
+        if "--wait" in task_text:
+            auto_wait = True
+            task_text = task_text.replace("--wait", "").strip()
+
         agent_type_name: str | None = None
         type_match = re.search(r"--type[= ](\S+)", task_text)
         if type_match:
@@ -1069,6 +1086,33 @@ def _make_spawn(app: Application) -> HandlerFn:
             task_text = task_text.strip()
 
         try:
+            if pane:
+                if not task_text:
+                    return "No task provided."
+                agent_id = await mgr.spawn_pane(task_text, agent_type=agent_type_name)
+                if auto_wait:
+                    from mini_agent.ui.board import SubAgentBoard
+
+                    board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                    result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                    return MARKDOWN_RESULT + _format_agent_result(result)
+                return (
+                    f"SubAgent spawned in terminal pane: `{agent_id}`\n"
+                    f"  Task: {task_text[:80]}\n"
+                    "Watch it work in the new pane. "
+                    "Use `/spawn wait` to collect the result."
+                )
+
+            if auto_wait and task_text and not task_text.startswith("-p "):
+                from mini_agent.ui.board import SubAgentBoard
+
+                agent_id = await mgr.spawn(
+                    task_text, isolation=isolation, agent_type=agent_type_name
+                )
+                board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                return MARKDOWN_RESULT + _format_agent_result(result)
+
             if task_text.startswith("-p "):
                 tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
                 if not tasks:
@@ -1099,21 +1143,79 @@ def _make_spawn(app: Application) -> HandlerFn:
     return handler
 
 
+def _format_agent_results_overview(results) -> str:
+    """Multi-agent wait output: an overview table first, then one clearly
+    numbered section per report -- worker outputs contain their own
+    headings/rules and blur together without hard boundaries.
+    多 Agent 等待输出：先总览表，再逐份编号分节——worker 输出自带
+    标题/分隔线，没有硬边界会糊成一片。"""
+    passed = sum(1 for r in results if r.success)
+    lines = [
+        f"# 结果总览：{passed}/{len(results)} 成功",
+        "",
+        "| # | Agent | 状态 | Tokens | Tools | 任务 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for i, r in enumerate(results, 1):
+        status = "PASS" if r.success else "FAIL"
+        task_preview = " ".join(r.task.split())[:36]
+        lines.append(
+            f"| {i} | `{r.agent_id}` | {status} | {r.tokens_used:,} "
+            f"| {r.tool_calls_made} | {task_preview} |"
+        )
+    for i, r in enumerate(results, 1):
+        lines += ["", "---", "", f"# 报告 {i}/{len(results)}", ""]
+        lines.append(_format_agent_result(r))
+    return "\n".join(lines)
+
+
+def _extract_deliverables(output: str) -> list[str]:
+    """File names mentioned in the output that actually exist in the
+    working directory -- these are the worker's deliverables. Mentions of
+    source files elsewhere in the tree don't resolve from cwd and drop out.
+    输出中提到且真实存在于工作目录的文件名——即 worker 的交付物；
+    分析正文里提到的源码文件从 cwd 解析不到，自然被过滤。"""
+    import re
+
+    pattern = re.compile(r"[\w\-./\\]{2,}\.(?:md|txt|json|py|html|csv|ya?ml|log)\b")
+    seen: list[str] = []
+    for match in pattern.finditer(output):
+        name = match.group(0).lstrip("./\\")
+        if name not in seen and (Path.cwd() / name).is_file():
+            seen.append(name)
+    return seen[:8]
+
+
 def _format_agent_result(r) -> str:
+    """Markdown-friendly result block: metadata as a list, the worker's
+    output as its own section so its headers/tables render properly.
+    Markdown 友好的结果块：元数据用列表，worker 输出独立成段——
+    其内部的标题/表格才能正确渲染。"""
     status = "PASS" if r.success else "FAIL"
     lines = [
         f"**[{status}] Agent `{r.agent_id}`**",
-        f"  Task: {r.task[:80]}",
-        f"  Tokens: {r.tokens_used} | Tools: {r.tool_calls_made}",
+        "",
+        f"- Task: {r.task[:80]}",
+        f"- Tokens: {r.tokens_used} | Tools: {r.tool_calls_made}",
     ]
-    if r.output:
-        lines.append(f"  Output: {r.output[:200]}")
+    deliverables = _extract_deliverables(r.output or "")
+    if deliverables:
+        lines.append("- 交付文件: " + ", ".join(f"`{f}`" for f in deliverables))
     if r.error:
-        lines.append(f"  Error: {r.error}")
+        lines.append(f"- Error: {r.error}")
     if r.worktree_path:
         branch = r.worktree_path.name
-        lines.append(f"  Worktree: {r.worktree_path}")
-        lines.append(f"  Merge with: `git merge {branch}` (then clean up the worktree)")
+        lines.append(f"- Worktree: {r.worktree_path}")
+        lines.append(f"- Merge with: `git merge {branch}` (then clean up the worktree)")
+    if r.output:
+        # The output IS the deliverable -- never amputate the answer.
+        # Only guard against pathological megabyte outputs.
+        # 输出就是交付物——不截断答案，只防病态超大输出。
+        output = r.output
+        if len(output) > 8000:
+            output = output[:8000] + f"\n... (truncated, {len(r.output)} chars total)"
+        lines.append("")
+        lines.append(output)
     return "\n".join(lines)
 
 

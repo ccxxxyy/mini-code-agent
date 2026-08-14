@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -539,3 +541,93 @@ async def test_spawn_agents_tool_names_validation(tmp_path):
 
     result = await tool.execute(ctx, tasks=["a"], names=["main"])
     assert result.is_error
+
+
+# --- Cross-process safety (6.4 prerequisite) 跨进程安全 ---
+
+
+async def test_concurrent_processes_no_message_loss(tmp_path):
+    """N processes x M appends to ONE inbox -- file lock must prevent any
+    lost update. N 个进程并发向同一收件箱各写 M 条——文件锁保证零丢失。"""
+    import subprocess
+    import sys
+
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("target")
+
+    script = (
+        "import sys; from pathlib import Path; "
+        "sys.path.insert(0, r'{src}'); "
+        "from mini_agent.core.mailbox import Mailbox; "
+        "mb = Mailbox(Path(r'{box}')); "
+        "[mb.send(sender=sys.argv[1], recipient='target', content=f'msg-{{i}}') "
+        "for i in range(20)]"
+    ).format(src=str(Path(__file__).parents[2] / "src"), box=str(tmp_path / "mailboxes"))
+
+    procs = [subprocess.Popen([sys.executable, "-c", script, f"writer{n}"]) for n in range(4)]
+    for p in procs:
+        assert p.wait(timeout=60) == 0
+
+    messages = mb.drain("target")
+    assert len(messages) == 80  # 4 procs x 20 msgs, zero lost
+    senders = {m.sender for m in messages}
+    assert senders == {"writer0", "writer1", "writer2", "writer3"}
+
+
+async def test_registry_visible_across_instances(tmp_path):
+    """A second Mailbox instance (as another process would create) sees
+    agents registered by the first. 第二个 Mailbox 实例（等价另一进程）
+    能看到第一个实例注册的 Agent。"""
+    mb1 = make_mailbox(tmp_path)
+    mb1.register("main")
+    mb1.register("a1b2c3d4", name="explorer")
+
+    mb2 = make_mailbox(tmp_path)  # fresh instance, no shared memory
+    assert mb2.resolve("explorer") == "a1b2c3d4"
+    assert mb2.resolve("a1b2c3d4") == "a1b2c3d4"
+    assert "explorer (a1b2c3d4)" in mb2.describe_peers(exclude="main")
+    assert mb2.send(sender="main", recipient="explorer", content="cross-process hi")
+    assert mb1.drain("a1b2c3d4")[0].content == "cross-process hi"
+
+
+async def test_stale_lock_taken_over(tmp_path):
+    """A lock file left by a crashed process is taken over after
+    STALE_LOCK_AGE. 崩溃进程遗留的锁超龄后被接管。"""
+    import os as _os
+
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+    inbox = tmp_path / "mailboxes" / "agent_a.json"
+    stale = Path(f"{inbox}.lock")
+    stale.write_text("", encoding="utf-8")
+    old = time.time() - 60
+    _os.utime(stale, (old, old))
+
+    assert mb.send(sender="main", recipient="agent_a", content="took over")
+    assert mb.drain("agent_a")[0].content == "took over"
+    assert not stale.exists()  # lock released 锁已释放
+
+
+async def test_fresh_lock_times_out(tmp_path, monkeypatch):
+    """A recent (non-stale) lock held by someone else -> TimeoutError, the
+    caller knows the message was NOT delivered.
+    他人持有的新鲜锁 -> 超时抛异常，调用方知道消息没送出去。"""
+    import mini_agent.core.mailbox as mbox
+
+    monkeypatch.setattr(mbox, "LOCK_TIMEOUT", 0.3)
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+    inbox = tmp_path / "mailboxes" / "agent_a.json"
+    Path(f"{inbox}.lock").write_text("", encoding="utf-8")  # fresh lock
+
+    with pytest.raises(TimeoutError):
+        mb.send(sender="main", recipient="agent_a", content="never lands")
+
+
+async def test_reserved_registry_id_rejected(tmp_path):
+    mb = make_mailbox(tmp_path)
+    with pytest.raises(ValueError):
+        mb.register("_registry")

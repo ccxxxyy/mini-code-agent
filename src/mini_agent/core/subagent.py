@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import os
 import sys
 import time
@@ -261,6 +262,30 @@ class _ActiveAgent:
     started_at: float = 0.0
 
 
+class _PaneWorkerProxy:
+    """Stands in for SubAgent in the active table when the real agent runs
+    in a separate terminal pane process (6.4). Provides just the interface
+    the manager touches: cancel/status/task/agent_id/_conversation.
+    当真实 Agent 跑在独立窗格进程时，在活跃表里顶替 SubAgent——只提供
+    管理器用到的接口。"""
+
+    def __init__(self, agent_id: str, task: str) -> None:
+        self.agent_id = agent_id
+        self.task = task
+        self._conversation = Conversation(system_prompt="")
+        self._cancelled = False
+
+    @property
+    def status(self) -> AgentPhase:
+        return AgentPhase.TOOL_CALLING
+
+    def cancel(self) -> None:
+        # Best effort: the pane process is not force-killed, but the
+        # collector task stops waiting for it. 尽力而为：不强杀窗格进程，
+        # 只让收集任务停止等待。
+        self._cancelled = True
+
+
 class SubAgentManager:
     """Manages spawning, tracking, and collecting results from sub-agents.
     管理 SubAgent 的派生、跟踪与结果收集。
@@ -373,6 +398,119 @@ class SubAgentManager:
             )
         return ids
 
+    async def spawn_pane(
+        self,
+        task: str,
+        name: str = "",
+        agent_type: str | None = None,
+        timeout: float = 900.0,
+    ) -> str:
+        """Spawn a sub-agent in a visible terminal pane (separate process,
+        6.4). Requires an active tmux / Windows Terminal session; raises
+        ValueError otherwise. Returns agent_id -- wait/cancel/list work the
+        same as in-process agents.
+        在可见终端窗格（独立进程）中派生 SubAgent。需要当前会话跑在
+        tmux / Windows Terminal 里，否则抛 ValueError。"""
+        from mini_agent.core.spawn_backends import (
+            SpawnBackendError,
+            build_worker_argv,
+            detect_pane_backend,
+        )
+        from mini_agent.core.spawn_backends import spawn_pane as open_pane
+        from mini_agent.core.worker import WorkerSpec
+
+        backend = detect_pane_backend()
+        if not backend:
+            raise ValueError(
+                "No pane backend available -- run inside tmux or Windows Terminal, "
+                "or use in-process spawn"
+            )
+
+        agent_id = uuid.uuid4().hex[:8]
+        # Protocol files live OUTSIDE the working dir: a worker's LLM once
+        # found its own spec (with result_path) inside the project, helpfully
+        # wrote a premature result itself, and the parent collected the stub.
+        # 协议文件放在工作目录之外：曾有 worker 的 LLM 在项目里读到自己的
+        # spec（含 result_path），"好心"提前自己写了结果，父进程捡走了早产桩。
+        workers_dir = Path.home() / ".mini-agent" / "workers"
+        workers_dir.mkdir(parents=True, exist_ok=True)
+        spec_path = workers_dir / f"{agent_id}.spec.json"
+        result_path = workers_dir / f"{agent_id}.result.json"
+
+        WorkerSpec(
+            task=task,
+            agent_id=agent_id,
+            name=name,
+            working_dir=str(self._working_dir),
+            mailbox_dir=str(self.mailbox.base_dir),
+            result_path=str(result_path),
+            agent_type=agent_type or "",
+        ).dump(spec_path)
+
+        try:
+            open_pane(
+                backend,
+                title=f"agent {name or agent_id}",
+                argv=build_worker_argv(str(spec_path)),
+                cwd=str(self._working_dir),
+            )
+        except SpawnBackendError as e:
+            spec_path.unlink(missing_ok=True)
+            raise ValueError(f"Pane spawn failed: {e}") from e
+
+        proxy = _PaneWorkerProxy(agent_id, task)
+        handle = asyncio.create_task(self._collect_pane_result(proxy, task, result_path, timeout))
+        self._active[agent_id] = _ActiveAgent(
+            agent=proxy, task_handle=handle, started_at=time.monotonic()
+        )
+        await self._event_bus.emit(SubAgentSpawnEvent(agent_id=agent_id, task=task))
+        return agent_id
+
+    async def _collect_pane_result(
+        self, proxy: _PaneWorkerProxy, task: str, result_path: Path, timeout: float
+    ) -> SubAgentResult:
+        """Poll for the worker's result file (written atomically by the
+        worker process). 轮询 worker 进程原子写出的结果文件。"""
+        required = {
+            "agent_id",
+            "task",
+            "success",
+            "output",
+            "error",
+            "tool_calls_made",
+            "tokens_used",
+        }
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not proxy._cancelled:
+            if result_path.is_file():
+                try:
+                    data = json.loads(result_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = None
+                # Schema + identity check: only accept a COMPLETE result
+                # written by run_worker, not a stub something else produced
+                # Schema + 身份校验：只接受 run_worker 写出的完整结果，
+                # 拒绝其他来源的桩文件
+                if (
+                    isinstance(data, dict)
+                    and required.issubset(data.keys())
+                    and data.get("agent_id") == proxy.agent_id
+                ):
+                    return SubAgentResult(
+                        agent_id=proxy.agent_id,
+                        task=task,
+                        success=bool(data.get("success")),
+                        output=str(data.get("output", "")),
+                        error=data.get("error"),
+                        tool_calls_made=int(data.get("tool_calls_made", 0)),
+                        tokens_used=int(data.get("tokens_used", 0)),
+                    )
+            await asyncio.sleep(0.5)
+        reason = "Cancelled" if proxy._cancelled else "Pane worker timed out (no result file)"
+        return SubAgentResult(
+            agent_id=proxy.agent_id, task=task, success=False, output="", error=reason
+        )
+
     async def wait(self, agent_id: str, timeout: float | None = None) -> SubAgentResult:
         """Wait for a specific sub-agent to complete. 等待指定的 SubAgent 完成。"""
         entry = self._active.get(agent_id)
@@ -394,6 +532,19 @@ class SubAgentManager:
                 success=False,
                 output="",
                 error="Timed out",
+            )
+        except asyncio.CancelledError:
+            # The agent's own task was cancelled (via cancel()); waiting for
+            # it should report that, not blow up the waiter.
+            # Agent 自身任务被 cancel()——等待方应得到结果而非被炸。
+            if not entry.task_handle.cancelled():
+                raise
+            result = SubAgentResult(
+                agent_id=agent_id,
+                task=entry.agent.task,
+                success=False,
+                output="",
+                error="Cancelled",
             )
         finally:
             self._active.pop(agent_id, None)
