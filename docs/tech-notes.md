@@ -2092,6 +2092,22 @@ mewcode 用 JSONL 追加式存储，边界是一条自包含的 `type=compact_bo
 
 mewcode 的 `build_recovery_attachment()` 把最近 5 个文件的实际内容烤进摘要（每个 5000 tokens），恢复后 LLM 不仅知道"读过什么"还记得"读到了什么"。mini 只记路径——省 token 但恢复后 LLM 对内容记忆更弱。这是有意的取舍：路径足以阻止重读循环，内容恢复的收益是"少一轮工具调用"，代价是摘要膨胀 25000 tokens。
 
+## 60. 压缩工具对对齐（P60）
+
+### 60.1 问题：固定切分切断工具对
+
+`SummarizeOldest.KEEP_RECENT=6` 固定从尾部数 6 条切分。若切分点恰好落在 TOOL 消息上，其对应的 tool_use（assistant 的 tool_calls 消息）被摘要吞掉，kept 开头是孤儿 tool result——严格的 API（OpenAI 官方、Anthropic）会直接 400 拒绝。
+
+### 60.2 修复：边界回退对齐
+
+`_align_split_to_tool_pair(msgs, split)`——当 `msgs[split].role == TOOL` 时向前回退，直到落在非 TOOL 消息（即工具对头部的 assistant 消息）上。工具对整体进入 kept，摘要区永不切断配对。回退到 0 说明切分点之前全是一个工具对，无可摘要内容，压缩空操作。SummarizeOldest 和 LLMSummarizeOldest 共用。
+
+SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超预算，所以对开头的孤儿 TOOL 消息直接丢弃（最后手段本来就是有损的）。任务锚点（保留最近 USER 消息）逻辑在孤儿丢弃之后执行，不受影响。
+
+### 60.3 真实 API 验证的诚实发现
+
+用 DeepSeek 真实端点验证：对齐后的压缩产物发送成功；但**未对齐的孤儿 tool result 消息 DeepSeek 也接受了**（未报 400）——该端点对孤儿宽容。修复价值在于严格端点（OpenAI 官方 / Anthropic 的 tool_use/tool_result 强校验），与 mewcode 的 `_align_keep_start_to_tool_pair()` 对齐。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

@@ -1451,5 +1451,19 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P59.3 与 mewcode 的诚实差异（已记入总表）
 - 恢复附件只记路径（mewcode 烤入最近 5 文件内容到摘要）→ 9.2a
-- KEEP_RECENT 固定切分可能切断 tool_use/tool_result 配对 → 9.2b
+- KEEP_RECENT 固定切分可能切断 tool_use/tool_result 配对 → 9.2b（P60 已完成）
 - 无压缩熔断器 → 9.2c
+
+## Phase 60: 压缩工具对对齐 (P60)
+
+> comparison-mewcode.md 9.2b。修复 9.2 诚实差异 #3：`KEEP_RECENT=6` 固定切分可能切断 tool_use/tool_result 配对，导致严格 API（OpenAI 官方/Anthropic）返回 400。
+
+### P60.1 实现
+- [x] `memory/compressor.py` — `_align_split_to_tool_pair(msgs, split)`：切分点落在 TOOL 消息时向前回退到工具对头部（assistant tool_calls 消息），配对整体保留在 kept；回退到 0 时无可摘要内容，压缩空操作
+- [x] `SummarizeOldest` / `LLMSummarizeOldest` 均接入对齐（共用 helper）
+- [x] `SlidingWindow` — 孤儿防护：token 切分落在工具对中间时丢弃开头的孤儿 tool result（向前扩会超预算），任务锚点逻辑不受影响
+
+### P60.2 测试
+- [x] test_context.py — 4 个单元测试：SummarizeOldest 对齐（边界回退到 assistant）/ 全部为工具对时空操作 / LLMSummarizeOldest 对齐 / SlidingWindow 孤儿丢弃 + 任务锚点共存
+- [x] 真实 API 验证：DeepSeek 端点上对齐后的压缩产物发送成功；诚实发现——未对齐的孤儿 tool result 该端点也接受（宽容实现），修复价值在严格端点
+- [x] 764 个测试全过（760 + 4 新增），ruff lint + format clean（顺手格式化了 2 个遗留未格式化的测试文件）

@@ -163,9 +163,7 @@ async def test_compact_boundary_round_trip(tmp_path: Path):
     store = SessionStore(session_dir=str(tmp_path))
     session = Session()
     session.conversation.system_prompt = "sys"
-    session.conversation.append(
-        Message(role=Role.SYSTEM, content="[summary]", compressed=True)
-    )
+    session.conversation.append(Message(role=Role.SYSTEM, content="[summary]", compressed=True))
     session.conversation.append(Message(role=Role.USER, content="hi"))
     session.conversation.compact_boundary = {
         "summary": "[summary]",
@@ -187,9 +185,7 @@ async def test_compact_boundary_skips_compressed_system(tmp_path: Path):
     the boundary summary is used instead."""
     store = SessionStore(session_dir=str(tmp_path))
     session = Session()
-    session.conversation.append(
-        Message(role=Role.SYSTEM, content="old summary", compressed=True)
-    )
+    session.conversation.append(Message(role=Role.SYSTEM, content="old summary", compressed=True))
     session.conversation.append(Message(role=Role.USER, content="q"))
     session.conversation.append(Message(role=Role.ASSISTANT, content="a"))
     session.conversation.compact_boundary = {
@@ -216,9 +212,7 @@ async def test_compact_boundary_preserves_non_compressed(tmp_path: Path):
     session = Session()
     # Compressed tool result (from DropToolResults) should NOT be skipped
     tr = ToolResult(call_id="tc1", name="read_file", output="truncated...")
-    session.conversation.append(
-        Message(role=Role.TOOL, tool_result=tr, compressed=True)
-    )
+    session.conversation.append(Message(role=Role.TOOL, tool_result=tr, compressed=True))
     session.conversation.append(Message(role=Role.USER, content="next"))
     session.conversation.compact_boundary = {
         "summary": "summary",
@@ -240,9 +234,7 @@ async def test_compact_boundary_absent_loads_all(tmp_path: Path):
     """Legacy sessions without boundary load all messages as before."""
     store = SessionStore(session_dir=str(tmp_path))
     session = Session()
-    session.conversation.append(
-        Message(role=Role.SYSTEM, content="old summary", compressed=True)
-    )
+    session.conversation.append(Message(role=Role.SYSTEM, content="old summary", compressed=True))
     session.conversation.append(Message(role=Role.USER, content="hello"))
     # No compact_boundary set
 

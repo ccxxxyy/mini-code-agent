@@ -15,7 +15,7 @@ from mini_agent.memory.compressor import (
 )
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
-from mini_agent.models.message import Conversation, Message, Role, ToolResult
+from mini_agent.models.message import Conversation, Message, Role, ToolCall, ToolResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -300,3 +300,85 @@ async def test_ensure_fits_truncates():
     assert truncated
     assert len(conv.messages) < 50
     assert cm.total_tokens <= 200
+
+
+# --- Tool-pair alignment (9.2b) 工具对对齐 ---
+
+
+def make_call_msg(call_id="c1", token_count=25) -> Message:
+    msg = Message(
+        role=Role.ASSISTANT,
+        tool_calls=[ToolCall(id=call_id, name="read_file", arguments={})],
+    )
+    msg.token_count = token_count
+    return msg
+
+
+async def test_summarize_oldest_aligns_tool_pair():
+    # Split index lands on a tool result: the boundary must back up to
+    # include the assistant tool_calls message, or the API returns 400.
+    # 切分点落在 tool result 上：边界必须回退到包含 assistant 的
+    # tool_calls 消息，否则 API 返回 400。
+    strategy = SummarizeOldest()
+    conv = Conversation()
+    conv.messages = (
+        [make_msg(content=f"m{i}", token_count=10) for i in range(12)]
+        + [make_call_msg(), make_tool_msg(token_count=10), make_tool_msg(token_count=10)]
+        + [make_msg(content=f"t{i}", token_count=10) for i in range(5)]
+    )
+    # naive split = len - 6 = 14, which is the second tool result
+    await strategy.compress(conv, 100)
+
+    assert conv.messages[0].role == Role.SYSTEM  # summary
+    assert conv.messages[1].role == Role.ASSISTANT
+    assert conv.messages[1].tool_calls  # pair head kept intact 配对头部完整保留
+    assert conv.messages[2].role == Role.TOOL
+    assert conv.messages[3].role == Role.TOOL
+
+
+async def test_summarize_oldest_alignment_reaches_start():
+    # Everything before the naive split is one giant tool pair: nothing
+    # summarizable remains, so compression is a no-op.
+    # 切分点之前全是一个工具对：没有可摘要的内容，压缩应为空操作。
+    strategy = SummarizeOldest()
+    conv = Conversation()
+    conv.messages = [make_call_msg()] + [make_tool_msg(token_count=10) for _ in range(7)]
+    await strategy.compress(conv, 100)
+    assert len(conv.messages) == 8  # unchanged
+    assert not any(m.compressed for m in conv.messages)
+
+
+async def test_llm_summarize_aligns_tool_pair():
+    llm = SummaryMockLLM()
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    conv.messages = (
+        [make_msg(content=f"m{i}", token_count=10) for i in range(12)]
+        + [make_call_msg(), make_tool_msg(token_count=10), make_tool_msg(token_count=10)]
+        + [make_msg(content=f"t{i}", token_count=10) for i in range(5)]
+    )
+    await strategy.compress(conv, 100)
+
+    assert conv.messages[1].role == Role.ASSISTANT
+    assert conv.messages[1].tool_calls
+
+
+async def test_sliding_window_drops_orphan_tool_results():
+    # Token cut lands mid tool-pair: the orphaned tool results (whose
+    # tool_use was dropped) must not survive.
+    # token 切分落在工具对中间：孤儿 tool result（tool_use 已被丢弃）不能存活。
+    strategy = SlidingWindow()
+    conv = Conversation()
+    conv.messages = [
+        make_msg(role=Role.USER, content="do it", token_count=10),
+        make_call_msg(token_count=100),
+        make_tool_msg(token_count=10),
+        make_tool_msg(token_count=10),
+        make_msg(role=Role.ASSISTANT, content="done", token_count=10),
+    ]
+    # budget 35: fits [tool, tool, assistant] but not the tool_calls message
+    await strategy.compress(conv, 35)
+
+    assert all(m.role != Role.TOOL for m in conv.messages)
+    assert conv.messages[-1].content == "done"
+    assert conv.messages[0].role == Role.USER  # task anchor still applies
