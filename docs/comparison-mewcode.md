@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **728 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **754 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -122,19 +122,30 @@
 
 ## 一、LLM 集成
 
-### 1.1 Provider 支持
+### 1.1 Provider 支持 ✅ Responses API 已实现
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
 | OpenAI 兼容（Chat Completions） | ✅ | ✅ |
 | Anthropic 原生 | 代码就绪，未 E2E 验证 | ✅ 完整验证 |
-| OpenAI Responses API | ❌ | ✅ |
+| OpenAI Responses API | ✅ `provider = "openai-responses"` | ✅ |
 
-**差距**：mini 缺 OpenAI Responses API 支持；Anthropic Provider 未实测。
+**已完成**（Responses API）：
+- `llm/openai_responses_provider.py` — 完整实现，零 SDK（httpx 直连，mewcode 依赖 `openai` SDK）
+- 消息转换：system → `instructions` / user/assistant → typed input items / tool_calls → `function_call` / tool → `function_call_output`
+- 工具 schema 扁平化：`{function: {name, params}}` → `{name, parameters}`
+- SSE 事件解析：text delta / reasoning summary delta / function_call start/args delta / completed（用量 + finish_reason 推断）/ incomplete → "length"（触发 max_tokens 恢复）
+- 用量：`input_tokens_details.cached_tokens` 正确提取；`max_tokens` → `max_output_tokens` 映射
+- 上下文窗口探测 + 推理模型表（默认 200k）
+- 429/5xx 退避重试（共享基础设施）
+- **Thinking round-trip**（mewcode 差距补齐）：agent_loop 累积 thinking 存入 Message.metadata → `_convert_to_input` 发出 `{type: "reasoning", id, summary}` 项回传 API，o1/o3 多轮对话推理过程不丢失
+- **Tool pairing repair**（mewcode 差距补齐）：消息转换时跟踪未配对的 function_call，补合成 "interrupted" 结果——中断后继续对话不再 400 报错
+- **错误分类**（mewcode 差距补齐）：401 → `LLMAuthenticationError` / 429 → `LLMRateLimitError`（含 retry_after）/ 连接超时 → `LLMNetworkError`
+- 26 个单测（消息转换含 thinking round-trip/tool pairing/事件解析/assemble 集成/窗口/注册/错误分类）
 
-**增强方案**：
-1. **Anthropic Provider E2E 验证**：获取 API key 后验证 streaming/tool_use/thinking blocks/token counting 四项（代码已就绪）
-2. **OpenAI Responses API**：在 `llm/` 下新增 `openai_responses_provider.py`，与现有 `openai_provider.py`（Chat Completions）并列。Responses API 支持 reasoning summaries，对 o1/o3 系列模型有价值。注册到 ProviderRegistry，用户通过 `provider = "openai-responses"` 切换
+**与 mewcode 的最终对比**：mini 在 7 项上超出（temperature/max_output_tokens/incomplete 事件/failed 事件/内置重试/动态窗口探测/并行工具追踪/零 SDK），mewcode 的 3 项差距（thinking round-trip/tool pairing/错误分类）已全部补齐，`function_call_arguments.done` 是纯风格差异不计入
+
+**仍待做**（1.1 节内）：Anthropic Provider E2E 验证（需 API key）
 
 ### 1.2 Prompt 缓存 ✅ 已实现（P37）
 
@@ -738,7 +749,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 4.5 | 记忆合并（P53） | 记忆质量 | 已完成 |
 | ✅ 完成 | 5.2 | 远程/浏览器模式 + 11 项增强（P57） | 新使用场景 | 已完成 |
 | ✅ 完成 | 6.2 | Mailbox 跨 Agent 通信（P58） | 多 Agent 协作 | 已完成 |
-| 🔵 P3 | 1.1 | OpenAI Responses API | o1/o3 模型支持 | 1 天 |
+| ✅ 完成 | 1.1 | OpenAI Responses API（openai-responses Provider） | o1/o3 模型支持 | 已完成 |
 | ✅ 完成 | 6.4 | 多后端 spawn（tmux + Windows Terminal 窗格，含 Mailbox 跨进程改造） | 可视化 | 已完成 |
 | ✅ 完成 | 6.5 | Worktree 完善（P54） | 并行隔离 | 已完成 |
 | ✅ 完成 | 8.1 | Skill 安装命令（P55） | 扩展性 | 已完成 |

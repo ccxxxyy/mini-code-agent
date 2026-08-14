@@ -225,12 +225,17 @@ class AgentLoop:
             await self._transition(AgentPhase.THINKING)
             response = await self._think(conversation)
 
-            # Record assistant message
+            # Record assistant message (store thinking in metadata for
+            # round-trip -- Responses API sends it back as reasoning items)
+            # 记录助手消息（thinking 存 metadata 供 round-trip——Responses
+            # API 将其作为 reasoning 项回传）
             assistant_msg = Message(
                 role=Role.ASSISTANT,
                 content=response.content,
                 tool_calls=response.tool_calls,
             )
+            if response.thinking:
+                assistant_msg.metadata["thinking"] = response.thinking
             if response.usage:
                 # completion_tokens (this message's own size), NOT total_tokens:
                 # total includes the whole prompt, so summing it per message
@@ -393,6 +398,7 @@ class AgentLoop:
         chunks: list[StreamChunk] = []
         stream_started = False
         _stream_text_parts: list[str] = []
+        _thinking_parts: list[str] = []
         assembler = IncrementalAssembler()
         streaming_enabled = self._config.streaming_tool_execution
         extra: dict[str, Any] = {"max_tokens": max_tokens} if max_tokens else {}
@@ -402,6 +408,7 @@ class AgentLoop:
                 break
             chunks.append(chunk)
             if chunk.thinking:
+                _thinking_parts.append(chunk.thinking)
                 if not stream_started:
                     stream_started = True
                     if self.on_stream_start:

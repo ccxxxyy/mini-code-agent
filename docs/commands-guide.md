@@ -54,6 +54,7 @@
 /model            # 查看
 /model smart      # 切换到 smart 档案
 ```
+注意：`/model` 切换的是模型名和 API key 等参数，不切换 provider。要从 Chat Completions 切换到 Responses API（o1/o3），需在 config.toml 里改 `provider = "openai-responses"`，重启生效。
 
 ### /cost [turns|reset]
 ```

@@ -45,6 +45,7 @@ class LLMResponse:
     """Completed LLM response. 完整的 LLM 响应。"""
 
     content: str = ""
+    thinking: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str = "stop"
