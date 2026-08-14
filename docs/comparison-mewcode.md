@@ -701,7 +701,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | 存储格式 | JSON conversation 段中的 `compact_boundary` 字段（覆写式） | JSONL 中 `type=compact_boundary` 记录（追加式） |
 | 已读文件恢复 | `adopt_boundary()` 恢复文件路径列表到 `_read_files` | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
 | keep 消息处理 | 尾部消息作为普通消息存在 messages 数组中 | `keep` 消息序列化到边界记录内，自包含 |
-| 工具对完整性 | `KEEP_RECENT=6` 固定切分，不保证 tool_use/tool_result 配对 | `_align_keep_start_to_tool_pair()` 确保不切断工具对 |
+| 工具对完整性 | ✅ **`_align_split_to_tool_pair()`**——keep 边界回退到工具对头部，SlidingWindow 丢弃孤儿 tool result（9.2b/P60） | `_align_keep_start_to_tool_pair()` 确保不切断工具对 |
 | 压缩熔断 | 无 | `CompactCircuitBreaker`——连续失败 3 次后熔断，防死循环 |
 
 **已完成**：
@@ -718,8 +718,21 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 |---|---|---|---|---|
 | 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | 只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读 | mini 的方式省 token 但恢复后 LLM 对文件内容的记忆更弱；mewcode 的方式恢复质量更高但摘要消息更大 |
 | 2 | keep 消息自包含 | `CompactBoundary.keep` 把尾部消息序列化到边界记录内（JSONL 追加式，边界是自包含的恢复点） | 尾部消息作为普通消息存在 JSON messages 数组中 | mini 用单 JSON 覆写式存储，尾部消息天然与边界同文件，自包含性等价——仅格式层差异 |
-| 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | `KEEP_RECENT=6` 固定切分，可能切断 | 这是压缩策略层的已有问题（早于 9.2），非本次边界功能引入；修复应在 `SummarizeOldest` 中对齐 |
+| 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | ~~`KEEP_RECENT=6` 固定切分，可能切断~~ | ✅ 已消除（9.2b/P60），见 9.2b 小节 |
 | 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | 无 | 独立防护机制，可作为后续增强单独实现 |
+
+### 9.2b 压缩工具对对齐 ✅ 已实现（P60）
+
+| | mini | mewcode |
+|---|---|---|
+| keep 边界对齐 | ✅ **`_align_split_to_tool_pair()`**——切分点落在 TOOL 消息时回退到工具对头部（assistant tool_calls 消息），`SummarizeOldest` / `LLMSummarizeOldest` 共用 | `_align_keep_start_to_tool_pair()` |
+| 最后手段截断 | ✅ **SlidingWindow 孤儿防护**——token 切分落在工具对中间时丢弃开头的孤儿 tool result（向前扩会超预算） | 无对应（架构不同） |
+
+**已完成**：
+1. `_align_split_to_tool_pair(msgs, split)` —— `msgs[split].role == TOOL` 时向前回退到非 TOOL 消息，工具对整体保留在 kept；回退到 0 说明无可摘要内容，压缩空操作
+2. `SlidingWindow` 孤儿防护 + 任务锚点（保留最近 USER 消息）共存，锚点逻辑在孤儿丢弃之后执行
+3. 4 个单元测试：边界回退到 assistant / 全部为工具对时空操作 / LLM 变体对齐 / 孤儿丢弃 + 锚点共存
+4. 真实 API 验证（DeepSeek）：对齐后的压缩产物发送成功；**诚实发现**——未对齐的孤儿 tool result 该端点也接受（宽容实现），修复价值在严格端点（OpenAI 官方 / Anthropic 的强校验）
 
 ---
 
@@ -774,7 +787,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
 | ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
 | ⚪ P4 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1：mewcode 烤入最近 5 文件内容（5000 tokens/个），mini 只记路径 | 半天 |
-| ⚪ P3 | 9.2b | 压缩工具对对齐 | 9.2 诚实差异 #3：`KEEP_RECENT=6` 可能切断 tool_use/tool_result 配对致 API 400 | 2 小时 |
+| ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |
 | ⚪ P4 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4：mewcode 有 `CompactCircuitBreaker` 连续失败 3 次停止，防死循环 | 2 小时 |
 | ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |
 

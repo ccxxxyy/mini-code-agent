@@ -1141,3 +1141,24 @@
 - [x] tasks.md 新增 Phase 59 条目
 - [x] tech-notes.md 新增 §59（5 个设计决策小节）
 - [x] checklist.md 新增本检查项
+
+## Phase 60 检查项：压缩工具对对齐（comparison 9.2b）
+
+### 功能完整性
+- [x] `_align_split_to_tool_pair(msgs, split)` —— 切分点落在 TOOL 消息时向前回退到工具对头部（assistant tool_calls 消息），配对整体保留在 kept
+- [x] 回退到 0（切分点之前全是一个工具对）时无可摘要内容，压缩空操作，消息不变
+- [x] `SummarizeOldest` 与 `LLMSummarizeOldest` 共用同一对齐 helper
+- [x] `SlidingWindow` 孤儿防护：token 切分落在工具对中间时丢弃开头的孤儿 tool result（向前扩会超预算）
+- [x] 任务锚点（保留最近 USER 消息）在孤儿丢弃之后执行，两者共存不冲突
+
+### 测试
+- [x] test_context.py — 4 个单元测试：边界回退到 assistant / 全部为工具对时空操作 / LLM 变体对齐 / SlidingWindow 孤儿丢弃 + 任务锚点共存
+- [x] 真实 API 验证（合成消息）：对齐后压缩产物发 DeepSeek 成功；诚实发现——未对齐孤儿该端点也接受（宽容实现），修复价值在严格端点（OpenAI 官方/Anthropic）
+- [x] 真实 LLM E2E 验证：真实 AgentLoop + 真实工具（read_file/glob/grep）+ 内存调小窗口（2500/0.5）跑 3 轮真实对话，压缩多次触发，配对检查器扫描 0 违规（检查器已用合成孤儿自检）
+- [x] 764 个测试全过（760 + 4 新增），ruff lint + format clean，CI 全部检查项本地复跑通过（3.11/3.12 双版本）
+
+### 文档同步
+- [x] comparison-mewcode.md 9.2 节对比表"工具对完整性"行更新 + 诚实差异 #3 标记消除 + 新增 9.2b 小节 + 总表标 ✅
+- [x] tasks.md 新增 Phase 60 条目
+- [x] tech-notes.md 新增 §60（3 个小节：问题 / 修复 / 真实 API 诚实发现）
+- [x] checklist.md 新增本检查项

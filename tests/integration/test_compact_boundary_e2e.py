@@ -54,9 +54,7 @@ async def test_compress_save_load_boundary(tmp_path: Path):
     assert conv.compact_boundary["read_files"] == ["src/main.py", "README.md"]
     assert "summary" in conv.compact_boundary
 
-    summary_msgs_before = [
-        m for m in conv.messages if m.compressed and m.role == Role.SYSTEM
-    ]
+    summary_msgs_before = [m for m in conv.messages if m.compressed and m.role == Role.SYSTEM]
     assert len(summary_msgs_before) >= 1
 
     store = SessionStore(session_dir=str(tmp_path))
@@ -75,11 +73,7 @@ async def test_compress_save_load_boundary(tmp_path: Path):
     assert loaded_msgs[0].compressed is True
     assert loaded_msgs[0].content == conv.compact_boundary["summary"]
 
-    non_system_compressed = [
-        m
-        for m in loaded_msgs[1:]
-        if m.compressed and m.role == Role.SYSTEM
-    ]
+    non_system_compressed = [m for m in loaded_msgs[1:] if m.compressed and m.role == Role.SYSTEM]
     assert len(non_system_compressed) == 0, "duplicate compressed SYSTEM should be skipped"
 
     ctx2 = ContextManager(MemoryConfig())
@@ -92,9 +86,7 @@ async def test_legacy_session_no_boundary(tmp_path: Path):
     """Sessions saved before this feature load identically (backward compat)."""
     store = SessionStore(session_dir=str(tmp_path))
     session = Session()
-    session.conversation.append(
-        Message(role=Role.SYSTEM, content="[old summary]", compressed=True)
-    )
+    session.conversation.append(Message(role=Role.SYSTEM, content="[old summary]", compressed=True))
     session.conversation.append(Message(role=Role.USER, content="hi"))
     session.conversation.append(Message(role=Role.ASSISTANT, content="hello"))
 

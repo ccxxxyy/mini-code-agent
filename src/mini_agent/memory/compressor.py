@@ -82,11 +82,27 @@ class SummarizeOldest(CompressionStrategy):
         if len(msgs) <= self.KEEP_RECENT:
             return
 
-        to_summarize = msgs[: len(msgs) - self.KEEP_RECENT]
-        kept = msgs[len(msgs) - self.KEEP_RECENT :]
+        split = _align_split_to_tool_pair(msgs, len(msgs) - self.KEEP_RECENT)
+        if split <= 0:
+            return
+
+        to_summarize = msgs[:split]
+        kept = msgs[split:]
 
         summary_text = "[Compressed conversation history]\n" + _extractive_digest(to_summarize)
         conversation.messages = [_make_summary_message(summary_text)] + kept
+
+
+def _align_split_to_tool_pair(msgs: list[Message], split: int) -> int:
+    """Move the keep-start backward so it never lands on a tool result whose
+    tool_use (assistant tool_calls message) would be summarized away --
+    an orphan tool result makes the API reject the request with a 400.
+    把 keep 起点向前移，避免落在 tool result 上而其对应的 tool_use
+    （assistant 的 tool_calls 消息）被摘要掉——孤儿 tool result 会导致 API 400。
+    """
+    while 0 < split < len(msgs) and msgs[split].role == Role.TOOL:
+        split -= 1
+    return split
 
 
 def _extractive_digest(messages: list[Message]) -> str:
@@ -146,8 +162,12 @@ class LLMSummarizeOldest(CompressionStrategy):
         if len(msgs) <= self.KEEP_RECENT:
             return
 
-        to_summarize = msgs[: len(msgs) - self.KEEP_RECENT]
-        kept = msgs[len(msgs) - self.KEEP_RECENT :]
+        split = _align_split_to_tool_pair(msgs, len(msgs) - self.KEEP_RECENT)
+        if split <= 0:
+            return
+
+        to_summarize = msgs[:split]
+        kept = msgs[split:]
 
         digest = _extractive_digest(to_summarize)
         try:
@@ -189,6 +209,14 @@ class SlidingWindow(CompressionStrategy):
             kept.append(msg)
             running += cost
         kept.reverse()
+
+        # Orphan guard: the token cut may land mid tool-pair, leaving tool
+        # results whose tool_use was dropped. Extending backward would blow
+        # the budget, so drop the orphans instead.
+        # 孤儿防护：按 token 切分可能切在工具对中间，留下 tool_use 已被丢弃的
+        # tool result。向前扩会超预算，所以直接丢弃孤儿。
+        while kept and kept[0].role == Role.TOOL:
+            kept.pop(0)
 
         # Task anchor: NEVER drop the latest user message. A long turn (one
         # question + dozens of tool results) can push the question itself out
