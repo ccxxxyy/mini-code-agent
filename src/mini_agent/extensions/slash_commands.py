@@ -7,6 +7,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+# Handlers prefix their result with this sentinel to request Markdown
+# rendering (agent reports with headers/tables). Plain-text outputs
+# (/status, /cost aligned layouts) stay verbatim -- Markdown would
+# collapse their newlines and spacing.
+# 处理函数在结果前加此哨兵请求 Markdown 渲染（带标题/表格的 agent
+# 报告）；纯文本对齐版式（/status /cost）保持原样——Markdown 会折叠
+# 其换行与空格。
+MARKDOWN_RESULT = "\x00md\x00"
+
 
 @dataclass
 class SlashCommand:
@@ -33,7 +42,13 @@ class SlashCommandRegistry:
         return self._commands.get(name)
 
     def list_commands(self) -> list[SlashCommand]:
-        return [c for c in self._commands.values() if not c.hidden]
+        """Visible commands, alphabetically sorted -- feeds /help, the
+        unknown-command hint and the `/` dropdown completer.
+        可见命令按字母排序——供 /help、未知命令提示、`/` 下拉补全共用。"""
+        return sorted(
+            (c for c in self._commands.values() if not c.hidden),
+            key=lambda c: c.name,
+        )
 
     def is_slash_command(self, text: str) -> bool:
         return text.strip().startswith("/")

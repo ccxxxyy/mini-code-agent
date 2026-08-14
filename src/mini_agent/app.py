@@ -12,7 +12,7 @@ from mini_agent.core.subagent import SubAgentManager
 from mini_agent.events.bus import EventBus
 from mini_agent.extensions.builtin_commands import register_builtin_commands
 from mini_agent.extensions.skills import SkillRegistry
-from mini_agent.extensions.slash_commands import SlashCommandRegistry
+from mini_agent.extensions.slash_commands import MARKDOWN_RESULT, SlashCommandRegistry
 from mini_agent.llm.registry import ProviderRegistry
 from mini_agent.memory.compressor import Compressor
 from mini_agent.memory.context import ContextManager
@@ -498,10 +498,32 @@ class Application:
                         result = await self.slash_commands.execute(user_input, self)
                         if result:
                             self.terminal.console.print()
-                            self.terminal.console.print(result)
+                            if result.startswith(MARKDOWN_RESULT):
+                                from rich.markdown import Markdown
+                                from rich.theme import Theme
+
+                                # Agent reports opt into Markdown rendering
+                                # (headers/tables); inline code (file names,
+                                # agent ids) pops in bright orange.
+                                # Agent 报告显式选择 Markdown 渲染；行内代码
+                                # （文件名/agent id）亮橙色凸显。
+                                with self.terminal.console.use_theme(
+                                    Theme({"markdown.code": "bold orange1"})
+                                ):
+                                    self.terminal.console.print(
+                                        Markdown(result.removeprefix(MARKDOWN_RESULT))
+                                    )
+                            else:
+                                # Plain-text layouts (/status, /cost) verbatim
+                                # 纯文本版式原样打印
+                                self.terminal.console.print(result)
                             self.terminal.console.print()
                     except SystemExit:
                         break
+                    except Exception as e:
+                        # A buggy command must not kill the whole session
+                        # 命令自身的 bug 不能炸掉整个会话
+                        self.terminal.show_error(f"Command failed: {type(e).__name__}: {e}")
                     finally:
                         await self._autosave()
                     continue

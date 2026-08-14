@@ -54,6 +54,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="",
         help="Token for remote mode authentication (optional)",
     )
+    parser.add_argument(
+        "--worker",
+        default=None,
+        metavar="SPEC_JSON",
+        help="Run as a headless pane worker: execute the task described in "
+        "SPEC_JSON and exit (used by /spawn --pane, not meant for manual use)",
+    )
     from mini_agent import __version__
 
     parser.add_argument(
@@ -89,6 +96,11 @@ def main(argv: list[str] | None = None) -> None:
     _harden_windows_stdio()
     args = parse_args(argv)
 
+    if args.worker:
+        from mini_agent.core.worker import run_worker
+
+        sys.exit(asyncio.run(run_worker(args.worker)))
+
     from mini_agent.app import Application
     from mini_agent.config.loader import ConfigLoader
 
@@ -113,6 +125,11 @@ def main(argv: list[str] | None = None) -> None:
 
     app = Application(config)
 
+    # NOTE: no `finally: sys.exit(0)` here -- that would swallow the
+    # traceback of ANY crash and turn it into a silent clean exit
+    # (a pane-board AttributeError once hid exactly this way).
+    # 不能用 finally: sys.exit(0)——它会吞掉一切崩溃的 traceback，
+    # 把异常变成无声的正常退出（进度面板的 AttributeError 曾被这样掩盖）。
     try:
         if args.remote:
             from mini_agent.remote.server import RemoteServer
@@ -128,5 +145,4 @@ def main(argv: list[str] | None = None) -> None:
             asyncio.run(app.run())
     except KeyboardInterrupt:
         pass
-    finally:
-        sys.exit(0)
+    sys.exit(0)

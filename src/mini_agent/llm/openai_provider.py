@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from mini_agent.llm.base import (
+    MAX_HTTP_RETRIES,
+    RETRYABLE_HTTP_STATUSES,
     LLMProvider,
     LLMResponse,
     StreamChunk,
     TokenUsage,
     ToolCallDelta,
+    compute_retry_delay,
 )
 from mini_agent.models.config import LLMConfig
 from mini_agent.models.message import ToolCall
+
+logger = logging.getLogger(__name__)
 
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-4o": 128_000,
@@ -133,17 +140,37 @@ class OpenAIProvider(LLMProvider):
             body["tools"] = tools
             body["tool_choice"] = "auto"
 
-        async with self._client.stream("POST", "/chat/completions", json=body) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
+        # Retry rate limits / transient 5xx with backoff -- but ONLY when the
+        # failure happens before any chunk was yielded (a clean re-request).
+        # Mid-stream failures propagate: retrying would duplicate output.
+        # 限流/瞬时 5xx 带退避重试——仅限任何 chunk 产出之前的失败（可干净重发）。
+        # 流中途失败原样抛出：重试会产生重复输出。
+        attempt = 0
+        while True:
+            async with self._client.stream("POST", "/chat/completions", json=body) as response:
+                if response.status_code in RETRYABLE_HTTP_STATUSES and attempt < MAX_HTTP_RETRIES:
+                    delay = compute_retry_delay(attempt, response.headers.get("retry-after"))
+                    attempt += 1
+                    logger.warning(
+                        "LLM request got %d, retry %d/%d in %.1fs",
+                        response.status_code,
+                        attempt,
+                        MAX_HTTP_RETRIES,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
-                data = line[6:]
-                if data == "[DONE]":
-                    break
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
 
-                chunk_data = json.loads(data)
-                yield self._parse_chunk(chunk_data)
+                    chunk_data = json.loads(data)
+                    yield self._parse_chunk(chunk_data)
+            return
 
     def _parse_chunk(self, data: dict[str, Any]) -> StreamChunk:
         chunk = StreamChunk()

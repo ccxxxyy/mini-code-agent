@@ -1075,3 +1075,30 @@
 - [x] 11 个测试含 AgentLoop 端到端拦截 + regex 三例（含非法正则跳过）
 - [x] comparison 7.2 勘误陈旧描述 + 标记 ✅ + 优先级表更新
 - [x] config-guide 补 [[hooks]] 配置段（含 TOML 顶级键位置警告）
+
+## 多后端 spawn 检查项（comparison 6.4）
+
+- [x] 文件锁：O_EXCL + 退避抖动 + 陈旧接管 + 超时；超时抛异常不静默丢消息
+- [x] 原子写 temp+os.replace；读免锁
+- [x] 磁盘注册表跨进程可见（第二实例/子进程能 resolve 父进程注册的名字）
+- [x] 4 进程并发写零丢失实测
+- [x] worker 协议：spec 进 → 结果 JSON 出；API key 环境变量继承不落盘
+- [x] 后端探测：会话内分屏，装 wt 未在会话内降级弹新窗口；完全无后端报错清晰
+- [x] wt 后端命令 `wt -w 0 split-pane --title ... -d cwd ...`；tmux `split-window -d`
+- [x] spawn_pane 融入 wait/cancel/list；超时与取消路径有测试
+- [x] 真实 LLM 跨进程 E2E 通过
+- [x] 诚实边界记录：iTerm2 未做、cancel 不强杀、worker 无权限弹窗
+
+## 多后端 spawn 实测迭代检查项（六轮真实使用）
+
+- [x] /spawn wait 结果完整输出不截断（8000 字符病态防线带总长标注）
+- [x] `--wait` 一条命令派发+面板+结果；与 --pane 可组合
+- [x] wt 降级 `-w mini-agents` 命名窗口：首派弹窗，后续进标签页不轰炸
+- [x] worker 任何崩溃写失败结果文件 + traceback + 窗格停留（不再无声超时）
+- [x] /spawn wait 超时 900s 对齐收集器
+- [x] 协议文件在 ~/.mini-agent/workers/（工作目录外，agent 探索不到）
+- [x] 收集器 schema 7 字段 + agent_id 双校验，拒绝 LLM 早产桩/冒名文件
+- [x] Provider 429/5xx 指数退避重试（1/2/4/8/16s），chunk 产出后不重试
+- [x] 多报告：总览表 + 编号硬分节 + 交付文件行（仅列真实存在文件，亮橙渲染）
+- [x] slash 输出哨兵机制：仅报告类走 Markdown，/status /cost 纯文本版式不受污染
+- [x] 顺带修复：AgentPhase.ACTING 不存在（面板崩溃）、cli finally 吞 traceback、slash 异常炸会话——三处 + 回归测试

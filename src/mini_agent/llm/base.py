@@ -78,3 +78,29 @@ class LLMProvider(ABC):
     def context_window(self) -> int:
         """Maximum context window size for the configured model. 所配置模型的最大上下文窗口大小。"""
         ...
+
+
+# HTTP statuses worth retrying: rate limit + transient server errors
+# 值得重试的 HTTP 状态：限流 + 瞬时服务端错误
+RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 529})
+# 5 attempts of exponential backoff = ~31s total patience. Rate limits are
+# often sustained quota windows (parallel workers sharing one API key),
+# not momentary blips -- 3 quick retries (~7s) proved too short in real runs.
+# 5 次指数退避约 31 秒总耐心。限流常是持续配额窗口（并行 worker 共用一个
+# key），不是瞬时抖动——实测 3 次快速重试（约 7 秒）扛不住。
+MAX_HTTP_RETRIES = 5
+
+
+def compute_retry_delay(attempt: int, retry_after: str | None = None) -> float:
+    """Backoff delay for a retryable HTTP failure: honor the server's
+    Retry-After header when present, otherwise exponential with jitter
+    (1s -> 2s -> 4s -> 8s -> 16s). 可重试 HTTP 失败的退避时长：优先尊重
+    服务端 Retry-After 头，否则指数退避带抖动。"""
+    import random
+
+    if retry_after:
+        try:
+            return min(float(retry_after), 30.0)
+        except ValueError:
+            pass
+    return (2**attempt) + random.uniform(0, 0.5)

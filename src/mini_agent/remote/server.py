@@ -187,7 +187,13 @@ class RemoteServer:
                         try:
                             result = await self._app.slash_commands.execute(text, self._app)
                             if result:
-                                await self._ws_send("info", message=result)
+                                from mini_agent.extensions.slash_commands import (
+                                    MARKDOWN_RESULT,
+                                )
+
+                                await self._ws_send(
+                                    "info", message=result.removeprefix(MARKDOWN_RESULT)
+                                )
                             parts = text.strip().split(maxsplit=1)
                             if parts[0].lower() == "/theme" and len(parts) > 1:
                                 t = parts[1].strip().lower()
