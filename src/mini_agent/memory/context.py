@@ -145,6 +145,22 @@ class ContextManager:
         target = int(self._max_tokens * 0.5)
         await self._compressor.compress(conversation, target)
         self._inject_read_files(conversation)
+        # Fallback: SlidingWindow alone doesn't create a summary, but
+        # _inject_read_files inserts a compressed SYSTEM message we can use.
+        # 兜底：纯 SlidingWindow 不产生摘要，但 _inject_read_files 会插入
+        # 压缩 SYSTEM 消息可作为边界。
+        if conversation.compact_boundary is None:
+            from datetime import datetime
+
+            for msg in conversation.messages:
+                if msg.compressed and msg.role == Role.SYSTEM and msg.content:
+                    conversation.compact_boundary = {
+                        "summary": msg.content,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    break
+        if conversation.compact_boundary is not None:
+            conversation.compact_boundary["read_files"] = list(self._read_files)
         self.update_total(conversation)
         return True
 
@@ -174,6 +190,15 @@ class ContextManager:
         # No summary message (pure SlidingWindow path): insert a standalone note
         # 没有摘要消息（纯滑窗路径）：插入独立提示
         conversation.messages.insert(0, Message(role=Role.SYSTEM, content=note, compressed=True))
+
+    def adopt_boundary(self, conversation: Conversation) -> None:
+        """Restore read-files state from a loaded compact boundary.
+        从已加载的压缩边界恢复已读文件状态。"""
+        boundary = conversation.compact_boundary
+        if not boundary:
+            return
+        for path in boundary.get("read_files", []):
+            self._read_files[path] = None
 
     async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
         """Last-resort guard: force-truncate if conversation exceeds max_tokens.

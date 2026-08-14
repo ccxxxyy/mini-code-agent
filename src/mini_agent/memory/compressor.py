@@ -15,6 +15,7 @@ Three-stage cascade:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from mini_agent.llm.token_counter import count_tokens
@@ -228,3 +229,13 @@ class Compressor:
             if total <= target_tokens:
                 break
             await strategy.compress(conversation, target_tokens)
+            # Record boundary after each stage (SlidingWindow may drop
+            # the summary created by SummarizeOldest, so capture early)
+            # 每个阶段后记录边界（SlidingWindow 可能丢弃 SummarizeOldest 创建的摘要）
+            for msg in conversation.messages:
+                if msg.compressed and msg.role == Role.SYSTEM and msg.content:
+                    conversation.compact_boundary = {
+                        "summary": msg.content,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    break

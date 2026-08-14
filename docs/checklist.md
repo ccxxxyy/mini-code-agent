@@ -1115,3 +1115,29 @@
 - [x] 注册 "openai-responses" 到 ProviderRegistry
 - [x] 26 个单测，754 全过，覆盖率 80.83%
 - [x] config-guide 补 provider 选项；comparison 1.1 标记 ✅ + 优先级表 ✅
+
+## Phase 59 检查项：会话压缩边界（comparison 9.2）
+
+### 功能完整性
+- [x] 压缩后 `Conversation.compact_boundary` 自动记录 summary + timestamp + read_files
+- [x] 每个压缩策略运行后都尝试记录边界（SummarizeOldest 创建的摘要不被后续 SlidingWindow 丢弃时错过）
+- [x] 纯 SlidingWindow 路径（消息数 ≤ KEEP_RECENT 时 SummarizeOldest 跳过）兜底从 `_inject_read_files` 消息创建边界
+- [x] `SessionStore` 序列化：`compact_boundary` 写入 conversation 段
+- [x] `SessionStore` 反序列化：有边界时跳过 `compressed=True and role=system` 消息，从边界 summary 重建单条摘要
+- [x] 非 SYSTEM 的 compressed 消息（DropToolResults 的 TOOL 消息）不被跳过（正常加载）
+- [x] 无边界的旧格式会话文件加载行为完全不变（向后兼容）
+- [x] `ContextManager.adopt_boundary()` 从边界恢复 `_read_files` 状态
+- [x] `app.py._adopt_session()` 调用 `adopt_boundary()`——崩溃恢复 / `/session load` / `/fork` 三入口自动恢复
+
+### 测试
+- [x] test_session_store.py — 4 个单元测试：边界往返 / 跳过压缩 SYSTEM / 保留非压缩消息 / 无边界旧格式兼容
+- [x] test_compact_boundary_e2e.py — 2 个集成测试：完整链路 E2E（ContextManager → Compressor → save → load → adopt_boundary）/ 旧格式 E2E
+- [x] 真实 LLM E2E 验证：DeepSeek 模型实际对话 → 压缩 → 保存 → 加载 → 边界 + read_files 恢复全链路 PASS
+- [x] 760 个测试全过，ruff lint + format clean
+
+### 文档同步
+- [x] comparison-mewcode.md 9.2 节更新：对比表 + 实现详情 + 诚实差异表（4 条）
+- [x] comparison-mewcode.md 总表新增 5 个遗漏差距项（1.1a / 9.2a / 9.2b / 9.2c / 6.4a）
+- [x] tasks.md 新增 Phase 59 条目
+- [x] tech-notes.md 新增 §59（5 个设计决策小节）
+- [x] checklist.md 新增本检查项

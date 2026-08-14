@@ -130,6 +130,11 @@ def _serialize_session(session: Session) -> dict[str, Any]:
         "conversation": {
             "system_prompt": session.conversation.system_prompt,
             "messages": [_serialize_message(m) for m in session.conversation.messages],
+            **(
+                {"compact_boundary": session.conversation.compact_boundary}
+                if session.conversation.compact_boundary
+                else {}
+            ),
         },
     }
 
@@ -174,8 +179,22 @@ def _deserialize_session(data: dict[str, Any]) -> Session:
     )
 
     conv_data = data.get("conversation", {})
+    boundary = conv_data.get("compact_boundary")
     conv = Conversation(system_prompt=conv_data.get("system_prompt", ""))
+
+    if boundary:
+        conv.compact_boundary = boundary
+        from mini_agent.llm.token_counter import count_tokens as _count
+
+        summary_msg = Message(role=Role.SYSTEM, content=boundary["summary"], compressed=True)
+        summary_msg.token_count = _count(boundary["summary"]) + 4
+        conv.append(summary_msg)
+
     for md in conv_data.get("messages", []):
+        # With a boundary, skip compressed SYSTEM messages (covered by boundary summary)
+        # 有边界时跳过已压缩的 SYSTEM 消息（已被边界摘要覆盖）
+        if boundary and md.get("compressed", False) and md.get("role") == "system":
+            continue
         tool_calls = [
             ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
             for tc in md.get("tool_calls", [])

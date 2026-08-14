@@ -1429,3 +1429,27 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] Tool pairing repair：`_convert_to_input` 跟踪 pending_call_ids，orphan function_call 补合成 "interrupted" 结果
 - [x] 错误分类：LLMAuthenticationError（401）/ LLMRateLimitError（429，含 retry_after）/ LLMNetworkError（ConnectError/Timeout）——stream() 的 except 链在重试穿透后分类包装
 - [x] 754 个测试全过
+
+## Phase 59: 会话压缩边界 (P59)
+
+> comparison-mewcode.md 9.2。压缩后记录边界标记，会话恢复时跳过已归档消息并恢复已读文件状态。
+
+### P59.1 实现
+- [x] `models/message.py` — `Conversation.compact_boundary: dict[str, Any] | None` 字段（summary + timestamp + read_files）
+- [x] `memory/compressor.py` — `Compressor.compress()` 每个策略运行后记录边界（从压缩 SYSTEM 消息提取 summary）
+- [x] `memory/context.py` — `check_and_compress()` 兜底：纯 SlidingWindow 不产生摘要时从 `_inject_read_files` 插入的消息创建边界 + 附加 `read_files` 列表
+- [x] `memory/context.py` — 新增 `adopt_boundary()` 方法：从边界恢复 `_read_files` 状态
+- [x] `memory/session_store.py` — 序列化：conversation 段写入 `compact_boundary`；反序列化：跳过 compressed SYSTEM 消息，从边界 summary 重建单条摘要消息
+- [x] `app.py` — `_adopt_session()` 调用 `adopt_boundary()`，崩溃恢复 / `/session load` / `/fork` 三入口均自动恢复已读文件状态
+
+### P59.2 测试
+- [x] test_session_store.py — 4 个单元测试：边界往返 / 跳过压缩 SYSTEM / 保留非压缩消息（DropToolResults 的 TOOL 消息不被跳过）/ 无边界旧格式向后兼容
+- [x] test_compact_boundary_e2e.py — 2 个集成测试：完整链路（ContextManager → Compressor → SessionStore 保存加载 → adopt_boundary 恢复 read_files）/ 旧格式兼容
+- [x] 真实 LLM E2E 验证：DeepSeek 模型实际对话 → 压缩 → 保存 → 加载 → 边界 + read_files 恢复全链路 PASS
+- [x] 实测暴露修复：纯 SlidingWindow 压缩（消息数 ≤ KEEP_RECENT=6 时 SummarizeOldest 跳过）不产生摘要消息，boundary 为 None → `check_and_compress` 兜底从 `_inject_read_files` 消息创建边界
+- [x] 760 个测试全过，ruff lint + format clean
+
+### P59.3 与 mewcode 的诚实差异（已记入总表）
+- 恢复附件只记路径（mewcode 烤入最近 5 文件内容到摘要）→ 9.2a
+- KEEP_RECENT 固定切分可能切断 tool_use/tool_result 配对 → 9.2b
+- 无压缩熔断器 → 9.2c

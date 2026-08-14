@@ -2056,6 +2056,42 @@ P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始�
 5. **交付物不可截断**：结果格式化的 `output[:200]` 对小任务合理，对整篇分析报告就是自毁交付
 6. **渲染的显式选择**：全量 Markdown 化让 /status /cost 的空格对齐版式被折叠搅碎——修复为哨兵前缀显式 opt-in（MARKDOWN_RESULT），默认纯文本永远安全
 
+## 59. 会话压缩边界（P59）
+
+### 59.1 核心设计：边界 = 摘要 + 已读文件 + 时间戳
+
+压缩后在 `Conversation.compact_boundary` 记录一个 dict：
+
+```python
+{
+    "summary": "[Compressed conversation history]\n...",
+    "timestamp": "2026-08-15T00:20:10.440632",
+    "read_files": ["src/app.py", "README.md"]
+}
+```
+
+为什么不只用 `compressed=True` 标记？因为 `compressed` 有两种含义：① `DropToolResults` 截断的工具输出（TOOL 角色）② `SummarizeOldest` 生成的摘要（SYSTEM 角色）。反序列化时需要区分"哪些是摘要、哪些是截断的工具结果"——边界是显式标记，消除歧义。
+
+### 59.2 为什么记录 read_files
+
+`ContextManager._read_files` 在会话加载时不会恢复（`_adopt_session` 只调 `update_total`）。丢失后果：LLM 不知道自己读过什么文件 → 重读 → 触发压缩 → 再丢失 → 再重读——这是 tech-notes §36 根治的压缩-重读膨胀循环的另一个入口。边界里带 `read_files`，`adopt_boundary()` 恢复它，堵住这个入口。
+
+### 59.3 反序列化跳过逻辑
+
+有边界时，加载跳过 `compressed=True and role="system"` 的消息（摘要已被边界覆盖），从边界 summary 重建单条摘要。非 SYSTEM 的 compressed 消息（DropToolResults 的 TOOL 消息）正常加载——它们虽被截断但仍是工具调用历史的一部分。
+
+### 59.4 实测暴露：纯 SlidingWindow 路径
+
+`SummarizeOldest.KEEP_RECENT = 6`。当消息数 ≤ 6 时 SummarizeOldest 跳过，只有 SlidingWindow 执行——SlidingWindow 不创建摘要消息，边界录不到。
+
+修复：`check_and_compress` 在 `_inject_read_files`（它会插入一条 compressed SYSTEM 消息）之后兜底检查，若 `compact_boundary` 仍为 None 则从这条消息创建边界。两层保底：Compressor 内部录 + ContextManager 外部兜底。
+
+### 59.5 与 mewcode 的架构差异
+
+mewcode 用 JSONL 追加式存储，边界是一条自包含的 `type=compact_boundary` 记录（内含 summary + keep 消息序列化），恢复时"找最后一个边界，丢弃之前全部"。mini 用单 JSON 覆写式存储，每次 save 已是当前完整状态，边界是 conversation 段的一个字段。两种方式在功能上等价——区别只在存储格式层。
+
+mewcode 的 `build_recovery_attachment()` 把最近 5 个文件的实际内容烤进摘要（每个 5000 tokens），恢复后 LLM 不仅知道"读过什么"还记得"读到了什么"。mini 只记路径——省 token 但恢复后 LLM 对内容记忆更弱。这是有意的取舍：路径足以阻止重读循环，内容恢复的收益是"少一轮工具调用"，代价是摘要膨胀 25000 tokens。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

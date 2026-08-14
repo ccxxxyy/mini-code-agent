@@ -153,3 +153,104 @@ async def test_cleanup_stale_empty_dir(tmp_path: Path):
     store = SessionStore(session_dir=str(tmp_path))
     removed = await store.cleanup_stale(max_age_days=30)
     assert removed == 0
+
+
+# --- compact_boundary ---
+
+
+async def test_compact_boundary_round_trip(tmp_path: Path):
+    """Boundary is serialized and deserialized correctly."""
+    store = SessionStore(session_dir=str(tmp_path))
+    session = Session()
+    session.conversation.system_prompt = "sys"
+    session.conversation.append(
+        Message(role=Role.SYSTEM, content="[summary]", compressed=True)
+    )
+    session.conversation.append(Message(role=Role.USER, content="hi"))
+    session.conversation.compact_boundary = {
+        "summary": "[summary]",
+        "timestamp": "2025-01-01T00:00:00",
+        "read_files": ["a.py", "b.py"],
+    }
+
+    await store.save(session)
+    loaded = await store.load(session.metadata.session_id)
+
+    assert loaded is not None
+    assert loaded.conversation.compact_boundary is not None
+    assert loaded.conversation.compact_boundary["summary"] == "[summary]"
+    assert loaded.conversation.compact_boundary["read_files"] == ["a.py", "b.py"]
+
+
+async def test_compact_boundary_skips_compressed_system(tmp_path: Path):
+    """With a boundary, compressed SYSTEM messages are skipped on load;
+    the boundary summary is used instead."""
+    store = SessionStore(session_dir=str(tmp_path))
+    session = Session()
+    session.conversation.append(
+        Message(role=Role.SYSTEM, content="old summary", compressed=True)
+    )
+    session.conversation.append(Message(role=Role.USER, content="q"))
+    session.conversation.append(Message(role=Role.ASSISTANT, content="a"))
+    session.conversation.compact_boundary = {
+        "summary": "boundary summary",
+        "timestamp": "2025-01-01T00:00:00",
+    }
+
+    await store.save(session)
+    loaded = await store.load(session.metadata.session_id)
+
+    assert loaded is not None
+    msgs = loaded.conversation.messages
+    assert msgs[0].role == Role.SYSTEM
+    assert msgs[0].content == "boundary summary"
+    assert msgs[0].compressed is True
+    assert msgs[1].content == "q"
+    assert msgs[2].content == "a"
+    assert len(msgs) == 3
+
+
+async def test_compact_boundary_preserves_non_compressed(tmp_path: Path):
+    """Non-compressed messages are loaded normally even with boundary."""
+    store = SessionStore(session_dir=str(tmp_path))
+    session = Session()
+    # Compressed tool result (from DropToolResults) should NOT be skipped
+    tr = ToolResult(call_id="tc1", name="read_file", output="truncated...")
+    session.conversation.append(
+        Message(role=Role.TOOL, tool_result=tr, compressed=True)
+    )
+    session.conversation.append(Message(role=Role.USER, content="next"))
+    session.conversation.compact_boundary = {
+        "summary": "summary",
+        "timestamp": "2025-01-01T00:00:00",
+    }
+
+    await store.save(session)
+    loaded = await store.load(session.metadata.session_id)
+
+    assert loaded is not None
+    # summary from boundary + tool msg + user msg
+    assert len(loaded.conversation.messages) == 3
+    assert loaded.conversation.messages[0].content == "summary"
+    assert loaded.conversation.messages[1].role == Role.TOOL
+    assert loaded.conversation.messages[2].content == "next"
+
+
+async def test_compact_boundary_absent_loads_all(tmp_path: Path):
+    """Legacy sessions without boundary load all messages as before."""
+    store = SessionStore(session_dir=str(tmp_path))
+    session = Session()
+    session.conversation.append(
+        Message(role=Role.SYSTEM, content="old summary", compressed=True)
+    )
+    session.conversation.append(Message(role=Role.USER, content="hello"))
+    # No compact_boundary set
+
+    await store.save(session)
+    loaded = await store.load(session.metadata.session_id)
+
+    assert loaded is not None
+    assert loaded.conversation.compact_boundary is None
+    assert len(loaded.conversation.messages) == 2
+    assert loaded.conversation.messages[0].content == "old summary"
+    assert loaded.conversation.messages[0].compressed is True

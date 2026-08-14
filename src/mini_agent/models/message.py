@@ -60,6 +60,10 @@ class Conversation:
     system_prompt: str = ""
     messages: list[Message] = field(default_factory=list)
     total_tokens: int = 0
+    # Set by Compressor after compression; persisted with the session so that
+    # loading can skip archived messages and restore read-files state.
+    # 压缩后由 Compressor 设置；随会话持久化，加载时跳过已归档消息并恢复已读文件状态。
+    compact_boundary: dict[str, Any] | None = None
 
     def append(self, message: Message) -> None:
         self.messages.append(message)
