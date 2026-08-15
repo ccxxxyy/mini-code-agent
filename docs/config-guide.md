@@ -203,6 +203,7 @@ compression_threshold = 0.75 # 压缩触发阈值（75% 时压缩）
 auto_extract = true          # 会话结束自动提取记忆
 spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留预览（0 = 禁用）——防大文件撑爆上下文
 session_cleanup_days = 30    # 超过此天数的旧会话启动时自动清理（0 = 禁用）——未正常关闭的保留供崩溃恢复
+compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳过（0 = 禁用）——防已读文件列表过长时的死循环
 
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）

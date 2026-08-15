@@ -146,6 +146,37 @@ uv run python experiments/deadlock_induction.py --all                           
 
 *边界说明：本实验用强硬系统提示（"不许放弃、必须用工具"）刻意诱导死循环，放大了风险。正常使用中 LLM 更容易自行停止。*
 
+## 实验 4：压缩熔断器验证（P62）
+
+### 研究问题
+
+压缩熔断器在真实 LLM 下能否正确触发并保护？
+
+### 方法
+
+用真实 LLM（DeepSeek V4 Flash）跑 5 个阶段：
+
+| 阶段 | 验证内容 |
+|---|---|
+| Phase 1 | 正常压缩——小窗口 + 长 LLM 回复，压缩有效，熔断计数为 0 |
+| Phase 2 | 自然熔断——注册 150 个已读文件，`_inject_read_files` 注入抵消压缩收益，连续 3 次无效后熔断 |
+| Phase 3 | ensure_fits 兜底——熔断后 `check_and_compress` 被阻，`ensure_fits` 仍正常截断 |
+| Phase 4 | 禁用对照——`compress_max_failures=0` 时无保护，持续白跑压缩 |
+| Phase 5 | 新会话恢复——新 `ContextManager` 计数器归零 |
+
+运行：
+
+```bash
+uv run python experiments/verify_circuit_breaker.py
+uv run python experiments/verify_circuit_breaker.py --model gpt-4o-mini
+```
+
+### 关键发现
+
+1. **默认压缩链（DropToolResults → SummarizeOldest → SlidingWindow）下，熔断器几乎不会触发**——SlidingWindow 总能丢弃旧消息降低 token
+2. **150 个已读文件可重现自然熔断**：压缩减少了消息，但 `_inject_read_files` 注入的 150 行文件清单反而增加了 token（2040→3183），压缩后续几轮稳定在 2000 无法下降
+3. **ensure_fits 与熔断器正交**：熔断只阻止 75% 阈值处的主动压缩，真正超窗口时 `ensure_fits` 仍是安全网
+
 ## 附：LLM 摘要压缩策略（roadmap 1.1 兑现）
 
 实验 1 的 `llm` 臂用到的 `LLMSummarizeOldest` 是 roadmap 1.1 预留插槽的实现（`src/mini_agent/memory/compressor.py`）：

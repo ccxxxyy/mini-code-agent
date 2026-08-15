@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from mini_agent.llm.token_counter import count_tokens
 from mini_agent.memory.compressor import SlidingWindow
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message, Role
+
+logger = logging.getLogger(__name__)
 
 
 class ContextManager:
@@ -18,6 +22,11 @@ class ContextManager:
         self._total_tokens = 0
         self._compressor = None  # set via set_compressor() after init
         # 初始化后通过 set_compressor() 设置
+        # Circuit breaker: stop retrying compression after N consecutive
+        # ineffective attempts (tokens did not decrease)
+        # 熔断器：连续 N 次压缩无效后停止重试
+        self._compress_failures: int = 0
+        self._max_compress_failures: int = config.compress_max_failures
         # Ordered, deduplicated list of files read this session -- re-injected
         # after compression so the LLM does not forget and re-read them
         # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
@@ -141,7 +150,19 @@ class ContextManager:
             return False
         if self._compressor is None:
             return False
+        if (
+            self._max_compress_failures > 0
+            and self._compress_failures >= self._max_compress_failures
+        ):
+            logger.warning(
+                "Compression circuit breaker open: %d consecutive ineffective "
+                "attempts, skipping. 压缩熔断器已开启：连续 %d 次无效，跳过",
+                self._compress_failures,
+                self._compress_failures,
+            )
+            return False
 
+        old_total = self._total_tokens
         target = int(self._max_tokens * 0.5)
         await self._compressor.compress(conversation, target)
         self._inject_read_files(conversation)
@@ -162,6 +183,31 @@ class ContextManager:
         if conversation.compact_boundary is not None:
             conversation.compact_boundary["read_files"] = list(self._read_files)
         self.update_total(conversation)
+        if self._total_tokens >= old_total:
+            self._compress_failures += 1
+            logger.info(
+                "Compression ineffective (%d -> %d tokens), failure %d/%d. "
+                "压缩无效（%d -> %d），失败 %d/%d",
+                old_total,
+                self._total_tokens,
+                self._compress_failures,
+                self._max_compress_failures or -1,
+                old_total,
+                self._total_tokens,
+                self._compress_failures,
+                self._max_compress_failures or -1,
+            )
+        else:
+            if self._compress_failures > 0:
+                logger.info(
+                    "Compression effective (%d -> %d tokens), resetting failure count. "
+                    "压缩有效（%d -> %d），重置失败计数",
+                    old_total,
+                    self._total_tokens,
+                    old_total,
+                    self._total_tokens,
+                )
+            self._compress_failures = 0
         return True
 
     def _inject_read_files(self, conversation: Conversation) -> None:

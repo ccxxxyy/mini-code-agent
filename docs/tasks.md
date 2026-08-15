@@ -1486,3 +1486,18 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 真实 LLM E2E 验证：机器 A add → export → 机器 B import → 真实 Application 的 PRE_LLM hook 注入导入的记忆 → 真实 DeepSeek 正确答出只存在于记忆中的两个事实（项目代号 + 用户昵称），system prompt 注入确认为 True
 - [x] 真实 handler 验证：临时目录跑真实 `_make_memory` —— add → export → 同机重导入全去重 → 跨机导入 scope 还原正确（project→项目库，user→用户库）→ 非目录/缺参数错误路径
 - [x] 774 个测试全过（764 + 10 新增），ruff lint + format clean
+
+## Phase 62: 压缩熔断器 (P62)
+
+> comparison-mewcode.md 9.2c。连续压缩无效时熔断，防死循环烧 token。
+
+### P62.1 实现
+- [x] `ContextManager` 新增 `_compress_failures` / `_max_compress_failures` 字段——连续 N 次压缩后 token 未减少则跳过后续压缩
+- [x] `MemoryConfig.compress_max_failures = 3` 配置项（0 = 禁用熔断器）
+- [x] 成功压缩（token 减少）自动重置计数
+
+### P62.2 测试
+- [x] 3 个单元测试（test_context.py）：熔断触发 / 成功重置 / 禁用(0 值)
+- [x] 1 个集成测试（test_compact_boundary_e2e.py）：完整链路 NoOp→失败累积→日志验证→熔断跳过→ensure_fits 兜底
+- [x] 真实 LLM 验证（experiments/verify_circuit_breaker.py）：5 阶段——正常压缩 / 150 文件触发自然熔断 / ensure_fits 兜底 / 禁用对照 / 新会话恢复
+- [x] 778 个测试全过（774 + 4 新增），ruff lint + format clean

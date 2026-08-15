@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **754 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **778 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -702,7 +702,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | 已读文件恢复 | `adopt_boundary()` 恢复文件路径列表到 `_read_files` | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
 | keep 消息处理 | 尾部消息作为普通消息存在 messages 数组中 | `keep` 消息序列化到边界记录内，自包含 |
 | 工具对完整性 | ✅ **`_align_split_to_tool_pair()`**——keep 边界回退到工具对头部，SlidingWindow 丢弃孤儿 tool result（9.2b/P60） | `_align_keep_start_to_tool_pair()` 确保不切断工具对 |
-| 压缩熔断 | 无 | `CompactCircuitBreaker`——连续失败 3 次后熔断，防死循环 |
+| 压缩熔断 | ✅ **熔断器**——连续 N 次压缩无效后跳过（`compress_max_failures`，默认 3，0 禁用） | `CompactCircuitBreaker`——连续失败 3 次后熔断，防死循环 |
 
 **已完成**：
 1. `Conversation.compact_boundary` 字段——压缩后由 `Compressor` 记录摘要文本、时间戳、已读文件列表
@@ -788,7 +788,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
 | ⚪ P4 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1：mewcode 烤入最近 5 文件内容（5000 tokens/个），mini 只记路径 | 半天 |
 | ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |
-| ⚪ P4 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4：mewcode 有 `CompactCircuitBreaker` 连续失败 3 次停止，防死循环 | 2 小时 |
+| ✅ 完成 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4 消除：`ContextManager` 内置熔断器，连续 N 次压缩无效后跳过 | 已完成 |
 | ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |
 
 **总工作量估算**：约 15-20 个工作日。全部完成后 mini-code-agent 在每一个维度都 ≥ mewcode-python，同时保持自身的差异化优势（/undo、/fork、/record、/cost、/explain、实验框架）。

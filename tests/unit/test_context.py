@@ -382,3 +382,63 @@ async def test_sliding_window_drops_orphan_tool_results():
     assert all(m.role != Role.TOOL for m in conv.messages)
     assert conv.messages[-1].content == "done"
     assert conv.messages[0].role == Role.USER  # task anchor still applies
+
+
+# --- Compression circuit breaker (9.2c) 压缩熔断器 ---
+
+
+class NoOpCompressor:
+    """Compressor that does nothing -- simulates ineffective compression."""
+
+    async def compress(self, conversation, target_tokens):
+        pass
+
+
+async def test_circuit_breaker_trips_after_max_failures():
+    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(20):
+        conv.messages.append(make_msg(token_count=25))
+
+    for i in range(3):
+        result = await cm.check_and_compress(conv)
+        assert result is True
+    assert cm._compress_failures == 3
+
+    result = await cm.check_and_compress(conv)
+    assert result is False
+
+
+async def test_circuit_breaker_resets_on_success():
+    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(20):
+        conv.messages.append(make_msg(token_count=25))
+
+    await cm.check_and_compress(conv)
+    await cm.check_and_compress(conv)
+    assert cm._compress_failures == 2
+
+    cm.set_compressor(Compressor())
+    await cm.check_and_compress(conv)
+    assert cm._compress_failures == 0
+
+
+async def test_circuit_breaker_disabled_when_zero():
+    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=0)
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(20):
+        conv.messages.append(make_msg(token_count=25))
+
+    for _ in range(10):
+        result = await cm.check_and_compress(conv)
+        assert result is True
