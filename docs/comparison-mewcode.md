@@ -385,20 +385,20 @@
 - 防护：幻觉 ID 过滤、单 ID 组忽略、跨组重复 ID 只处理首组、fail-safe 静默 no-op
 - `/memory consolidate` 手动触发子命令（无阈值限制，≥2 条即可跑）
 
-### 4.6 记忆存储格式
+### 4.6 记忆存储格式 ✅ 已实现（P61：导出/导入互操作）
 
 | | mini | mewcode |
 |---|---|---|
-| 存储格式 | 单个 `memory.json` 文件 | **独立 .md 文件 + YAML 前置元数据 + MEMORY.md 索引** |
+| 存储格式 | 单个 `memory.json` 文件（内部）+ ✅ **`/memory export`/`import` 互操作 .md 格式**（P61） | **独立 .md 文件 + YAML 前置元数据 + MEMORY.md 索引** |
 
-**差距**：单 JSON 文件不方便用户手动浏览/编辑。
+**已完成**（P61）：
+1. `memory/interop.py` 新模块：`export_memories()` 每条记忆一个 `{id}.md`（YAML 前置元数据：id/source/scope/created_at/tags）+ MEMORY.md 索引；`import_memories()` 容错解析返回 `(entry, scope)` 对
+2. `/memory export [dir]` —— 导出项目 + 用户全部记忆，默认目录 `.mini-agent/memory-export/`（无项目时 `~/.mini-agent/memory-export/`）
+3. `/memory import <dir>` —— 按 id 去重导入，按 `scope` 前置元数据路由回项目/用户存储
+4. 容错导入：无前置元数据的纯 .md、mewcode 风格前置元数据（name/description/metadata 嵌套）、未闭合前置元数据、正文为空取 description、tags 逗号分隔回退——均可导入
+5. JSON 仍是内部存储格式，.md 仅作互操作/浏览层
 
-**增强方案**：
-1. 保持 JSON 作为内部存储格式（程序读写方便）
-2. 新增 `/memory export` 命令——导出为 mewcode 格式的独立 .md 文件（方便用户浏览）
-3. 新增 `/memory import <dir>` 命令——从 .md 文件目录导入
-
-代码改动：`extensions/builtin_commands.py` ~30 行。这是优先级较低的增强——JSON 格式在功能上不弱，只是用户体验不同。
+**实测暴露的设计点**：mini 的 `MemoryEntry.source`（"user"/"extracted"）记录的是**谁创建的**，不是**存在哪里**——`/memory add` 进项目库的条目 source 也是 "user"。第一版按 source 路由导致跨机导入时项目记忆错进用户库；修复为导出时显式写 `scope` 前置元数据（project/user），导入按 scope 还原。
 
 ---
 
@@ -783,7 +783,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 8.2 | Skill 热重载（P56） | 开发效率 | 已完成 |
 | ✅ 完成 | 9.1 | 会话自动清理 | 磁盘管理 | 已完成 |
 | ✅ 完成 | 9.2 | 会话压缩边界 | 恢复性能 | 已完成 |
-| ⚪ P4 | 4.6 | 记忆导出/导入 | 互操作 | 半天 |
+| ✅ 完成 | 4.6 | 记忆导出/导入（P61） | 互操作：export/import .md + scope 路由 | 已完成 |
 | ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
 | ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
 | ⚪ P4 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1：mewcode 烤入最近 5 文件内容（5000 tokens/个），mini 只记路径 | 半天 |

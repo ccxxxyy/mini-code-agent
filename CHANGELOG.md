@@ -11,6 +11,8 @@
 
 ### Added 新增
 
+- **Memory export/import** — `/memory export [dir]` writes each memory as a standalone .md file (YAML frontmatter: id/source/scope/created_at/tags) plus a MEMORY.md index; `/memory import <dir>` imports with id dedup and restores project/user scope from frontmatter. Tolerant parsing accepts plain .md and mewcode-style files. 记忆导出/导入：导出为独立 .md（YAML 前置元数据 + MEMORY.md 索引），导入按 id 去重、按 scope 还原项目/用户作用域，容错解析外来格式。
+- **Compression tool-pair alignment** — the summarize keep-boundary backs up to the tool-pair head so tool_use/tool_result pairs are never split (strict APIs reject orphans with 400); SlidingWindow drops leading orphan tool results. 压缩工具对对齐：keep 边界回退到工具对头部不切断配对，SlidingWindow 丢弃开头孤儿 tool result。
 - **Compression-reread inflation root fix** — two-layer defense: tool results >50K chars spill to disk (conversation keeps a 500-char preview); after compression the summary carries a "files already read" list so the LLM does not re-read them. Configurable via `[memory] spill_threshold_chars` (0 = off). 压缩-重读膨胀根治：大工具结果溢写磁盘 + 压缩后注入已读文件清单。
 - **`/memory delete`** — delete memories by ID or content keyword; ambiguous matches list candidates instead of deleting. 按 ID/关键词删除记忆，多匹配时列出候选。
 - **Same-tool per-iteration fuse** — second circuit breaker layer: a tool name appearing in every one of the last 8 iterations (args ignored) stops the loop; parallel batch reads within few iterations are unaffected. same-tool 按轮熔断（连续 8 轮每轮出现即停，一轮内并行批量不误杀）。

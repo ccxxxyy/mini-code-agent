@@ -2108,6 +2108,20 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 
 用 DeepSeek 真实端点验证：对齐后的压缩产物发送成功；但**未对齐的孤儿 tool result 消息 DeepSeek 也接受了**（未报 400）——该端点对孤儿宽容。修复价值在于严格端点（OpenAI 官方 / Anthropic 的 tool_use/tool_result 强校验），与 mewcode 的 `_align_keep_start_to_tool_pair()` 对齐。
 
+## 61. 记忆导出/导入（P61）
+
+### 61.1 分层：JSON 内部存储 + .md 互操作层
+
+内部存储保持单 `memory.json`（程序读写方便，原子覆写），`.md` 只是互操作/浏览层：`/memory export` 生成 mewcode 风格的独立文件（YAML 前置元数据 + MEMORY.md 索引），`/memory import <dir>` 反向解析。逻辑放在独立的 `memory/interop.py`（纯函数、无 I/O 依赖注入），命令层只做去重与路由。
+
+### 61.2 关键设计：source ≠ scope
+
+实测暴露：`MemoryEntry.source`（"user"/"extracted"）记录**谁创建的**，不是**存在哪里**——`/memory add` 写进项目库的条目 source 也是 "user"。第一版按 source 路由导入，跨机导入时项目记忆全部错进用户库。修复：导出时把存储作用域显式写成 `scope` 前置元数据（project/user），导入按 scope 还原；无 scope 的外来文件（如 mewcode 原生格式）默认进项目库（在项目里导入即是为了本项目）。
+
+### 61.3 容错解析而非严格 YAML
+
+不引 YAML 依赖，手写 ~20 行前置元数据解析：`---` 包围的 `key: value` 行；嵌套缩进行（mewcode 的 metadata）跳过；未闭合 `---` 整文件视为正文；tags 先试 JSON 数组再回退逗号分隔；空正文取 `description`（mewcode 文件的要点常在 description）。原则：导入面对的是"别人的文件"，宁可宽容导入也不报错拒绝——错误只在目录不存在这类硬失败时返回。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利

@@ -1467,3 +1467,22 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] test_context.py — 4 个单元测试：SummarizeOldest 对齐（边界回退到 assistant）/ 全部为工具对时空操作 / LLMSummarizeOldest 对齐 / SlidingWindow 孤儿丢弃 + 任务锚点共存
 - [x] 真实 API 验证：DeepSeek 端点上对齐后的压缩产物发送成功；诚实发现——未对齐的孤儿 tool result 该端点也接受（宽容实现），修复价值在严格端点
 - [x] 764 个测试全过（760 + 4 新增），ruff lint + format clean（顺手格式化了 2 个遗留未格式化的测试文件）
+
+## Phase 61: 记忆导出/导入 (P61)
+
+> comparison-mewcode.md 4.6。JSON 保持内部存储，新增 mewcode 兼容的 .md 互操作层：`/memory export [dir]` 与 `/memory import <dir>`。
+
+### P61.1 实现
+- [x] `memory/interop.py` 新模块 —— `export_memories(entries, dest, scopes)`：每条记忆一个 `{id}.md`（YAML 前置元数据）+ MEMORY.md 索引；`import_memories(dir)`：容错解析返回 `(entry, scope)` 对
+- [x] 前置元数据字段：id / source / scope / created_at / tags（JSON 数组，逗号分隔回退）
+- [x] `extensions/builtin_commands.py` —— `/memory export [dir]`（默认 `.mini-agent/memory-export/`，无项目时 `~/.mini-agent/memory-export/`）与 `/memory import <dir>`（id 去重 + scope 路由）
+- [x] 容错导入：无前置元数据 / mewcode 风格（name/description/metadata 嵌套缩进跳过）/ 未闭合前置元数据整文件视为正文 / 空正文取 description / 空文件跳过
+
+### P61.2 实测暴露修复
+- [x] `source` ≠ 存储作用域：`/memory add` 进项目库的条目 `source="user"`，第一版按 source 路由导致跨机导入时项目记忆错进用户库 → 导出时显式写 `scope` 前置元数据，导入按 scope 还原
+
+### P61.3 测试
+- [x] test_memory_interop.py — 10 个单元测试：导出文件 + 索引 / 往返保真（含 scope）/ 无 scope 省略 / 跳过索引文件 / 纯 .md / mewcode 风格 / description 兜底 / 空文件 / 未闭合前置元数据 / tags 逗号回退
+- [x] 真实 LLM E2E 验证：机器 A add → export → 机器 B import → 真实 Application 的 PRE_LLM hook 注入导入的记忆 → 真实 DeepSeek 正确答出只存在于记忆中的两个事实（项目代号 + 用户昵称），system prompt 注入确认为 True
+- [x] 真实 handler 验证：临时目录跑真实 `_make_memory` —— add → export → 同机重导入全去重 → 跨机导入 scope 还原正确（project→项目库，user→用户库）→ 非目录/缺参数错误路径
+- [x] 774 个测试全过（764 + 10 新增），ruff lint + format clean

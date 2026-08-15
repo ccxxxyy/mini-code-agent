@@ -803,7 +803,7 @@ uv run python experiments/deadlock_induction.py --all
 | `/model [名称]` | 查看或切换模型 |
 | `/clear` | 清空当前对话 |
 | `/compact` | 手动压缩对话历史 |
-| `/memory [add\|delete <内容>]` | 查看、添加或删除持久记忆 |
+| `/memory [add\|delete\|consolidate\|export\|import]` | 查看、添加、删除、合并、导出或导入持久记忆 |
 | `/session save\|list\|load\|delete` | 会话管理（自动保存已默认开启） |
 | `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |

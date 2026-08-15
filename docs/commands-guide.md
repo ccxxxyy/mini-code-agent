@@ -143,6 +143,8 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 /memory add <内容>           # 手动添加
 /memory delete <内容>        # 按内容删除
 /memory consolidate          # LLM 语义合并相关记忆（会调用 LLM）
+/memory export [目录]        # 导出为 .md 文件（YAML 前置元数据 + MEMORY.md 索引）
+/memory import <目录>        # 从 .md 目录导入（按 id 去重，按 scope 还原作用域）
 ```
 
 ### /todo — 持久化任务清单（重启不丢）
