@@ -442,3 +442,162 @@ async def test_circuit_breaker_disabled_when_zero():
     for _ in range(10):
         result = await cm.check_and_compress(conv)
         assert result is True
+
+
+# --- File content in compression recovery (9.2a) 压缩恢复附件含文件内容 ---
+
+
+def test_record_file_read_with_content():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("foo.py", "x" * 100_000)
+    assert cm._read_files["foo.py"] is not None
+    from mini_agent.llm.token_counter import count_tokens
+
+    assert count_tokens(cm._read_files["foo.py"].removesuffix("\n... (truncated)")) <= 5000
+
+
+def test_record_file_read_without_content_does_not_overwrite():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("foo.py", "original content")
+    cm.record_file_read("foo.py")
+    assert cm._read_files["foo.py"] == "original content"
+
+
+def test_record_file_read_with_new_content_overwrites():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("foo.py", "old")
+    cm.record_file_read("foo.py", "new")
+    assert cm._read_files["foo.py"] == "new"
+
+
+def test_inject_read_files_includes_content():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("a.py", "print('hello')")
+    cm.record_file_read("b.py", "import os")
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    text = conv.messages[0].content
+    assert "--- a.py ---" in text
+    assert "print('hello')" in text
+    assert "--- b.py ---" in text
+    assert "import os" in text
+
+
+def test_inject_read_files_limits_to_5_files():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    for i in range(8):
+        cm.record_file_read(f"f{i}.py", f"content{i}")
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    text = conv.messages[0].content
+    # All 8 paths listed
+    for i in range(8):
+        assert f"f{i}.py" in text
+    # Only last 5 file contents included
+    assert "--- f3.py ---" in text
+    assert "--- f7.py ---" in text
+    assert "--- f2.py ---" not in text
+
+
+def test_compact_boundary_stores_file_contents():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("a.py", "aaa")
+    cm.record_file_read("b.py", "bbb")
+    conv = Conversation()
+    conv.compact_boundary = {"summary": "s", "timestamp": "t"}
+    # Simulate what check_and_compress does
+    conv.compact_boundary["read_files"] = list(cm._read_files)
+    file_contents = {p: c for p, c in list(cm._read_files.items())[-5:] if c is not None}
+    if file_contents:
+        conv.compact_boundary["file_contents"] = file_contents
+    assert conv.compact_boundary["file_contents"] == {"a.py": "aaa", "b.py": "bbb"}
+
+
+def test_adopt_boundary_restores_file_contents():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {
+        "summary": "s",
+        "timestamp": "t",
+        "read_files": ["a.py", "b.py"],
+        "file_contents": {"a.py": "aaa"},
+    }
+    cm.adopt_boundary(conv)
+    assert cm._read_files["a.py"] == "aaa"
+    assert cm._read_files["b.py"] is None
+
+
+def test_adopt_boundary_backward_compat_no_file_contents():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {
+        "summary": "s",
+        "timestamp": "t",
+        "read_files": ["a.py", "b.py"],
+    }
+    cm.adopt_boundary(conv)
+    assert cm._read_files["a.py"] is None
+    assert cm._read_files["b.py"] is None
+
+
+# --- Last user request recovery 用户请求恢复 ---
+
+
+async def test_compression_preserves_last_user_request():
+    cm = ContextManager(MemoryConfig(context_window=2000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+
+    conv = Conversation()
+    for i in range(30):
+        conv.messages.append(make_msg(role=Role.USER, content=f"task {i}", token_count=40))
+        conv.messages.append(make_msg(role=Role.ASSISTANT, content=f"done {i}", token_count=40))
+
+    compressed = await cm.check_and_compress(conv)
+    assert compressed
+
+    # The summary should contain the last user request
+    summary_msg = None
+    for msg in conv.messages:
+        if msg.compressed and msg.role == Role.SYSTEM:
+            summary_msg = msg
+            break
+    assert summary_msg is not None
+    assert "[User's most recent request" in summary_msg.content
+    assert "task 29" in summary_msg.content
+
+
+async def test_last_user_request_in_boundary():
+    cm = ContextManager(MemoryConfig(context_window=2000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+
+    conv = Conversation()
+    for i in range(30):
+        conv.messages.append(make_msg(role=Role.USER, content=f"do thing {i}", token_count=40))
+        conv.messages.append(make_msg(role=Role.ASSISTANT, content=f"ok {i}", token_count=40))
+
+    await cm.check_and_compress(conv)
+    assert conv.compact_boundary is not None
+    assert conv.compact_boundary["last_user_request"] == "do thing 29"
+
+
+def test_adopt_boundary_restores_last_user_request():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {
+        "summary": "s",
+        "timestamp": "t",
+        "read_files": [],
+        "last_user_request": "fix the bug in auth.py",
+    }
+    cm.adopt_boundary(conv)
+    assert cm._last_user_request == "fix the bug in auth.py"
+
+
+def test_adopt_boundary_backward_compat_no_user_request():
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {"summary": "s", "timestamp": "t", "read_files": []}
+    cm.adopt_boundary(conv)
+    assert cm._last_user_request == ""

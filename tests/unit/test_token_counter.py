@@ -2,10 +2,30 @@
 
 from mini_agent.llm.base import TokenUsage
 from mini_agent.llm.openai_provider import assemble_response
-from mini_agent.llm.token_counter import _estimate_tokens, count_tokens
+from mini_agent.llm.token_counter import _estimate_tokens, count_tokens, truncate_to_tokens
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message, Role
+
+# --- truncate_to_tokens ---
+
+
+def test_truncate_to_tokens_short_text():
+    text = "hello world"
+    assert truncate_to_tokens(text, 100) == text
+
+
+def test_truncate_to_tokens_long_text():
+    text = "a" * 40_000  # ~10000 tokens
+    result = truncate_to_tokens(text, 100)
+    assert count_tokens(result.removesuffix("\n... (truncated)")) <= 100
+    assert result.endswith("... (truncated)")
+
+
+def test_truncate_to_tokens_empty():
+    assert truncate_to_tokens("", 100) == ""
+    assert truncate_to_tokens("hello", 0) == ""
+
 
 # --- CJK-aware estimation CJK 感知估算 ---
 
