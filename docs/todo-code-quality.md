@@ -10,12 +10,12 @@
 
 ## ☐ 中优先级
 
-### markdown 围栏剥离三处重复
+### ✅ markdown 围栏剥离三处重复
 - `memory/extraction.py:140`
 - `memory/recall.py:83`
 - `memory/consolidation.py:103`
 
-三处都在做同样的 strip ` ```json ... ``` ` 逻辑。建议抽取为 `memory/_utils.py` 的 `strip_json_fence(text) -> str` 函数。
+三处都在做同样的 strip ` ```json ... ``` ` 逻辑。✅ 已抽取为 `memory/_utils.py` 的 `strip_json_fence(text) -> str` 函数。
 
 ### LLM 流式调用+组装四处重复
 - `memory/extraction.py:125` — 提取记忆

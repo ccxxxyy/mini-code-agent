@@ -100,12 +100,9 @@ class MemoryConsolidator:
         """Parse the LLM's JSON array of merge groups. None on failure.
         解析 LLM 返回的合并组 JSON 数组。失败返回 None。"""
         try:
-            clean = text.strip()
-            if clean.startswith("```"):
-                clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
-                if clean.endswith("```"):
-                    clean = clean[:-3]
-                clean = clean.strip()
+            from mini_agent.memory._utils import strip_json_fence
+
+            clean = strip_json_fence(text)
             items = json.loads(clean)
             if not isinstance(items, list):
                 return None
