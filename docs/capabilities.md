@@ -140,7 +140,7 @@
 **实现**（`memory/persistent.py` + `extraction.py` + `session_store.py`）：
 - 双层存储：项目级 `.mini-agent/memory.json`（项目约定）+ 用户级 `~/.mini-agent/memory/`（跨项目偏好）
 - 自动提取：MemoryExtractor 从对话中提取 "always/prefer/don't" 类偏好，自动去重入库
-- 手动管理：`/memory add <内容>` 添加、`/memory` 查看
+- 手动管理：`/memory add <内容>` 添加、`/memory` 查看、`/memory export/import` 导出导入（mewcode 兼容 .md 互操作格式，comparison 4.6）
 - 会话持久化：`/session save/list/load/delete` — 完整对话（含工具调用）JSON 序列化，重启后恢复继续
 - 会话自动清理（comparison 9.1）：启动时 `cleanup_stale` 删除超过 N 天的旧会话（默认 30 天，`session_cleanup_days` 可配），未正常关闭的跳过（崩溃恢复保留）
 - 压缩边界标记（comparison 9.2）：压缩后记录 `compact_boundary`（摘要 + 已读文件列表），会话恢复时跳过已归档消息、从边界重建并恢复已读文件状态——防止压缩-重读膨胀循环的入口

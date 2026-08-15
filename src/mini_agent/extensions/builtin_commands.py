@@ -58,7 +58,10 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="memory",
-            description="Memory management (usage: /memory [add|delete <text>|consolidate])",
+            description=(
+                "Memory management (usage: /memory "
+                "[add|delete <text>|consolidate|export [dir]|import <dir>])"
+            ),
             handler=_make_memory(app),
         )
     )
@@ -679,6 +682,60 @@ def _make_memory(app: Application) -> HandlerFn:
             else:
                 await pm.save_user_memory(merged)
             return f"Merged {len(entries)} entries into {len(merged)}."
+
+        if subcmd == "export":
+            from mini_agent.memory.interop import export_memories
+
+            project_entries = await pm.load_project_memory(project_dir) if project_dir else []
+            user_entries = await pm.load_user_memory()
+            all_export = project_entries + user_entries
+            if not all_export:
+                return "No memories to export."
+            scopes = {e.id: "project" for e in project_entries}
+            scopes.update({e.id: "user" for e in user_entries})
+            if len(parts) > 1:
+                dest = Path(parts[1]).expanduser()
+            elif project_dir:
+                dest = project_dir / ".mini-agent" / "memory-export"
+            else:
+                dest = Path("~/.mini-agent/memory-export").expanduser()
+            paths = export_memories(all_export, dest, scopes)
+            return f"Exported {len(paths) - 1} memories to {dest} (+ MEMORY.md index)"
+
+        if subcmd == "import":
+            from mini_agent.memory.interop import import_memories
+
+            if len(parts) < 2:
+                return "Usage: /memory import <dir>"
+            src = Path(parts[1]).expanduser()
+            if not src.is_dir():
+                return f"Not a directory: {src}"
+            imported = import_memories(src)
+            if not imported:
+                return f"No memory files found in {src}"
+
+            existing_ids: set[str] = set()
+            if project_dir:
+                existing_ids |= {e.id for e in await pm.load_project_memory(project_dir)}
+            existing_ids |= {e.id for e in await pm.load_user_memory()}
+
+            added = skipped = 0
+            for entry, scope in imported:
+                if entry.id in existing_ids:
+                    skipped += 1
+                    continue
+                # Route by recorded storage scope; files without one (foreign
+                # formats) default to the project store when available.
+                # 按记录的存储作用域路由；无作用域的文件（外来格式）默认进
+                # 项目存储（若有）。
+                if scope == "user" or not project_dir:
+                    await pm.add_user_memory(entry)
+                else:
+                    await pm.add_project_memory(project_dir, entry)
+                existing_ids.add(entry.id)
+                added += 1
+            note = f" ({skipped} duplicate(s) skipped)" if skipped else ""
+            return f"Imported {added} memories from {src}{note}"
 
         if subcmd == "delete" and len(parts) > 1:
             query = parts[1]

@@ -1162,3 +1162,29 @@
 - [x] tasks.md 新增 Phase 60 条目
 - [x] tech-notes.md 新增 §60（3 个小节：问题 / 修复 / 真实 API 诚实发现）
 - [x] checklist.md 新增本检查项
+
+## Phase 61 检查项：记忆导出/导入（comparison 4.6）
+
+### 功能完整性
+- [x] `memory/interop.py` —— `export_memories()`：每条记忆一个 `{id}.md`（前置元数据 id/source/scope/created_at/tags）+ MEMORY.md 索引
+- [x] `import_memories()` 返回 `(entry, scope)` 对，容错解析：无前置元数据 / mewcode 风格 / 未闭合 / description 兜底 / tags 逗号回退 / 空文件跳过
+- [x] `/memory export [dir]` —— 项目 + 用户记忆全量导出，默认 `.mini-agent/memory-export/`（无项目时 `~/.mini-agent/memory-export/`）
+- [x] `/memory import <dir>` —— id 去重 + scope 路由（project→项目库，user→用户库，无 scope 默认项目库）
+- [x] source ≠ scope 设计点：导出显式记录存储作用域，跨机导入还原正确（实测暴露并修复）
+- [x] JSON 内部存储格式不变，命令 description 更新
+
+### 测试
+- [x] test_memory_interop.py — 10 个单元测试（导出 + 索引 / 往返保真含 scope / 容错解析各分支）
+- [x] 真实 LLM E2E 验证：机器 A add → export → 机器 B import → 真实 Application 的 PRE_LLM hook 注入导入的记忆 → 真实 DeepSeek 正确答出只存在于记忆中的两个事实（项目代号 + 用户昵称），system prompt 注入确认为 True
+- [x] 真实 handler 验证：临时目录跑真实 `_make_memory`——add → export → 重导入去重 → 跨机 scope 还原 → 错误路径
+- [x] 774 个测试全过（764 + 10 新增），ruff lint + format clean
+
+### 文档同步
+- [x] comparison-mewcode.md 4.6 节标 ✅（P61）+ 实现详情 + 实测设计点 + 总表标 ✅
+- [x] tasks.md 新增 Phase 61 条目
+- [x] tech-notes.md 新增 §61（分层 / source≠scope / 容错解析）
+- [x] README.md / README-zh.md 命令表更新（export|import）
+- [x] docs/commands-guide.md /memory 段新增 export/import 用法
+- [x] docs/capabilities.md 手动管理条目补充导出/导入
+- [x] CHANGELOG.md Unreleased 新增 Memory export/import 与 Compression tool-pair alignment 条目
+- [x] checklist.md 新增本检查项
