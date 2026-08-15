@@ -2154,12 +2154,37 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 4. **禁用对照**：`compress_max_failures=0` 时无保护，持续白跑压缩
 5. **新会话恢复**：新 `ContextManager` 计数器归零，压缩正常工作
 
+## 63. 压缩恢复附件含文件内容（P63 / comparison 9.2a）
+
+### 63.1 问题：压缩后 agent 丢失文件内容和任务上下文
+
+原有 `_inject_read_files` 只记录已读文件路径，压缩后 LLM 虽然知道不该重读，但对文件内容没有记忆，遇到需要引用文件内容的问题时仍会调 `read_file`。更严重的是，如果压缩在一轮中间触发（工具调用后的 `check_and_compress`），`KEEP_RECENT` 保留的消息可能全是工具返回，用户原始请求被摘要吞掉，agent 完全丢失任务上下文。
+
+### 63.2 三层修复
+
+**第一层：文件内容烤入**。`record_file_read(path, content)` 在 `read_file` 工具成功后立即将内容截断到 5000 tokens 存入 `_read_files: dict[str, str | None]`。`_inject_read_files()` 在摘要消息中追加最近 5 个文件的截断内容（`--- path ---` 格式）。
+
+**第二层：用户请求保留**。`check_and_compress()` 在调用 compressor 之前，从 `conversation.messages` 逆序找到最近的 USER 消息，截取前 2000 字符存入 `_last_user_request`。`_inject_read_files()` 在摘要消息最前面插入 `[User's most recent request before compression:]` 段。
+
+**第三层：边界持久化**。`compact_boundary` 新增 `file_contents: dict[str, str]` 和 `last_user_request: str`，`adopt_boundary()` 恢复时读取这两个字段，向后兼容旧格式（字段缺失时默认空）。
+
+### 63.3 关键设计决策
+
+1. **内容在 spill 之前捕获**：`record_file_read` 在 `maybe_spill` 之前执行。如果反过来（先 spill 再记录），超过 50000 字符的文件溢写后 `result.output` 变成占位符，存入的是占位符而非真实内容。
+2. **截断在记录时发生**：不在压缩时截断，而在 `record_file_read` 调用时立即截断。好处是内存使用可控（每个文件最多 5000 tokens），且后续压缩、序列化都不需要再处理长文本。
+3. **二分搜索截断**：`truncate_to_tokens` 用二分搜索找最大可保留前缀（O(log n) 次 `count_tokens` 调用），比线性扫描高效。
+4. **模块常量**：`_MAX_RECOVERY_FILES=5`、`_RECOVERY_TOKENS_PER_FILE=5000`、`_MAX_TASK_CHARS=2000`，集中管理恢复预算。
+
+### 63.4 真实验证
+
+`context_window=14000` 配置下读 2 个文件（token_counter.py + config.py），触发 grep 工具调用后压缩触发。压缩后 agent 能：(1) 知道用户在问什么（不说"我不知道你的请求"）；(2) 不重读文件直接回答 `truncate_to_tokens` 的实现细节；(3) 正确引用代码行号和逻辑。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——778 个测试约 75 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——793 个测试约 80 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

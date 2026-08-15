@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **778 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **793 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -699,7 +699,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | 恢复压缩后的会话 | ✅ **压缩边界标记**——恢复时只加载边界后的消息 + 摘要，同时恢复已读文件状态 | **压缩边界标记**——恢复时只加载边界后的消息 + 摘要 |
 | 边界数据结构 | `compact_boundary` dict（summary + timestamp + read_files） | `CompactBoundary(summary, keep)` + `CompactEvent` |
 | 存储格式 | JSON conversation 段中的 `compact_boundary` 字段（覆写式） | JSONL 中 `type=compact_boundary` 记录（追加式） |
-| 已读文件恢复 | `adopt_boundary()` 恢复文件路径列表到 `_read_files` | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
+| 已读文件恢复 | ✅ `adopt_boundary()` 恢复文件路径 + **内容**到 `_read_files`；`_inject_read_files()` 烤入最近 5 文件内容（5000 tokens/个）（9.2a） | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
 | keep 消息处理 | 尾部消息作为普通消息存在 messages 数组中 | `keep` 消息序列化到边界记录内，自包含 |
 | 工具对完整性 | ✅ **`_align_split_to_tool_pair()`**——keep 边界回退到工具对头部，SlidingWindow 丢弃孤儿 tool result（9.2b/P60） | `_align_keep_start_to_tool_pair()` 确保不切断工具对 |
 | 压缩熔断 | ✅ **熔断器**——连续 N 次压缩无效后跳过（`compress_max_failures`，默认 3，0 禁用） | `CompactCircuitBreaker`——连续失败 3 次后熔断，防死循环 |
@@ -716,10 +716,29 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 | # | 差异点 | mewcode 做法 | mini 做法 | 影响 |
 |---|---|---|---|---|
-| 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | 只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读 | mini 的方式省 token 但恢复后 LLM 对文件内容的记忆更弱；mewcode 的方式恢复质量更高但摘要消息更大 |
+| 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | ~~只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读~~ | ✅ 已消除（9.2a），见 9.2a 小节 |
 | 2 | keep 消息自包含 | `CompactBoundary.keep` 把尾部消息序列化到边界记录内（JSONL 追加式，边界是自包含的恢复点） | 尾部消息作为普通消息存在 JSON messages 数组中 | mini 用单 JSON 覆写式存储，尾部消息天然与边界同文件，自包含性等价——仅格式层差异 |
 | 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | ~~`KEEP_RECENT=6` 固定切分，可能切断~~ | ✅ 已消除（9.2b/P60），见 9.2b 小节 |
 | 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | 无 | 独立防护机制，可作为后续增强单独实现 |
+
+### 9.2a 压缩恢复附件含文件内容 ✅ 已实现
+
+| | mini | mewcode |
+|---|---|---|
+| 恢复附件 | ✅ `_inject_read_files()` 烤入最近 5 个已读文件的实际内容（`truncate_to_tokens` 截断到 5000 tokens/个）+ 用户最近请求 | `build_recovery_attachment()` 烤入最近 5 文件内容 + skill + 工具列表 |
+| 内容捕获时机 | `record_file_read(path, content)` 在 spill **之前**立即截断存储（防溢写后丢失原始内容） | 压缩时从磁盘重读 |
+| 用户请求保留 | ✅ 压缩前捕获最近 USER 消息（≤2000 字符），烤入摘要 + 持久化到 boundary | 无对应（mewcode 靠 keep 消息） |
+| 边界持久化 | `compact_boundary["file_contents"]` + `["last_user_request"]`，`adopt_boundary()` 恢复 | 烤入摘要文本 |
+
+**已完成**：
+1. `truncate_to_tokens(text, max_tokens)` —— 二分搜索截断，超出追加 `\n... (truncated)`（`token_counter.py`）
+2. `_read_files: dict[str, str | None]` —— value 存储截断后的文件内容（`context.py`）
+3. `record_file_read(path, content)` —— 有内容时截断到 5000 tokens 存储；无内容时不覆盖已有记录
+4. `agent_loop.py` 在 spill 之前传递 `result.output` 到 `record_file_read`（修复 spill 后丢失原始内容的 bug）
+5. `_inject_read_files()` —— 注入三段恢复上下文：用户最近请求 + 已读文件路径 + 最近 5 个文件内容
+6. `_last_user_request` —— 压缩前捕获最近 USER 消息（≤2000 字符），防压缩后 agent 丢失任务上下文
+7. `compact_boundary["file_contents"]` + `["last_user_request"]` —— 持久化到边界，`adopt_boundary()` 恢复，向后兼容旧格式
+8. 14 个测试：truncate 3 + content storage/injection/boundary 7 + user request 4
 
 ### 9.2b 压缩工具对对齐 ✅ 已实现（P60）
 
@@ -786,7 +805,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 4.6 | 记忆导出/导入（P61） | 互操作：export/import .md + scope 路由 | 已完成 |
 | ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
 | ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
-| ⚪ P4 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1：mewcode 烤入最近 5 文件内容（5000 tokens/个），mini 只记路径 | 半天 |
+| ✅ 完成 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1 消除：`_inject_read_files` 烤入最近 5 文件内容（5000 tokens/个） | 已完成 |
 | ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |
 | ✅ 完成 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4 消除：`ContextManager` 内置熔断器，连续 N 次压缩无效后跳过 | 已完成 |
 | ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |

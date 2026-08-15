@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-778%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-793%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -195,7 +195,7 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 778 tests, 80%+ coverage
+├── tests/           # 793 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 4 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 └── docs/            # 13 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -215,12 +215,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 778 tests
+uv run pytest tests/           # 793 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P62, 62 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P63, 63 phases).
 
 ## Publishing to PyPI
 

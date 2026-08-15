@@ -1450,9 +1450,9 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 760 个测试全过，ruff lint + format clean
 
 ### P59.3 与 mewcode 的诚实差异（已记入总表）
-- 恢复附件只记路径（mewcode 烤入最近 5 文件内容到摘要）→ 9.2a
-- KEEP_RECENT 固定切分可能切断 tool_use/tool_result 配对 → 9.2b（P60 已完成）
-- 无压缩熔断器 → 9.2c
+- ~~恢复附件只记路径（mewcode 烤入最近 5 文件内容到摘要）~~ → ✅ 9.2a（P63 已完成）
+- ~~KEEP_RECENT 固定切分可能切断 tool_use/tool_result 配对~~ → ✅ 9.2b（P60 已完成）
+- ~~无压缩熔断器~~ → ✅ 9.2c（P62 已完成）
 
 ## Phase 60: 压缩工具对对齐 (P60)
 
@@ -1501,3 +1501,23 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 1 个集成测试（test_compact_boundary_e2e.py）：完整链路 NoOp→失败累积→日志验证→熔断跳过→ensure_fits 兜底
 - [x] 真实 LLM 验证（experiments/verify_circuit_breaker.py）：5 阶段——正常压缩 / 150 文件触发自然熔断 / ensure_fits 兜底 / 禁用对照 / 新会话恢复
 - [x] 778 个测试全过（774 + 4 新增），ruff lint + format clean
+
+## Phase 63: 压缩恢复附件含文件内容 (P63)
+
+> comparison-mewcode.md 9.2a。消除 9.2 诚实差异 #1：压缩后烤入文件内容 + 用户请求，提升恢复质量。
+
+### P63.1 实现
+- [x] `llm/token_counter.py` — `truncate_to_tokens(text, max_tokens)`：二分搜索截断到指定 token 数内，超出追加 `\n... (truncated)`
+- [x] `memory/context.py` — `_read_files: dict[str, str | None]` 升级：value 存储截断后的文件内容（5000 tokens/个）
+- [x] `memory/context.py` — `record_file_read(path, content)` 增加 content 参数，有内容时截断存储，无内容时不覆盖
+- [x] `core/agent_loop.py` — 在 spill 之前传递 `result.output` 到 `record_file_read`（修复 spill 后丢内容的 bug）
+- [x] `memory/context.py` — `_inject_read_files()` 增强：注入三段恢复上下文（用户最近请求 + 已读文件路径 + 最近 5 个文件内容）
+- [x] `memory/context.py` — `_last_user_request`：压缩前捕获最近 USER 消息（≤2000 字符），防压缩后 agent 丢失任务
+- [x] `compact_boundary` 新增 `file_contents` + `last_user_request` 字段，`adopt_boundary()` 恢复，向后兼容旧格式
+- [x] 模块常量提取：`_MAX_RECOVERY_FILES=5`、`_RECOVERY_TOKENS_PER_FILE=5000`、`_MAX_TASK_CHARS=2000`
+
+### P63.2 测试
+- [x] test_token_counter.py — 3 个测试：短文本保留 / 长文本截断 / 空文本边界
+- [x] test_context.py — 11 个测试：内容存储截断 / 不覆盖 / 新内容覆盖 / 注入含内容 / 限制 5 个 / boundary 存储 / 恢复 / 向后兼容(2) / 用户请求压缩保留 / boundary 含请求 / 恢复请求 / 旧格式兼容
+- [x] 真实 LLM 验证（DeepSeek）：`context_window=14000` 下读 2 文件 → 触发压缩 → 压缩后 agent 不重读文件、不丢失任务上下文、能引用文件内容细节
+- [x] 793 个测试全过（778 + 3 + 11 + 1 flaky skip），ruff lint + format clean

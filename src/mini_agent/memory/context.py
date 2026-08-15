@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import logging
 
-from mini_agent.llm.token_counter import count_tokens
+from mini_agent.llm.token_counter import count_tokens, truncate_to_tokens
 from mini_agent.memory.compressor import SlidingWindow
 from mini_agent.models.config import MemoryConfig
 from mini_agent.models.message import Conversation, Message, Role
+
+_MAX_RECOVERY_FILES = 5
+_RECOVERY_TOKENS_PER_FILE = 5000
+_MAX_TASK_CHARS = 2000
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,8 @@ class ContextManager:
         # Ordered, deduplicated list of files read this session -- re-injected
         # after compression so the LLM does not forget and re-read them
         # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
-        self._read_files: dict[str, None] = {}
+        self._read_files: dict[str, str | None] = {}
+        self._last_user_request: str = ""
         # API usage anchor: the LLM-reported total is authoritative for the
         # whole conversation up to the anchored message (it even includes
         # tool schemas, which estimation cannot see). Messages after the
@@ -47,8 +52,11 @@ class ContextManager:
         注入压缩器（避免初始化时的循环导入）。"""
         self._compressor = compressor
 
-    def record_file_read(self, path: str) -> None:
-        self._read_files[path] = None
+    def record_file_read(self, path: str, content: str = "") -> None:
+        if content:
+            self._read_files[path] = truncate_to_tokens(content, _RECOVERY_TOKENS_PER_FILE)
+        elif path not in self._read_files:
+            self._read_files[path] = None
 
     @property
     def read_files(self) -> list[str]:
@@ -162,6 +170,13 @@ class ContextManager:
             )
             return False
 
+        # Capture the latest user request before compression discards it
+        # 压缩前捕获最近的用户请求，防止被摘要吞掉
+        for msg in reversed(conversation.messages):
+            if msg.role == Role.USER and msg.content:
+                self._last_user_request = msg.content[:_MAX_TASK_CHARS]
+                break
+
         old_total = self._total_tokens
         target = int(self._max_tokens * 0.5)
         await self._compressor.compress(conversation, target)
@@ -182,6 +197,15 @@ class ContextManager:
                     break
         if conversation.compact_boundary is not None:
             conversation.compact_boundary["read_files"] = list(self._read_files)
+            file_contents = {
+                p: c
+                for p, c in list(self._read_files.items())[-_MAX_RECOVERY_FILES:]
+                if c is not None
+            }
+            if file_contents:
+                conversation.compact_boundary["file_contents"] = file_contents
+            if self._last_user_request:
+                conversation.compact_boundary["last_user_request"] = self._last_user_request
         self.update_total(conversation)
         if self._total_tokens >= old_total:
             self._compress_failures += 1
@@ -211,40 +235,59 @@ class ContextManager:
         return True
 
     def _inject_read_files(self, conversation: Conversation) -> None:
-        """After compression, remind the LLM which files it already read --
-        summaries discard file contents AND identities, so without this the
-        LLM re-reads the same files and re-triggers compression in a loop.
-        压缩后提醒 LLM 已读过哪些文件——摘要连内容带文件名一起丢弃，
-        没有这行 LLM 会重读同样的文件并再次触发压缩，形成循环。"""
-        if not self._read_files:
+        """After compression, inject recovery context: user's last request,
+        read-file paths, and recent file contents.
+        压缩后注入恢复上下文：用户最近请求、已读文件路径、近期文件内容。"""
+        parts: list[str] = []
+        # 1. Last user request -- prevents "I don't know what you asked" after compression
+        # 最近用户请求——防止压缩后 agent 忘记任务
+        if self._last_user_request:
+            parts.append(
+                "[User's most recent request before compression:\n" + self._last_user_request + "]"
+            )
+        # 2. Read-file path list
+        if self._read_files:
+            parts.append(
+                "[Files already read this session -- do NOT re-read unless "
+                "their content changed: " + ", ".join(self._read_files) + "]"
+            )
+        # 3. Truncated contents of the most recent files (up to 5)
+        # 附加最近文件的截断内容（最多 5 个）
+        recent = [(p, c) for p, c in self._read_files.items() if c is not None][
+            -_MAX_RECOVERY_FILES:
+        ]
+        if recent:
+            parts.append("[File contents from before compression:]\n")
+            for path, content in recent:
+                parts.append(f"--- {path} ---\n{content}")
+        if not parts:
             return
-        note = (
-            "[Files already read this session -- do NOT re-read unless "
-            "their content changed: " + ", ".join(self._read_files) + "]"
-        )
+        note = "\n\n".join(parts)
         marker = "[Files already read this session"
+        user_marker = "[User's most recent request"
         for msg in reversed(conversation.messages):
             if msg.role == Role.SYSTEM and msg.compressed:
                 content = msg.content or ""
-                if marker in content:
-                    # Replace stale note -- the read list may have grown
-                    # 替换旧清单——已读列表可能已增长
-                    content = content[: content.index(marker)].rstrip()
+                # Strip old recovery block (either marker may come first)
+                # 剥离旧恢复块（两个标记可能任一在前）
+                for m in (user_marker, marker):
+                    if m in content:
+                        content = content[: content.index(m)].rstrip()
                 msg.content = (content + "\n" + note) if content else note
                 msg.token_count = None
                 return
-        # No summary message (pure SlidingWindow path): insert a standalone note
-        # 没有摘要消息（纯滑窗路径）：插入独立提示
         conversation.messages.insert(0, Message(role=Role.SYSTEM, content=note, compressed=True))
 
     def adopt_boundary(self, conversation: Conversation) -> None:
-        """Restore read-files state from a loaded compact boundary.
-        从已加载的压缩边界恢复已读文件状态。"""
+        """Restore read-files and task state from a loaded compact boundary.
+        从已加载的压缩边界恢复已读文件和任务状态。"""
         boundary = conversation.compact_boundary
         if not boundary:
             return
+        file_contents = boundary.get("file_contents", {})
         for path in boundary.get("read_files", []):
-            self._read_files[path] = None
+            self._read_files[path] = file_contents.get(path)
+        self._last_user_request = boundary.get("last_user_request", "")
 
     async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
         """Last-resort guard: force-truncate if conversation exceeds max_tokens.

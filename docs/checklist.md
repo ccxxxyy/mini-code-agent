@@ -1214,3 +1214,27 @@
 - [x] capabilities.md / positioning.md / tech-notes.md 测试数更新
 - [x] roadmap.md phase 范围更新
 - [x] checklist.md 新增本检查项
+
+## Phase 63 检查项：压缩恢复附件含文件内容（comparison 9.2a）
+
+### 功能完整性
+- [x] `truncate_to_tokens(text, max_tokens)` 二分搜索截断（token_counter.py）
+- [x] `_read_files` 升级为 `dict[str, str | None]`，value 存截断后文件内容
+- [x] `record_file_read(path, content)` 有内容截断存储，无内容不覆盖
+- [x] `agent_loop.py` 在 spill 之前传 `result.output`（修复顺序 bug）
+- [x] `_inject_read_files()` 注入三段恢复上下文：用户请求 + 路径列表 + 文件内容
+- [x] `_last_user_request` 压缩前捕获最近 USER 消息（≤2000 字符）
+- [x] `compact_boundary` 新增 `file_contents` + `last_user_request`，`adopt_boundary()` 恢复
+- [x] 向后兼容：旧格式 boundary 无这两个字段时默认空值
+
+### 测试
+- [x] test_token_counter.py — 3 个测试（短文本 / 长文本截断 / 空文本）
+- [x] test_context.py — 11 个测试（内容存储/注入/boundary/用户请求/向后兼容）
+- [x] 真实 LLM 验证（DeepSeek，context_window=14000）：压缩后 agent 不重读、不丢任务、能引用文件细节
+- [x] 793 个测试全过，ruff lint + format clean
+
+### 文档同步
+- [x] comparison-mewcode.md 9.2a 小节 + 诚实差异表 #1 标记消除 + 对比表更新 + 总表标 ✅
+- [x] tasks.md 新增 Phase 63 条目 + P59.3 诚实差异标记完成
+- [x] tech-notes.md 新增 §63
+- [x] checklist.md 新增本检查项

@@ -79,6 +79,26 @@ def count_tokens(text: str) -> int:
     return _count_cached(text)
 
 
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to fit within *max_tokens*.
+    将文本截断到 max_tokens 以内（二分搜索切割点）。"""
+    if not text or max_tokens <= 0:
+        return ""
+    if count_tokens(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if count_tokens(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    result = text[:lo]
+    if lo < len(text):
+        result += "\n... (truncated)"
+    return result
+
+
 def count_message_tokens(message: dict[str, Any]) -> int:
     """Estimate tokens for a single API message.
     估算单条 API 消息的 token 数。

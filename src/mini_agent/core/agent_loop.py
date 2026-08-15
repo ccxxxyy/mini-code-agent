@@ -650,16 +650,19 @@ class AgentLoop:
                 is_error=raw.is_error,
                 metadata=raw.metadata,
             )
+            # Record file content BEFORE spill -- spill replaces output
+            # with a placeholder, but recovery needs the real content
+            # 在溢写前记录文件内容——溢写会替换为占位符，恢复需要真实内容
+            if self._context is not None and tc.name == "read_file" and not result.is_error:
+                path = args.get("file_path")
+                if path:
+                    self._context.record_file_read(str(path), result.output)
             # Spill oversized outputs to disk -- large file contents entering
             # the conversation wholesale is the root cause of the
             # compression-reread inflation loop
             # 超大输出溢写磁盘——大文件内容整体进对话是压缩-重读膨胀的根源
             if self.result_cache is not None:
                 result = self.result_cache.maybe_spill(result)
-            if self._context is not None and tc.name == "read_file" and not result.is_error:
-                path = args.get("file_path")
-                if path:
-                    self._context.record_file_read(str(path))
         except ValueError as e:
             result = ToolResult(call_id=tc.id, name=tc.name, output=str(e), is_error=True)
         except Exception as e:
