@@ -14,7 +14,12 @@ from mini_agent.extensions.builtin_commands import register_builtin_commands
 from mini_agent.extensions.skills import SkillRegistry
 from mini_agent.extensions.slash_commands import MARKDOWN_RESULT, SlashCommandRegistry
 from mini_agent.llm.registry import ProviderRegistry
-from mini_agent.memory.compressor import Compressor
+from mini_agent.memory.compressor import (
+    Compressor,
+    DropToolResults,
+    LLMSummarizeOldest,
+    SlidingWindow,
+)
 from mini_agent.memory.context import ContextManager
 from mini_agent.memory.session_store import SessionStore
 from mini_agent.models.config import AgentConfig
@@ -215,7 +220,16 @@ class Application:
         # Memory: context manager + compressor + session store
         # 记忆：上下文管理器 + 压缩器 + 会话存储
         self.context_manager = ContextManager(config.memory)
-        compressor = Compressor()
+        if config.memory.llm_summarize:
+            compressor = Compressor(
+                strategies=[
+                    DropToolResults(),
+                    LLMSummarizeOldest(self._llm),
+                    SlidingWindow(),
+                ]
+            )
+        else:
+            compressor = Compressor()
         self.context_manager.set_compressor(compressor)
         self.session_store = SessionStore()
         self._last_autosave: float = 0.0

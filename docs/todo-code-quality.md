@@ -149,60 +149,111 @@ experiments/results/
 
 ---
 
-## ☐ 上下文管理增强（已验证的真实缺陷）
+## ☐ 上下文管理增强
 
-以下三项来自 mewcode 对比分析，经代码验证确认为 mini 的真实缺陷。
+对照 `D:\PythonProjects\mewcode-python\mewcode\context\manager.py` 及 `agent.py` 逐项对比。
 
-### ① 聚合工具结果预算（真实缺陷，高优先级）
+### ✅ ② LLM 摘要压缩接入 已修复
 
-**问题**：`_act()` 并行执行多个工具后，逐条追加结果到对话，无聚合大小检查。`ToolResultCache.maybe_spill()` 按单条 50K 阈值溢写——10 个并行工具各返回 49K 字符（未触发单条阈值），一轮塞入 ~500K 字符直接撑爆上下文。
+`MemoryConfig.llm_summarize = True`（默认开启）：`app.py` 装配 Compressor 时用 `LLMSummarizeOldest(self._llm)` 替换 `SummarizeOldest`。LLM 调用失败自动回退到抽取式摘要（已内置）。`llm_summarize = false` 恢复旧行为。2 个测试覆盖。
 
-**位置**：
-- `core/agent_loop.py:254-261` — `_act()` 返回结果后逐条 `conversation.append`，无总量检查
-- `memory/tool_result_cache.py:41` — `len(output) <= self._threshold` 仅按单条判断
-- `models/config.py:67` — `spill_threshold_chars = 50_000` 仅单条阈值
+修复两个问题：
+- **压缩检查移到 LLM 调用前**：原来只在 OBSERVE 阶段（工具结果追加后）检查压缩，纯对话场景（无工具调用）永远不触发压缩。移到 `_think()` 的 `ensure_fits` 之前，每次 LLM 调用前先尝试 LLM 摘要压缩，不够再用 SlidingWindow 兜底。
+- **压缩摘要前缀加明确指令**：压缩后 LLM 不信任摘要，去磁盘翻会话文件导致大量无效工具调用和权限弹窗。在摘要前缀中加 "this is the authoritative record of earlier conversation. Do NOT search session files or disk to recover history"。
 
-**修复建议**：在 `run()` 的 OBSERVE 阶段（追加结果前），计算本轮所有结果的总字符数。超过聚合阈值（如 200K）时，从最大的结果开始逐条溢写磁盘，直到总量降到阈值内。溢写回读的结果（`is_spilled_readback` 标记）豁免溢写。
+### ✅ ③ 压缩熔断器 已修复
 
-```python
-# agent_loop.py OBSERVE 阶段，追加结果前
-total = sum(len(r.output) for r in results)
-if total > AGGREGATE_BUDGET:
-    sorted_results = sorted(results, key=lambda r: len(r.output), reverse=True)
-    for r in sorted_results:
-        if total <= AGGREGATE_BUDGET:
-            break
-        if self.result_cache and not getattr(r, 'is_readback', False):
-            old_len = len(r.output)
-            r = self.result_cache.maybe_spill(r, force=True)
-            total -= (old_len - len(r.output))
-```
+`ContextManager` 内置熔断器：连续 N 次压缩无效（token 未减少）后跳过后续压缩。`MemoryConfig.compress_max_failures = 3`（0 = 禁用）。成功压缩自动重置计数。3 个测试覆盖。
 
-### ② LLM 摘要压缩接入（已有代码未接入）
+### ☐ ① 聚合工具结果预算（含三个配套机制）
 
-**问题**：默认压缩链用 `SummarizeOldest`（每条截 300 字符的抽取式摘要，丢语义），`LLMSummarizeOldest`（真正的 LLM 摘要）**已写好但未接入**，只在 `experiments/compression_ab.py` 实验中使用。
+**问题**：`maybe_spill()` 按单条 50K 阈值溢写。10 个并行工具各返回 49K 字符（未触发单条阈值），一轮塞入 ~500K 字符撑爆上下文。
 
-**位置**：
-- `memory/compressor.py:64-88` — `SummarizeOldest`（生产环境在用，300 字符截断）
-- `memory/compressor.py:128-171` — `LLMSummarizeOldest`（已实现，未接入，失败时自动回退到抽取式）
-- `app.py:206` — `Compressor()` 默认用 `SummarizeOldest`，未传入 LLM
+**mewcode 实现**（`context/manager.py` `apply_tool_result_budget`）：
+- `AGGREGATE_CHAR_LIMIT = 200_000`：单轮所有工具结果总字符超此值时，按 output 长度降序逐条溢写，直到总量降到限制内
+- 溢写目录：`.mewcode/sessions/<session_id>/tool-results/`
 
-**修复建议**：在 `app.py` 装配时把 LLM 实例传给 Compressor，让压缩链用 `LLMSummarizeOldest`（已内置失败回退，不会阻断主流程）：
+**三个配套机制**（缺任一聚合溢写都会出问题）：
 
-```python
-# app.py 中
-compressor = Compressor(strategies=[
-    DropToolResults(),
-    LLMSummarizeOldest(llm=self.llm_provider),  # 替换 SummarizeOldest
-    SlidingWindow(),
-])
-```
+| # | 配套机制 | mewcode | mini 现状 | 为什么必须 |
+|---|---|---|---|---|
+| 1a | **反重溢写保护** | `is_spill_readback`：工具结果的文件路径在溢写目录内时豁免溢写 | ❌ 没有 | LLM 读回溢写文件 → 结果又被溢写 → 再读回 → 死循环 |
+| 1b | **预览大小** | `PREVIEW_CHARS = 2_000` 字符 | 500 字符 | 500 字符太短，LLM 信息不足无法判断是否需要重读，直接放弃用 bash 绕过 |
+| 1c | **小结果豁免** | `< PREVIEW_CHARS` 的结果不溢写 | ❌ 没有 | 预览比原文还大时溢写没意义（反而变大） |
 
-注：mewcode 还在压缩后注入"文件内容快照"（截断后的文件内容），mini 只注入路径列表。内容快照 token 开销大，路径列表已足够防重读，按需评估是否值得。
+**修复位置**：
+- `memory/tool_result_cache.py`：`PREVIEW_CHARS` 从 500 改为 2000；新增 `spill_batch(results, budget)` 方法；`maybe_spill` 新增 `force` 参数
+- `core/agent_loop.py`：`_run_tool_pipeline()` 在溢写前检查 `is_spill_readback`（结果文件路径在 cache 目录内时跳过）；OBSERVE 阶段调 `spill_batch`（需跨迭代累计，不能只看单批）
+- `models/config.py`：`aggregate_spill_chars: int = 200_000`
 
-### ③ 压缩熔断器 ✅ 已修复
+### ☐ ④ 压缩双阈值（硬阈值绕过熔断器）
 
-`ContextManager` 内置熔断器：连续 N 次压缩无效（token 未减少）后跳过后续压缩。`MemoryConfig.compress_max_failures = 3`（0 = 禁用）。成功压缩自动重置计数。3 个测试覆盖：熔断触发 / 成功重置 / 禁用。
+**问题**：mini 的熔断器开启后**所有**压缩都被阻断，包括上下文即将溢出的紧急情况。
+
+**mewcode 实现**（`context/manager.py` `auto_compact`）：
+- 软阈值：`context_window - SUMMARY_OUTPUT_RESERVE(20K) - AUTO_COMPACT_SAFETY_MARGIN(13K)` → 正常压缩，受熔断器控制
+- 硬阈值：`context_window - SUMMARY_OUTPUT_RESERVE(20K) - MANUAL_COMPACT_SAFETY_MARGIN(3K)` → **强制压缩，绕过熔断器**
+- 效果：200K 窗口下，167K 触发软压缩，177K 触发硬压缩
+
+**mini 现状**：单阈值 `context_window × compression_threshold`（默认 75%），熔断器开启后只有 `ensure_fits`（粗暴 SlidingWindow 截断）兜底。
+
+**修复位置**：
+- `memory/context.py`：`check_and_compress()` 区分软硬阈值，硬阈值时跳过熔断器检查
+
+### ☐ ⑤ token 驱动的保留窗口（替代固定 6 条消息）
+
+**问题**：`SummarizeOldest.KEEP_RECENT = 6` 固定保留最近 6 条消息。6 条短消息可能只有 1K token（浪费空间），6 条长消息可能有 40K token（保留太多）。
+
+**mewcode 实现**（`context/manager.py` keep-recent 窗口）：
+- 从尾部反向扫描，累计 token 数
+- 停止条件：累计 ≥ `KEEP_RECENT_TOKENS(10K)` **且** 消息数 ≥ `MIN_KEEP_MESSAGES(5)`
+- 硬顶：不超过 `KEEP_MAX_TOKENS(40K)`
+- 工具对对齐：keep 边界不切断 tool_use/tool_result 配对
+
+**mini 现状**：固定 `KEEP_RECENT = 6` 条消息，有工具对对齐但无 token 感知。
+
+**修复位置**：
+- `memory/compressor.py`：`SummarizeOldest` 和 `LLMSummarizeOldest` 的 keep 计算从固定消息数改为 token 驱动
+
+### ☐ ⑥ 摘要 prompt 结构化
+
+**问题**：mini 的 `_SUMMARY_PROMPT` 只列 4 条通用指令，摘要质量不稳定。
+
+**mewcode 实现**（`context/manager.py` `SUMMARY_PROMPT`）：
+- 要求输出 `<analysis>` + `<summary>` 两个 XML 块
+- analysis 覆盖 9 个维度：主请求、技术概念、涉及文件/代码、错误/修复、问题解决步骤、所有用户消息、待做任务、当前工作进展、可选下一步
+- summary 要求简洁、保留所有关键信息
+
+**mini 现状**：`_SUMMARY_PROMPT` 只要求 4 条（目标/步骤/文件/未解决），无结构化输出格式。
+
+**修复位置**：
+- `memory/compressor.py`：重写 `_SUMMARY_PROMPT`，参考 mewcode 的结构化 prompt
+
+### ☐ ⑦ 摘要重试
+
+**问题**：LLM 摘要调用偶发网络错误时直接回退到抽取式截断，丢失语义摘要。
+
+**mewcode 实现**：最多重试 3 次；如果摘要 prompt 本身太长，丢弃最旧 20% 的消息后重试。
+
+**mini 现状**：`LLMSummarizeOldest._summarize()` 失败直接 `except Exception` 回退。
+
+**修复位置**：
+- `memory/compressor.py`：`LLMSummarizeOldest._summarize()` 加重试循环；prompt 超长时截断输入
+
+### ⑧ 压缩后重注入环境上下文和记忆 — 不适用（架构差异）
+
+mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，压缩 `replace_history()` 后需要重注入。mini 把记忆注入到 `system_prompt`（独立字段），压缩只操作 `messages` 不动 `system_prompt`，记忆天然免疫压缩，不需要重注入。
+
+### ☐ ⑨ 最小前缀检查
+
+**问题**：可摘要部分（keep 窗口之前的消息）很少时，压缩开销大于收益。
+
+**mewcode 实现**：可摘要前缀 < `MIN_SUMMARIZE_PREFIX_TOKENS(2K)` token 时跳过压缩。
+
+**mini 现状**：只检查消息数（`len(msgs) <= KEEP_RECENT`），不检查 token 量。
+
+**修复位置**：
+- `memory/compressor.py`：`SummarizeOldest` / `LLMSummarizeOldest` 的 `compress()` 增加前缀 token 量检查
 
 ---
 

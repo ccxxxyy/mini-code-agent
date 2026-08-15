@@ -202,7 +202,7 @@ async def test_llm_summarize_falls_back_on_error():
     await strategy.compress(conv, 100)
     # Fallback to extractive digest, chain not broken 回退到抽取式摘要，压缩链不中断
     assert len(conv.messages) == 1 + LLMSummarizeOldest.KEEP_RECENT
-    assert "[Compressed conversation history]" in conv.messages[0].content
+    assert "[Compressed conversation history" in conv.messages[0].content
     assert "message 0" in conv.messages[0].content
 
 
@@ -601,3 +601,21 @@ def test_adopt_boundary_backward_compat_no_user_request():
     conv.compact_boundary = {"summary": "s", "timestamp": "t", "read_files": []}
     cm.adopt_boundary(conv)
     assert cm._last_user_request == ""
+
+
+# --- LLM summarize config ---
+
+
+def test_llm_summarize_config_default():
+    """Default MemoryConfig enables LLM summarize."""
+    cfg = MemoryConfig()
+    assert cfg.llm_summarize is True
+
+
+def test_llm_summarize_config_false():
+    """llm_summarize=False uses extractive SummarizeOldest."""
+    assert MemoryConfig(llm_summarize=False).llm_summarize is False
+    compressor = Compressor()
+    strategies = compressor._strategies
+    assert any(isinstance(s, SummarizeOldest) for s in strategies)
+    assert not any(isinstance(s, LLMSummarizeOldest) for s in strategies)

@@ -359,6 +359,15 @@ class AgentLoop:
         if pre_llm_result.action == HookAction.BLOCK:
             return LLMResponse(content=pre_llm_result.reason or "(blocked by PRE_LLM hook)")
 
+        # Context compression: check BEFORE every LLM call (not just after
+        # tool results) so pure-conversation turns also get compressed.
+        # 上下文压缩：每次 LLM 调用前检查（不仅在工具结果后），
+        # 纯对话轮次也能触发压缩。
+        if self._context:
+            compressed = await self._context.check_and_compress(conversation)
+            if compressed:
+                api_messages = conversation.to_api_messages()
+
         # Context overflow guard: force-truncate if still over window
         # 上下文溢出兜底：超窗口时强制截断，防 API 400
         if self._context:

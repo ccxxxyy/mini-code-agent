@@ -1521,3 +1521,26 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] test_context.py — 11 个测试：内容存储截断 / 不覆盖 / 新内容覆盖 / 注入含内容 / 限制 5 个 / boundary 存储 / 恢复 / 向后兼容(2) / 用户请求压缩保留 / boundary 含请求 / 恢复请求 / 旧格式兼容
 - [x] 真实 LLM 验证（DeepSeek）：`context_window=14000` 下读 2 文件 → 触发压缩 → 压缩后 agent 不重读文件、不丢失任务上下文、能引用文件内容细节
 - [x] 793 个测试全过（778 + 3 + 11 + 1 flaky skip），ruff lint + format clean
+
+## Phase 64: 上下文管理增强 (P64)
+
+> todo-code-quality.md 上下文管理增强 ②。LLM 摘要压缩接入 + 验证两个修复。
+
+### P64.1 聚合工具结果预算（待做，需配套机制）
+- [x] 首次实现缺配套（反重溢写/预览太短/小结果豁免）→ 真实 LLM 验证失败 → 删除
+- [x] 对比 mewcode 后明确：聚合溢写本身合理，但必须连同 3 个配套机制一起做（详见 todo-code-quality.md ①）
+- [ ] 待后续实现
+
+### P64.2 LLM 摘要压缩接入
+- [x] `models/config.py` — `MemoryConfig.llm_summarize = True`：默认启用 LLM 语义摘要
+- [x] `app.py` — compressor 装配：`llm_summarize=True` 时用 `LLMSummarizeOldest(self._llm)` 替换 `SummarizeOldest`；失败自动回退抽取式
+- [x] `config.toml.example` — `[memory]` 段补充 `llm_summarize` 注释示例
+
+### P64.3 两个修复
+- [x] **压缩检查移到 LLM 调用前**：`agent_loop.py` `_think()` 在 `ensure_fits` 之前调 `check_and_compress`——原来只在 OBSERVE 阶段（工具结果追加后）检查，纯对话场景永远不触发压缩
+- [x] **压缩摘要前缀加明确指令**：`compressor.py` 三处摘要前缀加 "this is the authoritative record... Do NOT search session files"——压缩后 LLM 不再去磁盘翻会话文件
+
+### P64.4 验证
+- [x] 2 个新测试（config 默认 / config false） + 1 个已有测试适配摘要前缀变更，803 个测试全过
+- [x] ruff lint + format clean
+- [x] 真实 LLM 验证（context_window=10000）：纯对话场景压缩触发，但熔断器连续 3 次无效后开启——暴露 ⑤（token 驱动保留窗口）的必要性
