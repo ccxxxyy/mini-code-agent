@@ -9,6 +9,7 @@ Exercises the full chain without a real LLM:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,50 @@ async def test_legacy_session_no_boundary(tmp_path: Path):
     assert len(loaded.conversation.messages) == 3
     assert loaded.conversation.messages[0].content == "[old summary]"
     assert loaded.conversation.messages[0].compressed is True
+
+
+# --- Compression circuit breaker E2E (9.2c) 压缩熔断器端到端 ---
+
+
+class _NoOpCompressor:
+    """Does nothing -- simulates compression that has no effect."""
+
+    async def compress(self, conversation, target_tokens):
+        pass
+
+
+async def test_circuit_breaker_full_chain(caplog):
+    """Full chain: no-op compressor → failure accumulation → breaker trips →
+    subsequent calls skip with warning → ensure_fits still works as fallback.
+    完整链路：空压缩→失败累积→熔断→后续跳过并警告→ensure_fits 兜底仍有效。"""
+    config = MemoryConfig(
+        context_window=300,
+        compression_threshold=0.5,
+        compress_max_failures=3,
+    )
+    ctx = ContextManager(config)
+    ctx.set_compressor(_NoOpCompressor())
+
+    conv = Conversation()
+    for i in range(20):
+        conv.append(Message(role=Role.USER, content=f"Message {i} " + "x" * 100))
+
+    with caplog.at_level(logging.INFO, logger="mini_agent.memory.context"):
+        # Phase 1: three ineffective compressions accumulate failures
+        for i in range(3):
+            result = await ctx.check_and_compress(conv)
+            assert result is True, f"attempt {i + 1} should still run compression"
+        assert ctx._compress_failures == 3
+        assert "Compression ineffective" in caplog.text
+
+        # Phase 2: breaker trips — compression skipped with warning
+        caplog.clear()
+        result = await ctx.check_and_compress(conv)
+        assert result is False, "breaker should have tripped"
+        assert "circuit breaker open" in caplog.text.lower()
+
+    # Phase 3: ensure_fits still works as hard fallback even after breaker trips
+    msg_count_before = len(conv.messages)
+    truncated = await ctx.ensure_fits(conv, 300)
+    assert truncated, "ensure_fits should truncate when over window"
+    assert len(conv.messages) < msg_count_before, "messages should have been cut"

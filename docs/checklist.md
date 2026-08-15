@@ -1188,3 +1188,29 @@
 - [x] docs/capabilities.md 手动管理条目补充导出/导入
 - [x] CHANGELOG.md Unreleased 新增 Memory export/import 与 Compression tool-pair alignment 条目
 - [x] checklist.md 新增本检查项
+
+## Phase 62 检查项：压缩熔断器（comparison 9.2c）
+
+### 功能完整性
+- [x] `ContextManager._compress_failures` / `_max_compress_failures` —— 连续 N 次压缩后 token 未减少则跳过后续压缩
+- [x] `MemoryConfig.compress_max_failures = 3` 配置项（0 = 禁用）
+- [x] 成功压缩（token 减少）自动重置计数
+- [x] 熔断触发时 WARNING 日志 + 每次无效压缩 INFO 日志（可观测性）
+- [x] `ensure_fits()` 硬兜底不受熔断器影响——熔断只阻止 75% 阈值处的主动压缩
+
+### 测试
+- [x] 3 个单元测试（test_context.py）：熔断触发 / 成功重置 / 禁用(0 值)
+- [x] 1 个集成测试（test_compact_boundary_e2e.py）：完整链路 NoOp→失败累积→日志验证→熔断跳过→ensure_fits 兜底
+- [x] 真实 LLM 验证（experiments/verify_circuit_breaker.py）：5 阶段——正常压缩 / 150 文件 read_files 抵消触发熔断 / ensure_fits 兜底 / 禁用对照 / 新会话恢复
+- [x] 778 个测试全过（774 + 4 新增），ruff lint + format clean
+
+### 文档同步
+- [x] comparison-mewcode.md 9.2 表 + 9.2c 总表行标 ✅
+- [x] todo-code-quality.md ③ 标 ✅ 已修复
+- [x] tasks.md 新增 Phase 62 条目
+- [x] tech-notes.md 新增 §62
+- [x] CHANGELOG.md 新增条目
+- [x] README.md / README-zh.md 测试数 + 实验数 + phase 范围更新
+- [x] capabilities.md / positioning.md / tech-notes.md 测试数更新
+- [x] roadmap.md phase 范围更新
+- [x] checklist.md 新增本检查项

@@ -79,6 +79,9 @@ class MemoryConfig:
     # Sessions older than this many days are auto-removed at startup (0 = off)
     # 超过此天数的旧会话启动时自动清理（0 = 禁用）
     session_cleanup_days: int = 30
+    # Circuit breaker: skip compression after N consecutive ineffective attempts
+    # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
+    compress_max_failures: int = 3
 
 
 @dataclass

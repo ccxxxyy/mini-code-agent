@@ -200,42 +200,9 @@ compressor = Compressor(strategies=[
 
 注：mewcode 还在压缩后注入"文件内容快照"（截断后的文件内容），mini 只注入路径列表。内容快照 token 开销大，路径列表已足够防重读，按需评估是否值得。
 
-### ③ 压缩熔断器（真实缺陷，中优先级）
+### ③ 压缩熔断器 ✅ 已修复
 
-**问题**：`check_and_compress()` 无失败计数、无冷却机制。压缩失败（如 LLM 不可用）后不记录，下一轮 `usage_ratio >= 0.75` 仍满足，再次触发压缩——每轮都尝试、每轮都失败、白烧 token（尤其启用 `LLMSummarizeOldest` 后）。
-
-**位置**：
-- `memory/context.py:132-149` — `check_and_compress()` 无 try/except、无失败计数、压缩后不验证是否真的降了 token
-- 对比：`ensure_fits()`（`context.py:178-189`）是硬兜底但不在压缩链中
-
-**修复建议**：加失败计数器 + 连续 N 次失败后跳过（冷却）：
-
-```python
-class ContextManager:
-    def __init__(self, ...):
-        ...
-        self._compress_failures: int = 0
-        self._max_compress_failures: int = 3
-
-    async def check_and_compress(self, conversation):
-        self.update_total(conversation)
-        if not self.needs_compression:
-            return False
-        if self._compress_failures >= self._max_compress_failures:
-            return False  # 熔断：连续失败过多，跳过
-        if self._compressor is None:
-            return False
-        old_total = self._total_tokens
-        target = int(self._max_tokens * 0.5)
-        await self._compressor.compress(conversation, target)
-        self._inject_read_files(conversation)
-        self.update_total(conversation)
-        if self._total_tokens >= old_total:
-            self._compress_failures += 1  # 没效果，计失败
-        else:
-            self._compress_failures = 0  # 有效果，重置
-        return True
-```
+`ContextManager` 内置熔断器：连续 N 次压缩无效（token 未减少）后跳过后续压缩。`MemoryConfig.compress_max_failures = 3`（0 = 禁用）。成功压缩自动重置计数。3 个测试覆盖：熔断触发 / 成功重置 / 禁用。
 
 ---
 

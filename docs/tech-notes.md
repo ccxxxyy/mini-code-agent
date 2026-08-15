@@ -2122,12 +2122,44 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 
 不引 YAML 依赖，手写 ~20 行前置元数据解析：`---` 包围的 `key: value` 行；嵌套缩进行（mewcode 的 metadata）跳过；未闭合 `---` 整文件视为正文；tags 先试 JSON 数组再回退逗号分隔；空正文取 `description`（mewcode 文件的要点常在 description）。原则：导入面对的是"别人的文件"，宁可宽容导入也不报错拒绝——错误只在目录不存在这类硬失败时返回。
 
+## 62. 压缩熔断器（P62）
+
+### 62.1 问题：压缩无效时的死循环
+
+`check_and_compress()` 在 `usage_ratio >= 0.75` 时触发压缩。但压缩不一定降低 token——两种实际场景：
+
+1. **已读文件列表过长**：agent 读了上百个文件后，`_inject_read_files()` 注入的清单本身几百 token，压缩减少的量被注入量抵消甚至反超（实测 150 文件时 2040 → 3183 tokens，token 不降反增）
+2. **对话已压到极限**：经几轮压缩后只剩 system prompt + 摘要 + 最近几条消息，三级级联（DropToolResults → SummarizeOldest → SlidingWindow）均无可操作空间
+
+没有熔断器时，每轮工具调用后都会白跑一次完整的三级压缩链。
+
+### 62.2 方案：计数器 + 会话级熔断
+
+`ContextManager` 新增两个字段：
+
+- `_compress_failures: int` —— 连续无效（压缩后 token ≥ 压缩前）计数
+- `_max_compress_failures: int` —— 阈值，来自 `MemoryConfig.compress_max_failures`（默认 3，0 禁用）
+
+`check_and_compress()` 在调用 `Compressor.compress()` 前后对比 `_total_tokens`：有效则重置为 0，无效则 +1。计数达到阈值后所有后续调用直接返回 False。
+
+**不做恢复**——一旦熔断，会话内不再尝试主动压缩。理由：`ensure_fits()` 作为独立的硬兜底（在 `_think()` 的 LLM 调用前检查实际窗口大小），不受熔断器影响。熔断只省掉 75% 阈值处的无效重试，真正超窗口时 `ensure_fits` 仍然保护。新会话 = 新 `ContextManager` = 计数器从零开始。
+
+### 62.3 真实 LLM 验证
+
+`experiments/verify_circuit_breaker.py` 五阶段验证（DeepSeek V4 Flash）：
+
+1. **正常压缩**：3 轮 LLM 对话触发压缩，均有效（3371→53、3130→51、2523→50），failures=0
+2. **自然熔断**：注册 150 个已读文件，`_inject_read_files` 注入抵消压缩收益，连续 3 次无效后熔断触发（attempt 12-14：2000→2000→2000）
+3. **ensure_fits 兜底**：熔断后 `check_and_compress` 返回 False，但 `ensure_fits` 仍正常截断（50 条→11 条）
+4. **禁用对照**：`compress_max_failures=0` 时无保护，持续白跑压缩
+5. **新会话恢复**：新 `ContextManager` 计数器归零，压缩正常工作
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——754 个测试约 74 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——778 个测试约 75 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

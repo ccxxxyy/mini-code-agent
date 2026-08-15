@@ -13,6 +13,7 @@
 
 - **Memory export/import** — `/memory export [dir]` writes each memory as a standalone .md file (YAML frontmatter: id/source/scope/created_at/tags) plus a MEMORY.md index; `/memory import <dir>` imports with id dedup and restores project/user scope from frontmatter. Tolerant parsing accepts plain .md and mewcode-style files. 记忆导出/导入：导出为独立 .md（YAML 前置元数据 + MEMORY.md 索引），导入按 id 去重、按 scope 还原项目/用户作用域，容错解析外来格式。
 - **Compression tool-pair alignment** — the summarize keep-boundary backs up to the tool-pair head so tool_use/tool_result pairs are never split (strict APIs reject orphans with 400); SlidingWindow drops leading orphan tool results. 压缩工具对对齐：keep 边界回退到工具对头部不切断配对，SlidingWindow 丢弃开头孤儿 tool result。
+- **Compression circuit breaker** — after N consecutive ineffective compressions (tokens did not decrease), `check_and_compress()` skips further attempts. Prevents wasted compression cycles when `_inject_read_files` cancels out compression gains (e.g., 150+ read files). `ensure_fits()` hard fallback unaffected. Config: `compress_max_failures = 3` (0 = off). 压缩熔断器：连续 N 次压缩无效后跳过，防止已读文件列表抵消压缩收益时的死循环；ensure_fits 兜底不受影响。
 - **Compression-reread inflation root fix** — two-layer defense: tool results >50K chars spill to disk (conversation keeps a 500-char preview); after compression the summary carries a "files already read" list so the LLM does not re-read them. Configurable via `[memory] spill_threshold_chars` (0 = off). 压缩-重读膨胀根治：大工具结果溢写磁盘 + 压缩后注入已读文件清单。
 - **`/memory delete`** — delete memories by ID or content keyword; ambiguous matches list candidates instead of deleting. 按 ID/关键词删除记忆，多匹配时列出候选。
 - **Same-tool per-iteration fuse** — second circuit breaker layer: a tool name appearing in every one of the last 8 iterations (args ignored) stops the loop; parallel batch reads within few iterations are unaffected. same-tool 按轮熔断（连续 8 轮每轮出现即停，一轮内并行批量不误杀）。
@@ -47,6 +48,7 @@
 ### Experiments 实验
 
 - **Deadlock induction** — 5 scenarios × 2 arms testing triple fuse under real LLM. Key finding: iteration limit is the only reliable hard fuse; same-tool-6x never triggered (LLM varies arguments each time). 死循环诱导实验：迭代上限是唯一可靠硬熔断，same-tool-6x 从未触发。
+- **Circuit breaker verification** — 5-phase real-LLM test: normal compression / 150-file read_files triggers natural breaker / ensure_fits fallback / disabled control group / new-session recovery. 压缩熔断器验证：5 阶段真实 LLM 实验。
 
 ### Docs 文档
 

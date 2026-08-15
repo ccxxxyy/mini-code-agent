@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-728%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-778%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -346,8 +346,13 @@ mini-code-agent/
 - [x] P55：Skill 安装命令
 - [x] P56：Skill 热重载
 - [x] P57：远程/浏览器模式
+- [x] P58：跨 Agent Mailbox 通信
+- [x] P59：会话压缩边界
+- [x] P60：压缩工具对对齐
+- [x] P61：记忆导出/导入
+- [x] P62：压缩熔断器（连续 N 次压缩无效后跳过，防死循环烧 token）
 
-**全部阶段已完成，728 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，778 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
