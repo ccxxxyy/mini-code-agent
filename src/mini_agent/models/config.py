@@ -82,6 +82,9 @@ class MemoryConfig:
     # Circuit breaker: skip compression after N consecutive ineffective attempts
     # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
     compress_max_failures: int = 3
+    # Use LLM semantic summary for compression (True) or extractive truncation (False)
+    # 压缩时用 LLM 语义摘要（True）还是抽取式截断（False）
+    llm_summarize: bool = True
 
 
 @dataclass

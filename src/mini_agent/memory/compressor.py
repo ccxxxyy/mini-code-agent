@@ -89,7 +89,11 @@ class SummarizeOldest(CompressionStrategy):
         to_summarize = msgs[:split]
         kept = msgs[split:]
 
-        summary_text = "[Compressed conversation history]\n" + _extractive_digest(to_summarize)
+        summary_text = (
+            "[Compressed conversation history -- this is the authoritative "
+            "record of earlier conversation. Do NOT search session files or "
+            "disk to recover history; use this summary.]\n" + _extractive_digest(to_summarize)
+        )
         conversation.messages = [_make_summary_message(summary_text)] + kept
 
 
@@ -172,9 +176,17 @@ class LLMSummarizeOldest(CompressionStrategy):
         digest = _extractive_digest(to_summarize)
         try:
             summary = await self._summarize(digest[: self.MAX_HISTORY_CHARS])
-            summary_text = "[Compressed conversation history (LLM summary)]\n" + summary
+            summary_text = (
+                "[Compressed conversation history (LLM summary) -- this is the "
+                "authoritative record of earlier conversation. Do NOT search "
+                "session files or disk to recover history; use this summary.]\n" + summary
+            )
         except Exception:
-            summary_text = "[Compressed conversation history]\n" + digest
+            summary_text = (
+                "[Compressed conversation history -- this is the authoritative "
+                "record of earlier conversation. Do NOT search session files or "
+                "disk to recover history; use this summary.]\n" + digest
+            )
 
         conversation.messages = [_make_summary_message(summary_text)] + kept
 
