@@ -4,6 +4,9 @@
 
 ### Fixed 修复
 
+- **Spill cache permission popups** — reading back the agent's own spill files (`~/.mini-agent/cache/results/`) no longer prompts for confirmation (read-only auto-allow; writes still ask). The spill placeholder invites the LLM to read these files, so prompting on every read-back defeated the mechanism. 溢写缓存只读自动放行：读回自家溢写文件不再弹权限框（写入仍询问）。
+- **Prompt label pollution after confirmation** — the permission dialog reused the main input's PromptSession; prompt_toolkit makes the passed message the session's new default, so after the first confirmation the main prompt permanently showed "allow? [y/a/n] >". Now uses a temporary session. 权限框污染主提示符修复：confirm() 改用临时 PromptSession。
+- **Circuit breaker warning spam** — the compression circuit breaker warned on every check (twice per iteration) once open; now warns once on open and resets after an effective compression. 压缩熔断器警告刷屏修复：开启只警告一次。
 - **bash GBK output mojibake** — subprocess output now decoded strict UTF-8 → active codepage/GBK → UTF-8 replace (three-tier), so Chinese CMD error messages render correctly. bash 子进程输出三级解码，中文 CMD 错误信息不再乱码。
 - **LLM autonomous git commands** — all git state-changing commands (commit/push/reset/stash/rebase/checkout/restore/clean) now require user confirmation (human-in-the-loop), plus CRITICAL system prompt rules. 全部 git 状态修改命令需用户确认 + system prompt 红线。
 - **Git Bash (mintty) instant exit** — piped stdin detected via isatty(), falls back to plain input mode (no completion menu; use `winpty mini` for the full experience). mintty 管道 stdin 自动降级朴素输入，`winpty mini` 可获完整体验。
@@ -11,10 +14,11 @@
 
 ### Added 新增
 
+- **Aggregate tool result budget** — when a turn's cumulative tool-result chars exceed `aggregate_spill_chars` (default 200K, 0 = off), the largest results are force-spilled to disk largest-first until back under budget. Three supporting mechanisms: spill-file read-backs are exempt (anti-loop), preview enlarged 500→2000 chars, results no longer than the preview are never spilled. Spill placeholder now includes the spill file path for offset/limit re-reads. 聚合工具结果预算：单轮累计超 200K 字符时按大小降序强制溢写，含读回豁免/预览 2000/小结果豁免三配套；占位文案带溢写文件路径供精读。
 - **Memory export/import** — `/memory export [dir]` writes each memory as a standalone .md file (YAML frontmatter: id/source/scope/created_at/tags) plus a MEMORY.md index; `/memory import <dir>` imports with id dedup and restores project/user scope from frontmatter. Tolerant parsing accepts plain .md and mewcode-style files. 记忆导出/导入：导出为独立 .md（YAML 前置元数据 + MEMORY.md 索引），导入按 id 去重、按 scope 还原项目/用户作用域，容错解析外来格式。
 - **Compression tool-pair alignment** — the summarize keep-boundary backs up to the tool-pair head so tool_use/tool_result pairs are never split (strict APIs reject orphans with 400); SlidingWindow drops leading orphan tool results. 压缩工具对对齐：keep 边界回退到工具对头部不切断配对，SlidingWindow 丢弃开头孤儿 tool result。
 - **Compression circuit breaker** — after N consecutive ineffective compressions (tokens did not decrease), `check_and_compress()` skips further attempts. Prevents wasted compression cycles when `_inject_read_files` cancels out compression gains (e.g., 150+ read files). `ensure_fits()` hard fallback unaffected. Config: `compress_max_failures = 3` (0 = off). 压缩熔断器：连续 N 次压缩无效后跳过，防止已读文件列表抵消压缩收益时的死循环；ensure_fits 兜底不受影响。
-- **Compression-reread inflation root fix** — two-layer defense: tool results >50K chars spill to disk (conversation keeps a 500-char preview); after compression the summary carries a "files already read" list so the LLM does not re-read them. Configurable via `[memory] spill_threshold_chars` (0 = off). 压缩-重读膨胀根治：大工具结果溢写磁盘 + 压缩后注入已读文件清单。
+- **Compression-reread inflation root fix** — two-layer defense: tool results >50K chars spill to disk (conversation keeps a 2000-char preview incl. the spill file path); after compression the summary carries a "files already read" list so the LLM does not re-read them. Configurable via `[memory] spill_threshold_chars` (0 = off). 压缩-重读膨胀根治：大工具结果溢写磁盘 + 压缩后注入已读文件清单。
 - **`/memory delete`** — delete memories by ID or content keyword; ambiguous matches list candidates instead of deleting. 按 ID/关键词删除记忆，多匹配时列出候选。
 - **Same-tool per-iteration fuse** — second circuit breaker layer: a tool name appearing in every one of the last 8 iterations (args ignored) stops the loop; parallel batch reads within few iterations are unaffected. same-tool 按轮熔断（连续 8 轮每轮出现即停，一轮内并行批量不误杀）。
 

@@ -130,6 +130,44 @@ async def test_ask_yes_no_falls_back_to_input(monkeypatch):
     assert await t.ask_yes_no("continue?") is True
 
 
+# --- confirm must not pollute the shared main prompt session ---
+# confirm 不得污染主输入共用的 PromptSession（message 会成为其新默认值）
+
+
+@pytest.mark.asyncio
+async def test_confirm_does_not_touch_main_session(monkeypatch):
+    from mini_agent.ui.terminal import Terminal
+
+    class FakeTempSession:
+        async def prompt_async(self, message=""):
+            return "a"
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeTempSession())
+
+    t = Terminal()
+
+    class MainSessionGuard:
+        async def prompt_async(self, *a, **k):
+            raise AssertionError("confirm() must not use the main prompt session")
+
+    t._prompt_session = MainSessionGuard()
+    assert await t.confirm("Allow?") == "always"
+
+
+@pytest.mark.asyncio
+async def test_confirm_falls_back_to_input(monkeypatch):
+    from mini_agent.ui.terminal import Terminal
+
+    def boom(*a, **k):
+        raise RuntimeError("NoConsoleScreenBufferError simulated")
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession.__init__", boom)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    t = Terminal()
+    assert await t.confirm("Allow?") is True
+
+
 # --- todo emoji fallback on legacy ---
 
 

@@ -203,6 +203,10 @@ class AgentLoop:
         tokens_used = 0
         final_content = ""
         verified = False
+        # Aggregate spill budget: cumulative tool-result chars this turn --
+        # per-batch checks miss many small batches adding up across iterations
+        # 聚合溢写预算：本轮累计工具结果字符——只看单批会漏掉多次迭代累加
+        turn_result_chars = 0
 
         try:
             await self._hooks.run(
@@ -282,6 +286,19 @@ class AgentLoop:
 
             # OBSERVE
             await self._transition(AgentPhase.OBSERVING)
+            # Aggregate budget: single-result threshold cannot catch many
+            # results that are each under it but together blow the context
+            # 聚合预算：单条阈值管不住"每条都不超、合计撑爆"的场景
+            if self.result_cache is not None:
+                exempt_ids = {
+                    tc.id
+                    for tc in response.tool_calls
+                    if self.result_cache.is_spill_readback(tc.name, tc.arguments)
+                }
+                results = self.result_cache.spill_batch(
+                    results, already_used=turn_result_chars, exempt_ids=exempt_ids
+                )
+            turn_result_chars += sum(len(r.output) for r in results)
             for result in results:
                 conversation.append(Message(role=Role.TOOL, tool_result=result))
             self._state.last_tool_results = results
@@ -668,9 +685,13 @@ class AgentLoop:
                     self._context.record_file_read(str(path), result.output)
             # Spill oversized outputs to disk -- large file contents entering
             # the conversation wholesale is the root cause of the
-            # compression-reread inflation loop
-            # 超大输出溢写磁盘——大文件内容整体进对话是压缩-重读膨胀的根源
-            if self.result_cache is not None:
+            # compression-reread inflation loop. Read-backs of spill files
+            # are exempt: re-spilling them would loop forever.
+            # 超大输出溢写磁盘——大文件内容整体进对话是压缩-重读膨胀的根源。
+            # 溢写文件的读回结果豁免——再溢写会死循环。
+            if self.result_cache is not None and not self.result_cache.is_spill_readback(
+                tc.name, args
+            ):
                 result = self.result_cache.maybe_spill(result)
         except ValueError as e:
             result = ToolResult(call_id=tc.id, name=tc.name, output=str(e), is_error=True)

@@ -176,6 +176,7 @@ class SubAgent:
         self._result_cache = ToolResultCache(
             Path.home() / ".mini-agent" / "cache" / "results" / f"subagent_{self.agent_id}",
             threshold_chars=effective_config.memory.spill_threshold_chars,
+            aggregate_chars=effective_config.memory.aggregate_spill_chars,
         )
         self._loop.result_cache = self._result_cache
 

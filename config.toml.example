@@ -25,6 +25,7 @@
 # compression_threshold = 0.75
 # auto_extract = true
 # spill_threshold_chars = 50000  # tool results above this spill to disk, 0 = off 工具结果超此字符数溢写磁盘，0 禁用
+# aggregate_spill_chars = 200000 # per-turn aggregate budget: force-spill largest when total exceeds, 0 = off 单轮聚合预算：累计超此值时按大小强制溢写，0 禁用
 # llm_summarize = true           # LLM semantic summary for compression (false = extractive truncation) 压缩用 LLM 语义摘要（false = 抽取式截断）
 
 [security]

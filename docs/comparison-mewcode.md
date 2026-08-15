@@ -316,7 +316,8 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 大文件处理 | ✅ **>50K 字符溢写磁盘，对话留 500 字符预览**（`memory/tool_result_cache.py`，SubAgent 同样受保护——mewcode 的溢写不覆盖子代理） | >50K 字符的结果存磁盘，对话只留摘要 |
+| 大文件处理 | ✅ **>50K 字符溢写磁盘，对话留 2000 字符预览**（`memory/tool_result_cache.py`，SubAgent 同样受保护——mewcode 的溢写不覆盖子代理） | >50K 字符的结果存磁盘，对话只留摘要 |
+| 聚合预算 | ✅ **单轮累计超 200K 字符时按大小降序强制溢写**（P64.1 `spill_batch`，跨迭代累计）+ 三配套：读回豁免 `is_spill_readback` / 预览 2000 / 小结果豁免 | `apply_tool_result_budget`：单批总量超 `AGGREGATE_CHAR_LIMIT=200K` 时降序溢写 |
 
 **原差距**：曾是 mini 唯一的高严重度遗留问题（tech-notes 34.3 ③）。用户说"读 spec.md"（大文件），内容全进对话→触发压缩→LLM 忘了读过→重读→再压缩→循环烧 token。P36 已修复，实现见 tech-notes §36。
 
@@ -324,7 +325,7 @@
 1. 新建 `memory/tool_result_cache.py`
 2. 工具执行后检查结果长度，>50K 字符时：
    - 结果存入磁盘缓存（`~/.mini-agent/cache/result_{hash}.txt`）
-   - 对话中替换为摘要：`[File content cached to disk (52,341 chars). First 500 chars: ...]`
+   - 对话中替换为摘要：`[File content cached to disk (52,341 chars). First 2000 chars: ...]`（预览 P64.1 起为 2000，原方案 500）
 3. 后续 LLM 需要该内容时可用 `read_file` 重新读取（文件本身没变，不需要缓存里的副本）
 4. 会话结束时清理缓存
 
@@ -808,6 +809,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1 消除：`_inject_read_files` 烤入最近 5 文件内容（5000 tokens/个） | 已完成 |
 | ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |
 | ✅ 完成 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4 消除：`ContextManager` 内置熔断器，连续 N 次压缩无效后跳过 | 已完成 |
+| ✅ 完成 | 4.1a | 聚合工具结果预算（P64.1） | 多工具单条不超阈值、合计撑爆上下文；含读回豁免/预览 2000/小结果豁免三配套 | 已完成 |
 | ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |
 
 **总工作量估算**：约 15-20 个工作日。全部完成后 mini-code-agent 在每一个维度都 ≥ mewcode-python，同时保持自身的差异化优势（/undo、/fork、/record、/cost、/explain、实验框架）。

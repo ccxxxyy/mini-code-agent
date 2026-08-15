@@ -67,6 +67,10 @@ class MemoryConfig:
     # Tool results above this size are spilled to disk (0 = disabled)
     # 超过此字符数的工具结果溢写磁盘（0 = 禁用）
     spill_threshold_chars: int = 50_000
+    # Aggregate budget: when a turn's cumulative tool-result chars exceed
+    # this, largest results are force-spilled until back under (0 = disabled)
+    # 聚合预算：单轮工具结果累计字符超此值时按大小降序强制溢写（0 = 禁用）
+    aggregate_spill_chars: int = 200_000
     # Selective recall: above this many memories, an LLM picks the most
     # relevant ones instead of injecting the first N
     # 选择性召回：记忆超过此数量时用 LLM 挑选最相关的，而非注入前 N 条

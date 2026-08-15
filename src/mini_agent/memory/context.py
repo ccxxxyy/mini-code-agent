@@ -31,6 +31,10 @@ class ContextManager:
         # 熔断器：连续 N 次压缩无效后停止重试
         self._compress_failures: int = 0
         self._max_compress_failures: int = config.compress_max_failures
+        # Warn only once when the breaker opens -- check_and_compress runs
+        # twice per iteration, repeating the warning floods the console
+        # 熔断器开启只警告一次——每轮迭代检查两次，重复警告会刷屏
+        self._breaker_warned: bool = False
         # Ordered, deduplicated list of files read this session -- re-injected
         # after compression so the LLM does not forget and re-read them
         # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
@@ -162,12 +166,15 @@ class ContextManager:
             self._max_compress_failures > 0
             and self._compress_failures >= self._max_compress_failures
         ):
-            logger.warning(
-                "Compression circuit breaker open: %d consecutive ineffective "
-                "attempts, skipping. 压缩熔断器已开启：连续 %d 次无效，跳过",
-                self._compress_failures,
-                self._compress_failures,
-            )
+            if not self._breaker_warned:
+                self._breaker_warned = True
+                logger.warning(
+                    "Compression circuit breaker open: %d consecutive ineffective "
+                    "attempts, skipping further compression this session. "
+                    "压缩熔断器已开启：连续 %d 次无效，本会话跳过后续压缩",
+                    self._compress_failures,
+                    self._compress_failures,
+                )
             return False
 
         # Capture the latest user request before compression discards it
@@ -232,6 +239,7 @@ class ContextManager:
                     self._total_tokens,
                 )
             self._compress_failures = 0
+            self._breaker_warned = False
         return True
 
     def _inject_read_files(self, conversation: Conversation) -> None:

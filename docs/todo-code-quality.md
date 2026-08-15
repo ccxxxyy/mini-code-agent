@@ -165,26 +165,25 @@ experiments/results/
 
 `ContextManager` 内置熔断器：连续 N 次压缩无效（token 未减少）后跳过后续压缩。`MemoryConfig.compress_max_failures = 3`（0 = 禁用）。成功压缩自动重置计数。3 个测试覆盖。
 
-### ☐ ① 聚合工具结果预算（含三个配套机制）
+### ✅ ① 聚合工具结果预算（含三个配套机制）已修复（P64.1）
 
-**问题**：`maybe_spill()` 按单条 50K 阈值溢写。10 个并行工具各返回 49K 字符（未触发单条阈值），一轮塞入 ~500K 字符撑爆上下文。
+`ToolResultCache.spill_batch(results, already_used, exempt_ids)`：本轮累计工具结果字符超 `MemoryConfig.aggregate_spill_chars = 200_000`（0 = 禁用）时，按 output 长度降序强制溢写至预算内。三个配套机制全部落地：1a `is_spill_readback` 读回豁免（agent_loop 单条与聚合两层都检查）、1b `PREVIEW_CHARS` 500→2000、1c 不长于预览的结果豁免。`turn_result_chars` 在 run() 内跨迭代累计。溢写占位文案补溢写文件路径供 offset/limit 精读。13 个测试覆盖，真实 LLM 验证（DeepSeek）：聚合触发溢写、上下文有界、LLM 预览后自主精读收敛、读回不重溢写。交互式 E2E 验证（会话 JSON 审计）6 验证点达成；配套修复溢写缓存只读放行 + confirm() 提示符污染。诚实边界：aggregate < 单文件大小的极端参数下豁免读回计入累计会链式溢写-读回，默认 200K 无此问题（详见 tech-notes §64）。
 
-**mewcode 实现**（`context/manager.py` `apply_tool_result_budget`）：
-- `AGGREGATE_CHAR_LIMIT = 200_000`：单轮所有工具结果总字符超此值时，按 output 长度降序逐条溢写，直到总量降到限制内
-- 溢写目录：`.mewcode/sessions/<session_id>/tool-results/`
+**原问题**（已解决）：`maybe_spill()` 按单条 50K 阈值溢写。10 个并行工具各返回 49K 字符（未触发单条阈值），一轮塞入 ~500K 字符撑爆上下文。
 
-**三个配套机制**（缺任一聚合溢写都会出问题）：
+**三个配套机制**（缺任一聚合溢写都会出问题，均已实现）：
 
-| # | 配套机制 | mewcode | mini 现状 | 为什么必须 |
+| # | 配套机制 | mewcode | mini 实现 | 为什么必须 |
 |---|---|---|---|---|
-| 1a | **反重溢写保护** | `is_spill_readback`：工具结果的文件路径在溢写目录内时豁免溢写 | ❌ 没有 | LLM 读回溢写文件 → 结果又被溢写 → 再读回 → 死循环 |
-| 1b | **预览大小** | `PREVIEW_CHARS = 2_000` 字符 | 500 字符 | 500 字符太短，LLM 信息不足无法判断是否需要重读，直接放弃用 bash 绕过 |
-| 1c | **小结果豁免** | `< PREVIEW_CHARS` 的结果不溢写 | ❌ 没有 | 预览比原文还大时溢写没意义（反而变大） |
+| 1a | **反重溢写保护** | `is_spill_readback`：工具结果的文件路径在溢写目录内时豁免溢写 | ✅ `ToolResultCache.is_spill_readback()`，agent_loop 单条与聚合两层都检查 | LLM 读回溢写文件 → 结果又被溢写 → 再读回 → 死循环 |
+| 1b | **预览大小** | `PREVIEW_CHARS = 2_000` 字符 | ✅ 500→2000（以 `min(PREVIEW_CHARS, threshold)` 封顶） | 500 字符太短，LLM 信息不足无法判断是否需要重读，直接放弃用 bash 绕过 |
+| 1c | **小结果豁免** | `< PREVIEW_CHARS` 的结果不溢写 | ✅ `maybe_spill` 中不长于预览的结果一律豁免（含 force 路径） | 预览比原文还大时溢写没意义（反而变大） |
 
-**修复位置**：
-- `memory/tool_result_cache.py`：`PREVIEW_CHARS` 从 500 改为 2000；新增 `spill_batch(results, budget)` 方法；`maybe_spill` 新增 `force` 参数
-- `core/agent_loop.py`：`_run_tool_pipeline()` 在溢写前检查 `is_spill_readback`（结果文件路径在 cache 目录内时跳过）；OBSERVE 阶段调 `spill_batch`（需跨迭代累计，不能只看单批）
-- `models/config.py`：`aggregate_spill_chars: int = 200_000`
+**实现位置**（每条结果独立成消息故改为跨迭代累计）：
+- `memory/tool_result_cache.py`：`PREVIEW_CHARS` 2000；`spill_batch(results, already_used, exempt_ids)`；`maybe_spill(force=)`；`is_spill_readback()`
+- `core/agent_loop.py`：`_run_tool_pipeline()` 溢写前检查 `is_spill_readback`；OBSERVE 阶段调 `spill_batch`，`turn_result_chars` 跨迭代累计
+- `models/config.py`：`aggregate_spill_chars: int = 200_000`（0 = 禁用）
+- `security/path_guard.py`：溢写缓存目录只读自动放行（读回闭环不弹权限框）
 
 ### ☐ ④ 压缩双阈值（硬阈值绕过熔断器）
 

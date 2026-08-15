@@ -70,6 +70,19 @@ def test_pem_key_denied(path_guard, project_dir):
     assert path_guard.check(project_dir / "server.pem") == PermissionLevel.DENY
 
 
+def test_spill_cache_read_allowed(path_guard):
+    # Spill placeholder invites the LLM to read the file back -- prompting
+    # for our own cache defeats the mechanism
+    # 溢写占位文案引导 LLM 读回——对自家缓存弹权限框会废掉该机制
+    spill = Path.home() / ".mini-agent" / "cache" / "results" / "sess1" / "result_ab.txt"
+    assert path_guard.check(spill, "read") == PermissionLevel.ALLOW
+
+
+def test_spill_cache_write_still_asks(path_guard):
+    spill = Path.home() / ".mini-agent" / "cache" / "results" / "sess1" / "result_ab.txt"
+    assert path_guard.check(spill, "write") == PermissionLevel.ASK
+
+
 # --- PermissionManager: paths ---
 
 
