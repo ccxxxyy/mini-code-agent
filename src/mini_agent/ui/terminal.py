@@ -129,9 +129,31 @@ class Terminal:
                 expand=False,
             )
         )
-        self._ensure_prompt_session()
+        # Temporary session: passing a message to the shared main session's
+        # prompt_async() would become its new DEFAULT -- every later main
+        # prompt would show "allow? [y/a/n] >".
+        # 临时 session：给主输入 session 的 prompt_async() 传 message 会成为
+        # 其新默认值——之后主提示符会一直显示 "allow? [y/a/n] >"。
+        from prompt_toolkit import PromptSession as _PS
+
+        def _plain_confirm() -> bool | str:
+            try:
+                answer = input("allow? [y/a/n] > ").strip().lower()
+            except EOFError:
+                return False  # non-interactive: safe default 无交互时安全默认拒绝
+            if answer in ("a", "always"):
+                return "always"
+            return answer in ("y", "yes")
+
+        try:
+            tmp = _PS()
+        except Exception:
+            return _plain_confirm()
         while True:
-            answer = (await self._prompt_session.prompt_async("allow? [y/a/n] > ")).strip().lower()
+            try:
+                answer = (await tmp.prompt_async("allow? [y/a/n] > ")).strip().lower()
+            except Exception:
+                return _plain_confirm()
             if answer in ("y", "yes"):
                 return True
             if answer in ("a", "always"):

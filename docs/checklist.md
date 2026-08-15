@@ -1238,3 +1238,35 @@
 - [x] tasks.md 新增 Phase 63 条目 + P59.3 诚实差异标记完成
 - [x] tech-notes.md 新增 §63
 - [x] checklist.md 新增本检查项
+
+## Phase 64.1 检查项：聚合工具结果预算（①）
+
+### 功能完整性
+- [x] `PREVIEW_CHARS` 500→2000（配套 1b），预览以 `min(PREVIEW_CHARS, threshold)` 封顶
+- [x] `maybe_spill(result, force=False)` —— force 绕过单条阈值；不长于预览的结果一律豁免（配套 1c）
+- [x] `is_spill_readback(tool_name, arguments)` —— read_file 路径落在溢写目录内时豁免（配套 1a，防读回-溢写死循环）
+- [x] `spill_batch(results, already_used, exempt_ids)` —— 累计超预算时按大小降序强制溢写；豁免错误/已溢写/exempt/小结果；OSError 保留原文
+- [x] `MemoryConfig.aggregate_spill_chars = 200_000`（0 = 禁用），app.py / subagent.py 装配传参
+- [x] `agent_loop.py` —— `_run_tool_pipeline` 单条溢写前检查读回豁免；OBSERVE 阶段 `spill_batch`，`turn_result_chars` 跨迭代累计
+- [x] 溢写占位文案含溢写文件路径，LLM 可 offset/limit 精读
+
+### 配套修复
+- [x] 溢写缓存只读放行（`path_guard.py` `_result_cache_root()`，每次调用计算兼容测试 home 替换）——read 自动 ALLOW / write 仍询问，读回闭环不再弹权限框
+- [x] confirm() 提示符污染（`terminal.py`）——临时 PromptSession 替代主 session，主提示符不再被 "allow? [y/a/n] >" 永久覆盖
+- [x] 压缩熔断器警告去重（`context.py` `_breaker_warned`）——开启只警告一次，压缩恢复有效后重置
+
+### 测试
+- [x] 13 个新测试（test_tool_result_cache.py）：预览常量 / force 绕过 / force 小结果豁免 / 读回判定 5 情形 / 欠额不动 / 降序溢写 / exempt_ids / 错误+已溢写跳过 / 跨迭代累计 / aggregate=0 / config 默认 / 2 集成（并行聚合溢写、读回不重溢写）
+- [x] 配套修复 5 个测试：溢写缓存读放行 / 写仍询问 / confirm 不碰主 session / confirm 兜底 / 熔断器警告仅一次
+- [x] 真实 LLM 验证（DeepSeek，threshold=50K/aggregate=8K）：并行读 3 文件聚合触发溢写 6/9 条、对话累计 15.5K 字符有界、LLM 预览后自主 offset/limit 精读收敛、读回溢写文件不重溢写
+- [x] 交互式 E2E 验证（真实 mini 会话，aggregate=15000，会话 JSON 审计）：6 验证点 5 全达成 + 成本有界在极端参数下部分达成（诚实边界：豁免读回计入累计，aggregate < 单文件时链式溢写-读回；默认 200K 无此问题）
+- [x] 821 个测试全过，ruff lint + format clean
+
+### 文档同步
+- [x] tasks.md P64.1 勾选完成
+- [x] todo-code-quality.md ① 标 ✅ 已修复
+- [x] comparison-mewcode.md 4.1 表新增聚合预算行 + 总表新增 4.1a 行
+- [x] tech-notes.md 新增 §64
+- [x] CHANGELOG.md 新增条目
+- [x] config.toml.example [memory] 段补 aggregate_spill_chars
+- [x] checklist.md 新增本检查项

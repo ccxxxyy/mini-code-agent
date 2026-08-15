@@ -430,6 +430,29 @@ async def test_circuit_breaker_resets_on_success():
     assert cm._compress_failures == 0
 
 
+async def test_circuit_breaker_warns_only_once(caplog):
+    # check_and_compress runs twice per iteration -- repeated WARNING floods
+    # the console 每轮迭代检查两次，重复 WARNING 会刷屏
+    import logging
+
+    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(20):
+        conv.messages.append(make_msg(token_count=25))
+
+    for _ in range(3):
+        await cm.check_and_compress(conv)
+
+    with caplog.at_level(logging.WARNING, logger="mini_agent.memory.context"):
+        for _ in range(5):
+            assert await cm.check_and_compress(conv) is False
+    warnings = [r for r in caplog.records if "circuit breaker open" in r.message]
+    assert len(warnings) == 1
+
+
 async def test_circuit_breaker_disabled_when_zero():
     config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=0)
     cm = ContextManager(config)

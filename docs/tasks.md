@@ -1524,12 +1524,25 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ## Phase 64: 上下文管理增强 (P64)
 
-> todo-code-quality.md 上下文管理增强 ②。LLM 摘要压缩接入 + 验证两个修复。
+> todo-code-quality.md 上下文管理增强 ① + ②。P64.1 聚合工具结果预算（含三配套，已实现）；P64.2-64.4 LLM 摘要压缩接入 + 两个修复。
 
-### P64.1 聚合工具结果预算（待做，需配套机制）
-- [x] 首次实现缺配套（反重溢写/预览太短/小结果豁免）→ 真实 LLM 验证失败 → 删除
-- [x] 对比 mewcode 后明确：聚合溢写本身合理，但必须连同 3 个配套机制一起做（详见 todo-code-quality.md ①）
-- [ ] 待后续实现
+### P64.1 聚合工具结果预算（含三个配套机制）✅ 已实现
+- [x] 【历史教训，非现状】P64.4 时期的首次尝试缺配套（反重溢写/预览太短/小结果豁免）→ 真实 LLM 验证失败 → 删除重做；对比 mewcode 后明确必须连同 3 个配套机制一起做（详见 todo-code-quality.md ①）。以下为重做后的完整实现：
+- [x] `memory/tool_result_cache.py` — `PREVIEW_CHARS` 500→2000（配套 1b：预览太短 LLM 信息不足会绕过）；预览仍以 `min(PREVIEW_CHARS, threshold)` 封顶兼容小阈值测试
+- [x] `maybe_spill(result, force=False)` — force=True 绕过单条阈值（供聚合预算强制溢写）；`len(output) <= 预览长度` 的结果一律豁免（配套 1c：溢写换不回空间）
+- [x] `is_spill_readback(tool_name, arguments)` — read_file 的 file_path 落在溢写目录内时豁免（配套 1a：读回结果再溢写会死循环）
+- [x] `spill_batch(results, already_used, exempt_ids)` — 累计超 `aggregate_chars` 时按 output 长度降序强制溢写至预算内；豁免错误结果/已溢写结果/exempt_ids/小结果；写盘 OSError 保留原文不炸 OBSERVE
+- [x] `models/config.py` — `MemoryConfig.aggregate_spill_chars = 200_000`（0 = 禁用）
+- [x] `core/agent_loop.py` — `_run_tool_pipeline()` 溢写前检查 `is_spill_readback`；OBSERVE 阶段调 `spill_batch`，`turn_result_chars` 跨迭代累计（只看单批会漏掉多次迭代累加撑爆）
+- [x] `app.py` / `core/subagent.py` — ToolResultCache 装配传 `aggregate_chars`；`config.toml.example` 补注释
+- [x] 溢写占位文案补溢写文件路径——LLM 可用 read_file offset/limit 精读（读回受 1a 豁免保护）
+- [x] 13 个新测试（PREVIEW_CHARS/force 绕过阈值/force 小结果豁免/is_spill_readback 5 情形/批量欠额不动/降序溢写最大/exempt_ids/错误+已溢写跳过/跨迭代累计/aggregate=0 禁用/config 默认/2 集成：并行工具聚合溢写/读回不重溢写），816 个测试全过，ruff lint + format clean
+- [x] 真实 LLM 验证（DeepSeek，threshold=50K/aggregate=8K）：并行读 3 个 ~6K 文件 → 单条不触发、聚合触发溢写 6/9 条、对话累计 15.5K 字符有界；LLM 看到 2000 字符预览后自主用 offset/limit 精读收敛作答；读回溢写文件未被重溢写
+- [x] 交互式 E2E 验证（真实 mini 会话，aggregate=15000 极端参数，会话 JSON 审计 19 条工具结果）：6 验证点对账——溢写发生（9 条，read_file/grep/bash 全覆盖，SHA1 去重）✅ / 对话留 ~2284 字符预览 ✅ / 模型按占位路径 offset 精读一次收敛、零绕道 ✅ / 7 条大读回（最大 21.9K）原样保留不重溢写 ✅ / 小结果与首批"只溢写最大的"（CHANGELOG 溢写、README 保留）✅ / 成本有界⚠️见诚实边界
+- [x] **配套修复 1：溢写缓存只读放行**（`security/path_guard.py` `_result_cache_root()`）——溢写目录在项目外，占位文案引导的读回每次弹权限框，'a'(always) 按精确路径记忆对新溢写文件无效；改为该目录 read 自动 ALLOW（write 仍询问），机制闭环不再需要人工放行。2 个测试
+- [x] **配套修复 2：confirm() 提示符污染**（`ui/terminal.py`）——权限框复用主输入 PromptSession，prompt_toolkit 把传入 message 变成 session 新默认值，首次弹框后主提示符永久变成 "allow? [y/a/n] >"；改用临时 PromptSession（同 ask_yes_no 防污染模式）+ 无控制台兜底。2 个测试
+- [x] **诚实边界**：豁免读回不被溢写但计入本轮累计预算——aggregate 设得小于典型单文件大小时（如 15K < 20K 文件），一次读回即耗尽预算，后续中等结果链式"溢写→读回"，对话同时保留预览+全文，预算未真正压住上下文。默认 200K 下单文件读回最多占 1/8 预算，无此问题；属极端参数下的已知行为，机制层面不可消除（模型执意读全文时内容终归进对话，预算只能让它显式地进）
+- [x] 821 个测试全过（816 + 2 confirm + 2 path guard + 1 熔断器警告去重），ruff lint + format clean
 
 ### P64.2 LLM 摘要压缩接入
 - [x] `models/config.py` — `MemoryConfig.llm_summarize = True`：默认启用 LLM 语义摘要

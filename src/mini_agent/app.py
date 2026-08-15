@@ -259,6 +259,7 @@ class Application:
         self.result_cache = ToolResultCache(
             Path.home() / ".mini-agent" / "cache" / "results" / self.session.metadata.session_id,
             threshold_chars=config.memory.spill_threshold_chars,
+            aggregate_chars=config.memory.aggregate_spill_chars,
         )
         self.agent_loop.result_cache = self.result_cache
 

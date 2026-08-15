@@ -1570,7 +1570,7 @@ v2 改为按轮统计：`AgentState.iteration_tools` 记录每轮迭代用到的
 
 修复分两层，借鉴 mewcode 的成熟方案（comparison-mewcode.md §4.1/§4.2）：
 
-**第一层：溢写（源头减量）**。`memory/tool_result_cache.py` 的 `ToolResultCache.maybe_spill()`——工具结果超过 50K 字符（`[memory] spill_threshold_chars` 可配，0 禁用）时写入 `~/.mini-agent/cache/results/{session_id}/`，对话中只留 500 字符预览 + 提示（"输出过大已溢写，用 offset/limit 重新读取特定段落"）。大文件根本不进对话，压缩触发频率大幅下降。挂载点在 `agent_loop._run_tool_pipeline()`——工具管线层，SubAgent（没有 ContextManager）同样受保护。
+**第一层：溢写（源头减量）**。`memory/tool_result_cache.py` 的 `ToolResultCache.maybe_spill()`——工具结果超过 50K 字符（`[memory] spill_threshold_chars` 可配，0 禁用）时写入 `~/.mini-agent/cache/results/{session_id}/`，对话中只留 2000 字符预览（P64.1 起，原 500）+ 占位提示（含溢写文件路径，可用 offset/limit 精读该文件或重跑工具）。大文件根本不进对话，压缩触发频率大幅下降。挂载点在 `agent_loop._run_tool_pipeline()`——工具管线层，SubAgent（没有 ContextManager）同样受保护。
 
 **第二层：已读清单注入（断循环）**。`ContextManager.record_file_read()` 追踪本会话读过的文件（保序去重）；压缩完成后 `_inject_read_files()` 在摘要消息末尾追加 `[Files already read this session -- do NOT re-read unless their content changed: a.py, b.md]`。二次压缩时替换旧清单（清单可能已增长）；纯 SlidingWindow 路径（无摘要消息）插入独立 SYSTEM 消息。
 
@@ -2188,3 +2188,22 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——793 个测试约 80 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
+
+## 64. 聚合工具结果预算（P64.1）
+
+**问题**：`maybe_spill()` 只看单条 50K 阈值。10 个并行工具各返回 49K 字符，单条都不触发，一轮塞入 ~500K 字符撑爆上下文。
+
+**实现**：
+
+1. **聚合预算** `spill_batch(results, already_used, exempt_ids)`：本轮累计工具结果字符超 `aggregate_spill_chars`（默认 200K，0 禁用）时，按 output 长度降序强制溢写（`maybe_spill(force=True)`），直到回到预算内。降序意味着回到预算内动的条数最少。每条结果独立成消息，改为 `turn_result_chars` 在 `run()` 内跨迭代累计。
+2. **配套 1a 读回豁免** `is_spill_readback`：read_file 的 file_path 落在溢写目录内时豁免（单条层在 `_run_tool_pipeline` 检查，聚合层经 exempt_ids 传入）。没有它：LLM 读回溢写文件 → 结果又被溢写 → 死循环。
+3. **配套 1b 预览 2000**：500 字符太短，LLM 信息不足会放弃重读改用 bash 绕过。预览仍以 `min(PREVIEW_CHARS, threshold)` 封顶，兼容测试小阈值。
+4. **配套 1c 小结果豁免**：不长于预览的结果溢写换不回空间（预览+提示反而更大），force 路径也豁免。
+
+**细节**：溢写占位文案现在带溢写文件路径（原来只说"re-run with offset/limit"），LLM 可直接对溢写文件 offset/limit 精读，读回受 1a 保护；spill_batch 写盘 OSError 时保留原文，不炸 OBSERVE 阶段；错误结果和已溢写结果（metadata 有 spilled_path）跳过。
+
+**真实 LLM 验证**（DeepSeek，threshold=50K / aggregate=8K）：并行读 3 个 ~6K 文件——单条不触发、聚合触发，9 条结果溢写 6 条，对话累计 15.5K 字符有界；LLM 看到 2000 字符预览后自主用 offset/limit 分段精读并正确作答（预览给足信息量的效果）；读回溢写文件未被重溢写。
+
+**交互式 E2E 验证与配套修复**：会话（aggregate=15000 极端参数）+ 会话 JSON 审计 19 条工具结果，6 验证点中 5 项全达成（溢写发生/预览留存/精读收敛零绕道/读回不重溢写/小结果与最大优先）。暴露并当场修复两个可用性缺口：① 溢写目录在项目外，读回每次弹权限框且 'a' 按精确路径记忆对新文件无效——PathGuard 对 `~/.mini-agent/cache/results` read 自动放行（write 仍询问）；② confirm() 复用主输入 PromptSession，prompt_toolkit 把传入 message 固化为 session 默认值。
+
+**诚实边界**：豁免读回不被溢写但计入本轮累计预算。aggregate 设得小于典型单文件大小时（15K < 20K），一次读回即耗尽预算，后续中等结果链式"溢写→读回"，对话同时保留预览与全文——预算未真正压住上下文，只多花迭代。默认 200K 下单文件读回（≤50K，更大的被单条阈值先截）最多占 1/8 预算，无链式反应。机制层面不可消除：模型执意读全文时内容终归进对话，预算的职责是让它显式地进，不是拦住它。
