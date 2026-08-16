@@ -195,7 +195,7 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 821 tests, 80%+ coverage
+├── tests/           # 830 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 4 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 └── docs/            # 13 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -215,7 +215,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 821 tests
+uv run pytest tests/           # 830 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

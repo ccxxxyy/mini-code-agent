@@ -74,15 +74,12 @@ class SummarizeOldest(CompressionStrategy):
     以后可以接入完整的基于 LLM 的摘要。
     """
 
-    KEEP_RECENT = 6  # always keep the most recent N messages untouched
-    # 始终保持最近的 N 条消息不动
-
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         msgs = conversation.messages
-        if len(msgs) <= self.KEEP_RECENT:
+        if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, len(msgs) - self.KEEP_RECENT)
+        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs))
         if split <= 0:
             return
 
@@ -107,6 +104,40 @@ def _align_split_to_tool_pair(msgs: list[Message], split: int) -> int:
     while 0 < split < len(msgs) and msgs[split].role == Role.TOOL:
         split -= 1
     return split
+
+
+# Token-driven keep window constants
+KEEP_RECENT_TOKENS = 10_000  # minimum tokens to keep from the tail 尾部最少保留 token 数
+MIN_KEEP_MESSAGES = 5  # always keep at least this many messages 最少保留消息数
+KEEP_MAX_TOKENS = 40_000  # hard cap on kept tokens 保留 token 硬顶
+
+
+def _compute_keep_split(msgs: list[Message]) -> int:
+    """Token-driven split: msgs[split:] are kept, msgs[:split] are summarized.
+    从尾部反向扫描累计 token，满足最少消息数后达到 token 阈值即停。
+
+    Stop conditions (from tail, scanning backward):
+    - accumulated >= KEEP_RECENT_TOKENS AND count >= MIN_KEEP_MESSAGES
+    - accumulated would exceed KEEP_MAX_TOKENS (hard cap)
+    """
+    if len(msgs) <= MIN_KEEP_MESSAGES:
+        return 0
+
+    running_tokens = 0
+    keep_count = 0
+
+    for i in range(len(msgs) - 1, -1, -1):
+        msg = msgs[i]
+        cost = msg.token_count or count_tokens(msg.content or "") + 4
+        if running_tokens + cost > KEEP_MAX_TOKENS:
+            break
+        running_tokens += cost
+        keep_count += 1
+        if keep_count >= MIN_KEEP_MESSAGES and running_tokens >= KEEP_RECENT_TOKENS:
+            break
+
+    split = len(msgs) - keep_count
+    return max(split, 0)
 
 
 def _extractive_digest(messages: list[Message]) -> str:
@@ -155,7 +186,6 @@ class LLMSummarizeOldest(CompressionStrategy):
     LLM 调用失败时回退到抽取式摘要——压缩链绝不能因网络错误中断。
     """
 
-    KEEP_RECENT = 6
     MAX_HISTORY_CHARS = 24_000  # cap the summarization request size 限制摘要请求的大小
 
     def __init__(self, llm: LLMProvider) -> None:
@@ -163,10 +193,10 @@ class LLMSummarizeOldest(CompressionStrategy):
 
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         msgs = conversation.messages
-        if len(msgs) <= self.KEEP_RECENT:
+        if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, len(msgs) - self.KEEP_RECENT)
+        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs))
         if split <= 0:
             return
 

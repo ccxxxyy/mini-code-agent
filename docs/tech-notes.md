@@ -525,7 +525,7 @@ After:  read_file → 前 200 字符 + "... (2000 lines, 45000 chars total, trun
 
 **Stage 2: SummarizeOldest（摘要旧消息）**
 
-保留最近 6 条消息不动（当前工作上下文），将之前所有消息提取为一条摘要。当前实现是**提取式摘要**（每条消息取角色 + 前 300 字符 / 工具名 / 结果状态），不调 LLM：
+token 驱动保留窗口（P150）：从尾部反向累计 token，满足 `KEEP_RECENT_TOKENS`(10K) 且 `MIN_KEEP_MESSAGES`(5) 时停止，硬顶 `KEEP_MAX_TOKENS`(40K)。短消息全保留（不浪费），长消息少保留（不超限）。保留的消息不动，之前的所有消息提取为一条摘要。当前实现是**提取式摘要**（每条消息取角色 + 前 300 字符 / 工具名 / 结果状态），不调 LLM：
 
 ```
 [Compressed conversation history]
@@ -2082,7 +2082,7 @@ P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入�
 
 ### 59.4 实测暴露：纯 SlidingWindow 路径
 
-`SummarizeOldest.KEEP_RECENT = 6`。当消息数 ≤ 6 时 SummarizeOldest 跳过，只有 SlidingWindow 执行——SlidingWindow 不创建摘要消息，边界录不到。
+消息数 ≤ `MIN_KEEP_MESSAGES`(5) 时 SummarizeOldest 跳过（P150 前为固定 `KEEP_RECENT=6`），只有 SlidingWindow 执行——SlidingWindow 不创建摘要消息，边界录不到。
 
 修复：`check_and_compress` 在 `_inject_read_files`（它会插入一条 compressed SYSTEM 消息）之后兜底检查，若 `compact_boundary` 仍为 None 则从这条消息创建边界。两层保底：Compressor 内部录 + ContextManager 外部兜底。
 
@@ -2096,7 +2096,7 @@ mewcode 的 `build_recovery_attachment()` 把最近 5 个文件的实际内容�
 
 ### 60.1 问题：固定切分切断工具对
 
-`SummarizeOldest.KEEP_RECENT=6` 固定从尾部数 6 条切分。若切分点恰好落在 TOOL 消息上，其对应的 tool_use（assistant 的 tool_calls 消息）被摘要吞掉，kept 开头是孤儿 tool result——严格的 API（OpenAI 官方、Anthropic）会直接 400 拒绝。
+P150 之前 `SummarizeOldest.KEEP_RECENT=6` 固定从尾部数 6 条切分（已改为 token 驱动的 `_compute_keep_split`）。若切分点恰好落在 TOOL 消息上，其对应的 tool_use（assistant 的 tool_calls 消息）被摘要吞掉，kept 开头是孤儿 tool result——严格的 API（OpenAI 官方、Anthropic）会直接 400 拒绝。
 
 ### 60.2 修复：边界回退对齐
 
@@ -2158,7 +2158,7 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 
 ### 63.1 问题：压缩后 agent 丢失文件内容和任务上下文
 
-原有 `_inject_read_files` 只记录已读文件路径，压缩后 LLM 虽然知道不该重读，但对文件内容没有记忆，遇到需要引用文件内容的问题时仍会调 `read_file`。更严重的是，如果压缩在一轮中间触发（工具调用后的 `check_and_compress`），`KEEP_RECENT` 保留的消息可能全是工具返回，用户原始请求被摘要吞掉，agent 完全丢失任务上下文。
+原有 `_inject_read_files` 只记录已读文件路径，压缩后 LLM 虽然知道不该重读，但对文件内容没有记忆，遇到需要引用文件内容的问题时仍会调 `read_file`。更严重的是，如果压缩在一轮中间触发（工具调用后的 `check_and_compress`），token 驱动保留窗口保留的消息可能全是工具返回，用户原始请求被摘要吞掉，agent 完全丢失任务上下文。
 
 ### 63.2 三层修复
 
@@ -2280,12 +2280,36 @@ usage_ratio >= 0.75（软阈值）
 - trace 中反复出现 `Compression circuit breaker open`（软阈值被阻断）
 - 消息数骤降（如 35→8）证实硬阈值绕过熔断器执行了压缩
 
+## 66. Token 驱动的保留窗口
+
+### 66.1 问题：固定消息数保留不适应消息大小
+
+`SummarizeOldest.KEEP_RECENT = 6` 固定保留最近 6 条消息。6 条短消息可能只有 1K token（浪费压缩空间），6 条长消息可能有 40K token（保留太多导致压缩无效）。
+
+### 66.2 修复：token 驱动的 `_compute_keep_split`
+
+`_compute_keep_split(msgs)` 从尾部反向扫描累计 token，双条件停止：
+
+1. 累计 ≥ `KEEP_RECENT_TOKENS`(10K) **且** 消息数 ≥ `MIN_KEEP_MESSAGES`(5)
+2. 累计 + 下一条 > `KEEP_MAX_TOKENS`(40K)（硬顶，防止保留过多）
+
+`SummarizeOldest` 和 `LLMSummarizeOldest` 共用此函数替代固定 `KEEP_RECENT = 6`，工具对对齐（`_align_split_to_tool_pair`）不变。
+
+效果：短消息全保留（不浪费），长消息少保留（不超限）。
+
+### 66.3 验证
+
+真实 LLM 三场景验证 + 终端交互验证：
+- **长回复场景**（context_window=20000）：5 轮长回复压缩后 kept=5（MIN_KEEP_MESSAGES），旧行为 6 × 几千 token = 过多
+- **混合场景**（context_window=8000）：2 个长回复 + 8 个短问答，压缩后 19 条消息全保留（旧 KEEP_RECENT=6 只留 7 条）
+- 7 个新单测覆盖所有边界条件
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——793 个测试约 80 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——830 个测试约 80 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

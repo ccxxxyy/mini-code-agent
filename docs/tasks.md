@@ -1585,3 +1585,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 ### P65.4 验证
 - [x] 真实 LLM E2E 脚本（Phase 1 核心逻辑 + Phase 2 五轮 DeepSeek 对话，context_window=6000）：熔断器开启后软阈值被阻断，硬阈值绕过执行完整级联压缩（8910→4760），熔断器重置
 - [x] 终端窗口验证（context_window=20000，/trace + /status）：`breaker=3/3` 后消息数骤降证实硬阈值生效
+
+---
+
+## P66 Token 驱动的保留窗口
+
+> todo-code-quality.md ⑤。替代固定 `KEEP_RECENT = 6` 消息的保留策略，改为 token 驱动：从尾部反向扫描累计 token，满足 `KEEP_RECENT_TOKENS(10K)` 且 `MIN_KEEP_MESSAGES(5)` 时停止，硬顶 `KEEP_MAX_TOKENS(40K)`。
+
+### P66.1 实现
+- [x] `memory/compressor.py` — 新增 `_compute_keep_split(msgs)` 函数：从尾部反向扫描，双条件停止（token ≥ 10K 且 count ≥ 5），硬顶 40K
+- [x] `memory/compressor.py` — `SummarizeOldest` 移除 `KEEP_RECENT = 6`，改用 `_compute_keep_split()` + `_align_split_to_tool_pair()`
+- [x] `memory/compressor.py` — `LLMSummarizeOldest` 同步移除 `KEEP_RECENT = 6`，改用 `_compute_keep_split()`
+- [x] 消息数 ≤ `MIN_KEEP_MESSAGES` 时两个策略均跳过（与旧行为一致）
+
+### P66.2 测试
+- [x] `test_keep_split_short_messages_keeps_all` — 20 条 × 10 token = 200 < 10K → split=0 全保留（旧行为只保留 6）
+- [x] `test_keep_split_long_messages_keeps_fewer` — 20 条 × 8K = 160K → 保留 5 条（MIN_KEEP_MESSAGES），旧行为保留 6 条 = 48K
+- [x] `test_keep_split_hits_hard_cap` — 10 条 × 15K → 硬顶 40K 命中，只保留 2 条
+- [x] `test_keep_split_minimum_messages` / `fewer_than_minimum` — ≤ MIN_KEEP_MESSAGES 时 split=0
+- [x] `test_keep_split_meets_both_thresholds` — 15 条 × 2500 token → 双条件恰好满足时停在 5 条
+- [x] `test_summarize_oldest_keeps_all_when_tokens_low` — 低 token 场景 SummarizeOldest 空操作
+- [x] 已有 30+ 测试全部更新适配（token_count 调高触发 split，移除 `KEEP_RECENT` 引用）
+
+### P66.3 验证
+- [x] 真实 LLM 验证（DeepSeek，context_window=20000）：Phase 1 短消息全保留（20 条 × 10 token = 200，split=0，旧行为只留 6 条）；Phase 2 长消息少保留（20 条 × 8K，kept=5 = MIN_KEEP_MESSAGES，旧行为 6 × 8K = 48K）；Phase 3 真实对话压缩，token 驱动保留 13 条 ≈10639 tokens（旧 KEEP_RECENT=6 只保留 6 条）
+- [x] 830 个测试全过（含 7 个新增），ruff lint + format clean
