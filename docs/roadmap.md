@@ -16,7 +16,7 @@
 
 ### 1.1 LLM 摘要压缩（升级 SummarizeOldest 策略）✅ 已完成
 
-> 已实现 `LLMSummarizeOldest(CompressionStrategy)`：LLM 语义摘要 + 失败回退提取式 + 防递归（一次性直连调用不经过 AgentLoop）。4 个 MockLLM 单测。作为机制实验 1 的第三个对照臂投入使用（见 `experiments/`）。未接入默认压缩链（向后兼容），显式配置启用。
+> 已实现 `LLMSummarizeOldest(CompressionStrategy)`：LLM 语义摘要 + 失败回退提取式 + 防递归（一次性直连调用不经过 AgentLoop）。4 个 MockLLM 单测。作为机制实验 1 的第三个对照臂投入使用（见 `experiments/`）。P64.2 已改为默认启用（`llm_summarize=True`），`app.py` 装配时自动替换 Stage 2。
 
 ### 1.2 LLM 记忆提取（升级 MemoryExtractor）✅ 已完成
 
@@ -165,7 +165,7 @@
 7. ~~1.4 工具并行~~（✅ 已完成）
 8. 其余按需推进
 
-> 1.1 LLM 摘要压缩已在 P11 完成（且实验数据显示默认不开启是正确的）。
+> 1.1 LLM 摘要压缩已在 P11 完成，P64.2 改为默认启用（`llm_summarize=True`）。
 
 ---
 

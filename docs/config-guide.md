@@ -199,7 +199,8 @@ denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
 
 [memory]
 context_window = 128000      # 上下文窗口 token 数（压缩触发用；溢出兜底另用 Provider 从 API 自动探测的真实窗口值，P42）
-compression_threshold = 0.75 # 压缩触发阈值（75% 时压缩）
+compression_threshold = 0.75 # 软阈值（75% 时压缩，受熔断器控制）
+hard_compression_threshold = 0.90 # 硬阈值（90% 时强制压缩，绕过熔断器）
 auto_extract = true          # 会话结束自动提取记忆
 spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留预览（0 = 禁用）——防大文件撑爆上下文
 aggregate_spill_chars = 200000 # 单轮工具结果累计字符预算：超出时按大小降序强制溢写（0 = 禁用）——防"每条不超、合计撑爆"

@@ -61,6 +61,7 @@ class MCPConfig:
 class MemoryConfig:
     context_window: int = 128_000
     compression_threshold: float = 0.75
+    hard_compression_threshold: float = 0.90
     persistent_memory_dir: str = "~/.mini-agent/memory"
     project_memory_file: str = ".mini-agent/memory.json"
     auto_extract: bool = True

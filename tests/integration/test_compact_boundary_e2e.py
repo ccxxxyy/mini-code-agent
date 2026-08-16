@@ -118,6 +118,7 @@ async def test_circuit_breaker_full_chain(caplog):
     config = MemoryConfig(
         context_window=300,
         compression_threshold=0.5,
+        hard_compression_threshold=100.0,
         compress_max_failures=3,
     )
     ctx = ContextManager(config)

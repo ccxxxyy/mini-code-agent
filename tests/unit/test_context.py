@@ -395,7 +395,12 @@ class NoOpCompressor:
 
 
 async def test_circuit_breaker_trips_after_max_failures():
-    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    config = MemoryConfig(
+        context_window=200,
+        compression_threshold=0.5,
+        compress_max_failures=3,
+        hard_compression_threshold=100.0,
+    )
     cm = ContextManager(config)
     cm.set_compressor(NoOpCompressor())
 
@@ -413,7 +418,12 @@ async def test_circuit_breaker_trips_after_max_failures():
 
 
 async def test_circuit_breaker_resets_on_success():
-    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    config = MemoryConfig(
+        context_window=200,
+        compression_threshold=0.5,
+        compress_max_failures=3,
+        hard_compression_threshold=100.0,
+    )
     cm = ContextManager(config)
     cm.set_compressor(NoOpCompressor())
 
@@ -435,7 +445,12 @@ async def test_circuit_breaker_warns_only_once(caplog):
     # the console 每轮迭代检查两次，重复 WARNING 会刷屏
     import logging
 
-    config = MemoryConfig(context_window=200, compression_threshold=0.5, compress_max_failures=3)
+    config = MemoryConfig(
+        context_window=200,
+        compression_threshold=0.5,
+        compress_max_failures=3,
+        hard_compression_threshold=100.0,
+    )
     cm = ContextManager(config)
     cm.set_compressor(NoOpCompressor())
 
@@ -465,6 +480,65 @@ async def test_circuit_breaker_disabled_when_zero():
     for _ in range(10):
         result = await cm.check_and_compress(conv)
         assert result is True
+
+
+# --- Hard compression threshold bypasses breaker 硬阈值绕过熔断器 ---
+
+
+async def test_hard_threshold_bypasses_breaker():
+    # context_window=1000, 6×100=600 tokens → usage_ratio=0.6 (above soft 0.5, below hard 0.9)
+    config = MemoryConfig(
+        context_window=1000,
+        compression_threshold=0.5,
+        hard_compression_threshold=0.9,
+        compress_max_failures=3,
+    )
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(6):
+        conv.messages.append(make_msg(token_count=100))
+
+    # Trip the breaker with 3 ineffective attempts
+    for _ in range(3):
+        await cm.check_and_compress(conv)
+    assert cm._compress_failures == 3
+
+    # Soft threshold: breaker blocks
+    assert await cm.check_and_compress(conv) is False
+
+    # Push above hard threshold (6×100 + 4×100 = 1000 → ratio=1.0 >= 0.9)
+    for _ in range(4):
+        conv.messages.append(make_msg(token_count=100))
+
+    # Hard threshold bypasses breaker
+    result = await cm.check_and_compress(conv)
+    assert result is True
+
+
+async def test_soft_threshold_still_blocked_by_breaker():
+    # 6×100=600 tokens, context_window=1000 → usage_ratio=0.6 (above soft 0.5, below hard 0.9)
+    config = MemoryConfig(
+        context_window=1000,
+        compression_threshold=0.5,
+        hard_compression_threshold=0.9,
+        compress_max_failures=3,
+    )
+    cm = ContextManager(config)
+    cm.set_compressor(NoOpCompressor())
+
+    conv = Conversation()
+    for _ in range(6):
+        conv.messages.append(make_msg(token_count=100))
+
+    for _ in range(3):
+        await cm.check_and_compress(conv)
+    assert cm._compress_failures == 3
+
+    cm.update_total(conv)
+    assert cm.usage_ratio < 0.9
+    assert await cm.check_and_compress(conv) is False
 
 
 # --- File content in compression recovery (9.2a) 压缩恢复附件含文件内容 ---

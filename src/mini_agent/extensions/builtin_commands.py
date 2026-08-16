@@ -574,7 +574,9 @@ def _make_status(app: Application) -> HandlerFn:
             f"  Turns: {meta.total_turns}",
             f"  Tokens used: {meta.total_tokens_used}",
             _cost_status_line(app),
-            f"  Context: {cm.total_tokens}/{cm.max_tokens} ({cm.usage_ratio:.0%})",
+            f"  Context: {cm.total_tokens}/{cm.max_tokens} ({cm.usage_ratio:.0%})"
+            f"  soft={cm._threshold:.0%} hard={cm._hard_threshold:.0%}"
+            f"  breaker={cm._compress_failures}/{cm._max_compress_failures or '∞'}",
             f"  Messages: {len(app.session.conversation.messages)}",
             f"  Session ID: {meta.session_id}",
         ]

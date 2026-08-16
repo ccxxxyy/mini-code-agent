@@ -401,6 +401,18 @@
 
 **实测暴露的设计点**：mini 的 `MemoryEntry.source`（"user"/"extracted"）记录的是**谁创建的**，不是**存在哪里**——`/memory add` 进项目库的条目 source 也是 "user"。第一版按 source 路由导致跨机导入时项目记忆错进用户库；修复为导出时显式写 `scope` 前置元数据（project/user），导入按 scope 还原。
 
+### 4.7 压缩双阈值 ✅ 已实现（P65）
+
+| | mini | mewcode |
+|---|---|---|
+| 压缩阈值 | ✅ **双阈值**——软阈值（默认 75%）受熔断器控制 + 硬阈值（默认 90%）绕过熔断器强制完整级联压缩 (P65) | **双阈值**——`auto_compact_safety_margin`(13K) 触发正常压缩 + `manual_compact_safety_margin`(3K) 触发强制压缩绕过熔断器 |
+
+**已完成**（P65）：
+- `MemoryConfig.hard_compression_threshold = 0.90`：独立配置，默认 90%
+- `check_and_compress()` 熔断器检查加 `and not self.needs_hard_compression`：软阈值被熔断器阻断时，硬阈值仍走完整三级级联（DropToolResults → SummarizeOldest → SlidingWindow），避免只剩 `ensure_fits` 的粗暴截断
+- `/status` 显示 `soft=75% hard=90% breaker=0/3`，硬阈值触发时 WARNING 日志明确标识
+- 默认 128K 窗口下：96K 触发软压缩，115K 触发硬压缩
+
 ---
 
 ## 五、TUI / 终端
@@ -805,6 +817,9 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 9.2 | 会话压缩边界 | 恢复性能 | 已完成 |
 | ✅ 完成 | 4.6 | 记忆导出/导入（P61） | 互操作：export/import .md + scope 路由 | 已完成 |
 | ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
+| ✅ 完成 | 1.1 | LLM 摘要压缩接入（P64.2） | LLM 语义摘要设为默认，失败回退提取式 | 已完成 |
+| ✅ 完成 | — | 压缩检查前移 + 摘要前缀指令（P64.3） | 纯对话场景压缩触发 + 防 LLM 翻会话文件 | 已完成 |
+| ✅ 完成 | 4.7 | 压缩双阈值（P65） | 硬阈值绕过熔断器，紧急情况走完整级联而非粗暴截断 | 已完成 |
 | ⚪ P3 | 1.1a | Anthropic Provider E2E 验证 | 1.1 遗留：代码就绪但未用真实 API key 端到端验证 | 2 小时（需 key） |
 | ✅ 完成 | 9.2a | 压缩恢复附件含文件内容 | 9.2 诚实差异 #1 消除：`_inject_read_files` 烤入最近 5 文件内容（5000 tokens/个） | 已完成 |
 | ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |

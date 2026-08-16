@@ -535,7 +535,7 @@ After:  read_file → 前 200 字符 + "... (2000 lines, 45000 chars total, trun
 [assistant] 这个项目是一个...
 ```
 
-设计决策：P4 阶段用提取式而非 LLM 摘要，原因是避免压缩本身消耗 token、避免递归 API 调用的复杂性、以及保持可测性（无网络依赖）。LLM 摘要作为可插拔升级留给未来。
+设计决策：P4 阶段用提取式而非 LLM 摘要，原因是避免压缩本身消耗 token、避免递归 API 调用的复杂性、以及保持可测性（无网络依赖）。P64.2 已将 LLM 摘要设为默认（`llm_summarize=True`），失败自动回退提取式。
 
 **Stage 3: SlidingWindow（滑动窗口兜底）**
 
@@ -1085,7 +1085,7 @@ positioning.md 方向 4 提出"机制实验床"——拿自己的实现做对照
 - **策略选择逻辑复用**：把 `SummarizeOldest` 的提取式拼接抽成模块级函数 `_extractive_digest()`，LLM 版和提取式版共用消息选择/替换逻辑
 - **防递归**：摘要调用是一次性直连 `llm.stream()` 请求，不经过 AgentLoop——压缩发生在 OBSERVE 阶段内部，若走 AgentLoop 会再次触发压缩检查造成递归
 - **失败即回退**：LLM 网络异常或空响应时回退提取式摘要——压缩链在任何情况下都必须产出结果，否则对话会因超窗被 API 拒绝
-- **不动默认链**：`Compressor()` 默认策略列表不变，LLM 摘要需显式配置——压缩本身耗 token，是否值得由使用场景决定（这正是实验 1 要回答的问题）
+- **P11 阶段不动默认链**：`Compressor()` 默认策略列表不变——压缩本身耗 token，是否值得由实验决定。P64.2 实验结论后改为默认启用（`llm_summarize=True`），`app.py` 装配时自动替换 Stage 2
 
 ## 11.3 实验设计要点
 
@@ -2015,7 +2015,7 @@ spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字�
 
 ## 58.5 已拉平四项
 
-P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 曾记录四项差距，P58.4 全部实现：
+P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 曾记录四项差距，P58.4 全部实现：
 
 1. **广播** ✅——`Mailbox.broadcast()` + send_message `to='*'`，自动排除发送者，返回收件人列表
 2. **结构化消息协议** ✅——通用 `type=text/request/response` + request_id 配对（request 自动分配并回显）+ approve 表态，投递前缀区分 [Request]/[Response]。适配说明：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故用通用请求-应答而非照搬团队类型
@@ -2047,7 +2047,7 @@ P58 学的是 mewcode 的骨架（每 Agent 一个 JSON 收件箱 + turn 开始�
 
 **诚实边界**：iTerm2 未做（无 macOS 环境，不写无法验证的代码）；pane cancel 尽力而为不强杀进程；worker 无权限弹窗（与 in-process SubAgent 一致）
 
-## 58.7 实测迭代：六轮真实使用暴露的坑（每个都有回归测试）
+## 58.7 实测迭代
 
 1. **协议隔离（最深）**：worker 的 LLM 在探索项目时读到自己的 spec 文件（曾放在项目 `.mini-agent/workers/`，含 result_path），"好心"提前用 write_file 自己写了一份结果——父进程 0.5s 轮询立刻捡走早产桩（Tokens: 0），真结果 15 秒后写入但已无人收。**教训：父子协调文件绝不能放在 agent 可自由读写的目录里**。修复：协议文件迁 `~/.mini-agent/workers/` + 收集器 schema 7 字段 + agent_id 双校验。讽刺的是另一个并行 worker 的分析报告正确预言了此缺陷（"result 文件缺 schema 校验"）
 2. **崩溃可见性**：worker 崩在写结果之前 → 父进程只能干等超时，原因随窗格关闭消失。修复：顶层护栏任何异常都写失败结果 + traceback + 窗格停留。同类教训：cli 的 `finally: sys.exit(0)` 会吞掉一切崩溃 traceback（一个 AgentPhase.ACTING 枚举笔误曾借此无声杀死整个应用）
@@ -2142,7 +2142,7 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 
 `check_and_compress()` 在调用 `Compressor.compress()` 前后对比 `_total_tokens`：有效则重置为 0，无效则 +1。计数达到阈值后所有后续调用直接返回 False。
 
-**不做恢复**——一旦熔断，会话内不再尝试主动压缩。理由：`ensure_fits()` 作为独立的硬兜底（在 `_think()` 的 LLM 调用前检查实际窗口大小），不受熔断器影响。熔断只省掉 75% 阈值处的无效重试，真正超窗口时 `ensure_fits` 仍然保护。新会话 = 新 `ContextManager` = 计数器从零开始。
+**不做会话内恢复**——计数器只在压缩有效时重置，不随时间自动恢复。理由：硬阈值（P65）在紧急情况绕过熔断器执行压缩，`ensure_fits()` 作为最终兜底不受熔断器影响。新会话 = 新 `ContextManager` = 计数器从零开始。
 
 ### 62.3 真实 LLM 验证
 
@@ -2179,16 +2179,6 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 
 `context_window=14000` 配置下读 2 个文件（token_counter.py + config.py），触发 grep 工具调用后压缩触发。压缩后 agent 能：(1) 知道用户在问什么（不说"我不知道你的请求"）；(2) 不重读文件直接回答 `truncate_to_tokens` 的实现细节；(3) 正确引用代码行号和逻辑。
 
-# 附录：贯穿各阶段的通用设计原则
-
-1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
-2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
-3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
-4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——793 个测试约 80 秒跑完
-6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
-7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
-
 ## 64. 聚合工具结果预算（P64.1）
 
 **问题**：`maybe_spill()` 只看单条 50K 阈值。10 个并行工具各返回 49K 字符，单条都不触发，一轮塞入 ~500K 字符撑爆上下文。
@@ -2207,3 +2197,95 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 **交互式 E2E 验证与配套修复**：会话（aggregate=15000 极端参数）+ 会话 JSON 审计 19 条工具结果，6 验证点中 5 项全达成（溢写发生/预览留存/精读收敛零绕道/读回不重溢写/小结果与最大优先）。暴露并当场修复两个可用性缺口：① 溢写目录在项目外，读回每次弹权限框且 'a' 按精确路径记忆对新文件无效——PathGuard 对 `~/.mini-agent/cache/results` read 自动放行（write 仍询问）；② confirm() 复用主输入 PromptSession，prompt_toolkit 把传入 message 固化为 session 默认值。
 
 **诚实边界**：豁免读回不被溢写但计入本轮累计预算。aggregate 设得小于典型单文件大小时（15K < 20K），一次读回即耗尽预算，后续中等结果链式"溢写→读回"，对话同时保留预览与全文——预算未真正压住上下文，只多花迭代。默认 200K 下单文件读回（≤50K，更大的被单条阈值先截）最多占 1/8 预算，无链式反应。机制层面不可消除：模型执意读全文时内容终归进对话，预算的职责是让它显式地进，不是拦住它。
+
+## 64a. LLM 摘要压缩接入（P64.2）
+
+**背景**：P11 实现了 `LLMSummarizeOldest` 但未接入默认链（实验阶段）。P64.2 根据实验结论和实际使用体验，将 LLM 语义摘要设为默认。
+
+**实现**：
+- `MemoryConfig.llm_summarize: bool = True`：默认启用，`False` 回退提取式
+- `app.py` 装配：`llm_summarize=True` 时用 `LLMSummarizeOldest(self._llm)` 替换 Compressor 默认的 `SummarizeOldest`；失败自动回退（LLMSummarizeOldest 内置回退机制）
+- `config.toml.example` `[memory]` 段补 `llm_summarize` 注释
+
+## 64b. 压缩检查前移 + 摘要前缀指令（P64.3）
+
+**问题 1**：`check_and_compress()` 原来只在 OBSERVE 阶段（工具结果追加后）调用。纯对话场景（用户多轮提问无工具调用）永远不触发压缩，token 持续增长直到 `ensure_fits` 粗暴截断。
+
+**修复**：`_think()` 在 `ensure_fits` 之前增加 `check_and_compress` 调用——每次 LLM 调用前都检查，纯对话也能触发三级级联。
+
+**问题 2**：压缩后 LLM 看到 `[Compressed conversation history]` 标记，误以为有更完整的历史存在磁盘上，去 `.mini-agent/sessions/` 翻会话文件浪费迭代。
+
+**修复**：摘要前缀加明确指令 "this is the authoritative record... Do NOT search session files"。
+
+## 65. 压缩双阈值（P65）
+
+### 65.1 问题：熔断器过度保护——紧急压缩也被阻断
+
+P62 引入的熔断器解决了"压缩无效时白跑"的问题，但带来新问题：熔断器开启后**所有**压缩都被阻断，包括上下文即将溢出的紧急情况。此时只剩 `ensure_fits()` 兜底——它直接调 SlidingWindow 粗暴截断到 85%，跳过 DropToolResults 和 SummarizeOldest 两级，丢失大量上下文信息。
+
+真实场景：P64.4 验证中 context_window=10000 时观察到——熔断器 3 次无效后开启，后续对话 token 持续增长，check_and_compress 全部返回 False，最终由 ensure_fits 暴力截断，LLM 丢失任务上下文后反复重读文件。
+
+### 65.2 方案：软硬双阈值
+
+参考 mewcode 的 `auto_compact` 双阈值设计（200K 窗口下 167K 触发软压缩、177K 触发硬压缩），引入两个独立阈值：
+
+- **软阈值** `compression_threshold`（默认 0.75）：正常压缩触发点，受熔断器控制——连续 N 次无效后熔断器阻断，避免白跑
+- **硬阈值** `hard_compression_threshold`（默认 0.90）：紧急压缩触发点，**绕过熔断器**——即使熔断器开启，只要 `usage_ratio >= 0.90` 仍执行完整三级级联压缩
+
+默认 128K 窗口下：96K 触发软压缩，115K 触发硬压缩。两个阈值均可通过 `[memory]` 配置调整。
+
+### 65.3 实现
+
+改动集中在 `check_and_compress()` 的熔断器检查处，一行条件：
+
+```python
+# 原：达到熔断阈值就跳过
+if self._compress_failures >= self._max_compress_failures > 0:
+    return False
+
+# 改：达到熔断阈值 且 未达硬阈值 才跳过
+if (self._compress_failures >= self._max_compress_failures > 0
+    and not self.needs_hard_compression):
+    return False
+```
+
+硬阈值绕过后走的仍是同一条压缩路径（Compressor.compress → 三级级联），不需要新的压缩逻辑。区别仅在入口处是否放行。
+
+附带改进：
+- `/status` Context 行显示 `soft=75% hard=90% breaker=0/3`，运行时可观测
+- 硬阈值触发时 WARNING 日志 `Hard compression threshold reached (X%), bypassing circuit breaker`，与熔断器开启日志配对可区分软/硬阈值行为
+
+### 65.4 防护链完整图景（更新后）
+
+```
+usage_ratio >= 0.75（软阈值）
+  → 熔断器未开启 → 三级级联压缩（正常路径）
+  → 熔断器已开启 → 跳过（避免白跑）
+      → usage_ratio >= 0.90（硬阈值）→ 绕过熔断器，三级级联压缩（紧急路径）
+      → usage_ratio < 0.90 → 继续跳过
+          → _think() 前 ensure_fits(真实窗口) → SlidingWindow 强制截断（最终兜底）
+```
+
+三层防护各管一段：软阈值管常规、硬阈值管紧急、ensure_fits 管溢出。熔断器只在软-硬之间的"安全区"生效。
+
+### 65.5 真实 LLM 验证
+
+**E2E 脚本**（context_window=6000，soft=0.6，hard=0.85）：
+1. AlwaysFailCompressor 触发熔断器（3/3），软阈值被阻断（返回 False）
+2. 推高 usage_ratio 到 1.12，硬阈值绕过熔断器（返回 True）
+3. 五轮 DeepSeek 对话：熔断器开启后 ratio 继续增长，硬阈值触发有效压缩（8910→4760），熔断器重置
+
+**终端窗口验证**（context_window=20000，/trace + /status）：
+- `/status` 确认 `breaker=3/3`，Context 60%-85% 之间波动
+- trace 中反复出现 `Compression circuit breaker open`（软阈值被阻断）
+- 消息数骤降（如 35→8）证实硬阈值绕过熔断器执行了压缩
+
+# 附录：贯穿各阶段的通用设计原则
+
+1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
+2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
+3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
+4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——793 个测试约 80 秒跑完
+6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
+7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
