@@ -22,7 +22,8 @@
 
 [memory]
 # context_window = 128000
-# compression_threshold = 0.75
+# compression_threshold = 0.75        # soft threshold, controlled by circuit breaker 软阈值，受熔断器控制
+# hard_compression_threshold = 0.90   # hard threshold, bypasses circuit breaker 硬阈值，绕过熔断器强制压缩
 # auto_extract = true
 # spill_threshold_chars = 50000  # tool results above this spill to disk, 0 = off 工具结果超此字符数溢写磁盘，0 禁用
 # aggregate_spill_chars = 200000 # per-turn aggregate budget: force-spill largest when total exceeds, 0 = off 单轮聚合预算：累计超此值时按大小强制溢写，0 禁用

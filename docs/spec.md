@@ -416,7 +416,8 @@ class MCPConfig:
 @dataclass
 class MemoryConfig:
     context_window: int = 128_000         # Provider's context limit
-    compression_threshold: float = 0.75   # Compress at 75% of window
+    compression_threshold: float = 0.75   # Soft threshold (75%), breaker-controlled
+    hard_compression_threshold: float = 0.90  # Hard threshold (90%), bypasses breaker
     persistent_memory_dir: str = "~/.mini-agent/memory"
     project_memory_file: str = ".mini-agent/memory.json"
     auto_extract: bool = True

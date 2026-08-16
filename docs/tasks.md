@@ -1557,3 +1557,31 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 2 个新测试（config 默认 / config false） + 1 个已有测试适配摘要前缀变更，803 个测试全过
 - [x] ruff lint + format clean
 - [x] 真实 LLM 验证（context_window=10000）：纯对话场景压缩触发，但熔断器连续 3 次无效后开启——暴露 ⑤（token 驱动保留窗口）的必要性
+
+---
+
+## Phase 65: 压缩双阈值 (P65)
+
+### P65.1 双阈值实现
+- [x] `models/config.py` — `MemoryConfig.hard_compression_threshold: float = 0.90`（硬阈值，绕过熔断器）
+- [x] `memory/context.py` — `ContextManager._hard_threshold` 字段 + `needs_hard_compression` 属性
+- [x] `check_and_compress()` 熔断器检查加 `and not self.needs_hard_compression`：软阈值受熔断器控制，硬阈值绕过
+- [x] 硬阈值触发时 WARNING 日志 `Hard compression threshold reached (X%), bypassing circuit breaker`
+- [x] `/status` Context 行扩展：显示 `soft=75% hard=90% breaker=0/3`
+
+### P65.2 测试
+- [x] `tests/unit/test_context.py` 2 个新测试（硬阈值绕过熔断器 / 软阈值仍被阻断）
+- [x] 3 个现有熔断器测试 + 1 个集成测试修复（显式设 `hard_compression_threshold=100.0` 防干扰）
+- [x] 823 个测试全过，ruff lint + format clean
+
+### P65.3 文档同步
+- [x] `config.toml.example` / `docs/config-guide.md` / `docs/spec.md` — 新增硬阈值配置
+- [x] `docs/capabilities.md` — "75% 阈值" → "75% 软阈值 + 90% 硬阈值绕过熔断器"
+- [x] `docs/checklist.md` — 新增双阈值验收项
+- [x] `docs/tech-notes.md` — 62.2 节更新为双阈值描述
+- [x] `docs/todo-code-quality.md` — ☐ → ☑
+- [x] `docs/comparison-mewcode.md` — 新增 4.7 节 + roadmap 表格行
+
+### P65.4 验证
+- [x] 真实 LLM E2E 脚本（Phase 1 核心逻辑 + Phase 2 五轮 DeepSeek 对话，context_window=6000）：熔断器开启后软阈值被阻断，硬阈值绕过执行完整级联压缩（8910→4760），熔断器重置
+- [x] 终端窗口验证（context_window=20000，/trace + /status）：`breaker=3/3` 后消息数骤降证实硬阈值生效

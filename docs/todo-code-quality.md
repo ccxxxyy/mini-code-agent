@@ -185,7 +185,7 @@ experiments/results/
 - `models/config.py`：`aggregate_spill_chars: int = 200_000`（0 = 禁用）
 - `security/path_guard.py`：溢写缓存目录只读自动放行（读回闭环不弹权限框）
 
-### ☐ ④ 压缩双阈值（硬阈值绕过熔断器）
+### ☑ ④ 压缩双阈值（硬阈值绕过熔断器）
 
 **问题**：mini 的熔断器开启后**所有**压缩都被阻断，包括上下文即将溢出的紧急情况。
 

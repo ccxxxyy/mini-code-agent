@@ -23,6 +23,7 @@ class ContextManager:
     def __init__(self, config: MemoryConfig) -> None:
         self._max_tokens = config.context_window
         self._threshold = config.compression_threshold
+        self._hard_threshold = config.hard_compression_threshold
         self._total_tokens = 0
         self._compressor = None  # set via set_compressor() after init
         # 初始化后通过 set_compressor() 设置
@@ -150,6 +151,10 @@ class ContextManager:
     def needs_compression(self) -> bool:
         return self.usage_ratio >= self._threshold
 
+    @property
+    def needs_hard_compression(self) -> bool:
+        return self.usage_ratio >= self._hard_threshold
+
     async def check_and_compress(self, conversation: Conversation) -> bool:
         """Check if compression is needed and perform it.
         检查是否需要压缩并执行压缩。
@@ -165,6 +170,7 @@ class ContextManager:
         if (
             self._max_compress_failures > 0
             and self._compress_failures >= self._max_compress_failures
+            and not self.needs_hard_compression
         ):
             if not self._breaker_warned:
                 self._breaker_warned = True
@@ -176,6 +182,17 @@ class ContextManager:
                     self._compress_failures,
                 )
             return False
+
+        if (
+            self._compress_failures >= self._max_compress_failures > 0
+            and self.needs_hard_compression
+        ):
+            logger.warning(
+                "Hard compression threshold reached (%.0f%%), bypassing circuit breaker. "
+                "硬阈值触发（%.0f%%），绕过熔断器强制压缩",
+                self.usage_ratio * 100,
+                self.usage_ratio * 100,
+            )
 
         # Capture the latest user request before compression discards it
         # 压缩前捕获最近的用户请求，防止被摘要吞掉

@@ -227,7 +227,7 @@
 | 要求点 | 实现 |
 |---|---|
 | 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝 |
-| 上下文压缩 | 三级级联（75% 阈值自动 + /compact 手动） |
+| 上下文压缩 | 三级级联（75% 软阈值 + 90% 硬阈值绕过熔断器 + /compact 手动） |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
 | 跨会话记忆 | 项目级 + 用户级双层 JSON 存储 + 关键词/标签搜索 |
@@ -290,7 +290,7 @@
 
 以下为 mini 早期实现的合理取舍，**不影响需求达成**。带 ✅ 的已在后续阶段升级：
 
-1. 默认压缩链 Stage 2 用提取式摘要（LLM 摘要 `LLMSummarizeOldest` 已实现但需显式配置——压缩本身耗 token，默认不开启）
+1. ✅ 压缩链 Stage 2 已默认使用 LLM 语义摘要（P64.2，`llm_summarize=True`），失败自动回退提取式
 2. ✅ 记忆提取已从正则升级为 LLM 结构化提取（P30）
 3. ✅ MCP HTTP transport 已实现（P31，含 headers 认证）
 4. ✅ 多个 tool_calls 已改为权限预检串行 + 执行并行（P17，asyncio.gather + 审计锁）；P38 进一步升级为流式执行（组装完成即跑，不等流结束）
