@@ -1236,3 +1236,67 @@
 ### 测试
 - [x] 7 个新 `_compute_keep_split` 单测：短消息全保留 / 长消息少保留 / 硬顶 / 最少消息数 / 少于最少 / 双条件停止 / SummarizeOldest 低 token 空操作
 - [x] 已有 30+ 测试全部适配（token_count 调高、移除 KEEP_RECENT 引用）
+
+## Phase 66 检查项：摘要 prompt 结构化（P67）
+
+### 功能完整性
+- [x] `_SUMMARY_PROMPT` 重写为结构化格式：`<analysis>` 思考草稿（时间线梳理 + 自查）+ `<summary>` 9 节输出（主请求/技术概念/文件代码/错误修复/问题解决/全部用户消息/待做/当前工作/下一步）
+- [x] mini 适配：prompt 声明"近期消息已原样保留"（只摘要旧前缀）；省去 mewcode 的 "Do NOT call tools" 警告（直连调用不带工具）
+- [x] `_extract_summary()` 只注入 `<summary>` 块；无标签回退完整输出；只剩 `<analysis>`（截断）时剥离草稿返回空 → 触发抽取式回退
+- [x] 回退分支 WARNING 日志（异常类型 + 消息），回退原因可观测
+
+### 测试
+- [x] 5 个新单测：提取剥离草稿 / 无标签回退 / 截断剥离 / 注入内容不含草稿 / 空 summary 块回退
+- [x] 真实 LLM E2E（`experiments/verify_summary_prompt.py`）：9 节摘要完整，文件名/用户约束/下一步保留，5 项断言全 PASS
+- [x] 835 个测试全过，ruff lint + format clean
+
+## Phase 67 检查项：保留窗口按压缩目标缩放（P68）
+
+### 功能完整性
+- [x] `_compute_keep_split(msgs, target_tokens)`：下限 `min(10K, target//2)`、硬顶 `min(40K, target)` 随压缩目标缩放
+- [x] `keep_count == 0` 兜底强制保留 1 条尾部消息
+- [x] 大窗口（128K）行为与缩放前完全一致
+- [x] 小窗口（10K）摘要级恢复可达标，不再退化为纯 SlidingWindow
+
+### 测试
+- [x] 4 个新单测：小目标缩放 / 超顶保底 / 大目标不变 / 端到端预算内
+- [x] 真实 LLM 验证（target=7500）：压缩后 7008 ≤ 7500，结构化摘要存活
+- [x] 841 个测试全过，ruff lint + format clean
+
+## Phase 68 检查项：DropToolResults 尊重保留窗口（P69）
+
+### 功能完整性
+- [x] Stage 1 只截断可摘要前缀（`_compute_keep_split`）内的工具输出，绝不碰模型工作集
+- [x] 修复"以为工具坏了"重读死循环：同场景 36 迭代 → 4 迭代（终端实测）
+
+### 测试
+- [x] 3 个单测（前缀截断 / 短输出跳过 / 保留窗口内新旧对照）；会话 JSON 取证确认根因
+
+## Phase 69 检查项：恢复附件缩放 + 嵌套摘要前传（P70）
+
+### 功能完整性
+- [x] `_inject_read_files` 附件总预算 `min(25K, max_tokens//4)`，128K 行为不变
+- [x] `_SUMMARY_PROMPT` 明确嵌套旧摘要为权威历史，约定/决策/约束必须前传
+
+### 测试
+- [x] 附件缩放单测（8K vs 128K 对照）；真实 LLM 嵌套场景 5 约定全前传
+
+## Phase 70 检查项：SlidingWindow 摘要锚点（P71）
+
+### 功能完整性
+- [x] kept 无压缩 SYSTEM 消息时把摘要插回最前（与任务锚点同等待遇）
+- [x] 全管道插桩定案：LLM 摘要含全部埋点、SlidingWindow 删的恰是摘要
+
+### 测试
+- [x] 紧预算摘要锚点单测；修复后全管道两轮压缩埋点全存活
+
+## Phase 71 检查项：digest 剥附件 + 摘要重试（P72）
+
+### 功能完整性
+- [x] `_extractive_digest` 按 `RECOVERY_MARKERS` 剥离旧摘要上的恢复附件（共享常量防不同步）
+- [x] `SUMMARY_RETRIES = 2`：偶发空摘要先重试再落抽取式，重试/穷尽有 WARNING 日志
+
+### 测试与终验
+- [x] 3 个单测；复刻第八轮最恶劣路径（LLM 失败×2 → 抽取式+附件 → 二次压缩）埋点全存活
+- [x] **终端第九轮无污染验证最终通过**：五问全中（反转/陷阱题在内），JSON 判定埋点全在摘要、不在保留历史
+- [x] 846 个测试全过，ruff lint + format clean

@@ -1610,3 +1610,129 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 ### P66.3 验证
 - [x] 真实 LLM 验证（DeepSeek，context_window=20000）：Phase 1 短消息全保留（20 条 × 10 token = 200，split=0，旧行为只留 6 条）；Phase 2 长消息少保留（20 条 × 8K，kept=5 = MIN_KEEP_MESSAGES，旧行为 6 × 8K = 48K）；Phase 3 真实对话压缩，token 驱动保留 13 条 ≈10639 tokens（旧 KEEP_RECENT=6 只保留 6 条）
 - [x] 830 个测试全过（含 7 个新增），ruff lint + format clean
+
+---
+
+## P67 摘要 prompt 结构化
+
+> todo-code-quality.md ⑥。`_SUMMARY_PROMPT` 从 4 条通用指令重写为 mewcode 风格的结构化 prompt：`<analysis>` 思考草稿 + `<summary>` 9 节结构化输出，只把 summary 块注入对话。
+
+### P67.1 实现
+- [x] `memory/compressor.py` — `_SUMMARY_PROMPT` 重写：先输出 `<analysis>`（时间线梳理消息 + 自查完整性），再输出 `<summary>` 9 节（主请求与意图 / 关键技术概念 / 文件与代码段 / 错误与修复 / 问题解决 / 全部用户消息 / 待做任务 / 当前工作 / 可选下一步）
+- [x] mini 适配（非照搬 mewcode）：prompt 开头声明 "Recent messages are kept verbatim elsewhere"（mini 只摘要最旧前缀）；省去 "Do NOT call tools" 警告（`_summarize()` 直连 `llm.stream()` 不带工具）
+- [x] `memory/compressor.py` — 新增 `_extract_summary()`：提取 `<summary>` 块内容注入对话；无标签回退完整输出；只有 `<analysis>`（输出截断）时剥离草稿返回空 → 触发上游抽取式回退
+- [x] `memory/compressor.py` — 回退分支加 WARNING 日志（异常类型 + 消息）：真实验证遇到一次偶发回退但异常被静默吞掉，加日志让回退原因可观测
+
+### P67.2 测试
+- [x] `test_extract_summary_strips_analysis` — 只保留 summary 块内容
+- [x] `test_extract_summary_no_tags_returns_all` — 无标签回退完整输出
+- [x] `test_extract_summary_analysis_only_strips_scratchpad` — 截断场景草稿不泄漏
+- [x] `test_llm_summarize_uses_extracted_summary` — 注入对话的消息不含 analysis 草稿
+- [x] `test_llm_summarize_empty_summary_block_falls_back` — 空 summary 块触发抽取式回退
+- [x] 既有 55 个 test_context 测试全过（mock 无标签输出走回退路径，无需改动）
+
+### P67.3 验证
+- [x] 真实 LLM E2E（`experiments/verify_summary_prompt.py`，20 条消息含 bug 修复剧情）：产出完整 9 节摘要，文件名（login.py/config.py）、用户约束（"不要改 session_store.py"）、错误根因与修复、下一步全部保留；`<analysis>` 无泄漏、`<summary>` 标签无泄漏、走 LLM 路径非回退
+- [x] ruff lint + format clean
+
+### P67.4 追加修复
+- [x] 根因：DeepSeek 混合推理模型在 reasoning_content 烧 ~12K 字符，max_tokens=4096 下正文截断在 <analysis>/<summary> 中途 → 提取为空 → 8 次全部回退抽取式（回退日志暴露）
+- [x] `SUMMARY_MAX_TOKENS = 8192` —— `_summarize()` kwargs 覆盖默认 4096
+- [x] prompt 追加 "Keep the analysis BRIEF" —— 推理模型正文草稿不必重复展开
+- [x] `_extract_summary()` 抢救未闭合 `<summary>` —— 残缺摘要仍好于抽取式（1 个新测试）
+- [x] 真实会话 digest 复现验证：修复后 5708 字符完整 9 节摘要，无标签泄漏
+- [x] 终端验证 P68 达标：Context 全程 64-76%，硬阈值仅 99% 触发一次（修复前 128%-191% 每轮）
+
+### P67.5 二次压缩摘要退化（追加修复）
+- [x] 第三轮终端验证：回退日志 0 次 / 硬阈值 0 次 / 熔断器未开启；压缩后主请求+约束+对话内约定全部答出，成本 ¥0.13
+- [x] 新问题：`_extractive_digest` 300 字符截断作用于旧摘要消息，二次压缩产出"残缺摘要的摘要"（边界摘要自述 "the full request is unknown"）
+- [x] 修复：对 `compressed=True` 的 SYSTEM 摘要消息豁免截断，整条传递（MAX_HISTORY_CHARS 统一封顶）
+- [x] 真实 LLM 两轮压缩穿透验证：3 个埋点经两轮压缩全部存活；1 个新单测；841 个测试全过
+
+---
+
+## P68 保留窗口按压缩目标缩放
+
+> P67 终端窗口验证（context_window=10000）暴露的真实缺陷：`KEEP_RECENT_TOKENS=10K` 绝对常量不小于压缩目标（7500）时，摘要级数学上永远达不到目标，压缩全部退化为 SlidingWindow 截断 + 硬阈值每轮空转，单轮烧 1M token 直到 80 轮迭代上限。
+
+### P68.1 实现
+- [x] `memory/compressor.py` — `_compute_keep_split(msgs, target_tokens)` 增加 target 参数：保留下限 `min(KEEP_RECENT_TOKENS, target//2)`、硬顶 `min(KEEP_MAX_TOKENS, target)`
+- [x] 兜底：`keep_count == 0` 时强制保留 1 条尾部消息（最新消息单条超硬顶时不能全摘要掉）
+- [x] `SummarizeOldest` / `LLMSummarizeOldest` 两个调用点传入 target_tokens
+- [x] 大窗口行为不变：128K 窗口 target=96K 时 min 取的仍是 10K/40K 绝对值
+
+### P68.2 测试
+- [x] `test_keep_split_scales_to_small_target` — target=7500 时下限 3750/硬顶 7500，保留量在目标内
+- [x] `test_keep_split_never_empties_tail` — 单条超硬顶也保底 1 条
+- [x] `test_keep_split_large_target_unchanged` — 大目标下与缩放前行为一致
+- [x] `test_llm_summarize_small_target_fits_budget` — 小目标端到端保留量 ≤ 目标
+- [x] 既有测试适配：直接调用加 target 参数（200_000 保持原语义）、Summarize 测试 target 100 → 50_000
+
+### P68.3 验证
+- [x] 真实 LLM（target=7500 模拟 10K 窗口）：压缩后总量 7008 ≤ 7500，9 节结构化摘要存活；修复前该场景保留下限 10K 必然超标
+- [x] 839 个测试全过，ruff lint + format clean
+
+---
+
+## P69 DropToolResults 尊重保留窗口
+
+> 第五轮终端验证暴露：Stage 1 无差别截断全部工具结果（含模型正在使用的），诱发"以为工具坏了"的重读死循环（单轮 36+ 迭代 / 563K token）。第二轮验证的绕路脚本乱象深层机制相同。
+
+### P69.1 实现
+- [x] `DropToolResults.compress()` 先算 `_compute_keep_split(msgs, target_tokens)`，只截断可摘要前缀内的工具输出——与 Stage 2/3 的保留窗口语义对齐
+- [x] 保留窗口内的工具结果（模型工作集）绝不截断；大结果入口防护由 tool_result_cache 溢写负责
+
+### P69.2 测试与验证
+- [x] 3 个单测：前缀截断 / 短输出跳过 / 保留窗口内新旧工具结果同场对照
+- [x] 会话 JSON 取证：20 条工具消息 16 条被截（含近期结果），证实根因
+- [x] 842 个测试全过，ruff lint + format clean
+- [ ] 终端第六轮验证（无污染埋点召回 + 无重读螺旋）
+
+---
+
+## P70 第六轮终端验证收敛：恢复附件缩放 + 嵌套摘要约定前传
+
+> P69 验收通过（36 迭代 → 4 迭代，重读螺旋消失）。会话 JSON 取证暴露两个新缺陷，当场修复。
+
+### P70.1 缺陷 A：恢复附件预算不随窗口缩放
+- [x] 取证：摘要消息 54,691 字符（LLM 摘要 7.8K + 附件 47K），25K token 附件超过 20K 窗口 → Context 钉死 112%
+- [x] 修复：`_inject_read_files` 附件总预算 `min(25K, max_tokens//4)` 按文件数均分；128K 行为不变
+- [x] 单测：8K vs 128K 窗口附件长度对照
+
+### P70.2 缺陷 B：嵌套摘要二次总结丢约定
+- [x] 取证：埋点进了第一次抽取式摘要，但二次 LLM 摘要只转述技术请求、丢弃约定
+- [x] 修复：`_SUMMARY_PROMPT` 明确嵌套旧摘要是权威历史，约定/决策/约束必须前传
+- [x] 真实 LLM 复现验证：第六轮丢失场景下 5 个约定全部前传
+- [x] 843 个测试全过，ruff lint + format clean
+- [x] 终端第七轮验证：P70 生效但暴露 P71（SlidingWindow 删摘要），见 P71
+
+---
+
+## P71 SlidingWindow 摘要锚点
+
+> 第七轮终端验证定案：LLM 摘要完美保住埋点，但摘要位于头部、SlidingWindow 按尾部保留——Stage 3 第一个删的就是 Stage 2 刚生成的摘要。第六/七轮"边界空心化"的真正根因。
+
+### P71.1 实现
+- [x] `SlidingWindow.compress()` 增加摘要锚点：kept 无压缩 SYSTEM 消息时把摘要插回最前（与任务锚点同等待遇）
+
+### P71.2 验证
+- [x] 全管道插桩定位（真实 LLM + 真实文件 + check_and_compress）：确认 LLM summary out 含全部埋点、SlidingWindow 删除的恰好是摘要
+- [x] 修复后全管道复现：S1/S2 两轮压缩四个埋点全部存活
+- [x] 1 个新单测（紧预算摘要存活）；844 个测试全过，ruff lint + format clean
+- [x] 终端第八轮验证：P71 生效但暴露 P72（附件污染 digest），见 P72
+
+---
+
+## P72 恢复附件污染 digest + 摘要重试
+
+> 第八轮终端验证定案：LLM 摘要偶发失败 → 抽取式 S1 保住埋点但被烤入 17K 附件 → 二次摘要时埋点淹没在源码转储里被丢弃。
+
+### P72.1 实现
+- [x] `_extractive_digest` 传递旧摘要前剥离恢复附件（`RECOVERY_MARKERS` 共享常量）；纯附件消息剥后为空则跳过
+- [x] `LLMSummarizeOldest.SUMMARY_RETRIES = 2`：偶发空摘要先重试再回退（todo ⑦ 重试部分落地）
+
+### P72.2 验证
+- [x] 复刻第八轮最恶劣路径（强制 LLM 失败×2 → 抽取式+附件 → 二次压缩）：埋点全存活
+- [x] 3 个新单测；846 个测试全过，ruff lint + format clean
+- [x] 终端第九轮验证 **最终通过**：五问全中（含反转题与陷阱题）；JSON 判定——4 个埋点全部不在保留历史（无污染）、全部存在于 LLM 摘要（9 节、无泄漏、无回退、breaker 0/3、¥0.13）
+
