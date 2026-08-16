@@ -14,6 +14,7 @@ from mini_agent.memory.compressor import (
     SlidingWindow,
     SummarizeOldest,
     _compute_keep_split,
+    _extract_summary,
 )
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
@@ -107,11 +108,12 @@ async def test_check_and_compress_above_threshold():
 async def test_drop_tool_results():
     strategy = DropToolResults()
     conv = Conversation()
-    conv.messages = [
-        make_tool_msg(output="x" * 1000, token_count=250),
-        make_msg(token_count=10),
+    # Tool result in the summarizable prefix (outside the keep window)
+    # 工具结果位于可摘要前缀（保留窗口之外）
+    conv.messages = [make_tool_msg(output="x" * 1000, token_count=3000)] + [
+        make_msg(token_count=3000) for _ in range(10)
     ]
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 10_000)
     assert conv.messages[0].compressed
     assert len(conv.messages[0].tool_result.output) < 1000
 
@@ -120,9 +122,30 @@ async def test_drop_tool_results_skips_short():
     strategy = DropToolResults()
     conv = Conversation()
     msg = make_tool_msg(output="short", token_count=5)
-    conv.messages = [msg]
-    await strategy.compress(conv, 100)
+    conv.messages = [msg] + [make_msg(token_count=3000) for _ in range(10)]
+    await strategy.compress(conv, 10_000)
     assert not msg.compressed
+
+
+async def test_drop_tool_results_spares_keep_window():
+    """Tool results the model is actively using (inside the keep window) are
+    never truncated -- truncating them makes the model perceive broken tools
+    and spiral into re-reads (real-terminal verified).
+    保留窗口内（模型正在使用）的工具结果绝不截断——截了模型会以为工具坏了，
+    陷入重读螺旋（真实终端实测）。"""
+    strategy = DropToolResults()
+    conv = Conversation()
+    old_tool = make_tool_msg(output="a" * 1000, token_count=3000)
+    recent_tool = make_tool_msg(output="b" * 1000, token_count=3000)
+    conv.messages = (
+        [old_tool]
+        + [make_msg(token_count=3000) for _ in range(10)]
+        + [make_msg(role=Role.ASSISTANT, content="reading", token_count=100), recent_tool]
+    )
+    await strategy.compress(conv, 10_000)
+    assert old_tool.compressed  # prefix: truncated 前缀：截断
+    assert not recent_tool.compressed  # keep window: untouched 保留窗口：不动
+    assert recent_tool.tool_result.output == "b" * 1000
 
 
 # --- SummarizeOldest ---
@@ -134,14 +157,14 @@ async def test_summarize_oldest():
     for i in range(20):
         conv.messages.append(make_msg(content=f"message {i}", token_count=10))
 
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     # 20 msgs × 10 tokens = 200 total < KEEP_RECENT_TOKENS (10K),
     # _compute_keep_split 全保留 → split=0 → 无可摘要内容。
     # 需要更高的 token_count 才能触发切分：
     conv2 = Conversation()
     for i in range(20):
         conv2.messages.append(make_msg(content=f"message {i}", token_count=3000))
-    await strategy.compress(conv2, 100)
+    await strategy.compress(conv2, 50_000)
     assert conv2.messages[0].role == Role.SYSTEM
     assert conv2.messages[0].compressed
     assert "[Compressed" in conv2.messages[0].content
@@ -156,7 +179,7 @@ async def test_summarize_oldest_too_few():
     conv = Conversation()
     conv.messages = [make_msg(token_count=10) for _ in range(MIN_KEEP_MESSAGES)]
     original_count = len(conv.messages)
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert len(conv.messages) == original_count  # not enough to summarize
 
 
@@ -196,7 +219,7 @@ async def test_llm_summarize_oldest():
     for i in range(20):
         conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert conv.messages[0].role == Role.SYSTEM
     assert conv.messages[0].compressed
     assert "LLM summary" in conv.messages[0].content
@@ -213,7 +236,7 @@ async def test_llm_summarize_falls_back_on_error():
     for i in range(20):
         conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     # Fallback to extractive digest, chain not broken 回退到抽取式摘要，压缩链不中断
     assert conv.messages[0].role == Role.SYSTEM
     assert "[Compressed conversation history" in conv.messages[0].content
@@ -227,7 +250,7 @@ async def test_llm_summarize_falls_back_on_empty():
     for i in range(20):
         conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert "message 0" in conv.messages[0].content  # extractive fallback 回退到抽取式摘要
 
 
@@ -236,9 +259,134 @@ async def test_llm_summarize_too_few():
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
     conv.messages = [make_msg(token_count=10) for _ in range(MIN_KEEP_MESSAGES)]
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert len(conv.messages) == MIN_KEEP_MESSAGES
     assert llm.call_count == 0  # no LLM call when nothing to summarize 无可摘要时不调 LLM
+
+
+# --- Structured summary prompt (_extract_summary) 结构化摘要提取 ---
+
+
+def test_extract_summary_strips_analysis():
+    """Only the <summary> block content is kept. 只保留 <summary> 块内容。"""
+    output = "<analysis>chain of thought here</analysis>\n<summary>1. Goal: fix bug</summary>"
+    assert _extract_summary(output) == "1. Goal: fix bug"
+
+
+def test_extract_summary_no_tags_returns_all():
+    """Model ignored the format: full output is still usable. 无标签时回退完整输出。"""
+    assert _extract_summary("  plain summary text  ") == "plain summary text"
+
+
+def test_extract_summary_analysis_only_strips_scratchpad():
+    """Truncated mid-analysis: scratchpad never leaks. analysis 中途截断时草稿不泄漏。"""
+    assert _extract_summary("<analysis>partial thoughts") == ""
+    assert _extract_summary("<analysis>done</analysis> leftover") == "leftover"
+
+
+def test_extractive_digest_strips_recovery_attachment():
+    """The recovery attachment baked onto a prior summary is stripped before
+    re-digesting -- 17K chars of file dumps drown the planted conventions
+    (real-terminal verified). The attachment is re-injected after every
+    compression, so nothing is lost.
+    旧摘要上的恢复附件在进 digest 前剥离——文件转储会淹没约定（真实终端实测）；
+    附件每次压缩后重新注入，剥离无损失。"""
+    from mini_agent.memory.compressor import _extractive_digest
+
+    summary = Message(
+        role=Role.SYSTEM,
+        content=(
+            "[Compressed conversation history]\n[user] 记住：约定 X 很重要\n\n"
+            "[User's most recent request before compression:\n继续分析]\n\n"
+            "[Files already read this session: a.py]\n\n"
+            "[File contents from before compression:]\n--- a.py ---\n" + "code " * 2000
+        ),
+        compressed=True,
+    )
+    digest = _extractive_digest([summary])
+    assert "约定 X 很重要" in digest  # 历史保留
+    assert "code code" not in digest  # 附件剥离
+    assert "[Files already read" not in digest
+
+
+async def test_llm_summarize_retries_before_fallback():
+    """A transient failure recovers on retry -- no extractive fallback.
+    偶发失败重试后恢复，不落抽取式回退。"""
+
+    class FlakyLLM(SummaryMockLLM):
+        def __init__(self) -> None:
+            super().__init__(summary="<summary>Recovered fine.</summary>")
+            self.fails_left = 1
+
+        async def stream(self, messages, tools=None, **kwargs):
+            self.call_count += 1
+            if self.fails_left > 0:
+                self.fails_left -= 1
+                raise ConnectionError("transient")
+            yield StreamChunk(delta=self._summary)
+
+    llm = FlakyLLM()
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"m{i}", token_count=3000))
+    await strategy.compress(conv, 50_000)
+    assert "Recovered fine." in conv.messages[0].content  # LLM 路径，非回退
+    assert llm.call_count == 2  # 失败 1 次 + 重试成功 1 次
+
+
+def test_extractive_digest_preserves_prior_summary():
+    """A previous compression summary passes through the digest whole -- the
+    300-char cap on it would compound detail loss across re-compressions.
+    旧压缩摘要整条进入 digest，不受 300 字符截断——防二次压缩细节损失复利叠加。"""
+    from mini_agent.memory.compressor import _extractive_digest
+
+    summary = Message(
+        role=Role.SYSTEM,
+        content="[Compressed conversation history (LLM summary)]\n" + "detail " * 100,
+        compressed=True,
+    )
+    normal = make_msg(content="x" * 500)
+    digest = _extractive_digest([summary, normal])
+    assert summary.content in digest  # 完整保留（> 300 字符）
+    assert "x" * 301 not in digest  # 普通消息仍截断
+
+
+def test_extract_summary_salvages_unclosed_block():
+    """Truncated mid-summary (reasoning models burn the output budget): the
+    partial summary is salvaged -- still beats the extractive digest.
+    summary 中途截断（推理模型烧光输出预算）：抢救部分摘要，仍好于抽取式。"""
+    out = "<analysis>brief</analysis>\n<summary>1. Goal: fix login bug\n2. Files: log"
+    assert _extract_summary(out) == "1. Goal: fix login bug\n2. Files: log"
+
+
+async def test_llm_summarize_uses_extracted_summary():
+    """The injected message contains the <summary> content, not the analysis.
+    注入对话的摘要只含 <summary> 内容，不含 analysis 草稿。"""
+    llm = SummaryMockLLM(
+        summary="<analysis>secret scratchpad</analysis><summary>Goal: refactor auth.</summary>"
+    )
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
+
+    await strategy.compress(conv, 50_000)
+    assert "Goal: refactor auth." in conv.messages[0].content
+    assert "secret scratchpad" not in conv.messages[0].content
+
+
+async def test_llm_summarize_empty_summary_block_falls_back():
+    """Empty <summary></summary> triggers extractive fallback. 空 summary 块触发抽取式回退。"""
+    llm = SummaryMockLLM(summary="<analysis>thoughts</analysis><summary>  </summary>")
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
+
+    await strategy.compress(conv, 50_000)
+    assert "message 0" in conv.messages[0].content  # extractive fallback
+    assert "thoughts" not in conv.messages[0].content
 
 
 # --- SlidingWindow ---
@@ -272,6 +420,22 @@ async def test_sliding_window_keeps_latest_user_message():
     assert len(user_msgs) == 1
     assert user_msgs[0].content == "explain all docs"
     assert conv.messages[0].role == Role.USER  # anchored at the front 锚定在最前
+
+
+async def test_sliding_window_keeps_summary_anchor():
+    """The compression summary at the head must survive tail-based truncation
+    -- it carries the entire compressed history (full-pipeline verified:
+    SlidingWindow deleted exactly the summary the LLM call just produced).
+    头部的压缩摘要必须在尾部截断中存活——它承载全部压缩历史。"""
+    strategy = SlidingWindow()
+    conv = Conversation()
+    summary = Message(role=Role.SYSTEM, content="[Compressed] plants here", compressed=True)
+    summary.token_count = 50
+    conv.messages = [summary] + [make_msg(content=f"m{i}", token_count=200) for i in range(10)]
+    # budget 500: fits only ~2 tail messages -- summary would be dropped without the anchor
+    await strategy.compress(conv, 500)
+    assert conv.messages[0] is summary  # 摘要锚点存活且在最前
+    assert any(m.role == Role.USER for m in conv.messages[1:]) or len(conv.messages) > 1
 
 
 # --- Full Compressor cascade --- 完整的 Compressor 级联
@@ -347,7 +511,7 @@ async def test_summarize_oldest_aligns_tool_pair():
         ]
         + [make_msg(content=f"t{i}", token_count=3000) for i in range(5)]
     )
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
 
     assert conv.messages[0].role == Role.SYSTEM  # summary 摘要
     # Tool pair must not be split: if a TOOL result is kept, its
@@ -373,7 +537,7 @@ async def test_summarize_oldest_alignment_reaches_start():
     conv.messages = [make_call_msg(token_count=3000)] + [
         make_tool_msg(token_count=3000) for _ in range(7)
     ]
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert len(conv.messages) == 8  # unchanged 未变
     assert not any(m.compressed for m in conv.messages)
 
@@ -391,7 +555,7 @@ async def test_llm_summarize_aligns_tool_pair():
         ]
         + [make_msg(content=f"t{i}", token_count=3000) for i in range(5)]
     )
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
 
     # Tool pair must be intact 工具对必须完整
     for idx, msg in enumerate(conv.messages):
@@ -467,8 +631,13 @@ async def test_circuit_breaker_resets_on_success():
     cm.set_compressor(NoOpCompressor())
 
     conv = Conversation()
+    # Short content: with the summary anchor (P71) the digest survives
+    # SlidingWindow, so at this degenerate 200-token window a 100-char-per-msg
+    # digest would outweigh the savings and read as "ineffective".
+    # 短内容：摘要锚点（P71）让 digest 在 SlidingWindow 后存活，200 token 的
+    # 极端窗口下 100 字符/条的 digest 会抵消节省量、被判"无效"。
     for _ in range(20):
-        conv.messages.append(make_msg(token_count=25))
+        conv.messages.append(make_msg(content="hi", token_count=25))
 
     await cm.check_and_compress(conv)
     await cm.check_and_compress(conv)
@@ -620,6 +789,30 @@ def test_inject_read_files_includes_content():
     assert "import os" in text
 
 
+def test_inject_read_files_budget_scales_with_window():
+    """Recovery file contents scale with the window: at a small window the
+    absolute 5x5000-token attachment would exceed the entire window (observed
+    at window=20K: a 54K-char summary message pinned context at 112%).
+    恢复附件预算随窗口缩放：小窗口下绝对值附件会超过整个窗口。"""
+    big = "x" * 40_000  # ~10K tokens before truncation
+    small_cm = ContextManager(MemoryConfig(context_window=8000))
+    large_cm = ContextManager(MemoryConfig(context_window=128_000))
+    for cm in (small_cm, large_cm):
+        cm.record_file_read("a.py", big)
+        cm.record_file_read("b.py", big)
+    small_conv = Conversation()
+    small_conv.messages.append(Message(role=Role.SYSTEM, content="s", compressed=True))
+    large_conv = Conversation()
+    large_conv.messages.append(Message(role=Role.SYSTEM, content="s", compressed=True))
+    small_cm._inject_read_files(small_conv)
+    large_cm._inject_read_files(large_conv)
+    small_len = len(small_conv.messages[0].content)
+    large_len = len(large_conv.messages[0].content)
+    # 8K 窗口预算 2000 tokens vs 128K 窗口 25000 tokens——附件显著更小
+    assert small_len < large_len / 2
+    assert "--- a.py ---" in small_conv.messages[0].content  # 内容仍存在，只是截短
+
+
 def test_inject_read_files_limits_to_5_files():
     cm = ContextManager(MemoryConfig(context_window=10000))
     for i in range(8):
@@ -765,7 +958,7 @@ def test_keep_split_short_messages_keeps_all():
     so all messages are kept (split=0). Old fixed-6 would have only kept 6.
     20 条 × 10 token = 200 < 10K，全保留。旧固定 6 条只保留 6 条。"""
     msgs = [make_msg(token_count=10) for _ in range(20)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     # keep all — not enough tokens to warrant summarization
     # 全保留——token 不足不值得摘要
     assert split == 0
@@ -776,7 +969,7 @@ def test_keep_split_long_messages_keeps_fewer():
     KEEP_RECENT_TOKENS (10K) and MIN_KEEP_MESSAGES (5).
     每条 8K token，保留 5 条（双条件满足后停止）。"""
     msgs = [make_msg(token_count=8000) for _ in range(20)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     kept = len(msgs) - split
     assert kept == MIN_KEEP_MESSAGES  # 5 × 8K = 40K = KEEP_MAX_TOKENS 双条件满足停止
     assert split > 0
@@ -787,7 +980,7 @@ def test_keep_split_hits_hard_cap():
     MIN_KEEP_MESSAGES can be reached.
     单条太大，硬顶 40K 在消息数达到最低要求前就命中。"""
     msgs = [make_msg(token_count=15000) for _ in range(10)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     kept = len(msgs) - split
     # 15K per msg: 2 msgs = 30K (under 40K cap), 3 msgs = 45K (over cap)
     # 每条 15K：2 条 = 30K（未超 40K），3 条 = 45K（超了）
@@ -799,7 +992,7 @@ def test_keep_split_minimum_messages():
     """Exactly MIN_KEEP_MESSAGES messages — nothing to summarize.
     恰好 MIN_KEEP_MESSAGES 条——无可摘要内容。"""
     msgs = [make_msg(token_count=100) for _ in range(MIN_KEEP_MESSAGES)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     assert split == 0
 
 
@@ -807,7 +1000,7 @@ def test_keep_split_fewer_than_minimum():
     """Fewer than MIN_KEEP_MESSAGES messages — nothing to summarize.
     少于 MIN_KEEP_MESSAGES 条——无可摘要内容。"""
     msgs = [make_msg(token_count=100) for _ in range(3)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     assert split == 0
 
 
@@ -818,10 +1011,54 @@ def test_keep_split_meets_both_thresholds():
     # 2500 tokens/msg × 5 msgs = 12500 >= 10K, count=5 >= 5 → stop
     # 2500 × 5 = 12500 ≥ 10K，条数 5 ≥ 5 → 停止
     msgs = [make_msg(token_count=2500) for _ in range(15)]
-    split = _compute_keep_split(msgs)
+    split = _compute_keep_split(msgs, 200_000)
     kept = len(msgs) - split
     assert kept == MIN_KEEP_MESSAGES
     assert split == 10
+
+
+def test_keep_split_scales_to_small_target():
+    """target=7500 (window=10K × 75%): floor scales to 3750, cap to 7500 --
+    summarization stays viable instead of always overshooting the target.
+    小窗口下下限缩放为 target//2、硬顶缩放为 target，摘要级不再必然超标。"""
+    msgs = [make_msg(token_count=1000) for _ in range(20)]
+    split = _compute_keep_split(msgs, 7500)
+    kept = len(msgs) - split
+    assert kept == MIN_KEEP_MESSAGES  # 5 × 1000 = 5000 >= 3750 floor, count met
+    assert kept * 1000 <= 7500  # kept tokens fit within the target 保留量在目标内
+
+
+def test_keep_split_never_empties_tail():
+    """A single message bigger than the scaled cap: still keep one message --
+    summarizing away the entire tail would erase the task in progress.
+    单条超过缩放后的硬顶时也至少保留 1 条，不能把尾部全摘要掉。"""
+    msgs = [make_msg(token_count=3000) for _ in range(10)]
+    split = _compute_keep_split(msgs, 100)
+    assert split == len(msgs) - 1  # keeps exactly the newest message
+
+
+def test_keep_split_large_target_unchanged():
+    """With a large target the absolute constants govern -- behavior identical
+    to the pre-scaling implementation.
+    大目标下仍由绝对常量决定，与缩放前行为一致。"""
+    msgs = [make_msg(token_count=8000) for _ in range(20)]
+    assert _compute_keep_split(msgs, 200_000) == _compute_keep_split(msgs, 96_000)
+
+
+async def test_llm_summarize_small_target_fits_budget():
+    """End-to-end at a small target: kept tokens stay within the target so the
+    cascade can actually reach it (window=10K pathology fix).
+    小目标端到端：保留量在目标内，级联真正可达标。"""
+    llm = SummaryMockLLM(summary="<summary>Goal: small window.</summary>")
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"m{i}", token_count=1000))
+
+    await strategy.compress(conv, 7500)
+    assert "Goal: small window." in conv.messages[0].content
+    kept_tokens = sum(m.token_count for m in conv.messages[1:])
+    assert kept_tokens <= 7500
 
 
 async def test_summarize_oldest_keeps_all_when_tokens_low():
@@ -832,6 +1069,6 @@ async def test_summarize_oldest_keeps_all_when_tokens_low():
     conv = Conversation()
     for i in range(20):
         conv.messages.append(make_msg(content=f"m{i}", token_count=10))
-    await strategy.compress(conv, 100)
+    await strategy.compress(conv, 50_000)
     assert len(conv.messages) == 20
     assert not any(m.compressed for m in conv.messages)

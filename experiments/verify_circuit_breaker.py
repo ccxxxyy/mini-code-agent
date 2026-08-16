@@ -85,7 +85,9 @@ async def main() -> None:
     print("Scenario: long conversation fills context, compression reduces tokens.")
 
     ctx = ContextManager(
-        MemoryConfig(context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3)
+        MemoryConfig(
+            context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3
+        )
     )
     ctx.set_compressor(Compressor())
 
@@ -124,7 +126,9 @@ async def main() -> None:
     print("          compression gains are cancelled out by _inject_read_files.")
 
     ctx2 = ContextManager(
-        MemoryConfig(context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3)
+        MemoryConfig(
+            context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3
+        )
     )
     ctx2.set_compressor(Compressor())
 
@@ -203,7 +207,9 @@ async def main() -> None:
     print("Scenario: same as Phase 2 but breaker disabled -- shows wasted attempts.")
 
     ctx4 = ContextManager(
-        MemoryConfig(context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=0)
+        MemoryConfig(
+            context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=0
+        )
     )
     ctx4.set_compressor(Compressor())
     for i in range(150):
@@ -231,14 +237,16 @@ async def main() -> None:
             print(f"  Attempt {attempt + 1}: effective ({old} -> {new})")
 
     print(f"  Wasted attempts: {wasted} (breaker=off, no protection)")
-    print(f"  With breaker=on, would have stopped after 3.\n")
+    print("  With breaker=on, would have stopped after 3.\n")
 
     # == Phase 5: Recovery (new session) ==
     print("== Phase 5: Recovery -- new session, fresh state ==")
     print("Scenario: breaker is session-scoped. New session = new ContextManager.")
 
     ctx5 = ContextManager(
-        MemoryConfig(context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3)
+        MemoryConfig(
+            context_window=WINDOW, compression_threshold=THRESHOLD, compress_max_failures=3
+        )
     )
     ctx5.set_compressor(Compressor())
 

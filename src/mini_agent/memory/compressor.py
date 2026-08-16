@@ -14,6 +14,7 @@ Three-stage cascade:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -23,6 +24,8 @@ from mini_agent.models.message import Conversation, Message, Role
 
 if TYPE_CHECKING:
     from mini_agent.llm.base import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class CompressionStrategy(ABC):
@@ -35,12 +38,24 @@ class CompressionStrategy(ABC):
 
 class DropToolResults(CompressionStrategy):
     """Stage 1: Replace verbose tool outputs with short summaries.
-    第 1 级：用简短摘要替换冗长的工具输出。"""
+    第 1 级：用简短摘要替换冗长的工具输出。
+
+    Only touches tool results OUTSIDE the keep window. Truncating the tail
+    the model is actively working with makes it perceive broken tools and
+    spiral into ever-smaller re-reads (real-terminal verified: the model
+    measured a "~300 char output cap" == MAX_TOOL_OUTPUT + notice line,
+    burned 36 iterations working around its own compressor).
+    只处理保留窗口之外的工具结果。截断模型正在使用的尾部结果会让它以为
+    工具坏了，陷入越读越小的重读螺旋（真实终端实测：模型量出"输出上限
+    约 300 字符"== MAX_TOOL_OUTPUT + 说明行，烧 36 轮迭代绕自家压缩器）。
+    """
 
     MAX_TOOL_OUTPUT = 200
 
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
-        for msg in conversation.messages:
+        msgs = conversation.messages
+        split = _compute_keep_split(msgs, target_tokens)
+        for msg in msgs[:split]:
             if msg.role == Role.TOOL and msg.tool_result and not msg.compressed:
                 output = msg.tool_result.output
                 if len(output) > self.MAX_TOOL_OUTPUT:
@@ -79,7 +94,7 @@ class SummarizeOldest(CompressionStrategy):
         if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs))
+        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs, target_tokens))
         if split <= 0:
             return
 
@@ -111,17 +126,33 @@ KEEP_RECENT_TOKENS = 10_000  # minimum tokens to keep from the tail 尾部最少
 MIN_KEEP_MESSAGES = 5  # always keep at least this many messages 最少保留消息数
 KEEP_MAX_TOKENS = 40_000  # hard cap on kept tokens 保留 token 硬顶
 
+# Recovery-attachment markers appended to summary messages by
+# ContextManager._inject_read_files (shared so both sides stay in sync).
+# ContextManager._inject_read_files 追加到摘要消息的恢复附件标记（共享防不同步）。
+RECOVERY_MARKERS = ("[User's most recent request", "[Files already read")
 
-def _compute_keep_split(msgs: list[Message]) -> int:
+
+def _compute_keep_split(msgs: list[Message], target_tokens: int) -> int:
     """Token-driven split: msgs[split:] are kept, msgs[:split] are summarized.
     从尾部反向扫描累计 token，满足最少消息数后达到 token 阈值即停。
 
     Stop conditions (from tail, scanning backward):
-    - accumulated >= KEEP_RECENT_TOKENS AND count >= MIN_KEEP_MESSAGES
-    - accumulated would exceed KEEP_MAX_TOKENS (hard cap)
+    - accumulated >= keep floor AND count >= MIN_KEEP_MESSAGES
+    - accumulated would exceed the keep cap (hard cap)
+
+    Floor/cap scale down with target_tokens: with a small context window the
+    absolute floor (10K) can equal or exceed the target, making summarization
+    mathematically unable to reach it -- observed at window=10K: the hard
+    threshold fired every iteration and all work fell to SlidingWindow.
+    下限/硬顶随 target_tokens 缩放：小窗口下绝对下限（10K）可能不小于压缩目标，
+    摘要级数学上永远达不到目标——实测 window=10K 时硬阈值每轮触发，
+    压缩全部退化为 SlidingWindow 截断。
     """
     if len(msgs) <= MIN_KEEP_MESSAGES:
         return 0
+
+    keep_recent = min(KEEP_RECENT_TOKENS, target_tokens // 2)
+    keep_max = min(KEEP_MAX_TOKENS, target_tokens)
 
     running_tokens = 0
     keep_count = 0
@@ -129,12 +160,18 @@ def _compute_keep_split(msgs: list[Message]) -> int:
     for i in range(len(msgs) - 1, -1, -1):
         msg = msgs[i]
         cost = msg.token_count or count_tokens(msg.content or "") + 4
-        if running_tokens + cost > KEEP_MAX_TOKENS:
+        if running_tokens + cost > keep_max:
             break
         running_tokens += cost
         keep_count += 1
-        if keep_count >= MIN_KEEP_MESSAGES and running_tokens >= KEEP_RECENT_TOKENS:
+        if keep_count >= MIN_KEEP_MESSAGES and running_tokens >= keep_recent:
             break
+
+    # Never summarize away the entire tail -- the newest message may alone
+    # exceed the cap; losing it would erase the task in progress.
+    # 绝不把尾部全部摘要掉——最新一条可能单独超硬顶，丢了它就丢了进行中的任务。
+    if keep_count == 0:
+        keep_count = 1
 
     split = len(msgs) - keep_count
     return max(split, 0)
@@ -146,7 +183,31 @@ def _extractive_digest(messages: list[Message]) -> str:
     parts: list[str] = []
     for msg in messages:
         role = msg.role.value
-        if msg.content:
+        if msg.compressed and msg.role == Role.SYSTEM and msg.content:
+            # A previous compression summary is already dense -- truncating it
+            # to 300 chars makes each re-compression a "summary of a mangled
+            # summary", compounding detail loss (observed in real-terminal
+            # verification: final boundary said "the full request is unknown").
+            # 旧压缩摘要本身已是浓缩产物——砍到 300 字符会让每次二次压缩变成
+            # "残缺摘要的摘要"，细节损失复利叠加（真实终端验证实测：最终边界
+            # 自述"完整请求未知"）。整条传递，由 MAX_HISTORY_CHARS 统一封顶。
+            text = msg.content
+            # BUT strip the recovery attachment first: _inject_read_files bakes
+            # up to ~17K chars of file contents onto the summary message, and
+            # re-digesting that drowns the actual history -- real-terminal
+            # verified: planted conventions (~500 chars) buried under source
+            # dumps were dropped by the next summarization. The attachment is
+            # re-injected after every compression anyway, so nothing is lost.
+            # 但要先剥离恢复附件：_inject_read_files 会把 ~17K 字符的文件内容
+            # 烤到摘要消息上，再次进 digest 会淹没真正的历史——真实终端实测：
+            # 约 500 字符的埋点约定被源码转储淹没后遭下一次摘要丢弃。附件在
+            # 每次压缩后都会重新注入，剥离不损失任何信息。
+            cuts = [i for m in RECOVERY_MARKERS if (i := text.find(m)) != -1]
+            if cuts:
+                text = text[: min(cuts)].rstrip()
+            if text:
+                parts.append(text)
+        elif msg.content:
             text = msg.content[:300]
             parts.append(f"[{role}] {text}")
         elif msg.tool_calls:
@@ -164,17 +225,74 @@ def _make_summary_message(summary_text: str) -> Message:
     return msg
 
 
-_SUMMARY_PROMPT = """Summarize this conversation history between a user and a coding agent.
-Preserve, in compact form:
-1. The task goal(s) the user asked for
-2. Steps already completed (files read/modified, commands run, their outcomes)
-3. Key files, findings, and decisions
-4. Any unresolved issues or pending work
+_SUMMARY_PROMPT = """Your task is to create a detailed summary of the conversation history below \
+between a user and a coding agent, paying close attention to the user's explicit requests and the \
+agent's actions. Recent messages are kept verbatim elsewhere; this summary replaces only the older \
+history, so it must capture every technical detail needed to continue work without losing context.
 
-Be factual and dense. Output the summary only, no preamble.
+The history may itself contain earlier compression summaries (blocks starting with "[Compressed \
+conversation history"). Their contents are authoritative history, NOT noise: every convention, \
+decision, constraint, and user instruction recorded inside them MUST be carried forward into \
+your summary -- dropping them loses information permanently.
+
+Before providing your final summary, wrap your analysis in <analysis> tags to organize your \
+thoughts and ensure you've covered all necessary points. Keep the analysis BRIEF -- a compact \
+bullet list, not prose; spend your output budget on the <summary> block. In your analysis:
+1. Chronologically go through each message and identify:
+   - The user's explicit requests and intents
+   - The agent's approach to addressing them
+   - Key decisions, technical concepts and code patterns
+   - Specific details: file names, code snippets, function signatures, file edits
+   - Errors encountered and how they were fixed, especially user feedback asking to do \
+something differently
+2. Double-check for technical accuracy and completeness.
+
+After your analysis, output your final summary wrapped in <summary> tags, with these sections:
+
+1. Primary Request and Intent: all of the user's explicit requests and intents, in detail
+2. Key Technical Concepts: important technical concepts, technologies, and frameworks discussed
+3. Files and Code Sections: specific files and code sections examined, modified, or created; \
+why each matters, with code snippets where available
+4. Errors and Fixes: errors encountered and how they were fixed, including any user feedback
+5. Problem Solving: problems solved and ongoing troubleshooting efforts
+6. All User Messages: ALL user messages that are not tool results -- critical for tracking \
+feedback and changing intent
+7. Pending Tasks: tasks explicitly requested but not yet done
+8. Current Work: precisely what was being worked on in the most recent messages of this history
+9. Optional Next Step: the next step DIRECTLY in line with the user's most recent explicit \
+request, if any; quote the relevant messages verbatim to avoid drift
+
+Be factual and dense. Output only the <analysis> block followed by the <summary> block.
 
 Conversation history:
 {history}"""
+
+
+def _extract_summary(llm_output: str) -> str:
+    """Extract the <summary> block content; fall back to the full output if
+    the tags are missing (model ignored the format -- still usable text).
+    提取 <summary> 块内容；缺少标签时回退到完整输出（模型没按格式输出，文本仍可用）。
+    """
+    start = llm_output.find("<summary>")
+    end = llm_output.find("</summary>")
+    if start != -1:
+        if end != -1:
+            return llm_output[start + len("<summary>") : end].strip()
+        # Opened but never closed (output truncated mid-summary): salvage the
+        # partial summary -- it still beats the extractive digest.
+        # 开了标签没闭合（输出在 summary 中途截断）：抢救部分摘要——仍远好于抽取式。
+        return llm_output[start + len("<summary>") :].strip()
+    # No <summary> tag at all (e.g. truncated mid-analysis): strip the
+    # <analysis> scratchpad so it never leaks; empty result triggers the
+    # extractive fallback upstream.
+    # 完全没有 <summary> 标签（如截断在 analysis 中途）：剥离 <analysis> 草稿
+    # 防止泄漏；结果为空会触发上游的抽取式回退。
+    a_start = llm_output.find("<analysis>")
+    if a_start != -1:
+        a_end = llm_output.find("</analysis>")
+        tail = llm_output[a_end + len("</analysis>") :] if a_end != -1 else ""
+        llm_output = llm_output[:a_start] + tail
+    return llm_output.strip()
 
 
 class LLMSummarizeOldest(CompressionStrategy):
@@ -187,6 +305,13 @@ class LLMSummarizeOldest(CompressionStrategy):
     """
 
     MAX_HISTORY_CHARS = 24_000  # cap the summarization request size 限制摘要请求的大小
+    # Output budget for the summarize call: hybrid reasoning models (e.g.
+    # DeepSeek) burn thousands of tokens in reasoning_content before the
+    # visible answer -- the default 4096 gets truncated mid-summary.
+    # 摘要调用的输出预算：混合推理模型（如 DeepSeek）先在 reasoning_content
+    # 烧几千 token 才输出正文——默认 4096 会截断在 summary 中途。
+    SUMMARY_MAX_TOKENS = 8192
+    SUMMARY_RETRIES = 2  # attempts before extractive fallback 回退前的尝试次数
 
     def __init__(self, llm: LLMProvider) -> None:
         self._llm = llm
@@ -196,7 +321,7 @@ class LLMSummarizeOldest(CompressionStrategy):
         if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs))
+        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs, target_tokens))
         if split <= 0:
             return
 
@@ -204,14 +329,31 @@ class LLMSummarizeOldest(CompressionStrategy):
         kept = msgs[split:]
 
         digest = _extractive_digest(to_summarize)
-        try:
-            summary = await self._summarize(digest[: self.MAX_HISTORY_CHARS])
-            summary_text = (
-                "[Compressed conversation history (LLM summary) -- this is the "
-                "authoritative record of earlier conversation. Do NOT search "
-                "session files or disk to recover history; use this summary.]\n" + summary
-            )
-        except Exception:
+        summary_text = None
+        # Retry before falling back: transient empty summaries occurred once
+        # per real-terminal session -- a single retry usually recovers, and
+        # the extractive fallback loses the 9-section structure.
+        # 回退前先重试：真实终端会话几乎每场出现一次偶发空摘要——重试一次
+        # 通常就能恢复，而抽取式回退会丢掉 9 节结构。
+        for attempt in range(1, self.SUMMARY_RETRIES + 1):
+            try:
+                summary = await self._summarize(digest[: self.MAX_HISTORY_CHARS])
+                summary_text = (
+                    "[Compressed conversation history (LLM summary) -- this is the "
+                    "authoritative record of earlier conversation. Do NOT search "
+                    "session files or disk to recover history; use this summary.]\n" + summary
+                )
+                break
+            except Exception as e:
+                logger.warning(
+                    "LLM summarization attempt %d/%d failed (%s: %s)",
+                    attempt,
+                    self.SUMMARY_RETRIES,
+                    type(e).__name__,
+                    e,
+                )
+        if summary_text is None:
+            logger.warning("LLM summarization exhausted retries, using extractive digest")
             summary_text = (
                 "[Compressed conversation history -- this is the authoritative "
                 "record of earlier conversation. Do NOT search session files or "
@@ -225,10 +367,13 @@ class LLMSummarizeOldest(CompressionStrategy):
         # 一次性直连 LLM 调用，不经过 AgentLoop——无递归风险。
         messages = [{"role": "user", "content": _SUMMARY_PROMPT.format(history=history)}]
         parts: list[str] = []
-        async for chunk in self._llm.stream(messages):
+        async for chunk in self._llm.stream(messages, max_tokens=self.SUMMARY_MAX_TOKENS):
             if chunk.delta:
                 parts.append(chunk.delta)
-        summary = "".join(parts).strip()
+        # Keep only the <summary> block -- the <analysis> scratchpad improves
+        # summary quality but would waste context if injected into the conversation.
+        # 只保留 <summary> 块——<analysis> 草稿提升摘要质量，但注入对话会浪费上下文。
+        summary = _extract_summary("".join(parts))
         if not summary:
             raise ValueError("empty summary from LLM")
         return summary
@@ -270,6 +415,20 @@ class SlidingWindow(CompressionStrategy):
         if not any(m.role == Role.USER for m in kept):
             for msg in reversed(conversation.messages):
                 if msg.role == Role.USER:
+                    kept.insert(0, msg)
+                    break
+
+        # Summary anchor: the compression summary sits at the HEAD, so
+        # tail-based truncation drops it first -- destroying the entire
+        # compressed history the previous stage just paid an LLM call to
+        # preserve (full-pipeline verified: the summary held all planted
+        # conventions and SlidingWindow deleted exactly that message).
+        # 摘要锚点：压缩摘要位于头部，按尾部保留的截断会最先丢掉它——
+        # 上一级刚花一次 LLM 调用保住的全部历史被销毁（全管道实测：
+        # 摘要完整保住了埋点约定，而 SlidingWindow 恰好删掉这一条）。
+        if not any(m.role == Role.SYSTEM and m.compressed for m in kept):
+            for msg in conversation.messages:
+                if msg.role == Role.SYSTEM and msg.compressed and msg.content:
                     kept.insert(0, msg)
                     break
 

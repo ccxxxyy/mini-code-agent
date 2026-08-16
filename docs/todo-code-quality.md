@@ -21,7 +21,7 @@
 - `memory/extraction.py:125` — 提取记忆
 - `memory/recall.py:61` — 选择性召回
 - `memory/consolidation.py:53` — 语义合并
-- `memory/compressor.py:164` — LLM 摘要压缩
+- `memory/compressor.py:269` — LLM 摘要压缩（`_summarize`）
 
 四处都是"流式调 LLM → 拼接文本 → 解析 JSON"的相同模式。建议抽取为：
 ```python
@@ -209,9 +209,9 @@ experiments/results/
 - 硬顶：不超过 `KEEP_MAX_TOKENS(40K)`
 - 工具对对齐：keep 边界不切断 tool_use/tool_result 配对
 
-**已实现**：`_compute_keep_split()` 替代固定 `KEEP_RECENT = 6`，`SummarizeOldest` 和 `LLMSummarizeOldest` 均使用 token 驱动的保留窗口。常量 `KEEP_RECENT_TOKENS=10K` / `MIN_KEEP_MESSAGES=5` / `KEEP_MAX_TOKENS=40K`。7 个新测试覆盖短消息全保留 / 长消息少保留 / 硬顶 / 最少消息数 / 双阈值停止。
+**已实现**：`_compute_keep_split()` 替代固定 `KEEP_RECENT = 6`，`SummarizeOldest` 和 `LLMSummarizeOldest` 均使用 token 驱动的保留窗口。常量 `KEEP_RECENT_TOKENS=10K` / `MIN_KEEP_MESSAGES=5` / `KEEP_MAX_TOKENS=40K`（⑩/P68 起为绝对上限，实际随压缩目标缩放）。7 个新测试覆盖短消息全保留 / 长消息少保留 / 硬顶 / 最少消息数 / 双阈值停止。
 
-### ☐ ⑥ 摘要 prompt 结构化
+### ☑ ⑥ 摘要 prompt 结构化
 
 **问题**：mini 的 `_SUMMARY_PROMPT` 只列 4 条通用指令，摘要质量不稳定。
 
@@ -220,12 +220,9 @@ experiments/results/
 - analysis 覆盖 9 个维度：主请求、技术概念、涉及文件/代码、错误/修复、问题解决步骤、所有用户消息、待做任务、当前工作进展、可选下一步
 - summary 要求简洁、保留所有关键信息
 
-**mini 现状**：`_SUMMARY_PROMPT` 只要求 4 条（目标/步骤/文件/未解决），无结构化输出格式。
+**已实现**：`_SUMMARY_PROMPT` 重写为 `<analysis>`（时间线梳理 + 自查）+ `<summary>`（9 节结构化输出）；新增 `_extract_summary()` 只把 `<summary>` 块注入对话（analysis 草稿不进上下文），无标签回退完整输出、只有 analysis（截断）时剥离草稿触发抽取式回退。mini 适配：prompt 明确"近期消息已原样保留，摘要只替换旧历史"；不需要 mewcode 的 "Do NOT call tools" 警告（`_summarize()` 直连不带工具）。真实 LLM E2E 验证 9 节摘要完整、无草稿泄漏。5 个新测试。详见 tech-notes §67。
 
-**修复位置**：
-- `memory/compressor.py`：重写 `_SUMMARY_PROMPT`，参考 mewcode 的结构化 prompt
-
-### ☐ ⑦ 摘要重试
+### ◐ ⑦ 摘要重试（重试部分已完成，P72）
 
 **问题**：LLM 摘要调用偶发网络错误时直接回退到抽取式截断，丢失语义摘要。
 
@@ -234,7 +231,8 @@ experiments/results/
 **mini 现状**：`LLMSummarizeOldest._summarize()` 失败直接 `except Exception` 回退。
 
 **修复位置**：
-- `memory/compressor.py`：`LLMSummarizeOldest._summarize()` 加重试循环；prompt 超长时截断输入
+- ~~`memory/compressor.py`：加重试循环~~ ✅ 已完成（P72：`SUMMARY_RETRIES=2`，穷尽后才落抽取式）
+- 未做：mewcode 的"prompt 超长时丢弃最旧 20% 后重试"（mini 已有 MAX_HISTORY_CHARS=24K 截断，需求弱）
 
 ### ⑧ 压缩后重注入环境上下文和记忆 — 不适用（架构差异）
 
@@ -250,6 +248,19 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 **修复位置**：
 - `memory/compressor.py`：`SummarizeOldest` / `LLMSummarizeOldest` 的 `compress()` 增加前缀 token 量检查
+
+### ☑ ⑪ P67 验收期间连带修复的压缩链路缺陷（P69/P70/P71）
+
+九轮真实终端无污染埋点验证暴露并当场修复，详见 tech-notes §69-§71：
+- **P69** DropToolResults 截断模型工作集 → 重读死循环（36 迭代→4）：Stage 1 只处理可摘要前缀
+- **P70** 恢复附件预算不随窗口缩放（54K 字符附件钉死小窗口）+ 嵌套摘要 prompt 缺前传指令
+- **P71** SlidingWindow 删除刚生成的摘要（有任务锚点无摘要锚点）：新增摘要锚点
+
+### ☑ ⑩ 保留窗口按压缩目标缩放（P68）
+
+**问题**：⑤ 的 `KEEP_RECENT_TOKENS=10K` / `KEEP_MAX_TOKENS=40K` 是绝对常量。窗口 ≤ 13K 时保留下限不小于压缩目标（75% × 窗口），摘要级数学上永远达不到目标，压缩全部退化为 SlidingWindow 硬截断 + 硬阈值每轮空转。P67 终端窗口验证（context_window=10000）实测暴露：单轮 80 次迭代烧 1M token 才被迭代上限刹住。
+
+**已实现**：`_compute_keep_split(msgs, target_tokens)` 增加 target 参数——保留下限 `min(10K, target//2)`、硬顶 `min(40K, target)` 随目标缩放；`keep_count==0` 时兜底保留 1 条尾部消息。大窗口行为完全不变（min 取的仍是绝对值）。真实 LLM 验证：target=7500 时压缩后 7008 ≤ 7500 达标、结构化摘要存活。4 个新测试。详见 tech-notes §68。
 
 ---
 

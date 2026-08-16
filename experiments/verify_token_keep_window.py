@@ -82,8 +82,10 @@ async def main() -> None:
         config.llm.model = args.model
 
     print(f"Model: {config.llm.model}")
-    print(f"Constants: KEEP_RECENT_TOKENS={KEEP_RECENT_TOKENS} "
-          f"MIN_KEEP_MESSAGES={MIN_KEEP_MESSAGES} KEEP_MAX_TOKENS={KEEP_MAX_TOKENS}")
+    print(
+        f"Constants: KEEP_RECENT_TOKENS={KEEP_RECENT_TOKENS} "
+        f"MIN_KEEP_MESSAGES={MIN_KEEP_MESSAGES} KEEP_MAX_TOKENS={KEEP_MAX_TOKENS}"
+    )
     print("=" * 70)
 
     # == Phase 1: Short messages — all kept 短消息全保留 ==
@@ -180,19 +182,25 @@ async def main() -> None:
             summary_msgs = [m for m in conv3.messages if m.compressed]
             non_summary_msgs = [m for m in conv3.messages if not m.compressed]
             kept_tokens = sum(m.token_count or 0 for m in non_summary_msgs)
-            print(f"  -> Compression #{compressed_count}! "
-                  f"summary={len(summary_msgs)} kept={len(non_summary_msgs)} "
-                  f"kept_tokens≈{kept_tokens}")
+            print(
+                f"  -> Compression #{compressed_count}! "
+                f"summary={len(summary_msgs)} kept={len(non_summary_msgs)} "
+                f"kept_tokens≈{kept_tokens}"
+            )
             if kept_tokens > 0:
-                print(f"     Token-driven: kept {len(non_summary_msgs)} msgs "
-                      f"≈{kept_tokens} tokens "
-                      f"(old KEEP_RECENT=6 would be fixed at 6 msgs)")
+                print(
+                    f"     Token-driven: kept {len(non_summary_msgs)} msgs "
+                    f"≈{kept_tokens} tokens "
+                    f"(old KEEP_RECENT=6 would be fixed at 6 msgs)"
+                )
         status(ctx, conv3, f"After check {i + 1}")
         print()
 
     if compressed_count > 0:
-        print(f"[PASS] Phase 3: {compressed_count} compressions fired, "
-              f"kept window adapted to actual sizes")
+        print(
+            f"[PASS] Phase 3: {compressed_count} compressions fired, "
+            f"kept window adapted to actual sizes"
+        )
     else:
         print(f"[INFO] Phase 3: no compression fired (window={real_window} was sufficient)")
         print("  Replies were short enough to fit. Token-driven logic verified in Phase 1 & 2.")

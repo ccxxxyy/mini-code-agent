@@ -276,15 +276,27 @@ class ContextManager:
                 "[Files already read this session -- do NOT re-read unless "
                 "their content changed: " + ", ".join(self._read_files) + "]"
             )
-        # 3. Truncated contents of the most recent files (up to 5)
-        # 附加最近文件的截断内容（最多 5 个）
+        # 3. Truncated contents of the most recent files (up to 5).
+        # Total budget scales with the window: the absolute 5x5000-token
+        # attachment exceeds a small window entirely (observed at window=20K:
+        # a 54K-char summary message pinned context at 112% -- compression
+        # could never win). Same constant-vs-target class of bug as the
+        # keep-window scaling fix.
+        # 附加最近文件的截断内容（最多 5 个）。总预算随窗口缩放：绝对值
+        # 5x5000 token 的附件在小窗口下超过整个窗口（实测 window=20K 时
+        # 54K 字符的摘要消息把上下文钉死在 112%——压缩永远赢不了）。与保留
+        # 窗口缩放修复同类问题。
         recent = [(p, c) for p, c in self._read_files.items() if c is not None][
             -_MAX_RECOVERY_FILES:
         ]
         if recent:
+            total_budget = min(
+                _MAX_RECOVERY_FILES * _RECOVERY_TOKENS_PER_FILE, self._max_tokens // 4
+            )
+            per_file = max(total_budget // len(recent), 200)
             parts.append("[File contents from before compression:]\n")
             for path, content in recent:
-                parts.append(f"--- {path} ---\n{content}")
+                parts.append(f"--- {path} ---\n{truncate_to_tokens(content, per_file)}")
         if not parts:
             return
         note = "\n\n".join(parts)
