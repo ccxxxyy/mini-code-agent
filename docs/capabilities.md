@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，821 个测试全部通过。
+> 当前版本 v1.0.0，830 个测试全部通过。
 
 ---
 
@@ -125,7 +125,7 @@
 - 自动压缩：ContextManager 每轮 OBSERVE 后检查，达到窗口 75% 触发；ensure_fits 溢出兜底使用 API 探测的真实窗口值（P42）
 - 三级压缩级联（保留关键信息的关键设计）：
   1. DropToolResults — 先压最冗余的工具输出（保留调用结构）
-  2. SummarizeOldest — 摘要旧消息，最近 6 条不动（当前工作上下文完整保留）
+  2. SummarizeOldest — 摘要旧消息，token 驱动保留窗口（≥10K tokens 且 ≥5 条，硬顶 40K tokens）不动
   3. SlidingWindow — 滑动窗口兜底
 - 手动入口：`/compact` 命令
 
@@ -260,7 +260,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 821 个测试全部通过（约 80 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
+| 测试 | 830 个测试全部通过（约 80 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

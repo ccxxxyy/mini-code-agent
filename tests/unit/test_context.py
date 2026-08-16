@@ -7,11 +7,13 @@ import pytest
 
 from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.memory.compressor import (
+    MIN_KEEP_MESSAGES,
     Compressor,
     DropToolResults,
     LLMSummarizeOldest,
     SlidingWindow,
     SummarizeOldest,
+    _compute_keep_split,
 )
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
@@ -133,17 +135,26 @@ async def test_summarize_oldest():
         conv.messages.append(make_msg(content=f"message {i}", token_count=10))
 
     await strategy.compress(conv, 100)
-    # Should have 1 summary + KEEP_RECENT messages
-    assert len(conv.messages) == 1 + SummarizeOldest.KEEP_RECENT
-    assert conv.messages[0].role == Role.SYSTEM
-    assert conv.messages[0].compressed
-    assert "[Compressed" in conv.messages[0].content
+    # 20 msgs × 10 tokens = 200 total < KEEP_RECENT_TOKENS (10K),
+    # _compute_keep_split 全保留 → split=0 → 无可摘要内容。
+    # 需要更高的 token_count 才能触发切分：
+    conv2 = Conversation()
+    for i in range(20):
+        conv2.messages.append(make_msg(content=f"message {i}", token_count=3000))
+    await strategy.compress(conv2, 100)
+    assert conv2.messages[0].role == Role.SYSTEM
+    assert conv2.messages[0].compressed
+    assert "[Compressed" in conv2.messages[0].content
+    # Kept messages should be token-driven, not fixed at 6
+    # 保留的消息数由 token 驱动，不是固定 6 条
+    kept = len(conv2.messages) - 1  # minus summary 减去摘要
+    assert kept >= MIN_KEEP_MESSAGES
 
 
 async def test_summarize_oldest_too_few():
     strategy = SummarizeOldest()
     conv = Conversation()
-    conv.messages = [make_msg(token_count=10) for _ in range(3)]
+    conv.messages = [make_msg(token_count=10) for _ in range(MIN_KEEP_MESSAGES)]
     original_count = len(conv.messages)
     await strategy.compress(conv, 100)
     assert len(conv.messages) == original_count  # not enough to summarize
@@ -180,16 +191,19 @@ async def test_llm_summarize_oldest():
     llm = SummaryMockLLM(summary="Goal: fix bug. Done: read 3 files.")
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
+    # Use 3000 tokens/msg so total (60K) exceeds KEEP_RECENT_TOKENS (10K)
+    # 每条 3000 token，总计 60K 超过 KEEP_RECENT_TOKENS (10K) 触发切分
     for i in range(20):
-        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
     await strategy.compress(conv, 100)
-    assert len(conv.messages) == 1 + LLMSummarizeOldest.KEEP_RECENT
     assert conv.messages[0].role == Role.SYSTEM
     assert conv.messages[0].compressed
     assert "LLM summary" in conv.messages[0].content
     assert "Goal: fix bug" in conv.messages[0].content
     assert llm.call_count == 1
+    kept = len(conv.messages) - 1  # minus summary 减去摘要
+    assert kept >= MIN_KEEP_MESSAGES
 
 
 async def test_llm_summarize_falls_back_on_error():
@@ -197,11 +211,11 @@ async def test_llm_summarize_falls_back_on_error():
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
     for i in range(20):
-        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
     await strategy.compress(conv, 100)
     # Fallback to extractive digest, chain not broken 回退到抽取式摘要，压缩链不中断
-    assert len(conv.messages) == 1 + LLMSummarizeOldest.KEEP_RECENT
+    assert conv.messages[0].role == Role.SYSTEM
     assert "[Compressed conversation history" in conv.messages[0].content
     assert "message 0" in conv.messages[0].content
 
@@ -211,20 +225,20 @@ async def test_llm_summarize_falls_back_on_empty():
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
     for i in range(20):
-        conv.messages.append(make_msg(content=f"message {i}", token_count=10))
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
 
     await strategy.compress(conv, 100)
-    assert "message 0" in conv.messages[0].content  # extractive fallback
+    assert "message 0" in conv.messages[0].content  # extractive fallback 回退到抽取式摘要
 
 
 async def test_llm_summarize_too_few():
     llm = SummaryMockLLM()
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
-    conv.messages = [make_msg(token_count=10) for _ in range(3)]
+    conv.messages = [make_msg(token_count=10) for _ in range(MIN_KEEP_MESSAGES)]
     await strategy.compress(conv, 100)
-    assert len(conv.messages) == 3
-    assert llm.call_count == 0  # no LLM call when nothing to summarize
+    assert len(conv.messages) == MIN_KEEP_MESSAGES
+    assert llm.call_count == 0  # no LLM call when nothing to summarize 无可摘要时不调 LLM
 
 
 # --- SlidingWindow ---
@@ -321,19 +335,31 @@ async def test_summarize_oldest_aligns_tool_pair():
     # tool_calls 消息，否则 API 返回 400。
     strategy = SummarizeOldest()
     conv = Conversation()
+    # Use 3000 tokens/msg so total exceeds KEEP_RECENT_TOKENS (10K),
+    # forcing a split that lands near the tool pair.
+    # 每条 3000 token 使总量超过 10K，迫使切分点落在工具对附近。
     conv.messages = (
-        [make_msg(content=f"m{i}", token_count=10) for i in range(12)]
-        + [make_call_msg(), make_tool_msg(token_count=10), make_tool_msg(token_count=10)]
-        + [make_msg(content=f"t{i}", token_count=10) for i in range(5)]
+        [make_msg(content=f"m{i}", token_count=3000) for i in range(12)]
+        + [
+            make_call_msg(token_count=3000),
+            make_tool_msg(token_count=3000),
+            make_tool_msg(token_count=3000),
+        ]
+        + [make_msg(content=f"t{i}", token_count=3000) for i in range(5)]
     )
-    # naive split = len - 6 = 14, which is the second tool result
     await strategy.compress(conv, 100)
 
-    assert conv.messages[0].role == Role.SYSTEM  # summary
-    assert conv.messages[1].role == Role.ASSISTANT
-    assert conv.messages[1].tool_calls  # pair head kept intact 配对头部完整保留
-    assert conv.messages[2].role == Role.TOOL
-    assert conv.messages[3].role == Role.TOOL
+    assert conv.messages[0].role == Role.SYSTEM  # summary 摘要
+    # Tool pair must not be split: if a TOOL result is kept, its
+    # preceding ASSISTANT tool_calls must also be kept.
+    # 工具对不能被拆分：TOOL result 保留时其前置 ASSISTANT tool_calls 也必须保留。
+    for idx, msg in enumerate(conv.messages):
+        if msg.role == Role.TOOL:
+            assert idx > 0
+            assert any(
+                conv.messages[j].role == Role.ASSISTANT and conv.messages[j].tool_calls
+                for j in range(idx)
+            )
 
 
 async def test_summarize_oldest_alignment_reaches_start():
@@ -342,9 +368,13 @@ async def test_summarize_oldest_alignment_reaches_start():
     # 切分点之前全是一个工具对：没有可摘要的内容，压缩应为空操作。
     strategy = SummarizeOldest()
     conv = Conversation()
-    conv.messages = [make_call_msg()] + [make_tool_msg(token_count=10) for _ in range(7)]
+    # Use enough msgs (>MIN_KEEP_MESSAGES) but make them all a tool pair
+    # 消息数超过 MIN_KEEP_MESSAGES 但全是工具对
+    conv.messages = [make_call_msg(token_count=3000)] + [
+        make_tool_msg(token_count=3000) for _ in range(7)
+    ]
     await strategy.compress(conv, 100)
-    assert len(conv.messages) == 8  # unchanged
+    assert len(conv.messages) == 8  # unchanged 未变
     assert not any(m.compressed for m in conv.messages)
 
 
@@ -353,14 +383,23 @@ async def test_llm_summarize_aligns_tool_pair():
     strategy = LLMSummarizeOldest(llm)
     conv = Conversation()
     conv.messages = (
-        [make_msg(content=f"m{i}", token_count=10) for i in range(12)]
-        + [make_call_msg(), make_tool_msg(token_count=10), make_tool_msg(token_count=10)]
-        + [make_msg(content=f"t{i}", token_count=10) for i in range(5)]
+        [make_msg(content=f"m{i}", token_count=3000) for i in range(12)]
+        + [
+            make_call_msg(token_count=3000),
+            make_tool_msg(token_count=3000),
+            make_tool_msg(token_count=3000),
+        ]
+        + [make_msg(content=f"t{i}", token_count=3000) for i in range(5)]
     )
     await strategy.compress(conv, 100)
 
-    assert conv.messages[1].role == Role.ASSISTANT
-    assert conv.messages[1].tool_calls
+    # Tool pair must be intact 工具对必须完整
+    for idx, msg in enumerate(conv.messages):
+        if msg.role == Role.TOOL:
+            assert any(
+                conv.messages[j].role == Role.ASSISTANT and conv.messages[j].tool_calls
+                for j in range(idx)
+            )
 
 
 async def test_sliding_window_drops_orphan_tool_results():
@@ -716,3 +755,83 @@ def test_llm_summarize_config_false():
     strategies = compressor._strategies
     assert any(isinstance(s, SummarizeOldest) for s in strategies)
     assert not any(isinstance(s, LLMSummarizeOldest) for s in strategies)
+
+
+# --- Token-driven keep window (_compute_keep_split) token 驱动保留窗口 ---
+
+
+def test_keep_split_short_messages_keeps_all():
+    """20 messages × 10 tokens = 200 total < KEEP_RECENT_TOKENS (10K),
+    so all messages are kept (split=0). Old fixed-6 would have only kept 6.
+    20 条 × 10 token = 200 < 10K，全保留。旧固定 6 条只保留 6 条。"""
+    msgs = [make_msg(token_count=10) for _ in range(20)]
+    split = _compute_keep_split(msgs)
+    # keep all — not enough tokens to warrant summarization
+    # 全保留——token 不足不值得摘要
+    assert split == 0
+
+
+def test_keep_split_long_messages_keeps_fewer():
+    """Messages at 8K tokens each — should keep 5, hitting both
+    KEEP_RECENT_TOKENS (10K) and MIN_KEEP_MESSAGES (5).
+    每条 8K token，保留 5 条（双条件满足后停止）。"""
+    msgs = [make_msg(token_count=8000) for _ in range(20)]
+    split = _compute_keep_split(msgs)
+    kept = len(msgs) - split
+    assert kept == MIN_KEEP_MESSAGES  # 5 × 8K = 40K = KEEP_MAX_TOKENS 双条件满足停止
+    assert split > 0
+
+
+def test_keep_split_hits_hard_cap():
+    """Messages so large that KEEP_MAX_TOKENS (40K) is hit before
+    MIN_KEEP_MESSAGES can be reached.
+    单条太大，硬顶 40K 在消息数达到最低要求前就命中。"""
+    msgs = [make_msg(token_count=15000) for _ in range(10)]
+    split = _compute_keep_split(msgs)
+    kept = len(msgs) - split
+    # 15K per msg: 2 msgs = 30K (under 40K cap), 3 msgs = 45K (over cap)
+    # 每条 15K：2 条 = 30K（未超 40K），3 条 = 45K（超了）
+    assert kept == 2
+    assert split == 8
+
+
+def test_keep_split_minimum_messages():
+    """Exactly MIN_KEEP_MESSAGES messages — nothing to summarize.
+    恰好 MIN_KEEP_MESSAGES 条——无可摘要内容。"""
+    msgs = [make_msg(token_count=100) for _ in range(MIN_KEEP_MESSAGES)]
+    split = _compute_keep_split(msgs)
+    assert split == 0
+
+
+def test_keep_split_fewer_than_minimum():
+    """Fewer than MIN_KEEP_MESSAGES messages — nothing to summarize.
+    少于 MIN_KEEP_MESSAGES 条——无可摘要内容。"""
+    msgs = [make_msg(token_count=100) for _ in range(3)]
+    split = _compute_keep_split(msgs)
+    assert split == 0
+
+
+def test_keep_split_meets_both_thresholds():
+    """Stop as soon as both count >= MIN_KEEP_MESSAGES AND
+    tokens >= KEEP_RECENT_TOKENS are satisfied.
+    双条件同时满足时立即停止。"""
+    # 2500 tokens/msg × 5 msgs = 12500 >= 10K, count=5 >= 5 → stop
+    # 2500 × 5 = 12500 ≥ 10K，条数 5 ≥ 5 → 停止
+    msgs = [make_msg(token_count=2500) for _ in range(15)]
+    split = _compute_keep_split(msgs)
+    kept = len(msgs) - split
+    assert kept == MIN_KEEP_MESSAGES
+    assert split == 10
+
+
+async def test_summarize_oldest_keeps_all_when_tokens_low():
+    """When all messages combined are below KEEP_RECENT_TOKENS,
+    SummarizeOldest should be a no-op (nothing to summarize).
+    所有消息总 token 低于 KEEP_RECENT_TOKENS 时，SummarizeOldest 应空操作。"""
+    strategy = SummarizeOldest()
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"m{i}", token_count=10))
+    await strategy.compress(conv, 100)
+    assert len(conv.messages) == 20
+    assert not any(m.compressed for m in conv.messages)

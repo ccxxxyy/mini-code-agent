@@ -731,7 +731,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 |---|---|---|---|---|
 | 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | ~~只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读~~ | ✅ 已消除（9.2a），见 9.2a 小节 |
 | 2 | keep 消息自包含 | `CompactBoundary.keep` 把尾部消息序列化到边界记录内（JSONL 追加式，边界是自包含的恢复点） | 尾部消息作为普通消息存在 JSON messages 数组中 | mini 用单 JSON 覆写式存储，尾部消息天然与边界同文件，自包含性等价——仅格式层差异 |
-| 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | ~~`KEEP_RECENT=6` 固定切分，可能切断~~ | ✅ 已消除（9.2b/P60），见 9.2b 小节 |
+| 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | ~~`KEEP_RECENT=6` 固定切分，可能切断~~ | ✅ 已消除（9.2b/P60 + P150 token 驱动替代固定 6），见 9.2b 小节 |
 | 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | 无 | 独立防护机制，可作为后续增强单独实现 |
 
 ### 9.2a 压缩恢复附件含文件内容 ✅ 已实现

@@ -199,7 +199,7 @@ experiments/results/
 **修复位置**：
 - `memory/context.py`：`check_and_compress()` 区分软硬阈值，硬阈值时跳过熔断器检查
 
-### ☐ ⑤ token 驱动的保留窗口（替代固定 6 条消息）
+### ☑ ⑤ token 驱动的保留窗口（替代固定 6 条消息）
 
 **问题**：`SummarizeOldest.KEEP_RECENT = 6` 固定保留最近 6 条消息。6 条短消息可能只有 1K token（浪费空间），6 条长消息可能有 40K token（保留太多）。
 
@@ -209,10 +209,7 @@ experiments/results/
 - 硬顶：不超过 `KEEP_MAX_TOKENS(40K)`
 - 工具对对齐：keep 边界不切断 tool_use/tool_result 配对
 
-**mini 现状**：固定 `KEEP_RECENT = 6` 条消息，有工具对对齐但无 token 感知。
-
-**修复位置**：
-- `memory/compressor.py`：`SummarizeOldest` 和 `LLMSummarizeOldest` 的 keep 计算从固定消息数改为 token 驱动
+**已实现**：`_compute_keep_split()` 替代固定 `KEEP_RECENT = 6`，`SummarizeOldest` 和 `LLMSummarizeOldest` 均使用 token 驱动的保留窗口。常量 `KEEP_RECENT_TOKENS=10K` / `MIN_KEEP_MESSAGES=5` / `KEEP_MAX_TOKENS=40K`。7 个新测试覆盖短消息全保留 / 长消息少保留 / 硬顶 / 最少消息数 / 双阈值停止。
 
 ### ☐ ⑥ 摘要 prompt 结构化
 
@@ -249,7 +246,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 **mewcode 实现**：可摘要前缀 < `MIN_SUMMARIZE_PREFIX_TOKENS(2K)` token 时跳过压缩。
 
-**mini 现状**：只检查消息数（`len(msgs) <= KEEP_RECENT`），不检查 token 量。
+**mini 现状**：已改为 token 驱动（`_compute_keep_split` 检查 token 量），但未单独检查"可摘要前缀 < 2K 则跳过"——split=0 时效果等价。
 
 **修复位置**：
 - `memory/compressor.py`：`SummarizeOldest` / `LLMSummarizeOldest` 的 `compress()` 增加前缀 token 量检查

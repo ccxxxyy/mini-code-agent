@@ -101,7 +101,7 @@
 ### 功能完整性
 - [x] ContextManager 正确跟踪 token 使用（count_message 缓存 + update_total 全量重算）
 - [x] 达到 75% 阈值自动触发压缩（needs_compression 属性 + check_and_compress 集成到 AgentLoop OBSERVE 阶段）
-- [x] 压缩后对话连贯性保持（SummarizeOldest 保留最近 6 条 + 提取式摘要保留角色和关键内容）
+- [x] 压缩后对话连贯性保持（SummarizeOldest token 驱动保留窗口 ≥10K tokens 且 ≥5 条，硬顶 40K + 提取式摘要保留角色和关键内容）
 - [x] Session 可序列化/反序列化（JSON，含 ToolCall/ToolResult 完整往返，6 个单测覆盖）
 - [x] 会话恢复后对话状态完整（system_prompt + messages + metadata 全部还原）
 - [x] 跨会话记忆 CRUD 正常（项目级 + 用户级双层存储，add/load/save/search）
@@ -109,7 +109,7 @@
 
 ### 压缩策略验证
 - [x] Stage 1: 工具输出精简生效（>200 字符截断 + 行数/字符数摘要，单测验证短输出跳过）
-- [x] Stage 2: 提取式摘要生效（保留最近 6 条 + 旧消息按 role 摘要，单测验证消息数不足时跳过）
+- [x] Stage 2: 提取式摘要生效（token 驱动保留窗口 P150 + 旧消息按 role 摘要，单测验证消息数不足时跳过）
 - [x] Stage 3: 滑动窗口兜底正常（按 token 预算从后往前保留，最终一定收敛到目标以内）
 
 ---
@@ -251,7 +251,7 @@
 ### 功能完整性
 - [x] LLMSummarizeOldest 摘要成功时输出含 "LLM summary" 标记
 - [x] LLM 调用失败/空响应时回退提取式摘要，压缩链不中断
-- [x] 消息数 ≤ KEEP_RECENT 时不调用 LLM（零浪费）
+- [x] 消息数 ≤ MIN_KEEP_MESSAGES 时不调用 LLM（零浪费）
 - [x] compression_ab.py 三臂可独立运行（--arm）、可跑单任务（--task）
 - [x] model_mix.py 从 llm_profiles 读取强弱模型，--strong/--weak 可指定
 - [x] 实验结果 JSON 落盘 experiments/results/
@@ -1121,7 +1121,7 @@
 ### 功能完整性
 - [x] 压缩后 `Conversation.compact_boundary` 自动记录 summary + timestamp + read_files
 - [x] 每个压缩策略运行后都尝试记录边界（SummarizeOldest 创建的摘要不被后续 SlidingWindow 丢弃时错过）
-- [x] 纯 SlidingWindow 路径（消息数 ≤ KEEP_RECENT 时 SummarizeOldest 跳过）兜底从 `_inject_read_files` 消息创建边界
+- [x] 纯 SlidingWindow 路径（消息数 ≤ MIN_KEEP_MESSAGES 时 SummarizeOldest 跳过）兜底从 `_inject_read_files` 消息创建边界
 - [x] `SessionStore` 序列化：`compact_boundary` 写入 conversation 段
 - [x] `SessionStore` 反序列化：有边界时跳过 `compressed=True and role=system` 消息，从边界 summary 重建单条摘要
 - [x] 非 SYSTEM 的 compressed 消息（DropToolResults 的 TOOL 消息）不被跳过（正常加载）
@@ -1134,13 +1134,6 @@
 - [x] test_compact_boundary_e2e.py — 2 个集成测试：完整链路 E2E（ContextManager → Compressor → save → load → adopt_boundary）/ 旧格式 E2E
 - [x] 真实 LLM E2E 验证：DeepSeek 模型实际对话 → 压缩 → 保存 → 加载 → 边界 + read_files 恢复全链路 PASS
 - [x] 760 个测试全过，ruff lint + format clean
-
-### 文档同步
-- [x] comparison-mewcode.md 9.2 节更新：对比表 + 实现详情 + 诚实差异表（4 条）
-- [x] comparison-mewcode.md 总表新增 5 个遗漏差距项（1.1a / 9.2a / 9.2b / 9.2c / 6.4a）
-- [x] tasks.md 新增 Phase 59 条目
-- [x] tech-notes.md 新增 §59（5 个设计决策小节）
-- [x] checklist.md 新增本检查项
 
 ## Phase 60 检查项：压缩工具对对齐（comparison 9.2b）
 
@@ -1156,12 +1149,6 @@
 - [x] 真实 API 验证（合成消息）：对齐后压缩产物发 DeepSeek 成功；诚实发现——未对齐孤儿该端点也接受（宽容实现），修复价值在严格端点（OpenAI 官方/Anthropic）
 - [x] 真实 LLM E2E 验证：真实 AgentLoop + 真实工具（read_file/glob/grep）+ 内存调小窗口（2500/0.5）跑 3 轮真实对话，压缩多次触发，配对检查器扫描 0 违规（检查器已用合成孤儿自检）
 - [x] 764 个测试全过（760 + 4 新增），ruff lint + format clean，CI 全部检查项本地复跑通过（3.11/3.12 双版本）
-
-### 文档同步
-- [x] comparison-mewcode.md 9.2 节对比表"工具对完整性"行更新 + 诚实差异 #3 标记消除 + 新增 9.2b 小节 + 总表标 ✅
-- [x] tasks.md 新增 Phase 60 条目
-- [x] tech-notes.md 新增 §60（3 个小节：问题 / 修复 / 真实 API 诚实发现）
-- [x] checklist.md 新增本检查项
 
 ## Phase 61 检查项：记忆导出/导入（comparison 4.6）
 
@@ -1179,16 +1166,6 @@
 - [x] 真实 handler 验证：临时目录跑真实 `_make_memory`——add → export → 重导入去重 → 跨机 scope 还原 → 错误路径
 - [x] 774 个测试全过（764 + 10 新增），ruff lint + format clean
 
-### 文档同步
-- [x] comparison-mewcode.md 4.6 节标 ✅（P61）+ 实现详情 + 实测设计点 + 总表标 ✅
-- [x] tasks.md 新增 Phase 61 条目
-- [x] tech-notes.md 新增 §61（分层 / source≠scope / 容错解析）
-- [x] README.md / README-zh.md 命令表更新（export|import）
-- [x] docs/commands-guide.md /memory 段新增 export/import 用法
-- [x] docs/capabilities.md 手动管理条目补充导出/导入
-- [x] CHANGELOG.md Unreleased 新增 Memory export/import 与 Compression tool-pair alignment 条目
-- [x] checklist.md 新增本检查项
-
 ## Phase 62 检查项：压缩熔断器（comparison 9.2c）
 
 ### 功能完整性
@@ -1204,17 +1181,6 @@
 - [x] 1 个集成测试（test_compact_boundary_e2e.py）：完整链路 NoOp→失败累积→日志验证→熔断跳过→ensure_fits 兜底
 - [x] 真实 LLM 验证（experiments/verify_circuit_breaker.py）：5 阶段——正常压缩 / 150 文件 read_files 抵消触发熔断 / ensure_fits 兜底 / 禁用对照 / 新会话恢复
 - [x] 778 个测试全过（774 + 4 新增），ruff lint + format clean
-
-### 文档同步
-- [x] comparison-mewcode.md 9.2 表 + 9.2c 总表行标 ✅
-- [x] todo-code-quality.md ③ 标 ✅ 已修复
-- [x] tasks.md 新增 Phase 62 条目
-- [x] tech-notes.md 新增 §62
-- [x] CHANGELOG.md 新增条目
-- [x] README.md / README-zh.md 测试数 + 实验数 + phase 范围更新
-- [x] capabilities.md / positioning.md / tech-notes.md 测试数更新
-- [x] roadmap.md phase 范围更新
-- [x] checklist.md 新增本检查项
 
 ## Phase 63 检查项：压缩恢复附件含文件内容（comparison 9.2a）
 
@@ -1234,13 +1200,7 @@
 - [x] 真实 LLM 验证（DeepSeek，context_window=14000）：压缩后 agent 不重读、不丢任务、能引用文件细节
 - [x] 793 个测试全过，ruff lint + format clean
 
-### 文档同步
-- [x] comparison-mewcode.md 9.2a 小节 + 诚实差异表 #1 标记消除 + 对比表更新 + 总表标 ✅
-- [x] tasks.md 新增 Phase 63 条目 + P59.3 诚实差异标记完成
-- [x] tech-notes.md 新增 §63
-- [x] checklist.md 新增本检查项
-
-## Phase 64.1 检查项：聚合工具结果预算（①）
+## Phase 64 检查项：聚合工具结果预算（①）
 
 ### 功能完整性
 - [x] `PREVIEW_CHARS` 500→2000（配套 1b），预览以 `min(PREVIEW_CHARS, threshold)` 封顶
@@ -1263,11 +1223,16 @@
 - [x] 交互式 E2E 验证（真实 mini 会话，aggregate=15000，会话 JSON 审计）：6 验证点 5 全达成 + 成本有界在极端参数下部分达成（诚实边界：豁免读回计入累计，aggregate < 单文件时链式溢写-读回；默认 200K 无此问题）
 - [x] 821 个测试全过，ruff lint + format clean
 
-### 文档同步
-- [x] tasks.md P64.1 勾选完成
-- [x] todo-code-quality.md ① 标 ✅ 已修复
-- [x] comparison-mewcode.md 4.1 表新增聚合预算行 + 总表新增 4.1a 行
-- [x] tech-notes.md 新增 §64
-- [x] CHANGELOG.md 新增条目
-- [x] config.toml.example [memory] 段补 aggregate_spill_chars
-- [x] checklist.md 新增本检查项
+## Phase 65 检查项：Token 驱动的保留窗口（todo-code-quality ⑤）
+
+### 功能完整性
+- [x] `_compute_keep_split(msgs)` 从尾部反向扫描累计 token，双条件停止（≥10K tokens 且 ≥5 条），硬顶 40K
+- [x] `SummarizeOldest` 移除 `KEEP_RECENT = 6`，改用 `_compute_keep_split()` + `_align_split_to_tool_pair()`
+- [x] `LLMSummarizeOldest` 同步改用 `_compute_keep_split()`
+- [x] 短消息全保留（总 token < 10K 时 split=0，不浪费压缩空间）
+- [x] 长消息少保留（8K/条 × 5 = 40K 命中硬顶，不保留过多）
+- [x] 工具对对齐仍然生效（`_align_split_to_tool_pair` 未变）
+
+### 测试
+- [x] 7 个新 `_compute_keep_split` 单测：短消息全保留 / 长消息少保留 / 硬顶 / 最少消息数 / 少于最少 / 双条件停止 / SummarizeOldest 低 token 空操作
+- [x] 已有 30+ 测试全部适配（token_count 调高、移除 KEEP_RECENT 引用）
