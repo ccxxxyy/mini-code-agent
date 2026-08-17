@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **793 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **887 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -92,7 +92,7 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 事件系统 | **EventBus**（5 个订阅者：Trace/Teach/Audit/Recorder/Cost） | 无独立事件总线（组件间直接回调） |
+| 事件系统 | **EventBus**（5 个订阅者：Trace/Teach/Audit/Recorder/Cost，共订阅 8+4+3+2+1=18 种事件） | 无独立事件总线（组件间直接回调） |
 | 解耦程度 | 五层架构通过 EventBus 解耦，单向依赖 | 组件间直接引用较多 |
 | 观测能力 | `/trace`、`/explain`、`/audit` 三个独立观测维度 | `/trace` |
 

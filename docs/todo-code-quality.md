@@ -81,7 +81,7 @@
 
 ---
 
-### 🟢 有意预留的扩展点（16 处，其中 #1 已接入）
+### 🟢 有意预留的扩展点（16 处，其中 #1/#4/#7/#12/#13 已接入）
 
 这些是公开 API 表面，当前无调用方但为外部消费者或未来功能预留（标 ✅ 的已有真实调用方）。除非要精简代码量，否则建议保留。
 
@@ -90,7 +90,7 @@
 | 1 | `EventBus.on_any()` | `events/bus.py:29` | ✅ 已接入：新增 `extensions/event_listeners.py`，从 `listener_dirs` 配置目录加载 *.py 插件（`register(bus)` 或 `on_event(event)` 契约），app 启动时注册为全局监听；`emit` 同时改为记录 handler 异常日志，并补充 `off_any()` |
 | 2 | `ToolRegistry.filter()` | `tools/base.py:212` | 按 allow/deny 列表过滤工具——未来权限系统可能用 |
 | 3 | `PermissionManager.add_rule()` | `security/permission.py:94` | 运行时动态添加权限规则——未来 UI 或 API 可能用 |
-| 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | 列出所有已注册 Provider——`/model` 命令增强时可能用 |
+| 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | ✅ 已接入：`/model` 无参数时显示可用 Provider 列表 |
 | 5 | `Conversation.slice_window()` | `models/message.py:105` | 按 token 窗口截取消息——ContextManager 替代了但方法本身有独立价值 |
 | 6 | `Plan.is_complete` | `core/planner.py:74` | 检查计划是否完成——AgentTeam 用自己的逻辑但外部调用者可能需要 |
 | 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
@@ -98,8 +98,8 @@
 | 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | 工具级权限控制（当前只有 COMMAND 和 PATH） |
 | 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | 默认 Agent 类型常量——应在 `SubAgent.__init__` 中引用但实际用了 `None` |
 | 11 | `SessionMetadata.tags` | `models/session.py:22` | 会话标签——未来 `/session` 增强时可能用 |
-| 12 | `UserMessageEvent.is_slash_command` | `models/events.py:24` | 标记斜杠命令事件——审计/统计可能用 |
-| 13 | `LLMRequestEvent.estimated_tokens` | `models/events.py:34` | 预估 token 数——CostTracker 预警可能用 |
+| 12 | `UserMessageEvent.is_slash_command` | `models/events.py:24` | ✅ 已接入：斜杠命令分支 emit 事件设 `is_slash_command=True`，AuditLogger 记录 + TraceRenderer 显示 |
+| 13 | `LLMRequestEvent.estimated_tokens` | `models/events.py:34` | ✅ 已接入：`agent_loop._think()` 从 ContextManager 填入预估 token，TraceRenderer 显示 |
 | 14 | `PermissionRequest.tool_name` | `models/permissions.py:39` | 触发权限请求的工具名——审计可能用 |
 | 15 | `PermissionManager.check()` | `security/permission.py:156` | 通用权限检查入口——当前只被 `check_path` 内部调用，但外部消费者可能直接用 |
 | 16 | `Conversation.slice_window()` | `models/message.py:105` | 同 #5（重复列出待确认是否与 ContextManager 有重叠可合并） |

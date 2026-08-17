@@ -1000,11 +1000,11 @@ CC 等商用 Agent 是黑盒——用户只能看到工具调用的表面行为�
 
 ## 9.2 架构：纯订阅者，零侵入
 
-TraceRenderer（`ui/trace.py`）是一个**纯 EventBus 订阅者**——不改 ReAct 循环任何逻辑，只订阅 7 种事件渲染输出：
+TraceRenderer（`ui/trace.py`）是一个**纯 EventBus 订阅者**——不改 ReAct 循环任何逻辑，只订阅 8 种事件渲染输出：
 
 ```
-AgentPhaseChange / PermissionCheck / ToolCallStart / ToolCallEnd /
-LLMRequest / LLMResponse / TurnComplete
+UserMessage / AgentPhaseChange / PermissionCheck / ToolCallStart /
+ToolCallEnd / LLMRequest / LLMResponse / TurnComplete
 ```
 
 关键设计：
@@ -1040,7 +1040,7 @@ positioning.md 方向 3 提出"垂直场景定制"——CC 覆盖不好的场景
 
 ### 合规审计模式（EventBus 订阅者范式）
 
-`/audit on` 开启 `security/audit.py` 的 AuditLogger。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 ToolCallStart/End + PermissionCheck 三种事件，每条写一行 JSON 到 `~/.mini-agent/audit.jsonl`。
+`/audit on` 开启 `security/audit.py` 的 AuditLogger。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 UserMessage + ToolCallStart/End + PermissionCheck 四种事件，每条写一行 JSON 到 `~/.mini-agent/audit.jsonl`。
 
 设计选择：
 - **同步写而非异步**：审计日志写入量极小（每次工具调用 2-3 行 JSON），同步 `open+append` 比引入 aiofiles 依赖更简单可靠
@@ -2545,7 +2545,7 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 
 ### 75.3 后果与验证
 
-`[[hooks]]` 从"禁止清单"升级为"禁止 + 人工闸门"双档；拒绝时 LLM 收到 `Denied by user: <reason>` 会调整策略而非重试。9 个新单测（解析/预判/短路/管道端到端 y/n/always/无回调）+ 真实 LLM 全管道三路径验证（JSON 取证 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次。876 个测试全过。
+`[[hooks]]` 从"禁止清单"升级为"禁止 + 人工闸门"双档；拒绝时 LLM 收到 `Denied by user: <reason>` 会调整策略而非重试。9 个新单测（解析/预判/短路/管道端到端 y/n/always/无回调）+ 真实 LLM 全管道三路径验证（JSON 取证 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次。887 个测试全过。
 
 # 附录：贯穿各阶段的通用设计原则
 
@@ -2553,6 +2553,6 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——876 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——887 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

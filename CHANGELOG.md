@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added 新增
+
+- **Three extension points wired (P76)** — (1) `/model` now shows available providers via `ProviderRegistry.list_providers()`; (2) `UserMessageEvent.is_slash_command` set to `True` for slash commands, consumed by `AuditLogger` (audit trail) and `TraceRenderer` (trace display with `[slash]` tag); (3) `LLMRequestEvent.estimated_tokens` filled from `ContextManager.total_tokens`, displayed in trace as `~N tok`. 三个扩展点接入：`/model` 显示可用 Provider 列表；斜杠命令事件标记 + 审计记录 + trace 显示；LLM 请求预估 token 填值 + trace 显示。
+
 ### Changed 变更
 
 - **LLM streaming call extraction (#158)** — moved `assemble_response()` from `llm/openai_provider.py` to `llm/base.py` (it operates on base types, not provider-specific); added standalone `complete(llm, messages, ...)` function that wraps stream + assemble in one call; replaced 5 duplicated stream+assemble loops (extraction, recall, consolidation, compressor, planner) with `complete()`. `agent_loop._stream_once()` unchanged (has its own mid-stream callbacks). LLM 流式调用抽取：`assemble_response()` 移至 base.py，新增 `complete()` 一次调用封装流式收集+组装，5 处重复调用点已简化。

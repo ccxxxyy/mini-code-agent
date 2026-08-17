@@ -20,6 +20,7 @@ from mini_agent.models.events import (
     ToolCallEndEvent,
     ToolCallStartEvent,
     TurnCompleteEvent,
+    UserMessageEvent,
 )
 from mini_agent.ui.themes import Theme, get_theme
 
@@ -48,6 +49,7 @@ class TraceRenderer:
         bus.on(LLMRequestEvent, self._on_llm_request)
         bus.on(LLMResponseEvent, self._on_llm_response)
         bus.on(TurnCompleteEvent, self._on_turn_complete)
+        bus.on(UserMessageEvent, self._on_user_message)
 
     def detach(self, bus: EventBus) -> None:
         """Unsubscribe all handlers. 取消所有订阅。"""
@@ -58,6 +60,7 @@ class TraceRenderer:
         bus.off(LLMRequestEvent, self._on_llm_request)
         bus.off(LLMResponseEvent, self._on_llm_response)
         bus.off(TurnCompleteEvent, self._on_turn_complete)
+        bus.off(UserMessageEvent, self._on_user_message)
 
     def _line(self, kind: str, body: str) -> None:
         """Print one trace line. 输出一行 trace。"""
@@ -104,10 +107,17 @@ class TraceRenderer:
             "tool", f"[{p}]{e.tool_name}[/{p}] done   [dim]{e.duration_ms:.0f}ms[/dim] {mark}"
         )
 
+    async def _on_user_message(self, e: UserMessageEvent) -> None:
+        if not self.enabled:
+            return
+        tag = " [dim]\\[slash][/dim]" if e.is_slash_command else ""
+        self._line("user", f'[dim]"{e.content[:60]}"[/dim]{tag}')
+
     async def _on_llm_request(self, e: LLMRequestEvent) -> None:
         if not self.enabled:
             return
-        self._line("llm", f"request  [dim]{e.message_count} msgs, {e.tool_count} tools[/dim]")
+        tok = f", ~{e.estimated_tokens} tok" if e.estimated_tokens else ""
+        self._line("llm", f"request  [dim]{e.message_count} msgs, {e.tool_count} tools{tok}[/dim]")
 
     async def _on_llm_response(self, e: LLMResponseEvent) -> None:
         if not self.enabled:

@@ -220,7 +220,7 @@ uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P63, 63 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P76, 76 phases).
 
 ## Publishing to PyPI
 

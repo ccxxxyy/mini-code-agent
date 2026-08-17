@@ -379,8 +379,13 @@ class AgentLoop:
         if self.plan_mode:
             tool_schemas = [s for s in tool_schemas if s["function"]["name"] not in _WRITE_TOOLS]
 
+        estimated = self._context.total_tokens if self._context else 0
         await self._event_bus.emit(
-            LLMRequestEvent(message_count=len(api_messages), tool_count=len(tool_schemas))
+            LLMRequestEvent(
+                message_count=len(api_messages),
+                tool_count=len(tool_schemas),
+                estimated_tokens=estimated,
+            )
         )
 
         # PRE_LLM hook: can inject memories, block LLM call, etc.

@@ -1844,3 +1844,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `app.py` — 注入 `terminal.confirm`（与权限确认同一 y/a/n 弹窗）；子 Agent 无 UI 保持安全拒绝
 - [x] 测试 — 新增 9 个（解析/预判/短路/管道端到端 y/n/always/无回调），876 个全过，ruff clean
 - [x] 真实 LLM 全管道验证（JSON 取证，三路径 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次
+
+---
+
+## Phase 76: 三个轻量扩展点接入 (P76)
+
+> todo-code-quality 扩展点 #4、#12、#13 接入。
+
+### P76.1 #4 ProviderRegistry.list_providers() 接入 /model
+- [x] `extensions/builtin_commands.py` — `/model` 无参数输出追加"可用 Provider: openai, anthropic, openai-responses"行
+
+### P76.2 #12 UserMessageEvent.is_slash_command 接入
+- [x] `app.py` — 斜杠命令分支追加 `UserMessageEvent(content=user_input, is_slash_command=True)` emit
+- [x] `security/audit.py` — AuditLogger 新增 `UserMessageEvent` 订阅，写 `user_message` 审计条目（content 截断 200 字符 + is_slash_command 标记）
+- [x] `ui/trace.py` — TraceRenderer 新增 `UserMessageEvent` 订阅，显示 `user "内容前60字" [slash]`
+
+### P76.3 #13 LLMRequestEvent.estimated_tokens 接入
+- [x] `core/agent_loop.py` — emit LLMRequestEvent 时从 `ContextManager.total_tokens` 填入 `estimated_tokens`（无 ContextManager 时默认 0）
+- [x] `ui/trace.py` — `_on_llm_request` 追加 `~{estimated_tokens} tok` 显示（为 0 时隐藏）
+
+### P76.4 验证
+- [x] 11 个新测试（list_providers 2 + is_slash_command 6 + estimated_tokens 3），887 个测试全过
