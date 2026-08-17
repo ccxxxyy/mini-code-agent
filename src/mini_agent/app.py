@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
 
+from mini_agent.config import detect_shell
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.subagent import SubAgentManager
 from mini_agent.events.bus import EventBus
@@ -121,7 +121,7 @@ class Application:
 
         working_dir = Path.cwd()
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
-        shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
+        shell = detect_shell()
         self.session.conversation.system_prompt = SYSTEM_PROMPT.format(
             model=config.llm.model,
             working_dir=working_dir,

@@ -28,13 +28,13 @@
 
 ## ☐ 低优先级
 
-### shell 检测逻辑重复
-- `app.py:112` 和 `subagent.py:144` 各自 `os.environ.get("SHELL")` 判断 shell 类型
-- 建议抽取到 `config/` 或 `utils.py`
+### ✅ shell 检测逻辑重复
+- `app.py` 和 `core/subagent.py` 各自 `os.environ.get("SHELL")` 判断 shell 类型
+- ✅ 已抽取为 `config/environment.py` 的 `detect_shell() -> str`，两处调用点改为 `detect_shell()`
 
-### `os.environ` 直接访问绕过 config
-- 同上两处直接读环境变量而非通过 ConfigLoader
-- 对测试隔离有影响
+### ✅ `os.environ` 直接访问绕过 config
+- 同上两处直接读环境变量而非通过 ConfigLoader，对测试隔离有影响
+- ✅ 随 shell 检测抽取一并解决：两处调用点不再直接读 `os.environ`，环境读取收敛到 `config/environment.py` 单点，测试可 monkeypatch `detect_shell` 隔离
 
 ### 权限检查逻辑内部重复
 - `permission.py:156-193`（`check()`）和 `permission.py:266-285`（`_check_rules_only()`）
