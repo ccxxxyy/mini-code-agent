@@ -81,13 +81,13 @@
 
 ---
 
-### 🟢 有意预留的扩展点（16 处）
+### 🟢 有意预留的扩展点（16 处，其中 #1 已接入）
 
-这些是公开 API 表面，当前无调用方但为外部消费者或未来功能预留。除非要精简代码量，否则建议保留。
+这些是公开 API 表面，当前无调用方但为外部消费者或未来功能预留（标 ✅ 的已有真实调用方）。除非要精简代码量，否则建议保留。
 
 | # | 项 | 位置 | 预留用途 |
 |---|---|---|---|
-| 1 | `EventBus.on_any()` | `events/bus.py:25` | 全局事件监听——外部插件可监听所有事件做统计/调试 |
+| 1 | `EventBus.on_any()` | `events/bus.py:29` | ✅ 已接入：新增 `extensions/event_listeners.py`，从 `listener_dirs` 配置目录加载 *.py 插件（`register(bus)` 或 `on_event(event)` 契约），app 启动时注册为全局监听；`emit` 同时改为记录 handler 异常日志，并补充 `off_any()` |
 | 2 | `ToolRegistry.filter()` | `tools/base.py:212` | 按 allow/deny 列表过滤工具——未来权限系统可能用 |
 | 3 | `PermissionManager.add_rule()` | `security/permission.py:94` | 运行时动态添加权限规则——未来 UI 或 API 可能用 |
 | 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | 列出所有已注册 Provider——`/model` 命令增强时可能用 |

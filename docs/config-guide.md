@@ -231,6 +231,11 @@ output = 8.0
 # 顶级配置（不属于任何段；注意必须写在所有 [段] 和 [[hooks]] 之前才算顶级）
 max_agent_iterations = 50    # ReAct 循环最大迭代数
 theme = "default"            # "default" | "dark" | "light"
+listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
+                             # 事件监听插件目录（issue #166）：目录下每个 *.py 文件是一个插件，
+                             # 定义 register(bus)（订阅特定事件）或 on_event(event)（自动订阅全部事件，
+                             # 同步/异步均可）。插件异常被隔离并记日志，不影响主流程。用于统计/调试，
+                             # 如把所有事件落盘 JSONL。下划线开头的文件跳过。
 
 # 声明式 Hook 拒绝规则（comparison 7.2）——命中即拒绝工具执行，reason 回给 LLM
 # 可写多条 [[hooks]]；非法条目告警跳过不阻断启动

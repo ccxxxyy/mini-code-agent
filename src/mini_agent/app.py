@@ -343,6 +343,17 @@ class Application:
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
         self.skill_registry.load_all()
 
+        # Event listener plugins: external code observing all bus events
+        # 事件监听插件：外部代码监听总线全部事件（统计/调试）
+        from mini_agent.extensions.event_listeners import load_event_listeners
+
+        self.loaded_listeners = load_event_listeners(config.listener_dirs, self.event_bus)
+        if self.loaded_listeners:
+            self.terminal.show_info(
+                f"Loaded {len(self.loaded_listeners)} event listener(s): "
+                + ", ".join(self.loaded_listeners)
+            )
+
         # Slash commands
         self.slash_commands = SlashCommandRegistry()
         register_builtin_commands(self)

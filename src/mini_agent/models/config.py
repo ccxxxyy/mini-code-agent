@@ -164,4 +164,9 @@ class AgentConfig:
     streaming_tool_execution: bool = True
     enable_plan_mode: bool = False
     skill_dirs: list[str] = field(default_factory=lambda: ["./skills", "~/.mini-agent/skills"])
+    # Event listener plugin dirs: *.py files observing all bus events
+    # 事件监听插件目录：*.py 文件监听总线全部事件（统计/调试）
+    listener_dirs: list[str] = field(
+        default_factory=lambda: ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
+    )
     theme: str = "default"
