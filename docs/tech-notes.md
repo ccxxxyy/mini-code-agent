@@ -1502,7 +1502,7 @@ S01-S20 对照审计中 S12 是唯一有实际价值的缺口。PlanStep 已有�
 
 ## 32.2 设计选择
 
-单文件 `tasks.json` 而非按任务一个文件——任务量不会大到需要分文件（不是 sessions 的几百个），JSON 方便用编辑器直接改。ID 用 `task_<uuid8>` 而非整数（PlanStep 用整数 index 在 /team 内部自增，跨会话不唯一）。ID 前缀匹配（`/todo done task_a1` 匹配完整 ID）是用户体验细节——16 位全输太长。
+单文件 `tasks.json` 而非按任务一个文件——任务量不会大到需要分文件（不是 sessions 的几百个），JSON 方便用编辑器直接改。ID 用 `task_<uuid8>` 而非整数（PlanStep 用整数 index 在 /team 内部自增，跨会话不唯一）。ID 前缀匹配（`/todo done task_a1` 匹配完整 ID）是用户体验细节——16 位全输太长。歧义前缀（匹配多个任务）抛 `AmbiguousTaskError` 并列出所有匹配项，避免静默返回第一个。显示时用 `min_unique_prefix()` 自动计算最短唯一前缀（最少 5 字符），替代固定 `[:12]` 截断——任务少时 ID 更短，任务多时自动加长以保证唯一。
 
 # 第三十四部分：P34 Windows 终端适配
 

@@ -207,11 +207,17 @@ def _make_help(app: Application) -> HandlerFn:
 
 def _make_todo(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
-        from mini_agent.core.task_store import TaskRecord
+        from mini_agent.core.task_store import AmbiguousTaskError, TaskRecord
 
         store = app.task_store
         parts = args.strip().split(None, 1)
         sub = parts[0].lower() if parts else ""
+
+        def _fmt_ambiguous(err: AmbiguousTaskError) -> str:
+            lines = [f"Ambiguous prefix '{err.query}', matches:"]
+            for m in err.matches:
+                lines.append(f"  {m.id[:12]}  {m.description[:40]}")
+            return "\n".join(lines)
 
         if sub == "add":
             if len(parts) < 2 or not parts[1].strip():
@@ -225,17 +231,26 @@ def _make_todo(app: Application) -> HandlerFn:
                     aid = raw_id.strip()
                     if not aid:
                         continue
-                    match = store.get(aid)
+                    try:
+                        match = store.get(aid)
+                    except AmbiguousTaskError as e:
+                        return _fmt_ambiguous(e)
                     if match:
                         blocked.append(match.id)
                     else:
                         return f"Task not found: {aid}"
             task = TaskRecord(description=desc_raw, blocked_by=blocked)
             store.add(task)
+            all_tasks = store.load()
+            short = store.min_unique_prefix(task.id, all_tasks)
             dep_note = ""
             if blocked:
-                dep_note = " [blocked by: " + ", ".join(b[:12] for b in blocked) + "]"
-            return f"Added: {task.id[:12]} {task.description}{dep_note}"
+                dep_note = (
+                    " [blocked by: "
+                    + ", ".join(store.min_unique_prefix(b, all_tasks) for b in blocked)
+                    + "]"
+                )
+            return f"Added: {short} {task.description}{dep_note}"
 
         if sub in ("done", "start", "fail"):
             if len(parts) < 2:
@@ -243,27 +258,41 @@ def _make_todo(app: Application) -> HandlerFn:
             tid = parts[1].strip()
             status_map = {"done": "completed", "start": "in_progress", "fail": "failed"}
             new_status = status_map[sub]
-            updated = store.update(tid, status=new_status)
+            try:
+                updated = store.update(tid, status=new_status)
+            except AmbiguousTaskError as e:
+                return _fmt_ambiguous(e)
             if not updated:
                 return f"Task not found: {tid}"
-            lines = [f"{updated.id[:12]} → {new_status}"]
+            all_tasks = store.load()
+            short = store.min_unique_prefix(updated.id, all_tasks)
+            lines = [f"{short} → {new_status}"]
             if sub == "done":
                 unblocked = store.find_unblocked_by(updated.id)
                 for u in unblocked:
-                    lines.append(f"  unblocked: {u.id[:12]} {u.description[:40]}")
+                    lines.append(
+                        f"  unblocked: {store.min_unique_prefix(u.id, all_tasks)}"
+                        f" {u.description[:40]}"
+                    )
             if sub == "start" and updated.blocked_by:
-                tasks = store.load()
-                done_ids = {t.id for t in tasks if t.status in ("completed", "failed")}
+                done_ids = {t.id for t in all_tasks if t.status in ("completed", "failed")}
                 pending_deps = [b for b in updated.blocked_by if b not in done_ids]
                 if pending_deps:
-                    lines.append(f"  ⚠ still blocked by: {', '.join(b[:12] for b in pending_deps)}")
+                    dep_shorts = ", ".join(
+                        store.min_unique_prefix(b, all_tasks) for b in pending_deps
+                    )
+                    lines.append(f"  ⚠ still blocked by: {dep_shorts}")
             return "\n".join(lines)
 
         if sub == "delete":
             if len(parts) < 2:
                 return "Usage: /todo delete <id>"
             tid = parts[1].strip()
-            return "Deleted." if store.remove(tid) else f"Task not found: {tid}"
+            try:
+                removed = store.remove(tid)
+            except AmbiguousTaskError as e:
+                return _fmt_ambiguous(e)
+            return "Deleted." if removed else f"Task not found: {tid}"
 
         if sub == "clear":
             removed = store.clear_done()
@@ -273,11 +302,14 @@ def _make_todo(app: Application) -> HandlerFn:
         tasks = store.load()
         if not tasks:
             return "No tasks. /todo add <description> to create one."
-        groups = {"pending": [], "in_progress": [], "completed": [], "failed": []}
+        groups: dict[str, list[TaskRecord]] = {
+            "pending": [],
+            "in_progress": [],
+            "completed": [],
+            "failed": [],
+        }
         for t in tasks:
             groups.get(t.status, groups["pending"]).append(t)
-        # Legacy Windows consoles render emoji with wrong cell width -- ASCII fallback
-        # legacy Windows 控制台 emoji 宽度错乱——降级 ASCII
         if app.terminal.console.options.legacy_windows:
             labels = {
                 "pending": "[ ] pending",
@@ -299,11 +331,16 @@ def _make_todo(app: Application) -> HandlerFn:
                 continue
             lines.append(f"\n  {labels[status]}:")
             for t in items:
+                short = store.min_unique_prefix(t.id, tasks)
                 dep = ""
                 if t.blocked_by:
-                    dep = f" [blocked by: {', '.join(b[:12] for b in t.blocked_by)}]"
+                    dep = (
+                        " [blocked by: "
+                        + ", ".join(store.min_unique_prefix(b, tasks) for b in t.blocked_by)
+                        + "]"
+                    )
                 tag = f" #{' #'.join(t.tags)}" if t.tags else ""
-                lines.append(f"    {t.id[:12]}  {t.description}{dep}{tag}")
+                lines.append(f"    {short}  {t.description}{dep}{tag}")
         return "\n".join(lines)
 
     return handler

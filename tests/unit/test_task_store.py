@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mini_agent.core.task_store import TaskRecord, TaskStore
+from mini_agent.core.task_store import AmbiguousTaskError, TaskRecord, TaskStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,6 +46,28 @@ def test_get_by_prefix(store):
     assert found.id == t.id
 
 
+def test_get_ambiguous_prefix(store):
+    t1 = TaskRecord(id="task_aaa11111", description="first")
+    t2 = TaskRecord(id="task_aaa22222", description="second")
+    store.add(t1)
+    store.add(t2)
+
+    with pytest.raises(AmbiguousTaskError) as exc_info:
+        store.get("task_aaa")
+    assert len(exc_info.value.matches) == 2
+
+
+def test_get_exact_id_not_ambiguous(store):
+    t1 = TaskRecord(id="task_aaa11111", description="first")
+    t2 = TaskRecord(id="task_aaa1111100", description="second")
+    store.add(t1)
+    store.add(t2)
+
+    found = store.get("task_aaa11111")
+    assert found is not None
+    assert found.id == "task_aaa11111"
+
+
 def test_get_not_found(store):
     assert store.get("nonexistent") is None
 
@@ -83,6 +105,29 @@ def test_clear_done(store):
     removed = store.clear_done()
     assert removed == 2
     assert len(store.load()) == 1
+
+
+# --- min_unique_prefix 最小唯一前缀 ---
+
+
+def test_min_unique_prefix_single_task(store):
+    t = TaskRecord(id="task_abcdefgh", description="only one")
+    store.add(t)
+    assert store.min_unique_prefix(t.id) == "task_"
+
+
+def test_min_unique_prefix_shared_prefix(store):
+    t1 = TaskRecord(id="task_aaa11111", description="first")
+    t2 = TaskRecord(id="task_aaa22222", description="second")
+    store.add(t1)
+    store.add(t2)
+    p1 = store.min_unique_prefix(t1.id)
+    p2 = store.min_unique_prefix(t2.id)
+    assert t1.id.startswith(p1)
+    assert t2.id.startswith(p2)
+    assert p1 != p2
+    assert len(p1) >= 5
+    assert len(p2) >= 5
 
 
 # --- persistence 持久化 ---
@@ -146,8 +191,8 @@ async def test_todo_list(app):
 
 
 async def test_todo_done_shows_unblocked(app):
-    r1 = await app.slash_commands.execute("/todo add first task")
-    tid = r1.split()[1]  # "Added: task_xxxx ..."
+    await app.slash_commands.execute("/todo add first task")
+    tid = app.task_store.load()[0].id
 
     await app.slash_commands.execute(f"/todo add second task --after {tid}")
 
@@ -157,31 +202,34 @@ async def test_todo_done_shows_unblocked(app):
 
 
 async def test_todo_start_warns_blocked(app):
-    r1 = await app.slash_commands.execute("/todo add blocker")
-    tid1 = r1.split()[1]
+    await app.slash_commands.execute("/todo add blocker")
+    tid1 = app.task_store.load()[0].id
 
-    r2 = await app.slash_commands.execute(f"/todo add dependent --after {tid1}")
-    tid2 = r2.split()[1]
+    await app.slash_commands.execute(f"/todo add dependent --after {tid1}")
+    tid2 = app.task_store.load()[1].id
 
     result = await app.slash_commands.execute(f"/todo start {tid2}")
     assert "still blocked by" in result
 
 
 async def test_todo_multi_dependency(app):
-    r1 = await app.slash_commands.execute("/todo add 设计")
-    tid1 = r1.split()[1]
-    r2 = await app.slash_commands.execute("/todo add 实现")
-    tid2 = r2.split()[1]
+    await app.slash_commands.execute("/todo add 设计")
+    tid1 = app.task_store.load()[0].id
+    await app.slash_commands.execute("/todo add 实现")
+    tid2 = app.task_store.load()[1].id
 
     # Depends on BOTH design AND implement 同时依赖两个
     r3 = await app.slash_commands.execute(f"/todo add 测试 --after {tid1},{tid2}")
     assert "blocked by" in r3
-    assert tid1[:12] in r3
-    assert tid2[:12] in r3
+    store = app.task_store
+    all_tasks = store.load()
+    assert store.min_unique_prefix(tid1, all_tasks) in r3
+    assert store.min_unique_prefix(tid2, all_tasks) in r3
 
     # Complete one — still blocked 完成一个——仍被阻塞
     await app.slash_commands.execute(f"/todo done {tid1}")
-    r_start = await app.slash_commands.execute(f"/todo start {r3.split()[1]}")
+    tid3 = app.task_store.load()[2].id
+    r_start = await app.slash_commands.execute(f"/todo start {tid3}")
     assert "still blocked" in r_start
 
     # Complete both — unblocked 全部完成——解锁
@@ -208,6 +256,18 @@ async def test_get_by_description(store):
     found = store.get("重构")
     assert found is not None
     assert found.id == t.id
+
+
+async def test_todo_ambiguous_prefix(app):
+    from mini_agent.core.task_store import TaskRecord
+
+    store = app.task_store
+    store.add(TaskRecord(id="task_aaa11111", description="alpha"))
+    store.add(TaskRecord(id="task_aaa22222", description="beta"))
+
+    result = await app.slash_commands.execute("/todo done task_aaa")
+    assert "Ambiguous" in result
+    assert "alpha" in result or "task_aaa" in result
 
 
 async def test_todo_delete(app):

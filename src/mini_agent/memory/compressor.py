@@ -100,6 +100,9 @@ class SummarizeOldest(CompressionStrategy):
         if split <= 0:
             return
 
+        if _prefix_tokens(msgs[:split]) < MIN_SUMMARIZE_PREFIX_TOKENS:
+            return
+
         to_summarize = msgs[:split]
         kept = msgs[split:]
 
@@ -127,11 +130,16 @@ def _align_split_to_tool_pair(msgs: list[Message], split: int) -> int:
 KEEP_RECENT_TOKENS = 10_000  # minimum tokens to keep from the tail 尾部最少保留 token 数
 MIN_KEEP_MESSAGES = 5  # always keep at least this many messages 最少保留消息数
 KEEP_MAX_TOKENS = 40_000  # hard cap on kept tokens 保留 token 硬顶
+MIN_SUMMARIZE_PREFIX_TOKENS = 2_000  # skip if prefix < this 前缀不足时跳过压缩
 
 # Recovery-attachment markers appended to summary messages by
 # ContextManager._inject_read_files (shared so both sides stay in sync).
 # ContextManager._inject_read_files 追加到摘要消息的恢复附件标记（共享防不同步）。
 RECOVERY_MARKERS = ("[User's most recent request", "[Files already read")
+
+
+def _prefix_tokens(msgs: list[Message]) -> int:
+    return sum(m.token_count or count_tokens(m.content) for m in msgs)
 
 
 def _compute_keep_split(msgs: list[Message], target_tokens: int) -> int:
@@ -367,6 +375,9 @@ class LLMSummarizeOldest(CompressionStrategy):
 
         split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs, target_tokens))
         if split <= 0:
+            return
+
+        if _prefix_tokens(msgs[:split]) < MIN_SUMMARIZE_PREFIX_TOKENS:
             return
 
         to_summarize = msgs[:split]

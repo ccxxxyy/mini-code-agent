@@ -282,7 +282,7 @@
 | 成本仪表盘 | `/cost` 按模型分账 input/output 计价 + 会话预算警告（P29）——按量付费用户的刚需，CC 订阅制无此功能 |
 | LLM 记忆提取 | MemoryExtractor 从 regex 升级为 LLM 结构化提取（P30）——理解语义不依赖关键词，覆盖率质变 |
 | MCP HTTP Transport | HTTPTransport 远程 MCP 服务器连接 + app 启动自动发现（P31）——P5 预留的 MCP 架构终于接通，支持 headers 认证 |
-| 持久化任务系统 | `/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪（P32）——S12 补全，S01-S20 覆盖 19/20 |
+| 持久化任务系统 | `/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪（P32）+ 歧义前缀检测 + 最短唯一前缀显示（P74）——S12 补全，S01-S20 覆盖 19/20 |
 | PyPI 发布 | `pip install mini-code-agent` 一行安装（P33）——元数据补全 + MIT LICENSE + tag 触发自动发布 workflow |
 | Windows 终端适配 | UTF-8 加固/流式防重影/按键防吞/无控制台兜底/emoji 降级（P34）——CMD/PowerShell/Windows Terminal 全兼容；P34.3 补修 bash GBK 解码、git 命令确认闸门、Git Bash（mintty）降级运行与代理字符清洗，各终端指南见 terminal-guide.md |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |

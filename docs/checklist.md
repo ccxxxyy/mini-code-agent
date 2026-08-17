@@ -649,7 +649,7 @@
 ## Phase 32 检查项：持久化任务系统 S12
 
 ### 功能完整性
-- [x] 任务 CRUD（add/get/update/remove）+ ID 前缀匹配
+- [x] 任务 CRUD（add/get/update/remove）+ ID 前缀匹配 + 歧义前缀检测（AmbiguousTaskError）+ 最小唯一前缀显示（min_unique_prefix）
 - [x] 磁盘持久化（JSON 单文件，跨会话保留）
 - [x] blockedBy 依赖追踪
 - [x] done 解锁提示 + start 阻塞警告（不阻断，只提醒）
@@ -1312,3 +1312,16 @@
 ### 测试与终验
 - [x] 6 个新单测；852 个测试全过，ruff lint + format clean
 - [x] 真实 API 全管道验证 PASS：真 400 → 2 轮收缩 → 成功 9 节摘要，埋点存活、请求尺寸严格递减
+
+---
+
+## Phase 73 检查项：最小前缀检查 + /todo 歧义前缀（P74）
+
+### 功能完整性
+- [x] 压缩器：`MIN_SUMMARIZE_PREFIX_TOKENS = 2000`，`SummarizeOldest` + `LLMSummarizeOldest` 前缀不足 2K token 时跳过
+- [x] TaskStore：`AmbiguousTaskError` 歧义前缀检测 + `min_unique_prefix()` 最短唯一前缀
+- [x] /todo 命令：全子命令捕获歧义异常并列出匹配项；ID 显示改用动态最短前缀
+
+### 测试
+- [x] 6 个新测试（压缩器前缀跳过 + TaskStore 歧义/精确/唯一前缀 + /todo 命令歧义处理）
+- [x] 97 个相关测试全过，ruff lint clean
