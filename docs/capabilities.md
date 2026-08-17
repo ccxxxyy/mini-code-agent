@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，846 个测试全部通过。
+> 当前版本 v1.0.0，852 个测试全部通过。
 
 ---
 
@@ -125,7 +125,7 @@
 - 自动压缩：ContextManager 每次 LLM 调用前 + OBSERVE 后检查（P64.3），软阈值 75% 触发、硬阈值 90% 绕过熔断器（P65）；ensure_fits 溢出兜底使用 API 探测的真实窗口值（P42）
 - 三级压缩级联（保留关键信息的关键设计）：
   1. DropToolResults — 压可摘要前缀内的冗余工具输出，绝不碰模型正在使用的工作集（P69，防重读死循环）
-  2. LLMSummarizeOldest — LLM 结构化摘要旧消息（`<analysis>` 草稿 + 9 节 `<summary>`，P67；偶发失败先重试 2 次再回退抽取式，P72），token 驱动保留窗口随压缩目标缩放（P68）；旧摘要整条前传且剥离恢复附件防淹没（P67.5/P72）
+  2. LLMSummarizeOldest — LLM 结构化摘要旧消息（`<analysis>` 草稿 + 9 节 `<summary>`，P67；偶发失败先重试 2 次再回退抽取式，P72；prompt 超长时丢最旧 20% 消息 + cap 缩 20% 收缩重试最多 3 轮，P73），token 驱动保留窗口随压缩目标缩放（P68）；旧摘要整条前传且剥离恢复附件防淹没（P67.5/P72），收缩丢弃时也绝不丢头部旧摘要（P73）
   3. SlidingWindow — 滑动窗口兜底，三重锚点：孤儿工具对防护 + 任务锚点（最新 USER 消息）+ 摘要锚点（P71，绝不删刚生成的摘要）
 - 压缩后恢复注入：最近请求 + 已读文件清单 + 文件内容（预算 min(25K, 窗口//4) 随窗口缩放，P70）
 - 手动入口：`/compact` 命令
@@ -261,7 +261,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 846 个测试全部通过（约 80 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
+| 测试 | 852 个测试全部通过（约 90 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
