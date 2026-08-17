@@ -334,6 +334,7 @@ class Application:
         )
         self.cost_tracker.attach(self.event_bus)
         self.agent_loop.model_name = config.llm.model
+        self.agent_loop.plan_mode = config.enable_plan_mode
 
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
@@ -373,9 +374,15 @@ class Application:
             self._esc_watcher.stop()
             self.terminal.finish_stream()
 
+        def _on_thinking_delta(delta: str) -> None:
+            if self._esc_watcher.triggered:
+                self.agent_loop.cancel()
+            self.terminal.feed_thinking(delta)
+
         self.agent_loop.on_stream_start = _on_stream_start
         self.agent_loop.on_stream_delta = _on_stream_delta
         self.agent_loop.on_stream_end = _on_stream_end
+        self.agent_loop.on_thinking_delta = _on_thinking_delta
 
         # Streaming tool call assembly: show tool name as soon as LLM starts
         # generating its arguments, before the full JSON is assembled.

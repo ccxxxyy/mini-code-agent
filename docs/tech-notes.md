@@ -455,12 +455,14 @@ Windows: del /s /q、rmdir /s、format c:
 
 ### 实现原理
 
-`llm/token_counter.py` 提供两层计数：
+`llm/token_counter.py` 提供基础文本计数，消息级精确计数由 `ContextManager.count_message()` 负责：
 
 ```
-count_tokens(text)          → 单段文本的 token 数
-count_message_tokens(msg)   → 单条 API 消息（含 role 开销 + 工具调用序列化）
+count_tokens(text)                    → 单段文本的 token 数（token_counter.py）
+ContextManager.count_message(msg)     → 单条 Message（含 role +4 开销 + 每个 tool_call +3 开销）（memory/context.py）
 ```
+
+> 注：原 `token_counter.py` 中的 `count_message_tokens()` / `count_messages_tokens()` 两个函数操作 API dict 格式但从未被调用，已在 P75 删除；其 per-tool-call +3 开销逻辑已合并进 `ContextManager.count_message()`。
 
 **双路径策略**：
 
@@ -1610,7 +1612,7 @@ Anthropic API 支持 `cache_control: {"type": "ephemeral"}`——标记的内容
 
 ## 37.2 缓存命中统计
 
-`_parse_event` 在 `message_start` 事件中新增解析 `cache_read_input_tokens`（命中）和 `cache_creation_input_tokens`（首次写入），传入 `TokenUsage`——CostTracker 可用于展示缓存节省量。OpenAI/DeepSeek 等其他 Provider 服务端自动缓存，无需客户端标记。
+`_parse_event` 在 `message_start` 事件中新增解析 `cache_read_input_tokens`（命中）和 `cache_creation_input_tokens`（首次写入），传入 `TokenUsage`。P75 已将这两个字段接入 `LLMResponseEvent` → `CostTracker`，支持 `cache_read` / `cache_creation` 差异化定价（pricing 中未配则退回 `input` 价格）。OpenAI/DeepSeek 等其他 Provider 服务端自动缓存，无需客户端标记。
 
 # 第三十八部分：流式工具执行（P38）
 

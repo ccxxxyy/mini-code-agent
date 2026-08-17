@@ -137,17 +137,18 @@ class AuditLogger:
         if not self.enabled:
             return
         async with self._write_lock:
-            self._write(
-                {
-                    "ts": event.timestamp.isoformat(timespec="milliseconds"),
-                    "event": "permission",
-                    "tool": event.tool_name,
-                    "scope": event.scope,
-                    "resource": event.resource,
-                    "decision": event.decision,
-                    "reason": event.reason,
-                }
-            )
+            record = {
+                "ts": event.timestamp.isoformat(timespec="milliseconds"),
+                "event": "permission",
+                "tool": event.tool_name,
+                "scope": event.scope,
+                "resource": event.resource,
+                "decision": event.decision,
+                "reason": event.reason,
+            }
+            if event.matched_rule:
+                record["matched_rule"] = event.matched_rule
+            self._write(record)
 
     def _write(self, record: dict) -> None:
         self._log_dir.mkdir(parents=True, exist_ok=True)

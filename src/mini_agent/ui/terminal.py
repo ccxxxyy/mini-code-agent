@@ -200,6 +200,11 @@ class Terminal:
     def feed_stream(self, delta: str) -> None:
         self.renderer.feed(delta)
 
+    def feed_thinking(self, delta: str) -> None:
+        """Write thinking delta to terminal in dim style (no Live buffering).
+        将思考增量以 dim 样式写入终端（不走 Live 缓冲）。"""
+        self.console.print(delta, end="", style="dim italic", highlight=False)
+
     def finish_stream(self) -> str:
         result = self.renderer.finish()
         self.console.print()

@@ -38,8 +38,20 @@ async def test_accumulates_per_model():
     await emit(t, "m1", 500, 100)
     await emit(t, "m2", 300, 50)
 
-    assert t.usage["m1"] == {"prompt": 1500, "completion": 300, "calls": 2}
-    assert t.usage["m2"] == {"prompt": 300, "completion": 50, "calls": 1}
+    assert t.usage["m1"] == {
+        "prompt": 1500,
+        "completion": 300,
+        "calls": 2,
+        "cache_read": 0,
+        "cache_creation": 0,
+    }
+    assert t.usage["m2"] == {
+        "prompt": 300,
+        "completion": 50,
+        "calls": 1,
+        "cache_read": 0,
+        "cache_creation": 0,
+    }
 
 
 async def test_empty_model_goes_to_unknown():
@@ -203,7 +215,9 @@ async def test_flush_writes_and_reloads(tmp_path):
 
     t2 = make_ledger_tracker(tmp_path)  # new session 新会话
     merged = t2._merged_models()
-    assert merged["m1"] == {"prompt": 1000, "completion": 200, "calls": 1}
+    assert merged["m1"]["prompt"] == 1000
+    assert merged["m1"]["completion"] == 200
+    assert merged["m1"]["calls"] == 1
     assert not t2.usage  # session scope is fresh 会话级是全新的
 
 

@@ -53,22 +53,20 @@
 
 ## ☐ 死代码清理（27 处）
 
-27 处死代码分为三类：**真正遗忘应接入的**（6 处）、**设计变更后的残留物**（5 处）、**有意预留的扩展点**（16 处）。
+27 处死代码分为三类：**真正遗忘应接入的**（6 处，✅ 已全部修复）、**设计变更后的残留物**（5 处）、**有意预留的扩展点**（16 处）。
 
 ---
 
-### 🔴 真正遗忘、应该接入（6 处）
+### ✅ 真正遗忘、应该接入（6 处）已全部修复
 
-这些是开发过程中写好但忘记接入的代码，属于 bug 或疏忽，建议优先修复。
-
-| # | 项 | 位置 | 问题分析 | 修复建议 |
-|---|---|---|---|---|
-| 1 | `LLMResponse.model` | `llm/base.py:51` | 两个 Provider 组装响应时忘了赋值，导致成本归属靠 `agent_loop.model_name` 间接补偿，如果切换模型可能归属错误 | 在 `llm/base.py` 的 `assemble_response` 中设置 `response.model`（该函数已从 `openai_provider.py` 移至 `base.py`） |
-| 2 | `TokenUsage.cache_read_input_tokens` | `llm/base.py:28-29` | Provider 费力解析了 Anthropic/OpenAI 返回的缓存 token 数，但 CostTracker 完全没用这两个字段，缓存命中不影响计费——实际 API 计费中缓存 token 价格不同，不接入会导致成本估算偏高 | CostTracker 读取这两个字段，按供应商的缓存价格折算 |
-| 3 | `AgentConfig.enable_plan_mode` | `models/config.py:145` | config.toml 有 `enable_plan_mode` 开关但 `/plan` 命令直接改 `agent_loop.plan_mode`，启动时没读这个配置——用户在 config 里设了 `enable_plan_mode = false` 毫无效果 | `app.py` 初始化时 `agent_loop.plan_mode = config.enable_plan_mode` |
-| 4 | `on_thinking_delta` 终端未接入 | `core/agent_loop.py:137` | remote 模式接了，终端模式漏了——DeepSeek R1 等模型的 `reasoning_content` 在终端静默丢弃，用户看不到思考过程 | `app.py` 回调中接入 `on_thinking_delta`，用 dim 样式输出到终端 |
-| 5 | `PermissionRequest.matched_rule` | `models/permissions.py:41` | 4 处赋值（`permission.py:168,176,272,278`）但从没被读过，本意应该是审计日志输出匹配的规则方便调试，但 AuditLogger 没取这个字段 | AuditLogger 记录时附上 `matched_rule`，或删掉赋值 |
-| 6 | `count_message_tokens()` / `count_messages_tokens()` | `llm/token_counter.py:82,109` | 写了完整的按消息角色（system/user/assistant/tool）分别计 token 的逻辑（含角色标记开销），但 ContextManager 用了 `count_tokens(text)` 简化版，精确版被遗忘。两个函数形成死调用链（109 调 82，无外部调用方） | 要么 ContextManager 改用精确版，要么删掉这两个函数 |
+| # | 项 | 修复内容 |
+|---|---|---|
+| 1 | `LLMResponse.model` | `_stream_once()` 中 `assemble_response` 后设置 `response.model = self.model_name` |
+| 2 | `TokenUsage.cache_read_input_tokens` | `LLMResponseEvent` 新增缓存字段，`CostTracker` 按 `cache_read`/`cache_creation` 差异化定价（pricing 支持 `cache_read`、`cache_creation` 键，未配则退回 input 价） |
+| 3 | `AgentConfig.enable_plan_mode` | `app.py` 初始化时 `agent_loop.plan_mode = config.enable_plan_mode`；默认值改为 `False`（用户需显式开启） |
+| 4 | `on_thinking_delta` 终端接入 | `Terminal.feed_thinking()` + `app.py` 回调：dim italic 样式输出思考过程 |
+| 5 | `PermissionRequest.matched_rule` | `PermissionManager.last_matched_rule` → `PermissionCheckEvent.matched_rule` → `AuditLogger` 记录 |
+| 6 | `count_message_tokens()` / `count_messages_tokens()` | `ContextManager.count_message()` 改用 per-tool-call +3 开销精确计数；删除 `token_counter.py` 中的死函数 |
 
 ---
 
