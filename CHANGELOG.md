@@ -5,6 +5,7 @@
 ### Changed 变更
 
 - **LLM streaming call extraction (#158)** — moved `assemble_response()` from `llm/openai_provider.py` to `llm/base.py` (it operates on base types, not provider-specific); added standalone `complete(llm, messages, ...)` function that wraps stream + assemble in one call; replaced 5 duplicated stream+assemble loops (extraction, recall, consolidation, compressor, planner) with `complete()`. `agent_loop._stream_once()` unchanged (has its own mid-stream callbacks). LLM 流式调用抽取：`assemble_response()` 移至 base.py，新增 `complete()` 一次调用封装流式收集+组装，5 处重复调用点已简化。
+- **Forgotten code wiring (P75, #160)** — six pieces of written-but-never-wired code connected: (1) `LLMResponse.model` set after `assemble_response`; (2) `CostTracker` cache-aware pricing via `cache_read`/`cache_creation` fields (avoids overcharging cached input); (3) `enable_plan_mode` config read at startup (default changed to `False`); (4) `on_thinking_delta` terminal callback (DeepSeek R1 reasoning now renders in dim italic); (5) `PermissionRequest.matched_rule` flows to `AuditLogger` via `PermissionCheckEvent`; (6) `ContextManager.count_message()` per-tool-call +3 overhead (dead `count_message_tokens`/`count_messages_tokens` deleted). 遗忘代码接入（6 处）：LLMResponse.model 赋值、CostTracker 缓存 token 差异化计费、enable_plan_mode 配置读取、on_thinking_delta 终端渲染、matched_rule 审计日志、精确 token 计数 + 死函数清理。
 
 ### Fixed 修复
 

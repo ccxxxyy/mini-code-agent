@@ -477,6 +477,7 @@ class AgentLoop:
             self.on_stream_end("".join(_stream_text_parts))
 
         response = assemble_response(chunks)
+        response.model = self.model_name
         usage = response.usage
         await self._event_bus.emit(
             LLMResponseEvent(
@@ -486,6 +487,8 @@ class AgentLoop:
                 prompt_tokens=usage.prompt_tokens if usage else 0,
                 completion_tokens=usage.completion_tokens if usage else 0,
                 model=self.model_name,
+                cache_read_input_tokens=usage.cache_read_input_tokens if usage else 0,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens if usage else 0,
             )
         )
         # POST_LLM hook: observe-only (mirrors POST_TOOL)
@@ -752,6 +755,7 @@ class AgentLoop:
                 resource=resource[:120],
                 decision=decision.value,
                 reason=self._permissions.last_decision_reason,
+                matched_rule=self._permissions.last_matched_rule,
             )
         )
         return decision

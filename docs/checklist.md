@@ -231,7 +231,7 @@
 - [x] Teach 面板含 Why this tool / Args / Params guide 三段，6 个内置工具各有专属文案
 - [x] `/audit on` 开启审计日志，工具调用写入 `~/.mini-agent/audit.jsonl`
 - [x] `/audit off` 关闭审计日志
-- [x] 审计日志格式为 JSONL，每行含 ts/event/tool 等字段
+- [x] 审计日志格式为 JSONL，每行含 ts/event/tool 等字段；permission 事件含 matched_rule（P75 接入）
 - [x] 哈希链防篡改：篡改内容/删除行均被 `/audit verify` 检出（单测验证两种攻击）
 - [x] 进程重启后链自动续接（从文件尾恢复 last_hash）
 - [x] `/audit on` 跨重启持久（.audit_on 标记文件），直到显式 `/audit off`
@@ -600,6 +600,7 @@
 - [x] /cost 面板：每模型明细 + 总额 + 预算占比
 - [x] /status 含 Cost 行
 - [x] 预算警告：80% 黄 /100% 红，提醒不阻断
+- [x] 缓存 token 差异化计费：pricing 支持 `cache_read`/`cache_creation` 键（未配退回 input 价），避免缓存命中时成本虚高（P75 接入）
 - [x] 未配置价格的模型只计 token 不算钱，且提示如何配置
 - [x] 累计总账跨会话持久（cost_ledger.json），每轮幂等 flush
 - [x] /cost reset 确认后清零；/cost turns 逐轮明细
@@ -743,6 +744,7 @@
 - [x] tool_result 类型的用户消息（role=user, content=[tool_result block]）同样被标记
 - [x] 空工具列表不崩溃
 - [x] message_start 事件正确解析 cache_read/cache_creation 统计
+- [x] 缓存统计经 LLMResponseEvent 传递到 CostTracker 差异化计费（P75 接入）
 - [x] 6 个新测试，总计 449 个全过
 
 ---
@@ -907,6 +909,7 @@
 - [x] 流式工具执行延迟写工具到 `_act()` 拦截
 - [x] `/plan [on|off]` 命令注册 + system prompt 注入/移除
 - [x] plan_mode=False 时行为完全不变（回归安全）
+- [x] `app.py` 初始化时读取 `config.enable_plan_mode` 赋给 `agent_loop.plan_mode`（P75 接入，默认 False）
 - [x] 3 个新测试，总计 562 个全过
 
 ---

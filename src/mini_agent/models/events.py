@@ -49,6 +49,8 @@ class LLMResponseEvent(Event):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     model: str = ""
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 @dataclass
@@ -86,6 +88,7 @@ class PermissionCheckEvent(Event):
     resource: str = ""
     decision: str = ""  # granted / denied
     reason: str = ""  # rule / session_grant / mode:xxx / user_confirm / dangerous
+    matched_rule: str = ""  # matched rule pattern for audit trail 匹配的规则模式——供审计追踪
 
 
 # --- Agent Events ---

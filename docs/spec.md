@@ -441,7 +441,7 @@ class AgentConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     max_agent_iterations: int = 50
-    enable_plan_mode: bool = True
+    enable_plan_mode: bool = False  # 启动时是否开启 plan 模式（app.py 读取此值赋给 agent_loop.plan_mode）
     skill_dirs: list[str] = field(default_factory=lambda: [
         "./skills", "~/.mini-agent/skills"
     ])
@@ -484,7 +484,7 @@ class PermissionRequest:
     resource: str                    # The specific resource being accessed
     tool_name: str = ""
     context: str = ""                # Human-readable description
-    matched_rule: PermissionRule | None = None
+    matched_rule: PermissionRule | None = None  # PermissionManager 赋值，经 PermissionCheckEvent 传递到 AuditLogger
 
 
 class PermissionDecision(str, Enum):

@@ -55,9 +55,20 @@ class CostTracker:
         if event.tokens_used <= 0:
             return
         model = event.model or UNKNOWN
-        rec = self.usage.setdefault(model, {"prompt": 0, "completion": 0, "calls": 0})
+        rec = self.usage.setdefault(
+            model,
+            {
+                "prompt": 0,
+                "completion": 0,
+                "calls": 0,
+                "cache_read": 0,
+                "cache_creation": 0,
+            },
+        )
         rec["prompt"] += event.prompt_tokens
         rec["completion"] += event.completion_tokens
+        rec["cache_read"] += event.cache_read_input_tokens
+        rec["cache_creation"] += event.cache_creation_input_tokens
         rec["calls"] += 1
 
     # --- pricing 计价 ---
@@ -69,9 +80,25 @@ class CostTracker:
         rec = self.usage.get(model)
         if price is None or rec is None:
             return None
+        return self._compute_cost(price, rec)
+
+    @staticmethod
+    def _compute_cost(price: dict, rec: dict) -> float:
+        """Compute cost accounting for cache token pricing.
+        计算成本，考虑缓存 token 的差异化定价（未配置缓存价则退回 input 价）。"""
         per_m_in = float(price.get("input", 0.0))
         per_m_out = float(price.get("output", 0.0))
-        return (rec["prompt"] * per_m_in + rec["completion"] * per_m_out) / 1_000_000
+        per_m_cache_read = float(price.get("cache_read", per_m_in))
+        per_m_cache_create = float(price.get("cache_creation", per_m_in))
+        cache_read = rec.get("cache_read", 0)
+        cache_creation = rec.get("cache_creation", 0)
+        non_cached = max(0, rec["prompt"] - cache_read - cache_creation)
+        return (
+            non_cached * per_m_in
+            + cache_read * per_m_cache_read
+            + cache_creation * per_m_cache_create
+            + rec["completion"] * per_m_out
+        ) / 1_000_000
 
     @property
     def total_cost(self) -> float:
@@ -126,16 +153,30 @@ class CostTracker:
         delta_completion = 0
         cost: float | None = 0.0
         for model, rec in self.usage.items():
-            prev = self._turn_mark.get(model, {"prompt": 0, "completion": 0})
+            prev = self._turn_mark.get(
+                model,
+                {
+                    "prompt": 0,
+                    "completion": 0,
+                    "cache_read": 0,
+                    "cache_creation": 0,
+                },
+            )
             dp = rec["prompt"] - prev["prompt"]
             dc = rec["completion"] - prev["completion"]
+            d_cr = rec.get("cache_read", 0) - prev.get("cache_read", 0)
+            d_cc = rec.get("cache_creation", 0) - prev.get("cache_creation", 0)
             delta_prompt += dp
             delta_completion += dc
             price = self._pricing.get(model)
             if price is not None and cost is not None:
-                cost += (
-                    dp * float(price.get("input", 0.0)) + dc * float(price.get("output", 0.0))
-                ) / 1_000_000
+                delta_rec = {
+                    "prompt": dp,
+                    "completion": dc,
+                    "cache_read": d_cr,
+                    "cache_creation": d_cc,
+                }
+                cost += self._compute_cost(price, delta_rec)
             elif dp or dc:
                 cost = None  # some usage unpriced this turn 本轮有未定价用量
         self._turn_mark = self._usage_snapshot()
@@ -185,10 +226,15 @@ class CostTracker:
         for model, rec in self._baseline.get("models", {}).items():
             merged[model] = dict(rec)
         for model, rec in self.usage.items():
-            m = merged.setdefault(model, {"prompt": 0, "completion": 0, "calls": 0})
+            m = merged.setdefault(
+                model,
+                {"prompt": 0, "completion": 0, "calls": 0, "cache_read": 0, "cache_creation": 0},
+            )
             m["prompt"] += rec["prompt"]
             m["completion"] += rec["completion"]
             m["calls"] += rec["calls"]
+            m["cache_read"] = m.get("cache_read", 0) + rec.get("cache_read", 0)
+            m["cache_creation"] = m.get("cache_creation", 0) + rec.get("cache_creation", 0)
         return merged
 
     def flush_to_ledger(self) -> None:
@@ -212,10 +258,7 @@ class CostTracker:
             price = self._pricing.get(model)
             if price is None:
                 continue
-            total += (
-                rec["prompt"] * float(price.get("input", 0.0))
-                + rec["completion"] * float(price.get("output", 0.0))
-            ) / 1_000_000
+            total += self._compute_cost(price, rec)
         return total
 
     @property
@@ -262,10 +305,7 @@ class CostTracker:
         for model, rec in sorted(models.items()):
             price = self._pricing.get(model)
             if price is not None:
-                cost = (
-                    rec["prompt"] * float(price.get("input", 0.0))
-                    + rec["completion"] * float(price.get("output", 0.0))
-                ) / 1_000_000
+                cost = self._compute_cost(price, rec)
                 cost_str = f"{self.currency}{cost:.4f}"
             else:
                 cost_str = "无价格"

@@ -97,35 +97,3 @@ def truncate_to_tokens(text: str, max_tokens: int) -> str:
     if lo < len(text):
         result += "\n... (truncated)"
     return result
-
-
-def count_message_tokens(message: dict[str, Any]) -> int:
-    """Estimate tokens for a single API message.
-    估算单条 API 消息的 token 数。
-
-    Each message has ~4 tokens overhead (role, separators).
-    Tool calls add extra for the function schema.
-    每条消息约有 4 个 token 的额外开销（角色、分隔符）。
-    tool_calls 会因函数 schema 增加额外开销。
-    """
-    total = 4  # role + separators overhead 角色 + 分隔符开销
-    content = message.get("content")
-    if isinstance(content, str):
-        total += count_tokens(content)
-
-    tool_calls = message.get("tool_calls")
-    if tool_calls:
-        for tc in tool_calls:
-            total += 3  # tool call overhead 工具调用开销
-            func = tc.get("function", {})
-            if func.get("name"):
-                total += count_tokens(func["name"])
-            if func.get("arguments"):
-                total += count_tokens(func["arguments"])
-
-    return total
-
-
-def count_messages_tokens(messages: list[dict[str, Any]]) -> int:
-    """Estimate total tokens for a list of API messages. 估算 API 消息列表的总 token 数。"""
-    return sum(count_message_tokens(m) for m in messages) + 3  # +3 for reply priming 回复引导开销

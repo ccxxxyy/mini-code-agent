@@ -88,19 +88,25 @@ class ContextManager:
         self._api_anchor = None
 
     def count_message(self, message: Message) -> int:
-        """Count and cache tokens for a message. 统计并缓存消息的 token 数。"""
+        """Count and cache tokens for a message. 统计并缓存消息的 token 数。
+
+        Accounts for per-role separators (+4) and per-tool-call overhead (+3 each,
+        for function name/arguments structure).
+        计入每条消息的角色分隔开销（+4）和每个工具调用的结构开销（每个 +3，
+        包含函数名/参数结构）。
+        """
         if message.token_count is not None:
             return message.token_count
-        parts = []
+        total = 4  # role + separators overhead 角色 + 分隔符开销
         if message.content:
-            parts.append(message.content)
+            total += count_tokens(message.content)
         if message.tool_result:
-            parts.append(message.tool_result.output)
+            total += count_tokens(message.tool_result.output)
         for tc in message.tool_calls:
-            parts.append(tc.name)
-            parts.append(str(tc.arguments))
-        text = " ".join(parts) if parts else ""
-        message.token_count = count_tokens(text) + 4  # +4 overhead
+            total += 3  # per-tool-call overhead 每个工具调用的结构开销
+            total += count_tokens(tc.name)
+            total += count_tokens(str(tc.arguments))
+        message.token_count = total
         return message.token_count
 
     def update_total(self, conversation: Conversation) -> int:

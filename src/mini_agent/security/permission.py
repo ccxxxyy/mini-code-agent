@@ -69,6 +69,7 @@ class PermissionManager:
         self.sandbox_auto_allow: bool = False
         # Why the last decision was made (for /trace) 最近一次判定的依据（用于 /trace）
         self.last_decision_reason: str = ""
+        self.last_matched_rule: str = ""
         self._load_rules_from_config(config)
 
     def _load_rules_from_config(self, config: SecurityConfig) -> None:
@@ -161,11 +162,13 @@ class PermissionManager:
         评估权限请求。
         顺序：显式 DENY -> 显式 ALLOW -> 会话授权 -> 默认模式。
         """
+        self.last_matched_rule = ""
         # 1. Explicit DENY rules 显式 DENY 规则
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
                     self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.DENIED
 
@@ -174,6 +177,7 @@ class PermissionManager:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
                     self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.GRANTED
 
@@ -266,16 +270,19 @@ class PermissionManager:
     async def _check_rules_only(self, request: PermissionRequest) -> PermissionDecision | None:
         """Check explicit rules and session grants. None = no match.
         检查显式规则和会话授权。None 表示无匹配。"""
+        self.last_matched_rule = ""
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
                     self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.DENIED
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
+                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
                     self.last_decision_reason = f"rule:{rule.pattern}"
                     return PermissionDecision.GRANTED
         for scope, pattern in self._session_grants:

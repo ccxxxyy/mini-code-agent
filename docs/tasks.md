@@ -1779,3 +1779,47 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `docs/commands-guide.md` — 补充歧义前缀报错和最短唯一前缀说明
 - [x] `docs/checklist.md` — 功能检查项补充
 - [x] `docs/agent-architecture.md` — S12 实现描述补充
+
+---
+
+## Phase 75: 遗忘代码接入 (P75)
+
+> todo-code-quality.md 🔴「真正遗忘、应该接入」6 处，全部修复。
+
+### P75.1 LLMResponse.model 赋值
+- [x] `core/agent_loop.py` — `_stream_once()` 中 `assemble_response()` 后设置 `response.model = self.model_name`
+
+### P75.2 CostTracker 缓存 token 差异化计费
+- [x] `models/events.py` — `LLMResponseEvent` 新增 `cache_read_input_tokens` / `cache_creation_input_tokens`
+- [x] `core/agent_loop.py` — `_stream_once()` 发射事件时填充缓存字段
+- [x] `core/cost_tracker.py` — `_on_response()` 累计缓存 token；新增 `_compute_cost()` 统一方法：非缓存 = prompt - cache_read - cache_creation，按 `cache_read`/`cache_creation`/`input`/`output` 四种单价分别计费（缓存价未配则退回 input 价）
+- [x] `end_turn()` / `_cost_of()` / `_model_lines()` / `_merged_models()` 全部改用 `_compute_cost()`
+- [x] 测试适配新字段（`test_accumulates_per_model` / `test_flush_writes_and_reloads`）
+
+### P75.3 enable_plan_mode 配置接入
+- [x] `app.py` — 初始化时 `agent_loop.plan_mode = config.enable_plan_mode`
+- [x] `models/config.py` — 默认值 `True` → `False`（用户需显式开启，避免默认禁写工具）
+
+### P75.4 on_thinking_delta 终端接入
+- [x] `ui/terminal.py` — 新增 `feed_thinking(delta)` 方法（dim italic 样式直出，不走 Live 缓冲）
+- [x] `app.py` — 注册 `_on_thinking_delta` 回调，含双 Esc 中断检测
+
+### P75.5 PermissionRequest.matched_rule 接入审计
+- [x] `security/permission.py` — 新增 `last_matched_rule` 属性；`check()` / `_check_rules_only()` 规则匹配时同步赋值
+- [x] `models/events.py` — `PermissionCheckEvent` 新增 `matched_rule` 字段
+- [x] `core/agent_loop.py` — `_check_permission()` 发射事件时填充 `matched_rule`
+- [x] `security/audit.py` — `_on_permission()` 有值时写入 JSONL
+
+### P75.6 精确 token 计数 + 死函数清理
+- [x] `memory/context.py` — `ContextManager.count_message()` 改为逐部分计数 + 每个 tool_call +3 开销（与原 `count_message_tokens` 精度一致）
+- [x] `llm/token_counter.py` — 删除死函数 `count_message_tokens()` / `count_messages_tokens()`
+
+### P75.7 文档同步
+- [x] `docs/todo-code-quality.md` — 🔴 节标题 → ✅ 已全部修复，表格改为修复记录
+- [x] `docs/spec.md` — `enable_plan_mode` 默认值 → `False` + 注释；`matched_rule` 补充用途说明
+- [x] `docs/tech-notes.md` — §37.2 缓存统计补充 CostTracker 接入说明；token_counter 两层计数描述更新
+- [x] `docs/tasks.md` — 新增 P75
+- [x] `CHANGELOG.md` — 新增 Unreleased 条目
+
+### P75.8 验证
+- [x] 858 个测试全过，ruff lint + format clean

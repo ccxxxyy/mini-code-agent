@@ -162,6 +162,6 @@ class AgentConfig:
     # Execute tool calls as they finish assembling during streaming
     # 流式期间工具调用一组装完成就开始执行
     streaming_tool_execution: bool = True
-    enable_plan_mode: bool = True
+    enable_plan_mode: bool = False
     skill_dirs: list[str] = field(default_factory=lambda: ["./skills", "~/.mini-agent/skills"])
     theme: str = "default"
