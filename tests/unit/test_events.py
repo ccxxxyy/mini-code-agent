@@ -3,7 +3,7 @@
 import asyncio
 
 from mini_agent.events.bus import EventBus
-from mini_agent.models.events import LLMStreamChunkEvent, UserMessageEvent
+from mini_agent.models.events import LLMRequestEvent, UserMessageEvent
 
 
 def test_event_bus_on_and_emit():
@@ -28,7 +28,7 @@ def test_event_bus_does_not_cross_types():
 
     bus = EventBus()
     bus.on(UserMessageEvent, handler)
-    asyncio.run(bus.emit(LLMStreamChunkEvent(delta="hi")))
+    asyncio.run(bus.emit(LLMRequestEvent(message_count=1)))
 
     assert len(results) == 0
 
@@ -42,7 +42,7 @@ def test_event_bus_on_any():
     bus = EventBus()
     bus.on_any(handler)
     asyncio.run(bus.emit(UserMessageEvent(content="a")))
-    asyncio.run(bus.emit(LLMStreamChunkEvent(delta="b")))
+    asyncio.run(bus.emit(LLMRequestEvent(message_count=2)))
 
     assert len(results) == 2
 

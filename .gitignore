@@ -33,5 +33,10 @@ Thumbs.db
 # Mini-Agent data
 .mini-agent/
 
-# Benchmark results (regenerable) 评测结果（可重新生成）
+# Cache directories (regenerable) 缓存目录（可重新生成）
+.pytest_cache/
+.ruff_cache/
+
+# Benchmark/experiment results (regenerable) 评测/实验结果（可重新生成）
 benchmarks/results/
+experiments/results/

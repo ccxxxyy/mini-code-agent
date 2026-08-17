@@ -35,11 +35,6 @@ class LLMRequestEvent(Event):
 
 
 @dataclass
-class LLMStreamChunkEvent(Event):
-    delta: str = ""
-
-
-@dataclass
 class LLMResponseEvent(Event):
     content: str = ""
     has_tool_calls: bool = False
@@ -51,12 +46,6 @@ class LLMResponseEvent(Event):
     model: str = ""
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
-
-
-@dataclass
-class LLMErrorEvent(Event):
-    error: str = ""
-    retryable: bool = False
 
 
 # --- Tool Events ---

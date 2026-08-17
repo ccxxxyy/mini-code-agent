@@ -27,8 +27,7 @@ mini-code-agent/
 │       │   ├── agent_types.py       # Agent type definitions (explore/plan/worker/verify) (P48)
 │       │   ├── planner.py           # Plan mode — structured task decomposition
 │       │   ├── subagent.py          # SubAgent spawning and lifecycle
-│       │   ├── team.py              # Agent Teams — multi-agent coordination
-│       │   └── errors.py            # Core exception hierarchy
+│       │   └── team.py              # Agent Teams — multi-agent coordination
 │       │
 │       ├── llm/                     # === LLM PROVIDER ABSTRACTION ===
 │       │   ├── __init__.py
@@ -76,7 +75,6 @@ mini-code-agent/
 │       │   ├── __init__.py
 │       │   ├── permission.py        # PermissionManager — allow/deny/ask
 │       │   ├── path_guard.py        # Path restriction enforcement
-│       │   ├── tool_filter.py       # Tool filtering per context
 │       │   └── worktree.py          # Git worktree isolation manager
 │       │
 │       ├── ui/                      # === INTERACTION LAYER ===
@@ -90,8 +88,7 @@ mini-code-agent/
 │       ├── extensions/              # === EXTENSION PROTOCOLS ===
 │       │   ├── __init__.py
 │       │   ├── skills.py            # Skill system — load/register/invoke skill packs
-│       │   ├── slash_commands.py    # Slash command registry + execution
-│       │   └── plugin_loader.py     # Dynamic plugin/extension discovery
+│       │   └── slash_commands.py    # Slash command registry + execution
 │       │
 │       ├── events/                  # === EVENT SYSTEM ===
 │       │   ├── __init__.py
@@ -101,8 +98,7 @@ mini-code-agent/
 │       └── config/                  # === CONFIGURATION ===
 │           ├── __init__.py
 │           ├── loader.py            # Layered config loading (global -> project -> session)
-│           ├── defaults.py          # Default configuration values
-│           └── schema.py            # Config validation (pydantic models)
+│           └── defaults.py          # Default configuration values
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures

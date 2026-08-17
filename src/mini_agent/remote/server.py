@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mini_agent.app import Application
+
+logger = logging.getLogger(__name__)
 
 
 def _get_html(port: int, version: str = "", model: str = "") -> str:
@@ -140,6 +143,7 @@ class RemoteServer:
                     await websocket.close()
                     return
             except Exception:
+                logger.warning("WS auth failed", exc_info=True)
                 await websocket.close()
                 return
 
@@ -163,6 +167,7 @@ class RemoteServer:
                 )
             )
         except Exception:
+            logger.debug("WS welcome send failed", exc_info=True)
             pass
         await self._replay_history(websocket)
         await self._send_commands(websocket)
@@ -227,6 +232,7 @@ class RemoteServer:
                     decision = msg.get("decision", "n")
                     self._resolve_permission(req_id, decision)
         except Exception:
+            logger.debug("WS main loop error", exc_info=True)
             pass
         finally:
             self._clients.discard(websocket)
@@ -243,6 +249,7 @@ class RemoteServer:
             try:
                 await websocket.send(json.dumps({"type": event_type, **data}, ensure_ascii=False))
             except Exception:
+                logger.debug("WS replay send failed", exc_info=True)
                 pass
 
         for msg in messages:
@@ -277,6 +284,7 @@ class RemoteServer:
                 json.dumps({"type": "commands", "commands": cmds}, ensure_ascii=False)
             )
         except Exception:
+            logger.debug("WS commands send failed", exc_info=True)
             pass
 
     def _wire_callbacks(self) -> None:

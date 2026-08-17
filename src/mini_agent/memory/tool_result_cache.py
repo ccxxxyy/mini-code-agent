@@ -20,12 +20,15 @@ Two protection layers 两层防护:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Any
 
 from mini_agent.models.message import ToolResult
+
+logger = logging.getLogger(__name__)
 
 PREVIEW_CHARS = 2_000
 
@@ -151,6 +154,7 @@ class ToolResultCache:
             except OSError:
                 # Disk write failed -- keep the original rather than crash
                 # the OBSERVE phase 写盘失败保留原文，不炸 OBSERVE 阶段
+                logger.debug("spill to disk failed", exc_info=True)
                 continue
             if spilled is r:
                 continue  # too small to reclaim space 太小换不回空间

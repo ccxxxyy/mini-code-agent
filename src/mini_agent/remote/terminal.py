@@ -7,10 +7,13 @@ Wraps the real Terminal to intercept calls and send them to WebSocket.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mini_agent.ui.terminal import Terminal
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteTerminalAdapter:
@@ -33,6 +36,7 @@ class RemoteTerminalAdapter:
         try:
             self._send_func("info", message=message)
         except Exception:
+            logger.debug("WS show_info failed", exc_info=True)
             pass
         # Also log to terminal as fallback
         self._terminal.show_info(message)
@@ -46,6 +50,7 @@ class RemoteTerminalAdapter:
             try:
                 self._send_func("error", message=message)
             except Exception:
+                logger.debug("WS show_error failed", exc_info=True)
                 pass
         self._terminal.show_error(message)
 
@@ -66,5 +71,6 @@ class RemoteTerminalAdapter:
             try:
                 self._send_func("file_changes", items=display_items)
             except Exception:
+                logger.debug("WS show_file_changes failed", exc_info=True)
                 pass
         self._terminal.show_file_changes(changes)

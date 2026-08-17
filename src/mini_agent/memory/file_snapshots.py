@@ -11,8 +11,11 @@ files over MAX_SNAPSHOT_BYTES are skipped (reported for manual recovery).
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 MAX_SNAPSHOT_BYTES = 30 * 1024 * 1024  # 30MB per file 单文件上限
 KEEP_TURNS = 5  # keep snapshots for the last N turns 保留最近 N 轮
@@ -59,6 +62,7 @@ class FileSnapshotStore:
                 if tid <= cutoff:
                     shutil.rmtree(d, ignore_errors=True)
         except OSError:
+            logger.debug("snapshot prune failed", exc_info=True)
             pass
 
     def snapshot(self, turn_id: int, file_path: Path) -> None:
@@ -87,6 +91,7 @@ class FileSnapshotStore:
                 manifest.append({"path": key, "state": "saved", "snap": snap_name})
             self._save_manifest(turn_id, manifest)
         except OSError:
+            logger.debug("snapshot save failed", exc_info=True)
             pass  # snapshot failure must never break the tool call 快照失败绝不阻断工具
 
     def restore_turns(self, turn_ids: list[int]) -> list[str]:

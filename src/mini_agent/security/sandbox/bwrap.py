@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import shlex
 import shutil
-from pathlib import Path
 
-from mini_agent.security.sandbox import Sandbox, SandboxConfig
+from mini_agent.security.sandbox import Sandbox, SandboxConfig, resolve_path
 
 
 class BwrapSandbox(Sandbox):
@@ -27,10 +26,10 @@ class BwrapSandbox(Sandbox):
             "/",
         ]
         for path in config.allow_write:
-            resolved = str(Path(path).resolve())
+            resolved = resolve_path(path)
             args += ["--bind", resolved, resolved]
         for path in config.deny_write:
-            resolved = str(Path(path).resolve())
+            resolved = resolve_path(path)
             args += ["--ro-bind", resolved, resolved]
         if not config.network:
             args.append("--unshare-net")

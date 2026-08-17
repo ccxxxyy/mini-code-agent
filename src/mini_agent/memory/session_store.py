@@ -48,6 +48,7 @@ class SessionStore:
             data = json.loads(path.read_text(encoding="utf-8"))
             return _deserialize_session(data)
         except (json.JSONDecodeError, KeyError):
+            log.debug("session load failed", exc_info=True)
             return None
 
     async def list_sessions(self) -> list[dict[str, Any]]:

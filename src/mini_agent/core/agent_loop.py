@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +28,8 @@ from mini_agent.models.permissions import PermissionDecision
 from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookStage
+
+logger = logging.getLogger(__name__)
 
 # Callback invoked with each streaming text delta (for UI rendering)
 # 每次收到流式文本增量时调用的回调（用于 UI 渲染）
@@ -215,6 +218,7 @@ class AgentLoop:
                 )
             )
         except Exception:
+            logger.warning("hook fire failed: turn-start", exc_info=True)
             pass
 
         while True:
@@ -335,6 +339,7 @@ class AgentLoop:
                 )
             )
         except Exception:
+            logger.warning("hook fire failed: turn-end", exc_info=True)
             pass
         return final_content
 
@@ -346,6 +351,7 @@ class AgentLoop:
         try:
             incoming = self.mailbox.drain(self.agent_id)
         except Exception:
+            logger.debug("mailbox drain failed", exc_info=True)
             return
         for mail in incoming:
             conversation.append(
@@ -505,6 +511,7 @@ class AgentLoop:
                 )
             )
         except Exception:
+            logger.warning("hook fire failed: post-LLM", exc_info=True)
             pass
         return response
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,8 @@ from mini_agent.models.events import (
 
 if TYPE_CHECKING:
     from mini_agent.events.bus import EventBus
+
+logger = logging.getLogger(__name__)
 
 GENESIS_HASH = "0" * 64
 
@@ -172,6 +175,7 @@ class AuditLogger:
                     try:
                         self._last_hash = json.loads(line).get("hash", GENESIS_HASH)
                     except json.JSONDecodeError:
+                        logger.debug("audit hash parse failed", exc_info=True)
                         pass
                     break
         return self._last_hash
