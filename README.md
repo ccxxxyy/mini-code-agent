@@ -148,7 +148,7 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/audit [on\|off\|verify]` | Audit logging with hash-chain integrity |
 | `/theme [dark\|light\|default]` | Switch color theme |
 | `/memory [add\|delete\|consolidate\|export\|import]` | View, add, delete, consolidate, export or import memories |
-| `/session save\|list\|load\|delete` | Session management |
+| `/session save\|list\|load\|delete\|tag\|untag\|tags` | Session management (tag for classification, list --tag to filter) |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | Manage skill packs |
 | `/compact` | Compress conversation history |
 | `/clear` | Clear conversation |

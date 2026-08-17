@@ -2454,7 +2454,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 6. `memory/extraction.py` -- MemoryExtractor
 7. `/compact` slash command
 8. `/memory` slash command
-9. `/session` slash command (list, resume, delete)
+9. `/session` slash command (save, list, load, delete, tag, untag, tags)
 
 **交付物**：长对话自动压缩且不丢失关键上下文。会话可保存和恢复。关键记忆跨会话持久化。
 

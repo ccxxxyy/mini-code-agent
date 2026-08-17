@@ -4,6 +4,7 @@
 
 ### Added 新增
 
+- **Four mid-level extension points wired (P77)** — (1) `ToolRegistry.filter()` now used in `AgentTeam.start()` (non-writer steps) and `SubAgent.__init__` (tool whitelist), replacing ad-hoc list comprehensions; (2) `Plan.is_complete` drives the team loop (`while not plan.is_complete` replaces manual pending-list tracking); (3) `SessionMetadata.tags` wired with `/session tag`/`untag`/`tags` subcommands and `/session list --tag <name>` filtering (tags survive save/load, displayed in session list); (4) `PermissionRequest.tool_name` populated by `check_path(tool_name=tc.name)` so permission decisions carry the originating tool name for audit. 四个中级扩展点接入：ToolRegistry.filter 替代手动过滤、Plan.is_complete 驱动团队循环、SessionMetadata.tags 会话标签命令、PermissionRequest.tool_name 权限审计工具名。
 - **Three extension points wired (P76)** — (1) `/model` now shows available providers via `ProviderRegistry.list_providers()`; (2) `UserMessageEvent.is_slash_command` set to `True` for slash commands, consumed by `AuditLogger` (audit trail) and `TraceRenderer` (trace display with `[slash]` tag); (3) `LLMRequestEvent.estimated_tokens` filled from `ContextManager.total_tokens`, displayed in trace as `~N tok`. 三个扩展点接入：`/model` 显示可用 Provider 列表；斜杠命令事件标记 + 审计记录 + trace 显示；LLM 请求预估 token 填值 + trace 显示。
 
 ### Changed 变更

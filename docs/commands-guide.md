@@ -20,12 +20,16 @@
 
 ### /session — 会话管理
 ```
-/session save             # 保存当前会话
-/session list             # 列出已保存会话（最新在前）
-/session load <id>        # 加载指定会话（id 可用 list 里的前缀）
-/session delete <id>      # 删除指定会话
+/session save              # 保存当前会话
+/session list              # 列出已保存会话（最新在前）
+/session list --tag <name> # 按标签过滤已保存会话
+/session load <id>         # 加载指定会话（id 可用 list 里的前缀）
+/session delete <id>       # 删除指定会话
+/session tag <name>        # 给当前会话添加标签
+/session untag <name>      # 移除当前会话标签
+/session tags              # 查看当前会话所有标签
 ```
-无参数时显示用法。会话存 `~/.mini-agent/sessions/`，超过 `session_cleanup_days`（默认 30 天）的已正常关闭会话启动时自动清理。
+无参数时显示用法。标签可用于分类会话（如 `#bug-fix`、`#refactor`），列出时带 `--tag` 按标签过滤。会话存 `~/.mini-agent/sessions/`，超过 `session_cleanup_days`（默认 30 天）的已正常关闭会话启动时自动清理。
 
 ### /undo [N]
 回滚最近 N 轮（默认 1）——**对话与文件双回滚**（文件快照仅保留最近 5 轮；bash 命令修改的文件无法恢复）。

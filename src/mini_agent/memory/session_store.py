@@ -68,6 +68,7 @@ class SessionStore:
                         "last_active": meta.get("last_active", ""),
                         "project_dir": meta.get("project_dir", ""),
                         "closed_cleanly": meta.get("closed_cleanly", True),
+                        "tags": meta.get("tags", []),
                     }
                 )
             except (json.JSONDecodeError, KeyError):

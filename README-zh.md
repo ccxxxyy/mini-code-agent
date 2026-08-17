@@ -353,7 +353,7 @@ mini-code-agent/
 - [x] P62：压缩熔断器（连续 N 次压缩无效后跳过，防死循环烧 token）
 - [x] P63：压缩恢复附件含文件内容（烤入最近 5 文件内容 + 用户请求，消除 9.2 诚实差异 #1）
 
-**全部阶段已完成，887 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，897 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -810,7 +810,7 @@ uv run python experiments/deadlock_induction.py --all
 | `/clear` | 清空当前对话 |
 | `/compact` | 手动压缩对话历史 |
 | `/memory [add\|delete\|consolidate\|export\|import]` | 查看、添加、删除、合并、导出或导入持久记忆 |
-| `/session save\|list\|load\|delete` | 会话管理（自动保存已默认开启） |
+| `/session save\|list\|load\|delete\|tag\|untag\|tags` | 会话管理（tag 分类标签，list --tag 按标签过滤） |
 | `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |

@@ -799,7 +799,9 @@ class AgentLoop:
             if path_arg:
                 scope = "path"
                 resource = str(path_arg)
-                decision = await self._permissions.check_path(Path(resource), "read")
+                decision = await self._permissions.check_path(
+                    Path(resource), "read", tool_name=tc.name
+                )
             else:
                 decision = PermissionDecision.GRANTED
                 self._permissions.last_decision_reason = "no_path_arg"
@@ -808,7 +810,9 @@ class AgentLoop:
             if path_arg:
                 scope = "path"
                 resource = str(path_arg)
-                decision = await self._permissions.check_path(Path(resource), "write")
+                decision = await self._permissions.check_path(
+                    Path(resource), "write", tool_name=tc.name
+                )
             else:
                 decision = PermissionDecision.GRANTED
                 self._permissions.last_decision_reason = "no_path_arg"

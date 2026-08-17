@@ -1370,3 +1370,31 @@
 
 ### 测试
 - [x] 11 个新测试（list_providers 2 + is_slash_command 6 + estimated_tokens 3），887 个全过
+
+## Phase 77 检查项：四个中级扩展点接入
+
+### #2 ToolRegistry.filter() 接入
+- [x] `team.py` 非写文件步骤改用 `self._manager._tools.filter(denied=list(_WRITE_TOOLS))`
+- [x] `subagent.py` 工具白名单改用 `registry.filter(allowed=effective_tools)`
+- [x] 原有 test_team.py 测试不受影响（行为等价）
+
+### #6 Plan.is_complete 接入
+- [x] `team.py` 主循环从 `while pending` 改为 `while not plan.is_complete`
+- [x] 不再维护独立的 `pending` 列表，用 `plan.steps` 的 status 驱动
+
+### #11 SessionMetadata.tags 接入
+- [x] `/session tag <name>` 添加标签（只取第一个词，忽略多余内容）
+- [x] `/session untag <name>` 移除标签
+- [x] `/session tags` 查看当前会话所有标签
+- [x] `/session list --tag <name>` 按标签过滤已保存会话
+- [x] `list_sessions()` 返回 `tags` 字段
+- [x] tags 经 save/load 往返存活（JSON 持久化）
+- [x] 真实终端验证：tag/untag/tags/save/list --tag 全链路 PASS
+
+### #14 PermissionRequest.tool_name 接入
+- [x] `check_path()` 新增 `tool_name` 参数
+- [x] `agent_loop._check_permission()` 的 read/write 分支传入 `tool_name=tc.name`
+- [x] 审计日志 permission 条目中 `tool` 字段正确记录工具名
+
+### 测试
+- [x] 10 个新测试（filter 2 + is_complete 2 + tags 4 + tool_name 2），897 个全过

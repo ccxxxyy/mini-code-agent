@@ -96,13 +96,13 @@ class AgentTeam:
         plan = await self._planner.decompose(task, context=context)
 
         results_by_index: dict[int, SubAgentResult] = {}
-        pending = list(plan.steps)
 
-        while pending:
+        while not plan.is_complete:
+            remaining = [s for s in plan.steps if s.status == "pending"]
             # Steps whose dependencies are all resolved 依赖已全部解决的步骤
-            batch = [s for s in pending if all(d in results_by_index for d in s.depends_on)]
+            batch = [s for s in remaining if all(d in results_by_index for d in s.depends_on)]
             if not batch:
-                batch = pending[:]  # circular/invalid deps: run all 循环依赖兜底：全部执行
+                batch = remaining[:]  # circular/invalid deps: run all 循环依赖兜底：全部执行
 
             ready: list = []
             for step in batch:
@@ -128,10 +128,12 @@ class AgentTeam:
                 # so prompts can't be ignored -- capability removal, not persuasion
                 # 非写文件步骤强制只读：剥夺写工具能力，而非依赖 prompt 自觉
                 if not step.writes_files:
-                    base = allowed_tools or [
-                        t.schema.name for t in self._manager._tools.list_tools()
+                    allowed_tools = [
+                        t.schema.name
+                        for t in self._manager._tools.filter(
+                            allowed=allowed_tools, denied=list(_WRITE_TOOLS)
+                        )
                     ]
-                    allowed_tools = [t for t in base if t not in _WRITE_TOOLS]
                 step.status = "in_progress"
                 dep_context = self._build_dep_context(step, results_by_index)
                 agent_id = await self._manager.spawn(
@@ -147,8 +149,6 @@ class AgentTeam:
                     step.status = "completed" if result.success else "failed"
                     step.result = result.output or (result.error or "")
                     results_by_index[step.index] = result
-
-            pending = [s for s in pending if s.index not in results_by_index]
 
         results = [results_by_index[s.index] for s in plan.steps]
         return TeamRunReport(task=task, plan=plan, results=results)

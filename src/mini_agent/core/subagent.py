@@ -145,8 +145,9 @@ class SubAgent:
         registry = tool_registry.clone()
         registry.unregister("spawn_agents")
         if effective_tools is not None:
+            keep = {t.schema.name for t in registry.filter(allowed=effective_tools)}
             for tool in registry.list_tools():
-                if tool.schema.name not in effective_tools:
+                if tool.schema.name not in keep:
                     registry.unregister(tool.schema.name)
 
         tool_context = ToolContext(

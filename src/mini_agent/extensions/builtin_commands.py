@@ -68,7 +68,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="session",
-            description="Session management (usage: /session [list|save|load <id>|delete <id>])",
+            description="Session management (/session [list|save|load|delete|tag|untag|tags])",
             handler=_make_session(app),
         )
     )
@@ -848,16 +848,46 @@ def _make_session(app: Application) -> HandlerFn:
             path = await store.save(app.session)
             return f"Session saved: {path}"
 
+        if subcmd == "tag" and len(parts) > 1:
+            tag = parts[1].strip().lstrip("#").split()[0] if parts[1].strip() else ""
+            if not tag:
+                return "Usage: /session tag <name>"
+            if tag not in app.session.metadata.tags:
+                app.session.metadata.tags.append(tag)
+            all_tags = ", ".join("#" + t for t in app.session.metadata.tags)
+            return f"Tag added: #{tag}  (tags: {all_tags})"
+
+        if subcmd == "untag" and len(parts) > 1:
+            tag = parts[1].strip().lstrip("#").split()[0] if parts[1].strip() else ""
+            if tag in app.session.metadata.tags:
+                app.session.metadata.tags.remove(tag)
+                return f"Tag removed: #{tag}"
+            return f"Tag not found: #{tag}"
+
+        if subcmd == "tags":
+            tags = app.session.metadata.tags
+            return f"Tags: {', '.join('#' + t for t in tags)}" if tags else "No tags."
+
         if subcmd == "list":
+            filter_tag = ""
+            if len(parts) > 1 and parts[1].strip().startswith("--tag"):
+                tag_parts = parts[1].strip().split(maxsplit=1)
+                if len(tag_parts) > 1:
+                    filter_tag = tag_parts[1].strip().lstrip("#")
             sessions = await store.list_sessions()
+            if filter_tag:
+                sessions = [s for s in sessions if filter_tag in s.get("tags", [])]
             if not sessions:
+                if filter_tag:
+                    return f"No sessions with tag #{filter_tag}."
                 return "No saved sessions."
             lines = ["**Saved Sessions 已保存的会话：**"]
             for s in sessions:
+                tag_str = f" #{' #'.join(s['tags'])}" if s.get("tags") else ""
                 lines.append(
                     f"  {s['session_id'][:12]}... "
                     f"model={s['model']} turns={s['total_turns']} "
-                    f"last={s['last_active'][:19]}"
+                    f"last={s['last_active'][:19]}{tag_str}"
                 )
             return "\n".join(lines)
 
@@ -897,7 +927,11 @@ def _make_session(app: Application) -> HandlerFn:
             deleted = await store.delete(sid)
             return f"Deleted: {sid}" if deleted else f"Not found: {sid}"
 
-        return "Usage: /session save | /session list | /session load <id> | /session delete <id>"
+        return (
+            "Usage: /session save | /session list [--tag <name>] | "
+            "/session load <id> | /session delete <id> | "
+            "/session tag <name> | /session untag <name> | /session tags"
+        )
 
     return handler
 
