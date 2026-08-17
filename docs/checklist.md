@@ -1079,6 +1079,28 @@
 - [x] comparison 7.2 勘误陈旧描述 + 标记 ✅ + 优先级表更新
 - [x] config-guide 补 [[hooks]] 配置段（含 TOML 顶级键位置警告）
 
+## HookAction.CONFIRM 接入检查项
+
+- [x] `[[hooks]]` 规则新增 `action` 字段：`"block"`（默认）/ `"confirm"`，非法值告警跳过
+- [x] 命中 confirm 规则弹 y/a/n 确认框：y 放行一次 / a 本会话同 (工具, 原因) 不再问 / n 拒绝
+- [x] 拒绝时 LLM 收到 "Denied by user: <reason>"（工具不执行）
+- [x] 裁决在 `agent_loop._resolve_hook_confirm`：app 注入 terminal.confirm（复用权限确认弹窗）；hook 层不持有 UI 引用
+- [x] fail-safe：无 confirm 回调（脚本/CI/子 Agent）时安全拒绝
+- [x] 确认弹窗加 asyncio.Lock：并行工具执行时不交错
+- [x] 流式工具执行经 `HookManager.would_confirm` 预判：会弹窗的延迟到 _act（弹窗不与流式渲染交错）
+- [x] 代码注册的 hook 返回 CONFIRM 走同一裁决路径（HookManager.run 短路上交语义不变）
+- [x] 9 个新测试（解析/预判/短路/管道端到端 y/n/always/无回调），876 个全过
+- [x] 真实 LLM 全管道验证（JSON 取证）：y 放行 / n 拒绝且 LLM 正确收尾 / a 两次写入只问一次
+- [x] 文档同步：config-guide、config.toml.example、todo-code-quality #7 标 ✅、tech-notes、capabilities、comparison 7.2、CHANGELOG
+
+## 全局事件监听插件检查项
+
+- [x] `extensions/event_listeners.py`：从 `listener_dirs` 配置目录加载 *.py 插件（下划线开头跳过）
+- [x] 插件契约：`register(bus)`（完全控制，优先）或 `on_event(event)`（同步/异步均可，自动 on_any 全局监听）
+- [x] 异常隔离：插件导入失败/register 失败/handler 异常都告警跳过，不影响 Agent 主流程
+- [x] `EventBus.emit` 记录 handler 异常日志（gather return_exceptions 后逐个 warning）；补充 `off_any()`
+- [x] app 启动时加载并提示 "Loaded N event listener(s): <名单>"
+
 ## 多后端 spawn 检查项（comparison 6.4）
 
 - [x] 文件锁：O_EXCL + 退避抖动 + 陈旧接管 + 超时；超时抛异常不静默丢消息

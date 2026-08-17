@@ -270,7 +270,7 @@ mini-code-agent/
 │       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
 │       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
 │       ├── security/           # 安全层（权限、路径守卫、worktree）
-│       └── extensions/         # 扩展协议（Skill、Slash 命令）
+│       └── extensions/         # 扩展协议（Skill、Slash 命令、事件监听插件）
 ├── tests/                      # 测试
 └── docs/
     ├── spec.md                 # 架构规格说明
@@ -353,7 +353,7 @@ mini-code-agent/
 - [x] P62：压缩熔断器（连续 N 次压缩无效后跳过，防死循环烧 token）
 - [x] P63：压缩恢复附件含文件内容（烤入最近 5 文件内容 + 用户请求，消除 9.2 诚实差异 #1）
 
-**全部阶段已完成，852 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，876 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

@@ -247,6 +247,9 @@ class Application:
             hook_manager=self.hook_manager,
             context_manager=self.context_manager,
         )
+        # CONFIRM hooks resolve through the same y/a/n dialog as permissions
+        # CONFIRM hook 复用与权限确认相同的 y/a/n 弹窗
+        self.agent_loop.confirm_callback = self.terminal.confirm
 
         # File snapshots for operation-level /undo 文件快照——操作级撤销
         from mini_agent.memory.file_snapshots import FileSnapshotStore

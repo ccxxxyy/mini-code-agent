@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +144,18 @@ class AgentLoop:
         self._context = context_manager
         self._state = AgentState(max_iterations=config.max_agent_iterations)
         self._cancelled = False
+        # CONFIRM hook resolution: UI callback injected by app.py -- hooks
+        # themselves hold no UI reference (tool layer must not depend on the
+        # interaction layer), so the loop resolves CONFIRM verdicts.
+        # CONFIRM hook 裁决：app.py 注入 UI 回调——hook 本身不持有 UI 引用
+        # （工具层不依赖交互层），由循环负责执行确认。
+        self.confirm_callback: Callable[[str], Awaitable[bool | str]] | None = None
+        # "always" grants for this session, keyed by (tool_name, reason)
+        # 本会话内 "always" 授权，按 (工具名, 原因) 记录
+        self._hook_confirm_grants: set[tuple[str, str]] = set()
+        # Confirm dialogs must not interleave (parallel tool execution)
+        # 确认弹窗不可交错（工具并行执行时）
+        self._confirm_lock = asyncio.Lock()
 
         self.on_stream_delta: StreamCallback | None = None
         self.on_stream_start: Callable[[], None] | None = None
@@ -475,6 +487,8 @@ class AgentLoop:
                         tc.name, tc.arguments
                     ):
                         continue  # deferred to _act 延迟到 _act
+                    if self._hooks.would_confirm(tc.name, tc.arguments):
+                        continue  # confirm dialog -> deferred to _act 确认弹窗延迟到 _act
                     self._streaming_tasks[tc.id] = asyncio.create_task(
                         self._execute_single_tool(tc)
                     )
@@ -671,6 +685,15 @@ class AgentLoop:
                 output=f"Blocked by hook: {hook_result.reason}",
                 is_error=True,
             )
+        if hook_result.action == HookAction.CONFIRM:
+            approved = await self._resolve_hook_confirm(tc.name, hook_result.reason)
+            if not approved:
+                return ToolResult(
+                    call_id=tc.id,
+                    name=tc.name,
+                    output=f"Denied by user: {hook_result.reason}",
+                    is_error=True,
+                )
         if hook_ctx.tool_args is not None:
             args = hook_ctx.tool_args
 
@@ -722,6 +745,39 @@ class AgentLoop:
             )
         )
         return result
+
+    async def _resolve_hook_confirm(self, tool_name: str, reason: str) -> bool:
+        """Resolve a CONFIRM hook verdict by asking the user.
+
+        Returns True to proceed. No UI callback -> deny (safe default,
+        mirrors PermissionManager). "always" grants skip the prompt for the
+        same (tool, reason) for the rest of the session. The lock keeps
+        dialogs from interleaving when tools execute in parallel.
+
+        通过询问用户裁决 CONFIRM hook。返回 True 表示放行。无 UI 回调时
+        拒绝（安全默认，与 PermissionManager 一致）。"always" 使同一
+        (工具, 原因) 本会话内不再询问。锁防止并行执行时弹窗交错。
+        """
+        key = (tool_name, reason)
+        if key in self._hook_confirm_grants:
+            return True
+        if self.confirm_callback is None:
+            logger.warning("CONFIRM hook for '%s' but no UI callback: denied", tool_name)
+            return False
+        async with self._confirm_lock:
+            # Re-check: a parallel call may have granted "always" while
+            # this one waited on the lock.
+            # 重查：等锁期间并行调用可能已授予 "always"。
+            if key in self._hook_confirm_grants:
+                return True
+            prompt = f"Hook requires confirmation for tool '{tool_name}'"
+            if reason:
+                prompt += f"\n({reason})"
+            answer = await self.confirm_callback(prompt)
+        if answer == "always":
+            self._hook_confirm_grants.add(key)
+            return True
+        return bool(answer)
 
     async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
         """Route permission check by tool type. 按工具类型路由权限检查。"""

@@ -93,7 +93,7 @@
 | 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | 列出所有已注册 Provider——`/model` 命令增强时可能用 |
 | 5 | `Conversation.slice_window()` | `models/message.py:105` | 按 token 窗口截取消息——ContextManager 替代了但方法本身有独立价值 |
 | 6 | `Plan.is_complete` | `core/planner.py:74` | 检查计划是否完成——AgentTeam 用自己的逻辑但外部调用者可能需要 |
-| 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | Hook 返回"需要用户确认"——未来交互式 hook 可能用 |
+| 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
 | 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | 异步权限判定的中间状态 |
 | 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | 工具级权限控制（当前只有 COMMAND 和 PATH） |
 | 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | 默认 Agent 类型常量——应在 `SubAgent.__init__` 中引用但实际用了 `None` |

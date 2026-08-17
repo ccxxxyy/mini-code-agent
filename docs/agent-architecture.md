@@ -98,7 +98,7 @@ while True:
 
 **核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、或只做旁路操作（记日志）。
 
-**本项目实现**：`tools/hooks.py` HookManager 支持 7 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式拒绝规则（comparison 7.2）——用户零代码声明"什么工具调用要被拒"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL BLOCK hook，配置方法见 config-guide.md。
+**本项目实现**：`tools/hooks.py` HookManager 支持 7 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则（comparison 7.2）——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 config-guide.md。
 
 **判断标准**：框架是否提供工具执行前后的扩展点？能不能在不改源码的情况下加审计/拦截？
 
@@ -360,7 +360,7 @@ while True:
 
 Agent 的核心循环（S01）**永远不改**——所有新能力都以以下三种方式接入：
 - **注册**：工具注册到 ToolRegistry（S02）
-- **订阅**：EventBus 订阅者（TraceRenderer / AuditLogger / CostTracker / ToolRecorder——都是纯订阅者，Agent 循环完全不知道它们的存在）
+- **订阅**：EventBus 订阅者（TraceRenderer / AuditLogger / CostTracker / ToolRecorder——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `bus.on_any` 注册为全局监听，异常隔离不影响主流程
 - **钩子**：HookManager 注册 handler（PRE_LLM 记忆注入 / SESSION_END 记忆提取）
 
 这意味着你可以**拿掉任何一个机制**（如删掉 CostTracker），Agent 照常工作——机制是可插拔的。

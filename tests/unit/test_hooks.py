@@ -345,3 +345,229 @@ async def test_hook_rule_invalid_regex_skipped():
     assert n == 0  # invalid regex must not crash startup 非法正则不崩启动
     result = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
     assert result.action == HookAction.CONTINUE
+
+
+# --- HookAction.CONFIRM: config rules + agent loop resolution ---
+
+
+async def test_confirm_short_circuits():
+    calls = []
+
+    async def confirmer(ctx):
+        calls.append("confirmer")
+        return HookResult(action=HookAction.CONFIRM, reason="are you sure?")
+
+    async def later(ctx):
+        calls.append("later")
+        return HookResult(action=HookAction.CONTINUE)
+
+    mgr = HookManager()
+    mgr.register(HookStage.PRE_TOOL, confirmer, priority=10)
+    mgr.register(HookStage.PRE_TOOL, later, priority=0)
+    result = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash"))
+    assert result.action == HookAction.CONFIRM
+    assert result.reason == "are you sure?"
+    assert calls == ["confirmer"]
+
+
+async def test_hook_rule_confirm_action():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(
+        mgr,
+        [{"tool": "bash", "action": "confirm", "contains": "git push", "reason": "pushes remote"}],
+    )
+    assert n == 1
+    result = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={"command": "git push origin"}
+        )
+    )
+    assert result.action == HookAction.CONFIRM
+    assert result.reason == "pushes remote"
+    # Non-matching command passes 不匹配的命令放行
+    result = await mgr.run(
+        HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={"command": "ls"})
+    )
+    assert result.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_confirm_default_reason():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(mgr, [{"tool": "delete_file", "action": "confirm"}])
+    result = await mgr.run(
+        HookContext(stage=HookStage.PRE_TOOL, tool_name="delete_file", tool_args={})
+    )
+    assert result.action == HookAction.CONFIRM
+    assert "requires confirmation" in result.reason
+
+
+async def test_hook_rule_invalid_action_skipped():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(mgr, [{"tool": "bash", "action": "modify"}])
+    assert n == 0
+    result = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
+    assert result.action == HookAction.CONTINUE
+
+
+async def test_would_confirm_peek():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {"tool": "bash", "action": "confirm", "contains": "git push"},
+            {"tool": "write_file", "reason": "blocked"},  # block rule: not a confirm 阻止规则不算
+        ],
+    )
+    assert mgr.would_confirm("bash", {"command": "git push origin"})
+    assert not mgr.would_confirm("bash", {"command": "ls"})
+    assert not mgr.would_confirm("write_file", {"file_path": "x"})
+
+
+def _make_confirm_loop(tool_context, mgr, responses):
+    from mini_agent.core.agent_loop import AgentLoop
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.config import AgentConfig
+    from mini_agent.tools.base import ToolRegistry
+    from mini_agent.tools.builtin import WriteFileTool
+    from tests.unit.test_agent_loop import MockLLM
+
+    registry = ToolRegistry()
+    registry.register(WriteFileTool())
+    return AgentLoop(
+        llm=MockLLM(responses),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+        hook_manager=mgr,
+    )
+
+
+async def test_confirm_rule_approved_executes_tool(tool_context):
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "confirmed.txt"
+    mgr = HookManager()
+    register_hook_rules(mgr, [{"tool": "write_file", "action": "confirm", "reason": "writes file"}])
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("done"),
+        ],
+    )
+    prompts = []
+
+    async def approve(prompt: str) -> bool:
+        prompts.append(prompt)
+        return True
+
+    loop.confirm_callback = approve
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write it"))
+    await loop.run(conv)
+
+    assert target.exists()
+    assert len(prompts) == 1
+    assert "writes file" in prompts[0]
+
+
+async def test_confirm_rule_denied_blocks_tool(tool_context):
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "denied.txt"
+    mgr = HookManager()
+    register_hook_rules(mgr, [{"tool": "write_file", "action": "confirm", "reason": "writes file"}])
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("ok, not writing"),
+        ],
+    )
+
+    async def deny(prompt: str) -> bool:
+        return False
+
+    loop.confirm_callback = deny
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write it"))
+    await loop.run(conv)
+
+    assert not target.exists()
+    tool_msgs = [m for m in conv.messages if m.role == Role.TOOL]
+    assert any(
+        "Denied by user: writes file" in (m.tool_result.output or "")
+        for m in tool_msgs
+        if m.tool_result
+    )
+
+
+async def test_confirm_without_callback_denies(tool_context):
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "no_ui.txt"
+    mgr = HookManager()
+    register_hook_rules(mgr, [{"tool": "write_file", "action": "confirm"}])
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("ok"),
+        ],
+    )
+    # confirm_callback stays None -> safe deny 无回调 -> 安全拒绝
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write it"))
+    await loop.run(conv)
+    assert not target.exists()
+
+
+async def test_confirm_always_grants_session(tool_context):
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    t1 = tool_context.working_dir / "always1.txt"
+    t2 = tool_context.working_dir / "always2.txt"
+    mgr = HookManager()
+    register_hook_rules(mgr, [{"tool": "write_file", "action": "confirm", "reason": "writes file"}])
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(t1), "content": "1"}),
+            tool_call_response("write_file", {"file_path": str(t2), "content": "2"}),
+            text_response("done"),
+        ],
+    )
+    prompts = []
+
+    async def always(prompt: str) -> str:
+        prompts.append(prompt)
+        return "always"
+
+    loop.confirm_callback = always
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write both"))
+    await loop.run(conv)
+
+    assert t1.exists() and t2.exists()
+    assert len(prompts) == 1  # second call auto-granted 第二次自动放行
