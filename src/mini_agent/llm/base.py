@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -105,3 +106,89 @@ def compute_retry_delay(attempt: int, retry_after: str | None = None) -> float:
         except ValueError:
             pass
     return (2**attempt) + random.uniform(0, 0.5)
+
+
+def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
+    """Assemble a list of stream chunks into a complete LLMResponse.
+    将 stream chunk 列表组装为完整的 LLMResponse。
+    """
+    content_parts: list[str] = []
+    thinking_parts: list[str] = []
+    tool_call_builders: dict[int, dict[str, Any]] = {}
+    usage = TokenUsage()
+    finish_reason = "stop"
+
+    for chunk in chunks:
+        if chunk.delta:
+            content_parts.append(chunk.delta)
+        if chunk.thinking:
+            thinking_parts.append(chunk.thinking)
+        if chunk.finish_reason:
+            finish_reason = chunk.finish_reason
+        if chunk.usage:
+            u = chunk.usage
+            usage = TokenUsage(
+                prompt_tokens=max(usage.prompt_tokens, u.prompt_tokens),
+                completion_tokens=max(usage.completion_tokens, u.completion_tokens),
+                total_tokens=max(usage.total_tokens, u.total_tokens),
+                cache_read_input_tokens=max(
+                    usage.cache_read_input_tokens, u.cache_read_input_tokens
+                ),
+                cache_creation_input_tokens=max(
+                    usage.cache_creation_input_tokens, u.cache_creation_input_tokens
+                ),
+            )
+
+        for tcd in chunk.tool_call_deltas:
+            if tcd.index not in tool_call_builders:
+                tool_call_builders[tcd.index] = {
+                    "id": "",
+                    "name": "",
+                    "arguments": "",
+                }
+            builder = tool_call_builders[tcd.index]
+            if tcd.id:
+                builder["id"] = tcd.id
+            if tcd.name:
+                builder["name"] = tcd.name
+            if tcd.arguments_delta:
+                builder["arguments"] += tcd.arguments_delta
+
+    tool_calls: list[ToolCall] = []
+    for _idx in sorted(tool_call_builders):
+        b = tool_call_builders[_idx]
+        raw_args = b["arguments"]
+        try:
+            parsed = json.loads(raw_args) if raw_args else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        tool_calls.append(
+            ToolCall(
+                id=b["id"],
+                name=b["name"],
+                arguments=parsed,
+                raw_arguments=raw_args,
+            )
+        )
+
+    return LLMResponse(
+        content="".join(content_parts),
+        thinking="".join(thinking_parts),
+        tool_calls=tool_calls,
+        usage=usage,
+        finish_reason=finish_reason,
+    )
+
+
+async def complete(
+    llm: Any,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    **kwargs: Any,
+) -> LLMResponse:
+    """Non-streaming completion: stream + assemble in one call.
+    非流式补全：一次调用完成流式收集和组装。"""
+    chunks: list[StreamChunk] = []
+    async for chunk in llm.stream(messages, tools=tools, **kwargs):
+        chunks.append(chunk)
+    return assemble_response(chunks)

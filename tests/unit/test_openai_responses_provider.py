@@ -246,7 +246,7 @@ def test_parse_non_function_output_item_ignored():
 
 
 def test_assemble_with_responses_chunks():
-    from mini_agent.llm.openai_provider import assemble_response
+    from mini_agent.llm.base import assemble_response
 
     chunks = [
         StreamChunk(delta="Hello "),
@@ -324,7 +324,7 @@ def test_convert_no_thinking_no_reasoning_item():
 
 
 def test_assemble_accumulates_thinking():
-    from mini_agent.llm.openai_provider import assemble_response
+    from mini_agent.llm.base import assemble_response
 
     chunks = [
         StreamChunk(thinking="step 1, "),

@@ -102,12 +102,11 @@ class Planner:
         if self._coordinator:
             prompt = _COORDINATOR_PREFIX + prompt
 
-        messages = [{"role": "user", "content": prompt}]
-        chunks = []
-        async for chunk in self._llm.stream(messages):
-            chunks.append(chunk)
+        from mini_agent.llm.base import complete
 
-        text = "".join(c.delta for c in chunks if c.delta)
+        messages = [{"role": "user", "content": prompt}]
+        response = await complete(self._llm, messages)
+        text = response.content
         steps = self._parse_steps(text)
 
         plan_steps = [

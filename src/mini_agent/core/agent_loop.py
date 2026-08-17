@@ -10,8 +10,7 @@ from typing import Any
 
 from mini_agent.core.agent_state import AgentPhase, AgentState
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, LLMResponse, StreamChunk
-from mini_agent.llm.openai_provider import assemble_response
+from mini_agent.llm.base import LLMProvider, LLMResponse, StreamChunk, assemble_response
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import (

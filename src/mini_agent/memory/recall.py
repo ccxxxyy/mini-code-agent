@@ -58,12 +58,9 @@ class MemoryRecall:
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            from mini_agent.llm.openai_provider import assemble_response
+            from mini_agent.llm.base import complete
 
-            chunks = []
-            async for chunk in self._llm.stream(messages):
-                chunks.append(chunk)
-            response = assemble_response(chunks)
+            response = await complete(self._llm, messages)
             ids = self._parse_ids(response.content)
         except Exception:
             return entries[:FALLBACK_LIMIT]

@@ -17,16 +17,14 @@
 
 三处都在做同样的 strip ` ```json ... ``` ` 逻辑。✅ 已抽取为 `memory/_utils.py` 的 `strip_json_fence(text) -> str` 函数。
 
-### LLM 流式调用+组装四处重复
-- `memory/extraction.py:125` — 提取记忆
-- `memory/recall.py:61` — 选择性召回
-- `memory/consolidation.py:53` — 语义合并
-- `memory/compressor.py:269` — LLM 摘要压缩（`_summarize`）
+### ✅ LLM 流式调用+组装五处重复
+- `memory/extraction.py` — 提取记忆
+- `memory/recall.py` — 选择性召回
+- `memory/consolidation.py` — 语义合并
+- `memory/compressor.py` — LLM 摘要压缩（`_summarize`）
+- `core/planner.py` — 任务分解
 
-四处都是"流式调 LLM → 拼接文本 → 解析 JSON"的相同模式。建议抽取为：
-```python
-async def llm_json_call(llm, messages, fallback=None) -> dict | None
-```
+五处"流式调 LLM → 收集 chunk → 组装响应"的重复模式。✅ 已抽取：`assemble_response()` 从 `openai_provider.py` 移至 `llm/base.py`（provider 无关），新增独立函数 `complete(llm, messages, ...)` 一次调用完成流式收集+组装。五处调用点均已简化为 `await complete(self._llm, messages)`。
 
 ## ☐ 低优先级
 
@@ -65,7 +63,7 @@ async def llm_json_call(llm, messages, fallback=None) -> dict | None
 
 | # | 项 | 位置 | 问题分析 | 修复建议 |
 |---|---|---|---|---|
-| 1 | `LLMResponse.model` | `llm/base.py:51` | 两个 Provider 组装响应时忘了赋值，导致成本归属靠 `agent_loop.model_name` 间接补偿，如果切换模型可能归属错误 | 在 `openai_provider.py` 和 `anthropic_provider.py` 的 `assemble_response` 中设置 `response.model = self._config.model` |
+| 1 | `LLMResponse.model` | `llm/base.py:51` | 两个 Provider 组装响应时忘了赋值，导致成本归属靠 `agent_loop.model_name` 间接补偿，如果切换模型可能归属错误 | 在 `llm/base.py` 的 `assemble_response` 中设置 `response.model`（该函数已从 `openai_provider.py` 移至 `base.py`） |
 | 2 | `TokenUsage.cache_read_input_tokens` | `llm/base.py:28-29` | Provider 费力解析了 Anthropic/OpenAI 返回的缓存 token 数，但 CostTracker 完全没用这两个字段，缓存命中不影响计费——实际 API 计费中缓存 token 价格不同，不接入会导致成本估算偏高 | CostTracker 读取这两个字段，按供应商的缓存价格折算 |
 | 3 | `AgentConfig.enable_plan_mode` | `models/config.py:145` | config.toml 有 `enable_plan_mode` 开关但 `/plan` 命令直接改 `agent_loop.plan_mode`，启动时没读这个配置——用户在 config 里设了 `enable_plan_mode = false` 毫无效果 | `app.py` 初始化时 `agent_loop.plan_mode = config.enable_plan_mode` |
 | 4 | `on_thinking_delta` 终端未接入 | `core/agent_loop.py:137` | remote 模式接了，终端模式漏了——DeepSeek R1 等模型的 `reasoning_content` 在终端静默丢弃，用户看不到思考过程 | `app.py` 回调中接入 `on_thinking_delta`，用 dim 样式输出到终端 |

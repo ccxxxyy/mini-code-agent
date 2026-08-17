@@ -622,16 +622,6 @@ class LLMProvider(ABC):
     def __init__(self, config: LLMConfig): ...
 
     @abstractmethod
-    async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        **kwargs,
-    ) -> LLMResponse:
-        """Non-streaming completion."""
-        ...
-
-    @abstractmethod
     async def stream(
         self,
         messages: list[dict[str, Any]],
@@ -654,6 +644,11 @@ class LLMProvider(ABC):
     async def prepare(self) -> None:
         """Optional warmup before first use (e.g. context window probing).
         Default: no-op. 首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
+
+# Module-level helpers (llm/base.py):
+# assemble_response(chunks) -- assemble StreamChunk list into LLMResponse
+# complete(llm, messages, tools, **kwargs) -- stream + assemble in one call
+# Both are standalone functions, not methods -- works with duck-typed LLM objects.
 
     @property
     @abstractmethod
@@ -1467,8 +1462,6 @@ class OpenAIProvider(LLMProvider):
         # OR uses openai package if installed
         ...
 
-    async def complete(self, messages, tools=None, **kwargs) -> LLMResponse: ...
-
     async def stream(
         self, messages, tools=None, **kwargs
     ) -> AsyncIterator[StreamChunk]: ...
@@ -1504,8 +1497,6 @@ class AnthropicProvider(LLMProvider):
     def __init__(self, config: LLMConfig) -> None:
         # Uses httpx.AsyncClient for Messages API
         ...
-
-    async def complete(self, messages, tools=None, **kwargs) -> LLMResponse: ...
 
     async def stream(
         self, messages, tools=None, **kwargs

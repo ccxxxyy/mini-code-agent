@@ -1,8 +1,8 @@
 """Tests for LLM provider parsing layers. LLM Provider 解析层的测试。"""
 
 from mini_agent.llm.anthropic_provider import AnthropicProvider
-from mini_agent.llm.base import StreamChunk, ToolCallDelta
-from mini_agent.llm.openai_provider import OpenAIProvider, assemble_response
+from mini_agent.llm.base import StreamChunk, ToolCallDelta, assemble_response
+from mini_agent.llm.openai_provider import OpenAIProvider
 from mini_agent.models.config import LLMConfig
 
 # --- OpenAI: _parse_chunk ---

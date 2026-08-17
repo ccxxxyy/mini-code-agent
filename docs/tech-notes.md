@@ -55,10 +55,10 @@ chunk 3: {"index":0, "function":{"arguments":"path\": \"a.py\"}"}}
 
 ### 实现原理
 
-分两层处理（`llm/openai_provider.py`）：
+分两层处理：
 
-1. **解析层 `_parse_chunk()`**：把每条 SSE 消息（`data: {json}` 行）转成统一的 `StreamChunk` 数据类——文本增量 `delta`、工具调用增量 `ToolCallDelta`、结束原因 `finish_reason`、用量 `usage`
-2. **组装层 `assemble_response()`**：流结束后，按 `index` 归组所有 `ToolCallDelta`，拼接 `arguments` 字符串再 `json.loads`，还原出完整的 `ToolCall` 列表
+1. **解析层 `_parse_chunk()`**（各 Provider 各自实现）：把每条 SSE 消息（`data: {json}` 行）转成统一的 `StreamChunk` 数据类——文本增量 `delta`、工具调用增量 `ToolCallDelta`、结束原因 `finish_reason`、用量 `usage`
+2. **组装层 `assemble_response()`**（`llm/base.py`，provider 无关）：流结束后，按 `index` 归组所有 `ToolCallDelta`，拼接 `arguments` 字符串再 `json.loads`，还原出完整的 `ToolCall` 列表。配套的 `complete(llm, messages, ...)` 函数将流式收集+组装封装为一次调用
 
 ```
 # 组装核心：按 index 累积碎片
@@ -1734,7 +1734,7 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 
 **① assistant 消息的 token_count 存错了量级**（`agent_loop.py`）：原来存 `usage.total_tokens`——它包含**整个 prompt**（系统提示 + 全部历史 + 工具 schema）。`update_total()` 按消息累加时，每条 assistant 消息都携带一份"全对话总量"，对话被重复计算 N 遍——10 轮对话后总量虚高一个数量级，压缩被过早疯狂触发。改存 `completion_tokens`（消息自身的真实大小）。这个 bug 此前被"len//4 低估"部分掩盖——两个方向相反的误差抵消了一部分，修一个必须同时修另一个。
 
-**② assemble_response 的 usage 覆盖丢数据**（`openai_provider.py`）：原来 `if chunk.usage: usage = chunk.usage` 直接覆盖。OpenAI 把完整 usage 放在最后一个 chunk 没问题；但 Anthropic 拆在两个事件——`message_start` 带 prompt_tokens（含缓存统计），`message_delta` 带 completion_tokens——后者会把前者覆盖清零。改按字段取 max 合并，两家协议都正确。
+**② assemble_response 的 usage 覆盖丢数据**（现已移至 `llm/base.py`）：原来 `if chunk.usage: usage = chunk.usage` 直接覆盖。OpenAI 把完整 usage 放在最后一个 chunk 没问题；但 Anthropic 拆在两个事件——`message_start` 带 prompt_tokens（含缓存统计），`message_delta` 带 completion_tokens——后者会把前者覆盖清零。改按字段取 max 合并，两家协议都正确。
 
 # 第四十四部分：max_tokens 恢复（P44）
 
