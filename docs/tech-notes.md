@@ -214,7 +214,7 @@ class Tool(ABC):
 register / unregister / get / list_tools     # 基础 CRUD
 get_schemas()   # 一次性导出全部工具的 function calling 格式，供 LLM 请求携带
 clone()         # 浅拷贝独立注册表（P6 SubAgent 各持一份，互不干扰）
-filter(allowed, denied)   # 白/黑名单过滤（P3 ToolFilter 使用）
+filter(allowed, denied)   # 白/黑名单过滤（AgentTeam 非写步骤 + SubAgent 工具白名单使用）
 ```
 
 参数校验放在基类 `validate_args()`：按 schema 检查必填项、填充默认值，校验失败抛 `ValueError`——由 AgentLoop 捕获转成错误 ToolResult 回传 LLM，让模型自己修正参数重试。
@@ -883,11 +883,12 @@ Planner.decompose(task) → Plan(steps=[PlanStep(index, description, role, statu
 ```
 AgentTeam.start(task):
     1. plan = planner.decompose(task)            # LLM 分解任务
-    2. for step in plan.steps:
-         member = _match_member(step.role)        # 角色匹配（子串双向匹配 + 首成员兜底）
-         spawn(带角色前缀的子任务, member.allowed_tools)
-    3. results = wait_all()                       # 并行等待全部完成
-    4. 状态回写 plan.steps + 生成 TeamRunReport
+    2. while not plan.is_complete:               # Plan.is_complete 驱动循环
+         batch = 依赖已满足的 pending 步骤
+         非写步骤 → registry.filter(denied=_WRITE_TOOLS)  # 剥夺写工具
+         spawn(带角色前缀的子任务, allowed_tools)
+         wait_all(batch) → 回写 step.status
+    3. 生成 TeamRunReport
 ```
 
 **角色匹配**：Planner 给每个子任务建议 role（如 "backend"），`_match_member` 用双向子串匹配找团队成员（"test" 匹配 "tester"）；没匹配到用第一个成员兜底，空团队则不带成员配置直接执行。
@@ -2545,7 +2546,29 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 
 ### 75.3 后果与验证
 
-`[[hooks]]` 从"禁止清单"升级为"禁止 + 人工闸门"双档；拒绝时 LLM 收到 `Denied by user: <reason>` 会调整策略而非重试。9 个新单测（解析/预判/短路/管道端到端 y/n/always/无回调）+ 真实 LLM 全管道三路径验证（JSON 取证 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次。887 个测试全过。
+`[[hooks]]` 从"禁止清单"升级为"禁止 + 人工闸门"双档；拒绝时 LLM 收到 `Denied by user: <reason>` 会调整策略而非重试。9 个新单测（解析/预判/短路/管道端到端 y/n/always/无回调）+ 真实 LLM 全管道三路径验证（JSON 取证 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次。887 个测试全过（P77 后 897）。
+
+## 77. 四个中级扩展点接入
+
+### 77.1 前因
+
+todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个轻量点（#1/#4/#12/#13），仍有 4 个中级扩展点有明确的自然接入位置但零调用方：#2 `ToolRegistry.filter()`、#6 `Plan.is_complete`、#11 `SessionMetadata.tags`、#14 `PermissionRequest.tool_name`。
+
+### 77.2 改动
+
+**#2 ToolRegistry.filter()**：`AgentTeam.start()` 非写文件步骤的工具过滤从手动 list comprehension（`[t for t in base if t not in _WRITE_TOOLS]`）改为 `self._manager._tools.filter(denied=list(_WRITE_TOOLS))`；`SubAgent.__init__` 工具白名单过滤同样改用 `registry.filter(allowed=effective_tools)` 后再 unregister。一处代码路径、一个语义。
+
+**#6 Plan.is_complete**：`AgentTeam.start()` 主循环从 `while pending:` + 手动维护 `pending = [s for s in pending if s.index not in results_by_index]` 改为 `while not plan.is_complete:`，每轮从 `plan.steps` 中筛选 `status == "pending"` 的步骤。步骤完成时 `step.status` 已在回写，`is_complete` 自然为 True 时循环终止。
+
+**#11 SessionMetadata.tags**：新增 `/session tag <name>` / `/session untag <name>` / `/session tags` 三个子命令；`/session list --tag <name>` 按标签过滤。tag 名只取第一个词（真实终端验证暴露贪心 bug 后修复）。`session_store.list_sessions()` 返回 `tags` 字段。tags 经 JSON 序列化/反序列化往返存活。
+
+**#14 PermissionRequest.tool_name**：`check_path()` 新增 `tool_name` 参数（默认空串，向后兼容），`agent_loop._check_permission()` 三个分支（read_file/glob/grep + write_file/edit_file + delete_file）传入 `tool_name=tc.name`。`check_command()` 已有 `tool_name="bash"`。审计日志的 permission 条目中 `"tool"` 字段来自 `PermissionCheckEvent.tool_name`，此前 path 类工具也能正确记录。
+
+### 77.3 后果
+
+- 9/16 扩展点已有真实调用方（#1/#2/#4/#6/#7/#11/#12/#13/#14），剩余 7 个是纯 API 表面预留
+- `/session` 从 4 个子命令扩展到 7 个（save/list/load/delete/tag/untag/tags）
+- 10 个新测试，897 个全过
 
 # 附录：贯穿各阶段的通用设计原则
 
@@ -2553,6 +2576,6 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——887 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——897 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

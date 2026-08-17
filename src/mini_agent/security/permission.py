@@ -175,7 +175,9 @@ class PermissionManager:
             return PermissionDecision.DENIED
         return await self._ask_user(request)
 
-    async def check_path(self, path: Path, operation: str = "read") -> PermissionDecision:
+    async def check_path(
+        self, path: Path, operation: str = "read", tool_name: str = ""
+    ) -> PermissionDecision:
         """Check file path access: explicit DENY rules -> PathGuard -> rules.
         检查文件路径访问：显式 DENY 规则 -> PathGuard -> 其余规则。
 
@@ -196,6 +198,7 @@ class PermissionManager:
         request = PermissionRequest(
             scope=PermissionScope.PATH,
             resource=str(path),
+            tool_name=tool_name,
             context=f"{operation} access outside project directory",
         )
         return await self.check(request)

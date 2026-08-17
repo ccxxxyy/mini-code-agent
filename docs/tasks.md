@@ -1865,3 +1865,31 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P76.4 验证
 - [x] 11 个新测试（list_providers 2 + is_slash_command 6 + estimated_tokens 3），887 个测试全过
+
+---
+
+## Phase 77: 四个中级扩展点接入 (P77)
+
+> todo-code-quality 扩展点 #2、#6、#11、#14 接入。
+
+### P77.1 #2 ToolRegistry.filter() 接入
+- [x] `core/team.py` — `AgentTeam.start()` 非写文件步骤的工具过滤改用 `ToolRegistry.filter(denied=...)`
+- [x] `core/subagent.py` — `SubAgent.__init__` 工具白名单过滤改用 `ToolRegistry.filter(allowed=...)`
+
+### P77.2 #6 Plan.is_complete 接入
+- [x] `core/team.py` — `AgentTeam.start()` 主循环条件从手动 `pending` 列表改为 `while not plan.is_complete`
+
+### P77.3 #11 SessionMetadata.tags 接入
+- [x] `extensions/builtin_commands.py` — `/session tag <name>` / `/session untag <name>` / `/session tags` 三个子命令
+- [x] `extensions/builtin_commands.py` — `/session list --tag <name>` 按标签过滤会话列表
+- [x] `memory/session_store.py` — `list_sessions()` 返回 `tags` 字段
+- [x] tag 名只取第一个词（真实终端验证暴露：用户输入多余内容被整行当 tag 名）
+
+### P77.4 #14 PermissionRequest.tool_name 接入
+- [x] `security/permission.py` — `check_path()` 新增 `tool_name` 参数并传入 `PermissionRequest`
+- [x] `core/agent_loop.py` — `_check_permission()` 调用 `check_path()` 时传入 `tc.name`
+
+### P77.5 验证
+- [x] 10 个新测试（filter 2 + is_complete 2 + tags 4 + tool_name 2），897 个测试全过，ruff clean
+- [x] 真实终端验证：tag/untag/tags/save/list --tag 全链路 + 审计日志 tool_name 字段确认
+- [x] 真实终端暴露 tag 名贪心 bug → 当场修复（`split()[0]` 只取首词）
