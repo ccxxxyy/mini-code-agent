@@ -15,6 +15,18 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+MIN_PREFIX = 5
+
+
+class AmbiguousTaskError(Exception):
+    """Raised when a prefix matches more than one task."""
+
+    def __init__(self, query: str, matches: list[TaskRecord]) -> None:
+        self.query = query
+        self.matches = matches
+        ids = ", ".join(t.id[:12] for t in matches)
+        super().__init__(f"Ambiguous prefix '{query}' matches: {ids}")
+
 
 @dataclass
 class TaskRecord:
@@ -66,11 +78,20 @@ class TaskStore:
 
     def get(self, query: str) -> TaskRecord | None:
         """Find task by ID, ID prefix, or description substring.
-        按 ID、ID 前缀或描述子串查找任务。"""
+        按 ID、ID 前缀或描述子串查找任务。
+        Raises AmbiguousTaskError when a prefix matches more than one task.
+        当前缀匹配多个任务时抛出 AmbiguousTaskError。"""
         tasks = self.load()
+        # Exact match first
         for t in tasks:
-            if t.id == query or t.id.startswith(query):
+            if t.id == query:
                 return t
+        # Prefix match — collect all candidates
+        candidates = [t for t in tasks if t.id.startswith(query)]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise AmbiguousTaskError(query, candidates)
         # Fallback: search by description 兜底：按描述搜索
         query_lower = query.lower()
         for t in tasks:
@@ -116,6 +137,18 @@ class TaskStore:
         if removed:
             self.save(remaining)
         return removed
+
+    def min_unique_prefix(self, task_id: str, tasks: list[TaskRecord] | None = None) -> str:
+        """Return the shortest prefix of *task_id* that uniquely identifies it.
+        返回能唯一标识该任务的最短 ID 前缀。"""
+        if tasks is None:
+            tasks = self.load()
+        others = [t.id for t in tasks if t.id != task_id]
+        for length in range(MIN_PREFIX, len(task_id) + 1):
+            prefix = task_id[:length]
+            if not any(o.startswith(prefix) for o in others):
+                return prefix
+        return task_id
 
     def find_unblocked_by(self, task_id: str) -> list[TaskRecord]:
         """Find pending tasks that were blocked only by the given task.

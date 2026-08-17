@@ -754,7 +754,8 @@
 ### P32.1 TaskStore
 - [x] `core/task_store.py` 新建——TaskRecord dataclass（id/description/status/blocked_by/tags）+ TaskStore（load/save/add/update/remove/get/clear_done/find_unblocked_by）
 - [x] 存储 `<project>/.mini-agent/tasks.json`（JSON 单文件，方便手编辑）
-- [x] ID 前缀匹配（/todo done task_a1 即可匹配完整 ID）
+- [x] ID 前缀匹配（/todo done task_a1 即可匹配完整 ID）；歧义前缀抛 AmbiguousTaskError 并列出所有匹配
+- [x] min_unique_prefix()——显示时自动计算最短唯一前缀（替代固定 [:12] 截断）
 
 ### P32.2 /todo 命令
 - [x] add/done/start/fail/delete/clear 子命令 + 默认 list
@@ -1753,3 +1754,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 6 个新单测（识别/收缩重试成功/穷尽回退/预算独立/旧摘要保护/无可丢不崩溃）；852 个测试全过，ruff clean
 - [x] 真实 API 全管道验证（无污染埋点 + JSON 取证）：6.2M 字符 → 模型层真 400 → 2 轮收缩 → 3.98M（999K token）成功产出 9 节摘要，埋点约定存活、尺寸严格递减
 - [x] 端点行为探明：阿里云 MaaS 网关 10MB→413、模型层 ~1.5M token→400，探测窗口 129K 非硬限制（811K token 照常接受）
+
+---
+
+## P74 最小前缀检查 + /todo 歧义前缀检测
+
+> todo-code-quality.md ⑨（压缩器）+ /todo ID 前缀改进（task_store）。
+
+### P74.1 压缩器最小前缀检查
+- [x] `memory/compressor.py` — 新增 `MIN_SUMMARIZE_PREFIX_TOKENS = 2000` 常量 + `_prefix_tokens()` 辅助函数
+- [x] `SummarizeOldest.compress()` + `LLMSummarizeOldest.compress()` — split 计算后检查前缀 token 量，< 2K 时跳过（与 mewcode `MIN_SUMMARIZE_PREFIX_TOKENS` 对齐）
+- [x] 1 个新测试 `test_summarize_oldest_skips_when_prefix_too_small`
+
+### P74.2 /todo 歧义前缀检测 + 最短唯一前缀
+- [x] `core/task_store.py` — 新增 `AmbiguousTaskError` 异常类 + `get()` 分离精确匹配与前缀匹配（前缀匹配多个时抛异常）
+- [x] `core/task_store.py` — 新增 `min_unique_prefix()` 方法（最少 5 字符，返回唯一标识该任务的最短前缀）
+- [x] `extensions/builtin_commands.py` — `/todo` 全子命令（add/done/start/fail/delete）捕获 `AmbiguousTaskError` 并列出匹配项；ID 显示改用 `min_unique_prefix()` 替代固定 `[:12]` 截断
+- [x] 5 个新测试（歧义前缀/精确匹配不误判/单任务前缀/共享前缀/命令层歧义处理）
+
+### P74.3 文档同步
+- [x] `docs/todo-code-quality.md` — ⑨ ☐→✅；④⑤⑥⑦⑩⑪ ☑→✅；节标题 ☐→✅
+- [x] `docs/tasks.md` — P32.1 补充歧义前缀 + min_unique_prefix 完成项
+- [x] `docs/tech-notes.md` — §32.2 扩展前缀匹配说明
+- [x] `docs/commands-guide.md` — 补充歧义前缀报错和最短唯一前缀说明
+- [x] `docs/checklist.md` — 功能检查项补充
+- [x] `docs/agent-architecture.md` — S12 实现描述补充

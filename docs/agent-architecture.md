@@ -216,7 +216,7 @@ while True:
 
 **为什么需要**：任务系统是多 Agent 协作的基础。没有持久化，关了程序进度就没了；没有依赖图，并行任务无法正确调度。
 
-**本项目实现**：`core/task_store.py` TaskRecord（id/description/status/blocked_by）+ TaskStore JSON 持久化。`/todo` 命令管理任务列表。依赖图支持多入汇聚（A→C, B→C）。done 时提示 unblocked 的下游任务。
+**本项目实现**：`core/task_store.py` TaskRecord（id/description/status/blocked_by）+ TaskStore JSON 持久化。`/todo` 命令管理任务列表。依赖图支持多入汇聚（A→C, B→C）。done 时提示 unblocked 的下游任务。ID 前缀匹配带歧义检测（AmbiguousTaskError），显示用 min_unique_prefix() 自动最短唯一前缀。
 
 **判断标准**：任务能不能跨会话持久？有没有 blockedBy 依赖关系？任务完成后能不能自动解锁下游？
 

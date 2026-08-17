@@ -9,6 +9,7 @@ import pytest
 from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.memory.compressor import (
     MIN_KEEP_MESSAGES,
+    MIN_SUMMARIZE_PREFIX_TOKENS,
     Compressor,
     DropToolResults,
     LLMSummarizeOldest,
@@ -1200,3 +1201,16 @@ async def test_summarize_oldest_keeps_all_when_tokens_low():
     await strategy.compress(conv, 50_000)
     assert len(conv.messages) == 20
     assert not any(m.compressed for m in conv.messages)
+
+
+async def test_summarize_oldest_skips_when_prefix_too_small():
+    """Skip summarization when the summarizable prefix < MIN_SUMMARIZE_PREFIX_TOKENS.
+    可摘要前缀 token 不足 MIN_SUMMARIZE_PREFIX_TOKENS 时跳过压缩。"""
+    strategy = SummarizeOldest()
+    conv = Conversation()
+    per_msg = (MIN_SUMMARIZE_PREFIX_TOKENS - 100) // MIN_KEEP_MESSAGES
+    for i in range(MIN_KEEP_MESSAGES + 1):
+        conv.messages.append(make_msg(content=f"m{i}", token_count=per_msg))
+    original_count = len(conv.messages)
+    await strategy.compress(conv, per_msg)
+    assert len(conv.messages) == original_count
