@@ -8,7 +8,7 @@
 - ✅ `anthropic_provider.py` `count_tokens` 同上问题 → 同上修复
 - ✅ `models/message.py` `__import__("json")` 反模式 → 改为模块顶部 `import json`
 
-## ☐ 中优先级
+## ✅ 中优先级
 
 ### ✅ markdown 围栏剥离三处重复
 - `memory/extraction.py:140`
@@ -26,7 +26,7 @@
 
 五处"流式调 LLM → 收集 chunk → 组装响应"的重复模式。✅ 已抽取：`assemble_response()` 从 `openai_provider.py` 移至 `llm/base.py`（provider 无关），新增独立函数 `complete(llm, messages, ...)` 一次调用完成流式收集+组装。五处调用点均已简化为 `await complete(self._llm, messages)`。
 
-## ☐ 低优先级
+## ✅ 低优先级
 
 ### ✅ shell 检测逻辑重复
 - `app.py` 和 `core/subagent.py` 各自 `os.environ.get("SHELL")` 判断 shell 类型
@@ -36,24 +36,23 @@
 - 同上两处直接读环境变量而非通过 ConfigLoader，对测试隔离有影响
 - ✅ 随 shell 检测抽取一并解决：两处调用点不再直接读 `os.environ`，环境读取收敛到 `config/environment.py` 单点，测试可 monkeypatch `detect_shell` 隔离
 
-### 权限检查逻辑内部重复
+### ✅ 权限检查逻辑内部重复
 - `permission.py:156-193`（`check()`）和 `permission.py:266-285`（`_check_rules_only()`）
-- 规则匹配遍历逻辑相似，可收敛为一个统一的规则解析器
+- ✅ `check()` 改为先调 `_check_rules_only()`，匹配则直接返回，否则走默认模式。消除了 DENY→ALLOW→session grants 的重复遍历
 
-### 路径 resolve 重复
+### ✅ 路径 resolve 重复
 - `security/sandbox/seatbelt.py:42,45` 和 `security/sandbox/bwrap.py:30,33`
-- 沙箱模块各自做 `Path(path).resolve()`，PathGuard 已做过
-- 建议从 PathGuard 传入已解析路径，或抽取路径规范化函数
+- ✅ 抽取为 `security/sandbox/__init__.py` 的 `resolve_path(path) -> str`，两处调用点改为 `resolve_path(path)`
 
-### 静默 except（约 27 处）
+### ✅ 静默 except（约 35 处）
 - 大部分是有意的 fail-safe（记忆提取/召回/合并失败不阻断主流程）
-- 建议为关键路径（hook/autosave）加日志，保留降级但可观测
+- ✅ 14 个文件共 35 处静默 except 加入 `logger.warning`（hook 触发失败等关键路径，10 处）或 `logger.debug`（I/O 与解析降级，25 处），均带 `exc_info=True`。原有降级行为不变
 
 ---
 
 ## ☐ 死代码清理（27 处）
 
-27 处死代码分为三类：**真正遗忘应接入的**（6 处，✅ 已全部修复）、**设计变更后的残留物**（5 处）、**有意预留的扩展点**（16 处）。
+27 处死代码分为三类：**真正遗忘应接入的**（6 处，✅ 已全部修复）、**设计变更后的残留物**（5 处，✅ 已全部删除）、**有意预留的扩展点**（16 处）。
 
 ---
 
@@ -70,17 +69,15 @@
 
 ---
 
-### 🟡 设计变更后的残留物（5 处）
+### ✅ 设计变更后的残留物（5 处）已全部删除
 
-这些代码在早期设计中有用途，后来方案改了但旧代码没清理。建议删除以减少混淆。
-
-| # | 项 | 位置 | 历史原因 |
-|---|---|---|---|
-| 1 | `LLMStreamChunkEvent` | `models/events.py:38` | 最初打算流式事件走 EventBus（订阅者处理渲染），后来改成直接回调（`on_stream_delta`）更高效，事件类留着没删 |
-| 2 | `LLMErrorEvent` | `models/events.py:55` | 同上，LLM 错误最终走 `try/except` 异常链不走事件总线，事件类成为残留 |
-| 3 | `ToolFilter` + `ToolFilterContext` | `security/tool_filter.py` | 早期设计的工具过滤方案（按上下文动态过滤），后来 SubAgent 用 `registry.unregister()` + `clone()` 替代，整个模块成为死代码 |
-| 4 | `AgentState.pending_tool_calls` | `core/agent_state.py:28` | 早期设计用于跟踪待执行工具，后来流式执行改用 `_streaming_tasks` dict 管理，旧字段没删 |
-| 5 | 5 个异常类 | `core/errors.py:4-29` | 早期定义了 `AgentError/LLMError/ToolError/MaxIterationsError/UserCancelledError` 异常体系，实际开发中全用 `Exception` + `ToolResult(is_error=True)` 替代，异常类从未迁移使用 |
+| # | 项 | 处理 |
+|---|---|---|
+| 1 | `LLMStreamChunkEvent` | ✅ 从 `models/events.py` 和 `events/types.py` 删除 |
+| 2 | `LLMErrorEvent` | ✅ 从 `models/events.py` 和 `events/types.py` 删除 |
+| 3 | `ToolFilter` + `ToolFilterContext` | ✅ 删除 `security/tool_filter.py` 整个文件，从 `security/__init__.py` 移除导出 |
+| 4 | `AgentState.pending_tool_calls` | ✅ 从 `core/agent_state.py` 删除字段，移除不再需要的 `ToolCall` 导入 |
+| 5 | 5 个异常类 | ✅ 删除 `core/errors.py` 整个文件，从 `core/__init__.py` 移除导入和导出 |
 
 ---
 
@@ -109,39 +106,20 @@
 
 ---
 
-## ☐ 文档与仓库卫生
+##  ✅ 文档与仓库卫生
 
 以下问题来自 `analysis-shortcomings.md` 的逐条验证，已确认为真实问题。
 
-### spec.md 与现状脱节（已验证）
+### ✅ spec.md 与现状脱节（已验证）
 - ~~`docs/spec.md` 自修正写"8 个内置工具"~~ ✅ 已修正为 10
-- spec.md 目录树列了不存在的 `extensions/plugin_loader.py`
+- ✅ spec.md 目录树已删除不存在的 `extensions/plugin_loader.py`、`config/schema.py`、`core/errors.py`、`security/tool_filter.py`
 - spec.md 目录树写"6 core tools"——属历史设计文档，已有 disclaimer 说明
-- **建议**：统一更新 spec.md 中的工具数量为 10，删除不存在的文件引用，或在文件头明确标注"本文档已归档，不再维护"
 
-### .gitignore 遗漏（已验证）
-以下产物目录/文件存在于仓库根目录但未被 .gitignore 覆盖：
-- `.coverage` — **已被 git 追踪**（`git ls-files` 可见），应加入 .gitignore 并 `git rm --cached`
-- `.pytest_cache/` — 未在 .gitignore 中
-- `.ruff_cache/` — 未在 .gitignore 中
-- `htmlcov/` — 未在 .gitignore 中
-- `experiments/results/` 下的 JSON 文件 — **已被 git 追踪**，应由 .gitignore 排除（benchmarks/results/ 已正确排除，experiments/results/ 漏了）
-
-**建议**：在 .gitignore 追加：
-```
-.coverage
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-experiments/results/
-```
-然后 `git rm --cached .coverage` 清除已追踪的文件。
-
-### Anthropic Provider 从未 E2E 验证（已验证）
-- `docs/checklist.md` 和 `docs/roadmap.md` 均自认 Anthropic Provider"代码就绪但从未连接真实 Claude API"
-- 单元测试有 14+ 个（mock 数据），但无真实 API 调用验证
-- thinking blocks、prompt caching、tool_use 三项核心功能均未实测
-- **建议**：获取 Anthropic API key 后做一次端到端验证（streaming + tool_use + thinking blocks + token counting），记录结果到 checklist
+### ✅ .gitignore 遗漏（已验证）
+- `.coverage` / `htmlcov/` — ✅ 已在 .gitignore 中（原有）
+- `.pytest_cache/` — ✅ 已追加到 .gitignore
+- `.ruff_cache/` — ✅ 已追加到 .gitignore
+- `experiments/results/` — ✅ 已追加到 .gitignore，已 `git rm --cached` 清除 31 个已追踪的 JSON 文件
 
 ---
 
@@ -252,7 +230,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 - **P71** SlidingWindow 删除刚生成的摘要（有任务锚点无摘要锚点）：新增摘要锚点
 ---
 
-## ✅ 远程/浏览器模式待做（P57）
+## ✅ 远程/浏览器模式（P57）
 
 ### 仍存在的已知局限
 - ~~单客户端~~ ✅ 已完成（`self._clients: set` 广播，多标签页同步输出）

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -47,6 +48,8 @@ from mini_agent.tools.hooks import (
 from mini_agent.ui.teach import TeachRenderer
 from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
+
+logger = logging.getLogger(__name__)
 
 # Minimum seconds between automatic session saves 两次自动保存之间的最小间隔秒数
 AUTOSAVE_INTERVAL = 30.0
@@ -457,6 +460,7 @@ class Application:
                 )
             )
         except Exception:
+            logger.warning("hook fire failed: startup", exc_info=True)
             pass
         self.terminal.show_welcome()
         # Probe context window before the first turn's overflow check
@@ -473,6 +477,7 @@ class Application:
                 if removed:
                     self.terminal.show_info(f"Cleaned {len(removed)} stale worktree(s)")
             except Exception:
+                logger.debug("worktree cleanup failed", exc_info=True)
                 pass
         # Stale session cleanup (9.1): remove sessions older than N days
         # 过期会话清理：删除超龄的已正常关闭会话
@@ -482,6 +487,7 @@ class Application:
                 if n:
                     self.terminal.show_info(f"Cleaned {n} stale session(s)")
             except Exception:
+                logger.debug("stale session cleanup failed", exc_info=True)
                 pass
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
@@ -496,6 +502,7 @@ class Application:
                 )
             )
         except Exception:
+            logger.warning("hook fire failed: session-init", exc_info=True)
             pass
 
         try:
@@ -563,6 +570,7 @@ class Application:
                         self.terminal.show_info(input_result.reason or "Input blocked by hook")
                         continue
                 except Exception:
+                    logger.warning("hook fire failed: pre-input", exc_info=True)
                     pass
 
                 await self._handle_turn(user_input)
@@ -585,6 +593,7 @@ class Application:
                     )
                 )
             except Exception:
+                logger.warning("hook fire failed: session-end", exc_info=True)
                 pass
             self.session.metadata.closed_cleanly = True
             await self._autosave(force=True)
@@ -601,6 +610,7 @@ class Application:
                     )
                 )
             except Exception:
+                logger.warning("hook fire failed: shutdown", exc_info=True)
                 pass
             self.terminal.show_info("Goodbye!")
 
@@ -658,6 +668,7 @@ class Application:
             await self.session_store.save(self.session)
             self._last_autosave = now
         except OSError:
+            logger.warning("autosave failed", exc_info=True)
             pass
 
     def _register_builtin_hooks(self) -> None:
@@ -716,6 +727,7 @@ class Application:
                     app.session.conversation, app.session.metadata.project_dir
                 )
             except Exception:
+                logger.warning("hook fire failed: memory extraction", exc_info=True)
                 pass
             return HookResult()
 
@@ -771,6 +783,7 @@ class Application:
             try:
                 await self.session_store.save(stale)
             except OSError:
+                logger.debug("stale session mark-clean failed", exc_info=True)
                 pass
 
     async def _handle_turn(self, user_input: str) -> None:

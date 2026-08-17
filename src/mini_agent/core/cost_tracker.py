@@ -11,11 +11,14 @@ EventBus 订阅者：从 LLMResponseEvent 按模型累计输入/输出 token
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from pathlib import Path
 
 from mini_agent.models.config import CostConfig
 from mini_agent.models.events import LLMResponseEvent
+
+logger = logging.getLogger(__name__)
 
 UNKNOWN = "(unknown)"
 
@@ -217,6 +220,7 @@ class CostTracker:
             if isinstance(data.get("models"), dict):
                 return data
         except (OSError, ValueError):
+            logger.debug("ledger load failed", exc_info=True)
             pass
         return empty
 
@@ -250,6 +254,7 @@ class CostTracker:
                 json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
             )
         except OSError:
+            logger.debug("ledger persist failed", exc_info=True)
             pass  # ledger failure must not break the turn 总账失败不阻断对话
 
     def _cost_of(self, models: dict[str, dict[str, int]]) -> float:
@@ -275,6 +280,7 @@ class CostTracker:
             try:
                 self._ledger_path.unlink()
             except OSError:
+                logger.debug("ledger delete failed", exc_info=True)
                 pass
 
     # --- display 展示 ---

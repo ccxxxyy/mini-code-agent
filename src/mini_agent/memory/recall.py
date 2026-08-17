@@ -12,9 +12,12 @@ block the main request).
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from mini_agent.memory.persistent import MemoryEntry
+
+logger = logging.getLogger(__name__)
 
 FALLBACK_LIMIT = 10
 
@@ -63,6 +66,7 @@ class MemoryRecall:
             response = await complete(self._llm, messages)
             ids = self._parse_ids(response.content)
         except Exception:
+            logger.warning("LLM recall ranking failed", exc_info=True)
             return entries[:FALLBACK_LIMIT]
 
         if ids is None:

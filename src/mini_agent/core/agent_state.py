@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from mini_agent.models.message import ToolCall, ToolResult
+from mini_agent.models.message import ToolResult
 
 
 class AgentPhase(StrEnum):
@@ -25,7 +25,6 @@ class AgentState:
     phase: AgentPhase = AgentPhase.IDLE
     iteration: int = 0
     max_iterations: int = 50
-    pending_tool_calls: list[ToolCall] = field(default_factory=list)
     recent_tool_names: list[str] = field(default_factory=list)
     last_tool_results: list[ToolResult] = field(default_factory=list)
     # Distinct tool names used per iteration (sliding window of 8) --

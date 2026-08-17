@@ -12,9 +12,12 @@ each into a single entry. Falls back silently to no-op on any failure.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from mini_agent.memory.persistent import MemoryEntry
+
+logger = logging.getLogger(__name__)
 
 CONSOLIDATION_PROMPT = """\
 You are a memory consolidator. Below is a list of memory entries. Identify
@@ -55,6 +58,7 @@ class MemoryConsolidator:
             response = await complete(self._llm, messages)
             groups = self._parse_groups(response.content)
         except Exception:
+            logger.warning("LLM consolidation failed", exc_info=True)
             return None
 
         if not groups:

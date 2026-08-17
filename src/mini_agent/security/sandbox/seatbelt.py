@@ -14,7 +14,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from mini_agent.security.sandbox import Sandbox, SandboxConfig
+from mini_agent.security.sandbox import Sandbox, SandboxConfig, resolve_path
 
 
 class SeatbeltSandbox(Sandbox):
@@ -39,10 +39,10 @@ def _build_profile(config: SandboxConfig) -> str:
         '(allow file-read* (subpath "/"))',
     ]
     for path in config.allow_write:
-        resolved = str(Path(path).resolve())
+        resolved = resolve_path(path)
         lines.append(f'(allow file-write* (subpath "{resolved}"))')
     for path in config.deny_write:
-        resolved = str(Path(path).resolve())
+        resolved = resolve_path(path)
         if Path(resolved).is_dir() or resolved.endswith("/"):
             lines.append(f'(deny file-write* (subpath "{resolved}"))')
         else:

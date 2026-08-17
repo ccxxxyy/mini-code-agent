@@ -13,6 +13,12 @@ from __future__ import annotations
 import platform
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def resolve_path(path: str) -> str:
+    """Resolve a path to its absolute canonical form. 将路径解析为绝对规范形式。"""
+    return str(Path(path).resolve())
 
 
 @dataclass

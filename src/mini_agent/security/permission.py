@@ -162,32 +162,11 @@ class PermissionManager:
         评估权限请求。
         顺序：显式 DENY -> 显式 ALLOW -> 会话授权 -> 默认模式。
         """
-        self.last_matched_rule = ""
-        # 1. Explicit DENY rules 显式 DENY 规则
-        for rule in self._rules:
-            if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
-                if self._matches(rule.pattern, request.resource):
-                    request.matched_rule = rule
-                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
-                    self.last_decision_reason = f"rule:{rule.pattern}"
-                    return PermissionDecision.DENIED
+        decision = await self._check_rules_only(request)
+        if decision is not None:
+            return decision
 
-        # 2. Explicit ALLOW rules 显式 ALLOW 规则
-        for rule in self._rules:
-            if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
-                if self._matches(rule.pattern, request.resource):
-                    request.matched_rule = rule
-                    self.last_matched_rule = f"{rule.level}:{rule.pattern}"
-                    self.last_decision_reason = f"rule:{rule.pattern}"
-                    return PermissionDecision.GRANTED
-
-        # 3. Session grants 会话授权
-        for scope, pattern in self._session_grants:
-            if scope == request.scope and self._matches(pattern, request.resource):
-                self.last_decision_reason = "session_grant"
-                return PermissionDecision.GRANTED
-
-        # 4. Default mode 默认模式
+        # Default mode 默认模式
         mode = self._config.permission_mode
         self.last_decision_reason = f"mode:{mode}"
         if mode == "allow":

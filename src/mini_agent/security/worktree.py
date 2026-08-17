@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Dependency dirs symlinked into new worktrees so agents skip reinstall (P54)
 # 创建 worktree 时符号链接的依赖目录——Agent 免重装依赖
@@ -94,6 +97,7 @@ class WorktreeManager:
                 try:
                     dst.symlink_to(src, target_is_directory=True)
                 except OSError:
+                    logger.debug("symlink dep failed: %s", dep, exc_info=True)
                     pass
 
     async def remove(self, worktree_path: Path, force: bool = False) -> None:

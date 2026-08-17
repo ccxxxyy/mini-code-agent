@@ -10,11 +10,14 @@ P30 升级：用 LLM 调用（JSON 输出）替代 P4 的正则启发式。
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from mini_agent.memory.persistent import MemoryEntry, PersistentMemory
 from mini_agent.models.message import Conversation, Role
+
+logger = logging.getLogger(__name__)
 
 MIN_TURNS_FOR_EXTRACTION = 5
 MAX_RECENT_MESSAGES = 20
@@ -98,6 +101,7 @@ class MemoryExtractor:
             else:
                 await self._memory.save_user_memory(merged)
         except Exception:
+            logger.warning("memory consolidation failed", exc_info=True)
             pass
 
     async def _extract_candidates(self, conversation: Conversation) -> list[MemoryEntry]:
@@ -127,6 +131,7 @@ class MemoryExtractor:
             response = await complete(self._llm, messages)
             return self._parse_response(response.content)
         except Exception:
+            logger.warning("LLM memory extraction failed", exc_info=True)
             return []
 
     @staticmethod

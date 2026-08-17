@@ -4,10 +4,13 @@ Agent 团队——协调多个 Agent 协作处理同一项目。
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from mini_agent.core.planner import Plan, Planner
 from mini_agent.core.subagent import SubAgentManager, SubAgentResult
+
+logger = logging.getLogger(__name__)
 
 # Tools stripped from non-writer steps 非写文件步骤被剥夺的工具
 _WRITE_TOOLS = {"write_file", "edit_file"}
@@ -176,6 +179,7 @@ class AgentTeam:
                 else:
                     lines.append(f"{prefix}{entry.name}")
         except OSError:
+            logger.debug("team dir scan failed", exc_info=True)
             pass
 
     @staticmethod
