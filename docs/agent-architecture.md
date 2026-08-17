@@ -360,7 +360,7 @@ while True:
 
 Agent 的核心循环（S01）**永远不改**——所有新能力都以以下三种方式接入：
 - **注册**：工具注册到 ToolRegistry（S02）
-- **订阅**：EventBus 订阅者（TraceRenderer / AuditLogger / CostTracker / ToolRecorder——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `bus.on_any` 注册为全局监听，异常隔离不影响主流程
+- **订阅**：EventBus 订阅者（TraceRenderer 订阅 8 种事件 / AuditLogger 订阅 4 种事件 / CostTracker / ToolRecorder——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `bus.on_any` 注册为全局监听，异常隔离不影响主流程
 - **钩子**：HookManager 注册 handler（PRE_LLM 记忆注入 / SESSION_END 记忆提取）
 
 这意味着你可以**拿掉任何一个机制**（如删掉 CostTracker），Agent 照常工作——机制是可插拔的。

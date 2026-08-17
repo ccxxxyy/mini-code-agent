@@ -631,7 +631,12 @@ def _make_model(app: Application) -> HandlerFn:
         # No args: show current model + switchable models
         # 无参数：显示当前模型和可切换模型列表
         if not arg:
+            from mini_agent.llm.registry import ProviderRegistry
+
             lines = [f"当前 LLM: {app.config.llm.model} ({app.config.llm.provider})"]
+            providers = ProviderRegistry.list_providers()
+            if providers:
+                lines.append(f"可用 Provider: {', '.join(providers)}")
             if app.config.llm_profiles:
                 lines.append("")
                 lines.append("**可切换模型 (用 /model <名称> 切换):**")

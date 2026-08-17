@@ -19,6 +19,7 @@ from mini_agent.models.events import (
     PermissionCheckEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
+    UserMessageEvent,
 )
 
 if TYPE_CHECKING:
@@ -101,11 +102,13 @@ class AuditLogger:
         bus.on(ToolCallStartEvent, self._on_tool_start)
         bus.on(ToolCallEndEvent, self._on_tool_end)
         bus.on(PermissionCheckEvent, self._on_permission)
+        bus.on(UserMessageEvent, self._on_user_message)
 
     def detach(self, bus: EventBus) -> None:
         bus.off(ToolCallStartEvent, self._on_tool_start)
         bus.off(ToolCallEndEvent, self._on_tool_end)
         bus.off(PermissionCheckEvent, self._on_permission)
+        bus.off(UserMessageEvent, self._on_user_message)
 
     async def _on_tool_start(self, event: ToolCallStartEvent) -> None:
         if not self.enabled:
@@ -133,6 +136,19 @@ class AuditLogger:
                     "call_id": event.call_id,
                     "duration_ms": event.duration_ms,
                     "is_error": event.is_error,
+                }
+            )
+
+    async def _on_user_message(self, event: UserMessageEvent) -> None:
+        if not self.enabled:
+            return
+        async with self._write_lock:
+            self._write(
+                {
+                    "ts": event.timestamp.isoformat(timespec="milliseconds"),
+                    "event": "user_message",
+                    "content": event.content[:200],
+                    "is_slash_command": event.is_slash_command,
                 }
             )
 

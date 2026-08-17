@@ -537,6 +537,9 @@ class Application:
 
                 # Slash command dispatch 斜杠命令分发
                 if self.slash_commands.is_slash_command(user_input):
+                    await self.event_bus.emit(
+                        UserMessageEvent(content=user_input, is_slash_command=True)
+                    )
                     try:
                         result = await self.slash_commands.execute(user_input, self)
                         if result:

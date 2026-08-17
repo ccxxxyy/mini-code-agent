@@ -1350,3 +1350,23 @@
 ### 测试
 - [x] 6 个新测试（压缩器前缀跳过 + TaskStore 歧义/精确/唯一前缀 + /todo 命令歧义处理）
 - [x] 97 个相关测试全过，ruff lint clean
+
+---
+
+## Phase 76 检查项：三个轻量扩展点接入
+
+### #4 ProviderRegistry.list_providers() 接入 /model
+- [x] `/model` 无参数输出追加"可用 Provider: openai, anthropic, openai-responses"行
+- [x] 调用 `ProviderRegistry.list_providers()` 获取列表（非硬编码）
+
+### #12 UserMessageEvent.is_slash_command 接入
+- [x] `app.py` 斜杠命令分支 emit `UserMessageEvent(content=user_input, is_slash_command=True)`
+- [x] `AuditLogger` 新增 `UserMessageEvent` 订阅（4 种事件），写 `user_message` 审计条目（content 截断 200 字符 + is_slash_command 标记）
+- [x] `TraceRenderer` 新增 `UserMessageEvent` 订阅（8 种事件），trace 行显示 `user "内容前60字" [slash]`
+
+### #13 LLMRequestEvent.estimated_tokens 接入
+- [x] `agent_loop.py` emit `LLMRequestEvent` 时从 `ContextManager.total_tokens` 填入 `estimated_tokens`（无 ContextManager 时默认 0）
+- [x] `TraceRenderer._on_llm_request` 追加 `~{estimated_tokens} tok` 显示（为 0 时隐藏）
+
+### 测试
+- [x] 11 个新测试（list_providers 2 + is_slash_command 6 + estimated_tokens 3），887 个全过
