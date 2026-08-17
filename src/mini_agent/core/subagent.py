@@ -7,13 +7,13 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import os
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mini_agent.config import detect_shell
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.core.agent_types import AgentTypeDefinition, get_agent_type
@@ -181,7 +181,7 @@ class SubAgent:
         self._loop.result_cache = self._result_cache
 
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
-        shell = os.environ.get("SHELL", "cmd.exe" if sys.platform == "win32" else "/bin/bash")
+        shell = detect_shell()
         system_prompt = prompt_template.format(
             working_dir=effective_dir,
             platform=platform,
