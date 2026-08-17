@@ -1,7 +1,6 @@
 """Tests for token counting accuracy (P43). token 计数精度的测试。"""
 
-from mini_agent.llm.base import TokenUsage
-from mini_agent.llm.openai_provider import assemble_response
+from mini_agent.llm.base import TokenUsage, assemble_response
 from mini_agent.llm.token_counter import _estimate_tokens, count_tokens, truncate_to_tokens
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig

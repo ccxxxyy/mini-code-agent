@@ -122,12 +122,9 @@ class MemoryExtractor:
         ]
 
         try:
-            from mini_agent.llm.openai_provider import assemble_response
+            from mini_agent.llm.base import complete
 
-            chunks = []
-            async for chunk in self._llm.stream(messages):
-                chunks.append(chunk)
-            response = assemble_response(chunks)
+            response = await complete(self._llm, messages)
             return self._parse_response(response.content)
         except Exception:
             return []

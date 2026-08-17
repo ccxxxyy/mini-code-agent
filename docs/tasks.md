@@ -709,7 +709,7 @@
 ## Phase 30: LLM 记忆提取 (P30)
 
 ### P30.1 LLM 提取替换 regex
-- [x] `memory/extraction.py` 重写——regex 全删，改为 LLM 结构化提取：构造 EXTRACTION_PROMPT（3类：preference/convention/fact，JSON 数组输出）+ 调 stream + assemble_response + JSON 解析
+- [x] `memory/extraction.py` 重写——regex 全删，改为 LLM 结构化提取：构造 EXTRACTION_PROMPT（3类：preference/convention/fact，JSON 数组输出）+ 调 `complete()` + JSON 解析（原 stream + assemble_response 已抽取为 `llm/base.py` 的 `complete()` 函数）
 - [x] 取最近 20 条消息（MAX_RECENT_MESSAGES），ASSISTANT 内容截断 200 字（控制 token 消耗）
 - [x] 降级：LLM 调用失败/JSON 解析失败/markdown 围栏 → 静默返回空列表（绝不阻断退出）
 
@@ -949,7 +949,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `llm/token_counter.py` — _estimate_tokens()：CJK 感知估算——CJK 字符（汉字/假名/谚文/全角符号 7 个 Unicode 区间）按 1 token/字，其余按 4 字符/token；替换纯 len//4（中文低估约 4 倍导致压缩迟迟不触发）
 - [x] `memory/context.py` — record_api_usage()：API usage 锚点——LLM 返回的 usage 总量锚定在最新消息（prompt_tokens 含系统提示/全部消息/工具 schema，比估算准）；update_total() 优先用锚点总量 + 锚点后新消息估算；对象身份检查让压缩/undo 重排后锚点自动失效
 - [x] `core/agent_loop.py` — 修复：assistant 消息 token_count 由 usage.total_tokens（含整个 prompt，按消息累加重复算 N 遍）改存 completion_tokens（消息自身大小）；每轮响应后调用 record_api_usage()
-- [x] `llm/openai_provider.py` — 修复：assemble_response 的 usage 由直接覆盖改按字段合并（Anthropic 把 prompt/completion 拆在 message_start/message_delta 两个事件，覆盖会丢 prompt 计数）
+- [x] `llm/base.py`（原 `openai_provider.py`）— 修复：assemble_response 的 usage 由直接覆盖改按字段合并（Anthropic 把 prompt/completion 拆在 message_start/message_delta 两个事件，覆盖会丢 prompt 计数）；assemble_response 已从 openai_provider.py 移至 base.py
 
 ### P43.2 测试
 - [x] `tests/unit/test_token_counter.py` 新建 11 个测试（CJK 估算 5 / usage 锚点 5 / usage 合并 1），515 个测试全过

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed 变更
+
+- **LLM streaming call extraction (#158)** — moved `assemble_response()` from `llm/openai_provider.py` to `llm/base.py` (it operates on base types, not provider-specific); added standalone `complete(llm, messages, ...)` function that wraps stream + assemble in one call; replaced 5 duplicated stream+assemble loops (extraction, recall, consolidation, compressor, planner) with `complete()`. `agent_loop._stream_once()` unchanged (has its own mid-stream callbacks). LLM 流式调用抽取：`assemble_response()` 移至 base.py，新增 `complete()` 一次调用封装流式收集+组装，5 处重复调用点已简化。
+
 ### Fixed 修复
 
 - **Compression pipeline defect chain (P69–P72)** — four defects exposed by real-terminal verification: Stage 1 no longer truncates tool results inside the keep window (the model perceived broken tools and spiraled into re-reads, 36 iterations → 4); the recovery-attachment budget scales with the context window (a 54K attachment pinned small windows); SlidingWindow anchors the freshly created summary so tail-based truncation never deletes it; the extractive digest strips baked-on recovery attachments before re-digesting (17K file dumps drowned planted conventions). 压缩链路缺陷链修复：Stage 1 尊重保留窗口（防重读螺旋）、恢复附件预算随窗口缩放、SlidingWindow 摘要锚点（不再删刚生成的摘要）、digest 剥离恢复附件（防源码转储淹没约定）。

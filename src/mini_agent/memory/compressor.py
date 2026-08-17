@@ -475,15 +475,11 @@ class LLMSummarizeOldest(CompressionStrategy):
     async def _summarize(self, history: str) -> str:
         # One-shot direct LLM call, bypasses AgentLoop -- no recursion risk.
         # 一次性直连 LLM 调用，不经过 AgentLoop——无递归风险。
+        from mini_agent.llm.base import complete
+
         messages = [{"role": "user", "content": _SUMMARY_PROMPT.format(history=history)}]
-        parts: list[str] = []
-        async for chunk in self._llm.stream(messages, max_tokens=self.SUMMARY_MAX_TOKENS):
-            if chunk.delta:
-                parts.append(chunk.delta)
-        # Keep only the <summary> block -- the <analysis> scratchpad improves
-        # summary quality but would waste context if injected into the conversation.
-        # 只保留 <summary> 块——<analysis> 草稿提升摘要质量，但注入对话会浪费上下文。
-        summary = _extract_summary("".join(parts))
+        response = await complete(self._llm, messages, max_tokens=self.SUMMARY_MAX_TOKENS)
+        summary = _extract_summary(response.content)
         if not summary:
             raise ValueError("empty summary from LLM")
         return summary
