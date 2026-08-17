@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import pytest
 
 from mini_agent.llm.base import LLMProvider, StreamChunk
@@ -15,6 +16,7 @@ from mini_agent.memory.compressor import (
     SummarizeOldest,
     _compute_keep_split,
     _extract_summary,
+    _is_prompt_too_long,
 )
 from mini_agent.memory.context import ContextManager
 from mini_agent.models.config import MemoryConfig
@@ -333,6 +335,132 @@ async def test_llm_summarize_retries_before_fallback():
     await strategy.compress(conv, 50_000)
     assert "Recovered fine." in conv.messages[0].content  # LLM 路径，非回退
     assert llm.call_count == 2  # 失败 1 次 + 重试成功 1 次
+
+
+# --- Prompt-too-long shrink retry (todo ⑦ 剩余部分) ---
+
+
+def _make_400() -> httpx.HTTPStatusError:
+    req = httpx.Request("POST", "http://test/chat/completions")
+    return httpx.HTTPStatusError(
+        "Client error '400 Bad Request'", request=req, response=httpx.Response(400, request=req)
+    )
+
+
+class TooLongLLM(SummaryMockLLM):
+    """Raises 400 for the first N calls, then succeeds; records prompts.
+    前 N 次调用抛 400，之后成功；记录每次收到的 prompt。"""
+
+    def __init__(self, fail_times: int, summary: str = "<summary>Shrunk fine.</summary>") -> None:
+        super().__init__(summary=summary)
+        self.fail_times = fail_times
+        self.prompts: list[str] = []
+
+    async def stream(self, messages, tools=None, **kwargs):
+        self.call_count += 1
+        self.prompts.append(messages[0]["content"])
+        if self.call_count <= self.fail_times:
+            raise _make_400()
+        yield StreamChunk(delta=self._summary)
+
+
+def test_is_prompt_too_long_detection():
+    """400/413 counts regardless of message; keywords catch wrapped errors.
+    400/413 一律算；关键词兜底识别包装过的异常。"""
+    assert _is_prompt_too_long(_make_400())
+    assert _is_prompt_too_long(ValueError("This model's maximum context length is 65536"))
+    assert _is_prompt_too_long(RuntimeError("Prompt is too long: 130000 tokens"))
+    assert not _is_prompt_too_long(ConnectionError("network down"))
+    assert not _is_prompt_too_long(ValueError("empty summary from LLM"))
+
+
+async def test_llm_summarize_shrinks_on_prompt_too_long():
+    """A 400 drops the oldest messages and retries -- LLM path recovers.
+    400 后丢最旧消息重试——LLM 路径恢复，不落抽取式。"""
+    llm = TooLongLLM(fail_times=1)
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
+    await strategy.compress(conv, 50_000)
+    assert "Shrunk fine." in conv.messages[0].content  # LLM 摘要，非回退
+    assert llm.call_count == 2
+    # Second prompt lost the oldest message but kept later ones
+    # 第二次 prompt 丢了最旧消息，保留了较新的
+    assert "message 0" in llm.prompts[0]
+    assert "message 0" not in llm.prompts[1]
+    assert "message 5" in llm.prompts[1]
+
+
+async def test_llm_summarize_shrink_exhausted_falls_back():
+    """Persistent 400s: after MAX_SHRINKS the identical request would fail
+    identically -- fall back immediately, never burn transient retries on it
+    (real-run verified: two wasted 400s on the same 6.1M-char prompt).
+    持续 400：shrink 穷尽后相同请求必然相同失败——立即回退，不烧偶发重试
+    预算（真实运行实测：同一 6.1M 字符 prompt 白吃两次 400）。"""
+    llm = TooLongLLM(fail_times=99)
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
+    await strategy.compress(conv, 50_000)
+    # MAX_SHRINKS shrink retries + 1 final attempt that triggers the bail-out
+    assert llm.call_count == LLMSummarizeOldest.MAX_SHRINKS + 1
+    assert "[Compressed conversation history" in conv.messages[0].content
+    assert "LLM summary" not in conv.messages[0].content  # 抽取式回退
+    # Fallback digest is the shrunk one -- oldest already dropped
+    # 回退用的是收缩后的 digest——最旧消息已丢弃
+    assert "message 0" not in conv.messages[0].content
+
+
+async def test_llm_summarize_shrink_separate_budget():
+    """A shrink retry does not consume the transient-retry budget.
+    shrink 重试不消耗偶发失败的重试预算。"""
+
+    class MixedLLM(SummaryMockLLM):
+        def __init__(self) -> None:
+            super().__init__(summary="<summary>Mixed ok.</summary>")
+
+        async def stream(self, messages, tools=None, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise _make_400()  # shrink 路径
+            if self.call_count == 2:
+                raise ConnectionError("transient")  # 偶发失败：attempt 1
+            yield StreamChunk(delta=self._summary)  # attempt 2 成功
+
+    llm = MixedLLM()
+    strategy = LLMSummarizeOldest(llm)
+    conv = Conversation()
+    for i in range(20):
+        conv.messages.append(make_msg(content=f"message {i}", token_count=3000))
+    await strategy.compress(conv, 50_000)
+    assert "Mixed ok." in conv.messages[0].content  # 若 shrink 消耗预算则第 3 次不会发生
+    assert llm.call_count == 3
+
+
+def test_shrink_oldest_protects_prior_summary():
+    """A prior compression summary at the head is never dropped.
+    头部的旧压缩摘要绝不丢弃——它是更早全部历史的唯一记录。"""
+    strategy = LLMSummarizeOldest(SummaryMockLLM())
+    prior = Message(
+        role=Role.SYSTEM, content="[Compressed conversation history] old", compressed=True
+    )
+    msgs = [prior] + [make_msg(content=f"m{i}") for i in range(10)]
+    shrunk, dropped = strategy._shrink_oldest(msgs)
+    assert shrunk[0] is prior  # 旧摘要保留在头部
+    assert dropped == 2  # 10 可丢消息的 20%
+    assert shrunk[1].content == "m2"  # 从旧摘要之后开始丢
+
+
+def test_shrink_oldest_nothing_droppable():
+    """Only a prior summary (or a single message) left: no drop, no crash.
+    只剩旧摘要或单条消息时不丢弃也不崩溃——仅靠缩 cap 推进。"""
+    strategy = LLMSummarizeOldest(SummaryMockLLM())
+    prior = Message(role=Role.SYSTEM, content="[Compressed] old", compressed=True)
+    assert strategy._shrink_oldest([prior]) == ([prior], 0)
+    single = [make_msg(content="only")]
+    assert strategy._shrink_oldest(single) == (single, 0)
 
 
 def test_extractive_digest_preserves_prior_summary():

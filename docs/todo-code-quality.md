@@ -222,17 +222,15 @@ experiments/results/
 
 **已实现**：`_SUMMARY_PROMPT` 重写为 `<analysis>`（时间线梳理 + 自查）+ `<summary>`（9 节结构化输出）；新增 `_extract_summary()` 只把 `<summary>` 块注入对话（analysis 草稿不进上下文），无标签回退完整输出、只有 analysis（截断）时剥离草稿触发抽取式回退。mini 适配：prompt 明确"近期消息已原样保留，摘要只替换旧历史"；不需要 mewcode 的 "Do NOT call tools" 警告（`_summarize()` 直连不带工具）。真实 LLM E2E 验证 9 节摘要完整、无草稿泄漏。5 个新测试。详见 tech-notes §67。
 
-### ◐ ⑦ 摘要重试（重试部分已完成，P72）
+### ☑ ⑦ 摘要重试（P72 偶发重试 + P73 超长收缩重试）
 
 **问题**：LLM 摘要调用偶发网络错误时直接回退到抽取式截断，丢失语义摘要。
 
 **mewcode 实现**：最多重试 3 次；如果摘要 prompt 本身太长，丢弃最旧 20% 的消息后重试。
 
-**mini 现状**：`LLMSummarizeOldest._summarize()` 失败直接 `except Exception` 回退。
-
-**修复位置**：
-- ~~`memory/compressor.py`：加重试循环~~ ✅ 已完成（P72：`SUMMARY_RETRIES=2`，穷尽后才落抽取式）
-- 未做：mewcode 的"prompt 超长时丢弃最旧 20% 后重试"（mini 已有 MAX_HISTORY_CHARS=24K 截断，需求弱）
+**已实现**：
+- P72：`SUMMARY_RETRIES=2`，偶发失败先重试再落抽取式，重试/穷尽有 WARNING 日志
+- P73：`_is_prompt_too_long()`（400/413 一律算 + 错误消息关键词兜底）识别超长后，丢弃最旧 20% 可摘要消息（头部旧压缩摘要绝不丢——它是更早历史的唯一记录）并把字符 cap 缩 20% 后重试；`MAX_SHRINKS=3`，与偶发重试预算独立；穷尽后立即回退，不用相同的超长请求烧偶发预算（真实运行实测：相同请求重试必然相同失败）。真实 API 全管道验证：6.2M 字符 → 真 400 → 2 轮收缩 → 3.98M 字符成功产出 9 节摘要，埋点约定存活。详见 tech-notes §73。
 
 ### ⑧ 压缩后重注入环境上下文和记忆 — 不适用（架构差异）
 

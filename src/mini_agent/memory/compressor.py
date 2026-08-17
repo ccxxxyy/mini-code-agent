@@ -19,6 +19,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+import httpx
+
 from mini_agent.llm.token_counter import count_tokens
 from mini_agent.models.message import Conversation, Message, Role
 
@@ -295,6 +297,38 @@ def _extract_summary(llm_output: str) -> str:
     return llm_output.strip()
 
 
+# Error-message markers that indicate the request itself was too large.
+# Keyword fallback for providers that wrap errors in plain exceptions.
+# 指示请求本身过大的错误消息关键词——用于兜底识别包装过的异常。
+_TOO_LONG_MARKERS = (
+    "context length",
+    "context_length",
+    "too long",
+    "too many tokens",
+    "maximum context",
+    "input length",
+    "prompt tokens",
+)
+
+
+def _is_prompt_too_long(exc: BaseException) -> bool:
+    """Whether the summarize call failed because the prompt was too large.
+    判断摘要调用是否因 prompt 过大失败。
+
+    Any 400/413 counts: in streaming mode the error body is often unreadable
+    (httpx ResponseNotRead), and a summarize request is fixed-format -- a 400
+    is almost always length. Misjudging costs at most a few bounded retries
+    before the extractive fallback, never a crash.
+    400/413 一律算：流式模式下错误响应体常不可读（httpx ResponseNotRead），
+    而摘要请求格式固定——400 几乎必是长度问题。误判最多多花几次有界重试
+    后落抽取式回退，不会崩溃。
+    """
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (400, 413):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _TOO_LONG_MARKERS)
+
+
 class LLMSummarizeOldest(CompressionStrategy):
     """Stage 2 (LLM variant): semantically summarize the oldest messages via LLM.
     第 2 级（LLM 变体）：用 LLM 对最旧的消息做语义摘要。
@@ -312,6 +346,16 @@ class LLMSummarizeOldest(CompressionStrategy):
     # 烧几千 token 才输出正文——默认 4096 会截断在 summary 中途。
     SUMMARY_MAX_TOKENS = 8192
     SUMMARY_RETRIES = 2  # attempts before extractive fallback 回退前的尝试次数
+    # Prompt-too-long recovery (separate budget from transient retries):
+    # drop the oldest 20% of summarizable messages AND shrink the char cap
+    # 20% per round. The message drop follows mewcode semantics (oldest is
+    # least valuable); the cap shrink guarantees the request actually gets
+    # smaller even while the digest still exceeds the cap.
+    # prompt 超长恢复（与偶发失败重试预算独立）：每轮丢弃最旧 20% 的可摘要
+    # 消息并把字符 cap 缩 20%。丢消息沿用 mewcode 语义（最旧价值最低）；
+    # 缩 cap 保证 digest 仍超 cap 时请求也确实变小。
+    MAX_SHRINKS = 3  # shrink-and-retry rounds before giving up 收缩重试轮数上限
+    SHRINK_KEEP_RATIO = 0.8  # keep 80%, drop oldest 20% 保留 80%，丢最旧 20%
 
     def __init__(self, llm: LLMProvider) -> None:
         self._llm = llm
@@ -335,9 +379,12 @@ class LLMSummarizeOldest(CompressionStrategy):
         # the extractive fallback loses the 9-section structure.
         # 回退前先重试：真实终端会话几乎每场出现一次偶发空摘要——重试一次
         # 通常就能恢复，而抽取式回退会丢掉 9 节结构。
-        for attempt in range(1, self.SUMMARY_RETRIES + 1):
+        cap = self.MAX_HISTORY_CHARS
+        attempt = 0
+        shrinks = 0
+        while attempt < self.SUMMARY_RETRIES:
             try:
-                summary = await self._summarize(digest[: self.MAX_HISTORY_CHARS])
+                summary = await self._summarize(digest[:cap])
                 summary_text = (
                     "[Compressed conversation history (LLM summary) -- this is the "
                     "authoritative record of earlier conversation. Do NOT search "
@@ -345,6 +392,36 @@ class LLMSummarizeOldest(CompressionStrategy):
                 )
                 break
             except Exception as e:
+                if _is_prompt_too_long(e):
+                    if shrinks >= self.MAX_SHRINKS:
+                        # Retrying the identical oversized request fails
+                        # identically -- real-run verified (Aliyun MaaS: two
+                        # extra 400s on the same 6.1M-char prompt). Fall back.
+                        # 相同的超长请求重试必然相同失败——真实运行实测
+                        # （阿里云 MaaS：同一 6.1M 字符 prompt 白吃两次 400）。
+                        # 直接回退。
+                        logger.warning(
+                            "summary prompt still too long after %d shrinks, "
+                            "falling back to extractive digest",
+                            shrinks,
+                        )
+                        break
+                    shrinks += 1
+                    to_summarize, dropped = self._shrink_oldest(to_summarize)
+                    cap = int(cap * self.SHRINK_KEEP_RATIO)
+                    digest = _extractive_digest(to_summarize)
+                    logger.warning(
+                        "summary prompt too long (%s: %s), dropped oldest %d message(s), "
+                        "cap -> %d chars, shrink retry %d/%d",
+                        type(e).__name__,
+                        e,
+                        dropped,
+                        cap,
+                        shrinks,
+                        self.MAX_SHRINKS,
+                    )
+                    continue
+                attempt += 1
                 logger.warning(
                     "LLM summarization attempt %d/%d failed (%s: %s)",
                     attempt,
@@ -361,6 +438,28 @@ class LLMSummarizeOldest(CompressionStrategy):
             )
 
         conversation.messages = [_make_summary_message(summary_text)] + kept
+
+    def _shrink_oldest(self, msgs: list[Message]) -> tuple[list[Message], int]:
+        """Drop the oldest ~20% of summarizable messages -- but never a prior
+        compression summary at the head: it is the sole record of ALL earlier
+        history, and losing it repeats the 300-char-truncation failure where
+        the boundary ended up saying "the full request is unknown".
+        丢弃最旧约 20% 的可摘要消息——但绝不丢头部的旧压缩摘要：它是更早
+        全部历史的唯一记录，丢了就重演 300 字符截断的失败（最终边界自述
+        "完整请求未知"）。
+
+        Dropped messages are replaced by the summary along with everything
+        else -- they just go unrepresented in the summary text (mewcode
+        accepts the same loss; we are out of space).
+        被丢弃的消息和其余消息一样被摘要替换——只是不再体现在摘要文本里
+        （mewcode 接受同样的损失；空间已经不够了）。
+        """
+        start = 1 if (msgs and msgs[0].compressed and msgs[0].role == Role.SYSTEM) else 0
+        droppable = len(msgs) - start
+        if droppable <= 1:
+            return msgs, 0  # cap shrink alone still makes progress 仅靠缩 cap 也能推进
+        drop = max(1, droppable - int(droppable * self.SHRINK_KEEP_RATIO))
+        return msgs[:start] + msgs[start + drop :], drop
 
     async def _summarize(self, history: str) -> str:
         # One-shot direct LLM call, bypasses AgentLoop -- no recursion risk.
