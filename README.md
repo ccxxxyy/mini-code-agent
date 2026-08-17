@@ -191,11 +191,11 @@ mini-code-agent/
 │   ├── security/    # Permissions, path guard, git worktree isolation
 │   ├── ui/          # Rich terminal rendering, themes, prompt toolkit
 │   ├── remote/      # WebSocket server + browser UI (--remote mode)
-│   ├── extensions/  # Slash commands, skills, hooks
+│   ├── extensions/  # Slash commands, skills, hooks, event listener plugins
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 852 tests, 80%+ coverage
+├── tests/           # 876 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 4 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 └── docs/            # 13 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
@@ -215,7 +215,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 852 tests
+uv run pytest tests/           # 876 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

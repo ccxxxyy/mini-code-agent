@@ -58,17 +58,20 @@ HookFn = Callable[[HookContext], Awaitable[HookResult]]
 
 @dataclass
 class HookRule:
-    """Declarative PRE_TOOL rejection rule from `[[hooks]]` TOML config (7.2).
-    Users block tools by config instead of writing Python hook code --
+    """Declarative PRE_TOOL rule from `[[hooks]]` TOML config.
+    Users block tools (action="block") or require user confirmation
+    (action="confirm") by config instead of writing Python hook code --
     adapted from mewcode's `reject: true` pre_tool_use hooks.
-    来自 `[[hooks]]` TOML 配置的声明式 PRE_TOOL 拒绝规则——用户通过配置
-    而非 Python 代码阻止工具执行（对标 mewcode 的 reject hook）。"""
+    来自 `[[hooks]]` TOML 配置的声明式 PRE_TOOL 规则——用户通过配置
+    而非 Python 代码阻止工具执行（action="block"）或要求用户确认
+    （action="confirm"），对标 mewcode 的 reject hook。"""
 
     tool: str = "*"  # fnmatch pattern on tool name 工具名 fnmatch 模式
     arg: str = ""  # optional: check only this argument 只检查此参数
     contains: str = ""  # optional: substring that triggers 触发子串
     regex: str = ""  # optional: re.search pattern that triggers 触发正则
     reason: str = ""  # message shown to the LLM 回给 LLM 的原因
+    action: HookAction = HookAction.BLOCK  # block or confirm 阻止或确认
 
     def _value_hits(self, text: str) -> bool:
         if self.contains and self.contains not in text:
@@ -105,6 +108,14 @@ def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
         if not entry.get("reject", True):
             log.warning("hooks[%d]: only reject=true rules are supported, skipped", i)
             continue
+        action_raw = str(entry.get("action", "block")).lower()
+        if action_raw not in (HookAction.BLOCK, HookAction.CONFIRM):
+            log.warning(
+                "hooks[%d]: unsupported action '%s' (only 'block'/'confirm'), skipped",
+                i,
+                action_raw,
+            )
+            continue
         regex = str(entry.get("regex", ""))
         if regex:
             try:
@@ -119,6 +130,7 @@ def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
                 contains=str(entry.get("contains", "")),
                 regex=regex,
                 reason=str(entry.get("reason", "")),
+                action=HookAction(action_raw),
             )
         )
     return rules
@@ -130,6 +142,11 @@ class HookManager:
 
     def __init__(self) -> None:
         self._hooks: dict[HookStage, list[tuple[int, HookFn]]] = {}
+        # Declarative confirm rules -- kept for the non-interactive peek
+        # would_confirm() (mirrors PermissionManager.would_ask)
+        # 声明式确认规则——供非交互预判 would_confirm() 使用
+        # （对应 PermissionManager.would_ask）
+        self._confirm_rules: list[HookRule] = []
 
     def register(self, stage: HookStage, hook: HookFn, priority: int = 0) -> None:
         """Register a hook. Higher priority runs first.
@@ -140,6 +157,17 @@ class HookManager:
     def unregister(self, stage: HookStage, hook: HookFn) -> None:
         hooks = self._hooks.get(stage, [])
         self._hooks[stage] = [(p, h) for p, h in hooks if h is not hook]
+
+    def track_confirm_rule(self, rule: HookRule) -> None:
+        self._confirm_rules.append(rule)
+
+    def would_confirm(self, tool_name: str, args: dict[str, Any] | None) -> bool:
+        """Non-interactive peek: would a declarative rule ask for confirmation?
+        Only covers `[[hooks]]` config rules -- programmatic hooks returning
+        CONFIRM cannot be predicted without running them.
+        非交互预判：声明式规则是否会要求确认？只覆盖 `[[hooks]]` 配置规则——
+        代码注册的 hook 返回 CONFIRM 无法在不执行的情况下预测。"""
+        return any(r.matches(tool_name, args) for r in self._confirm_rules)
 
     async def run(self, ctx: HookContext) -> HookResult:
         """Run all hooks for the stage in priority order.
@@ -165,14 +193,19 @@ class HookManager:
 
 
 def register_hook_rules(manager: HookManager, raw_rules: list[Any]) -> int:
-    """Parse config rules and register them as PRE_TOOL blocking hooks.
-    Returns the number of rules registered.
-    解析配置规则并注册为 PRE_TOOL 阻止 hook，返回注册数量。"""
+    """Parse config rules and register them as PRE_TOOL blocking or
+    confirming hooks. Returns the number of rules registered.
+    解析配置规则并注册为 PRE_TOOL 阻止或确认 hook，返回注册数量。"""
     rules = parse_hook_rules(raw_rules)
     for rule in rules:
 
         async def _rule_hook(ctx: HookContext, _rule: HookRule = rule) -> HookResult:
             if ctx.tool_name and _rule.matches(ctx.tool_name, ctx.tool_args):
+                if _rule.action == HookAction.CONFIRM:
+                    reason = _rule.reason or (
+                        f"tool '{ctx.tool_name}' requires confirmation (project hook rule)"
+                    )
+                    return HookResult(action=HookAction.CONFIRM, reason=reason)
                 reason = _rule.reason or (
                     f"tool '{ctx.tool_name}' is blocked by a project hook rule"
                 )
@@ -180,4 +213,6 @@ def register_hook_rules(manager: HookManager, raw_rules: list[Any]) -> int:
             return HookResult(action=HookAction.CONTINUE)
 
         manager.register(HookStage.PRE_TOOL, _rule_hook)
+        if rule.action == HookAction.CONFIRM:
+            manager.track_confirm_rule(rule)
     return len(rules)

@@ -237,7 +237,7 @@ listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
                              # 同步/异步均可）。插件异常被隔离并记日志，不影响主流程。用于统计/调试，
                              # 如把所有事件落盘 JSONL。下划线开头的文件跳过。
 
-# 声明式 Hook 拒绝规则（comparison 7.2）——命中即拒绝工具执行，reason 回给 LLM
+# 声明式 Hook 规则——命中即拒绝工具执行（默认）或弹窗确认，reason 回给 LLM
 # 可写多条 [[hooks]]；非法条目告警跳过不阻断启动
 [[hooks]]
 tool = "write_file"          # 工具名 fnmatch 模式（"bash"、"write_*"，默认 "*" 全部）
@@ -254,6 +254,12 @@ reason = "外网下载被项目策略禁止"
 tool = "bash"
 regex = 'rm\s+-rf'           # 可选：re.search 正则（与 contains 同时给则须同时命中；非法正则告警跳过该条）
 reason = "破坏性删除被项目策略禁止"
+
+[[hooks]]
+tool = "bash"
+contains = "git push"
+action = "confirm"           # 可选："block"（默认）直接拒绝；"confirm" 弹 y/a/n 确认框
+reason = "push 会影响远程仓库"
 
 # MCP 服务器
 [mcp.servers.github]
@@ -294,9 +300,9 @@ transport = "stdio"
 
 **注意**：预算基于金额计算，所以**必须先配置 `[cost.pricing.<模型名>]` 价格**——没有价格时成本恒为 0，预算永远不会触发。
 
-### Hook 拒绝规则详解（[[hooks]] 段）
+### Hook 规则详解（[[hooks]] 段）
 
-**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝"。命中的工具**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试。
+**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝或需要确认"。`action = "block"`（默认）命中即**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试；`action = "confirm"` 命中弹 y/a/n 确认框由你裁决——y 放行一次、a 本会话内同一规则不再询问、n 拒绝（LLM 收到 `Denied by user: <reason>`）。
 
 **写在哪**：用户级 `~/.mini-agent/config.toml`（跨项目生效）或项目级 `.mini-agent/config.toml`（仅本项目）。
 **层级语义（注意）**：项目级定义了 `[[hooks]]` 时**整体替换**用户级的规则列表（不合并）——想两边都生效，把用户级规则复制进项目级。
@@ -309,21 +315,22 @@ transport = "stdio"
 | `arg` | 否 | 空 | 只检查此参数的值（如 `"file_path"`）；缺省检查**所有**参数值 |
 | `contains` | 否 | 空 | 参数值包含此子串才触发 |
 | `regex` | 否 | 空 | 参数值 `re.search` 命中此正则才触发；非法正则**告警跳过该条**，不阻断启动 |
-| `reason` | 建议填 | 自动生成 | 拒绝原因，原样回给 LLM——写清楚"为什么+该怎么办"效果最好 |
+| `reason` | 建议填 | 自动生成 | 拒绝/确认原因，原样回给 LLM（confirm 时也显示在弹窗里）——写清楚"为什么+该怎么办"效果最好 |
+| `action` | 否 | `"block"` | `"block"` 直接拒绝；`"confirm"` 弹 y/a/n 确认框（a = 本会话内同一规则不再询问）；其他值告警跳过 |
 | `event` | 否 | `"pre_tool"` | 目前只支持 `pre_tool`，其他值告警跳过 |
 | `reject` | 否 | `true` | 目前只支持 `true`，`false` 告警跳过 |
 
 **匹配语义**：
-- `contains` 和 `regex` 都不写 = 该工具的**所有调用**都拒绝（等于禁用工具，但带解释）
-- `contains` 和 `regex` 同时写 = **两者都命中**才拒绝（AND）
-- 多条 `[[hooks]]` 规则 = 任一命中即拒绝（OR）
+- `contains` 和 `regex` 都不写 = 该工具的**所有调用**都触发（block 等于禁用工具，但带解释）
+- `contains` 和 `regex` 同时写 = **两者都命中**才触发（AND）
+- 多条 `[[hooks]]` 规则 = 任一命中即触发（OR），block 与 confirm 规则可混用
 - 匹配对参数值做 `str()` 后比较，数字/布尔参数也能匹配
 
 **TOML 语法注意**：
 1. `[[hooks]]` 必须写在所有顶级键（`max_agent_iterations`、`theme` 等）**之后**——顶级键出现在 `[[hooks]]` 之后会被归入该规则条目导致解析错乱
 2. `regex` 的值用**单引号**（TOML literal string）：`regex = 'rm\s+-rf'`——双引号里 `\s` 是非法转义会报错
 
-**验证是否生效**：启动时看到 `Loaded N hook rule(s) from config` 即已加载；让 Agent 触发一条规则，工具调用会显示错误 `Blocked by hook: <你的 reason>`。
+**验证是否生效**：启动时看到 `Loaded N hook rule(s) from config` 即已加载；让 Agent 触发一条规则，block 规则显示错误 `Blocked by hook: <你的 reason>`，confirm 规则弹出确认框（拒绝后 LLM 收到 `Denied by user: <你的 reason>`）。
 
 **常用配方**：
 
@@ -363,9 +370,16 @@ reason = "本项目禁止 Agent 删除文件，请让用户手动删"
 [[hooks]]
 contains = "internal.corp.com"
 reason = "内网地址不允许出现在工具调用中"
+
+# 敏感操作需人工确认（不禁用，但每次问你；按 a 本会话不再问）
+[[hooks]]
+tool = "bash"
+contains = "git push"
+action = "confirm"
+reason = "push 会影响远程仓库"
 ```
 
-**边界**：配置层只做"拒绝"。改写参数（MODIFY）、强制确认（CONFIRM）、观察记录需写 Python Hook 或 EventBus 订阅者——见 agent-architecture.md S04。
+**边界**：配置层做"拒绝"（block）与"强制确认"（confirm）。改写参数（MODIFY）、观察记录需写 Python Hook 或 EventBus 订阅者——见 agent-architecture.md S04。confirm 的裁决弹窗由主 Agent 的 terminal 执行；子 Agent（spawn_agents）不加载 `[[hooks]]` 规则、无确认 UI，代码注册的 CONFIRM hook 在无 UI 时一律安全拒绝。
 
 ---
 

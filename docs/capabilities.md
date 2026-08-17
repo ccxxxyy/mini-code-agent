@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，852 个测试全部通过。
+> 当前版本 v1.0.0，876 个测试全部通过。
 
 ---
 
@@ -103,16 +103,16 @@
 **要求**：危险命令会问你，敏感目录会拦截，Agent 有能力但不会失控。
 
 **实现**（`tools/hooks.py` + `security/`）：
-- Hook 框架：7 个生命周期阶段（PRE_TOOL/POST_TOOL/PRE_LLM/POST_LLM/SESSION_START/END/USER_INPUT）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路
+- Hook 框架：7 个生命周期阶段（PRE_TOOL/POST_TOOL/PRE_LLM/POST_LLM/SESSION_START/END/USER_INPUT）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
 - 危险命令确认：13 条正则（rm -rf/sudo/force push/curl|sh/format 等）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
-- 声明式拒绝规则（comparison 7.2）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason），命中即拒绝工具执行——给某目录加只读锁只需 5 行配置，无需写 Python
+- 声明式规则（comparison 7.2 + issue #167）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason + action），`action = "block"`（默认）命中即拒绝工具执行，`action = "confirm"` 命中弹 y/a/n 确认框由用户裁决——给某目录加只读锁或给 git push 加人工闸门只需 5 行配置，无需写 Python
 
-**验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）+ 11 个声明式规则测试（含 AgentLoop 端到端拦截）
+**验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）+ 20 个声明式规则测试（含 AgentLoop 端到端拦截 + CONFIRM y/n/always/无回调四路径端到端）
 
 ---
 
@@ -212,7 +212,7 @@
 | Tools 工具系统 | Tool ABC（schema + execute 双成员）+ ToolRegistry（注册/克隆/过滤）+ 参数校验 |
 | ReAct 范式 | think → act → observe 循环，失败即数据（错误回传 LLM 自纠错） |
 | Agent Loop 主循环 | `core/agent_loop.py` 状态机（8 个 AgentPhase），三重熔断护栏 |
-| 事件流 | `events/bus.py` 异步发布订阅 EventBus，14 种类型化事件贯穿全部组件 |
+| 事件流 | `events/bus.py` 异步发布订阅 EventBus（on/on_any/off/off_any，handler 异常隔离并记日志），14 种类型化事件贯穿全部组件；`listener_dirs` 目录 *.py 插件零代码接入全局监听|
 
 ### ✅ 层面 3：能力拓展协议
 
@@ -261,7 +261,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 852 个测试全部通过（约 90 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
+| 测试 | 876 个测试全部通过（约 90 秒，零网络依赖），单元 54 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

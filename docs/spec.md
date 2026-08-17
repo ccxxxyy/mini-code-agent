@@ -2352,6 +2352,8 @@ pattern = "rm|sudo|chmod|chown|mkfs|dd"
 message = "This command looks dangerous. Proceed?"
 ```
 
+> **实现注记**：实际落地的配置格式是 `[[hooks]]` 数组表（字段：tool/arg/contains/regex/reason/action），语义与本节设计一致——`action = "block"`（默认）拒绝执行，`action = "confirm"` 弹 y/a/n 确认框。见 config-guide.md "Hook 规则详解"。
+
 或通过代码：
 
 ```python

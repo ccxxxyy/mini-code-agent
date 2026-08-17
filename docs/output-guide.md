@@ -153,7 +153,7 @@
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
-| 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径 |
+| 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中 |
 | `Goodbye!` | `app.py` `run()` finally | 正常退出时 |
 | `Interrupted.` | `app.py` `_handle_turn` except | Ctrl+C / 双 Esc 中断时 |
 

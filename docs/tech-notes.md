@@ -120,12 +120,16 @@ class EventBus:
 
     def on(event_type, handler)      # 订阅特定事件
     def on_any(handler)              # 订阅全部（日志/调试用）
+    def off(event_type, handler)     # 取消订阅
+    def off_any(handler)             # 取消全局订阅
     async def emit(event)            # 广播，asyncio.gather 并发分发
 ```
 
-以**事件类的 type 对象**作为字典键做路由——`emit` 时 `type(event)` 精确匹配订阅者。所有处理器用 `asyncio.gather(..., return_exceptions=True)` 并发执行，单个处理器异常不影响其他订阅者。
+以**事件类的 type 对象**作为字典键做路由——`emit` 时 `type(event)` 精确匹配订阅者。所有处理器用 `asyncio.gather(..., return_exceptions=True)` 并发执行，单个处理器异常不影响其他订阅者；异常由 `emit` 逐个记 warning 日志（issue #166 起，此前静默吞掉）。
 
-事件类型定义在 `models/events.py`：UserMessageEvent、LLMStreamChunkEvent、ToolCallStart/EndEvent、AgentPhaseChangeEvent、TurnCompleteEvent、SessionStart/EndEvent 等，全部继承携带时间戳的 `Event` 基类。
+**零代码全局监听**：`extensions/event_listeners.py` 从顶级配置 `listener_dirs`（默认 `./.mini-agent/listeners` + `~/.mini-agent/listeners`）加载 *.py 插件——契约为 `register(bus)`（完全控制，优先）或 `on_event(event)`（同步/异步均可，自动经 `on_any` 注册为全局监听）。插件导入/注册/运行异常全部隔离并记日志，绝不影响主流程；app 启动时提示 "Loaded N event listener(s)"。用途：把全部事件落盘 JSONL、统计工具调用分布等。
+
+事件类型定义在 `models/events.py`：UserMessageEvent、LLMRequest/LLMResponseEvent、ToolCallStart/EndEvent、PermissionCheckEvent、AgentPhaseChangeEvent、TurnCompleteEvent、SessionStart/EndEvent 等，全部继承携带时间戳的 `Event` 基类。
 
 ### 方案选型
 
@@ -405,7 +409,7 @@ Windows: del /s /q、rmdir /s、format c:
 
 - **为什么全异步？** Hook 常需 I/O（弹窗、写日志、查外部策略），同步会阻塞事件循环卡死 TUI
 - **为什么显式 register 不用装饰器？** 装配点集中在 app.py，装了哪些拦截器一目了然——安全组件最忌魔法注册
-- **为什么 CONFIRM 短路上交？** HookManager 不持有 UI 引用（工具层不依赖交互层），确认动作由持有 terminal 的上层执行
+- **为什么 CONFIRM 短路上交？** HookManager 不持有 UI 引用（工具层不依赖交互层），确认动作由持有 terminal 的上层执行——已接线：`agent_loop._resolve_hook_confirm` 用 app 注入的 `terminal.confirm` 弹 y/a/n 裁决（a = 本会话内同一 (工具, 原因) 不再询问；无 UI 回调时安全拒绝；弹窗加 asyncio.Lock 防并行工具执行时交错），配置层经 `[[hooks]]` 的 `action = "confirm"` 直接可用
 - **为什么 BLOCK 回传 reason 而非抛异常？** 异常终止整个 ReAct 循环；作为 ToolResult 返回则 LLM 能"看到"拒绝理由并换方案
 
 ## 3.5 安全管道集成进 AgentLoop
@@ -2507,12 +2511,48 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 
 6 个新单测：识别函数（400/413/关键词/非超长不误判）/ 400 后丢最旧重试成功（验证第二次 prompt 不含最旧消息）/ 穷尽立即回退（调用数 = MAX_SHRINKS+1，不烧偶发预算）/ 收缩与偶发预算独立（400→ConnectionError→成功共 3 次调用）/ 旧摘要保护 / 无可丢消息不崩溃。852 个测试全过，ruff lint + format clean。
 
+## 74. 全局事件监听插件
+
+### 74.1 前因
+
+死代码审计（todo-code-quality 扩展点 #1）发现 `EventBus.on_any()` 自 P1 就存在但**零调用方**——注释写着"日志/调试用"，实际从未有人能用上：订阅需要写 Python 并改 app.py 装配代码，"零改循环代码加可观测性"的架构承诺（agent-architecture 4.3）只对内置订阅者成立，对**用户**并不成立。同时 `emit` 的 `return_exceptions=True` 把 handler 异常静默吞掉——坏订阅者无声失效，调试无从下手。
+
+### 74.2 方案
+
+`extensions/event_listeners.py`：启动时从顶级配置 `listener_dirs`（默认 `./.mini-agent/listeners` + `~/.mini-agent/listeners`）加载 *.py 插件。契约两档：`register(bus)` 完全控制（订阅特定事件），`on_event(event)` 便捷形式（同步/异步均可，自动经 `on_any` 全局订阅）；两者都有时 register 优先。配套补齐 `off_any()`（有 on 必有 off）和 `emit` 的 handler 异常 warning 日志。
+
+**权衡**：导入即执行任意代码——但插件目录在用户自己的项目/home 下，信任边界与 CLAUDE.md、`.mini-agent/config.toml` 一致（能改这些文件的人本就能改一切）；换取的是零装配成本。异常三层全隔离（导入/注册/运行）——观测组件绝不能反噬被观测系统。
+
+### 74.3 后果与验证
+
+用户丢一个 .py 进目录即可把全部事件落盘 JSONL、做工具调用统计——不改一行源码。启动提示 "Loaded N event listener(s)" 确认加载。`on_any` 从死代码变为插件机制的承载点。
+
+## 75. Hook 确认裁决 CONFIRM 接入
+
+### 75.1 前因
+
+`HookAction.CONFIRM` 自 P3 定义、`HookManager.run()` 也实现了"遇 CONFIRM 短路上交"，但上层（agent_loop）**只处理 BLOCK**——hook 返回 CONFIRM 会被静默当作放行，语义悬空至今（todo-code-quality 扩展点 #7"未来交互式 hook 可能用"）。spec 14.4 当初就设计了 `action = "confirm"` 的配置 hook，一直没落地。用户侧的真实缺口：`[[hooks]]` 只有"一刀切拒绝"，没有"敏感操作让我看一眼"的中间档——比如 git push 不想禁死但想人工过闸。
+
+### 75.2 方案
+
+三层接线，遵循既有架构约束（§3"HookManager 不持有 UI 引用，确认动作由持有 terminal 的上层执行"）：
+
+1. **配置层**：`HookRule` 新增 `action` 字段（`"block"` 默认 / `"confirm"`，非法值告警跳过不阻断启动——与既有非法条目语义一致）
+2. **裁决层**：`agent_loop._resolve_hook_confirm()` 用 app 注入的 `terminal.confirm` 弹 y/a/n（与权限确认同一弹窗，用户零新概念）；"a" 按 (工具名, 原因) 记会话授权，同规则不再问
+3. **并发防护**：确认弹窗加 `asyncio.Lock`（并行工具执行时弹窗不可交错，等锁后重查授权防重复问）；流式工具执行经 `HookManager.would_confirm()` 非交互预判（对标 `PermissionManager.would_ask`），会弹窗的延迟到 `_act`——弹窗不能和流式渲染交错
+
+**权衡**：CONFIRM 短路意味着用户放行后**不再执行链上后续 hook**（与 BLOCK 同语义）——按"安全裁决一票定案"的既有原则接受；`would_confirm` 只覆盖声明式规则，代码注册的 hook 返回 CONFIRM 无法不执行即预测（诚实边界）。fail-safe 延续：无 confirm 回调（脚本/CI/子 Agent）一律拒绝。
+
+### 75.3 后果与验证
+
+`[[hooks]]` 从"禁止清单"升级为"禁止 + 人工闸门"双档；拒绝时 LLM 收到 `Denied by user: <reason>` 会调整策略而非重试。9 个新单测（解析/预判/短路/管道端到端 y/n/always/无回调）+ 真实 LLM 全管道三路径验证（JSON 取证 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次。876 个测试全过。
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——852 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——876 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

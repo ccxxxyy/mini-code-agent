@@ -1823,3 +1823,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P75.8 验证
 - [x] 858 个测试全过，ruff lint + format clean
+
+## 全局事件监听插件
+
+**前因**：死代码审计发现 `EventBus.on_any()` 零调用方——用户想观察事件必须写 Python 改装配代码；且 `emit` 静默吞 handler 异常。**后果**：`listener_dirs` 丢 .py 即接入全局监听，异常隔离并可见。因果详述见 tech-notes §74。
+
+- [x] `extensions/event_listeners.py` — `load_event_listeners(listener_dirs, bus)`：扫描配置目录加载 *.py 插件（下划线开头跳过），返回成功加载的插件名
+- [x] 插件契约 — `register(bus)`（完全控制，优先）或 `on_event(event)`（同步/异步均可，自动经 `bus.on_any` 注册为全局监听）
+- [x] 异常隔离 — 导入失败 / register 失败 / handler 异常均告警跳过，绝不影响 Agent 主流程
+- [x] `events/bus.py` — `emit` 对 handler 异常记 warning 日志（原静默吞掉）；补充 `off_any()`
+- [x] `models/config.py` — 顶级 `listener_dirs` 配置（默认 `./.mini-agent/listeners` + `~/.mini-agent/listeners`）
+- [x] `app.py` — 启动时加载并提示 "Loaded N event listener(s): <名单>"
+
+## HookAction.CONFIRM 接入
+
+**前因**：`HookAction.CONFIRM` 自 P3 定义但 agent_loop 只处理 BLOCK，返回 CONFIRM 被静默放行（todo-code-quality 扩展点 #7）；`[[hooks]]` 只有一刀切拒绝，缺"敏感操作人工过闸"中间档。**后果**：`action = "confirm"` 规则弹 y/a/n 由用户裁决，拒绝原因回传 LLM。因果详述见 tech-notes §75。
+
+- [x] `tools/hooks.py` — `HookRule` 新增 `action` 字段（`"block"` 默认 / `"confirm"`，非法值告警跳过）；`register_hook_rules` 按 action 注册 PRE_TOOL BLOCK/CONFIRM hook；`HookManager.would_confirm()` 非交互预判（对标 `PermissionManager.would_ask`，只覆盖声明式规则）
+- [x] `core/agent_loop.py` — `_run_tool_pipeline` 处理 CONFIRM：`_resolve_hook_confirm` 弹 y/a/n（a = 本会话同 (工具, 原因) 不再问；无 UI 回调安全拒绝；asyncio.Lock 防并行弹窗交错）；拒绝回传 "Denied by user: <reason>"；流式执行对 would-confirm 的工具延迟到 `_act`
+- [x] `app.py` — 注入 `terminal.confirm`（与权限确认同一 y/a/n 弹窗）；子 Agent 无 UI 保持安全拒绝
+- [x] 测试 — 新增 9 个（解析/预判/短路/管道端到端 y/n/always/无回调），876 个全过，ruff clean
+- [x] 真实 LLM 全管道验证（JSON 取证，三路径 PASS）：y 放行只问一次、n 拒绝且 LLM 正确收尾、a 两次写入只问一次

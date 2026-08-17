@@ -74,8 +74,8 @@
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
 
-# 声明式 Hook 拒绝规则（详见 docs/config-guide.md "Hook 拒绝规则详解"）
-# 命中的工具调用被拒绝执行，reason 回给 LLM。可写多条 [[hooks]]。
+# 声明式 Hook 规则（详见 docs/config-guide.md "Hook 规则详解"）
+# 命中的工具调用被拒绝执行（默认）或弹窗确认，reason 回给 LLM。可写多条 [[hooks]]。
 # 注意：[[hooks]] 必须写在所有顶级键之后；regex 用单引号（literal string）
 # [[hooks]]
 # tool = "write_file"        # 工具名 fnmatch 模式（"bash"、"write_*"，默认 "*" 全部）
@@ -87,3 +87,9 @@
 # tool = "bash"
 # regex = 'rm\s+-rf'         # 可选：re.search 正则；与 contains 同给须同时命中
 # reason = "破坏性删除被项目策略禁止"
+#
+# [[hooks]]
+# tool = "bash"
+# contains = "git push"
+# action = "confirm"         # 可选："block"（默认）拒绝；"confirm" 弹 y/a/n 确认框
+# reason = "push 会影响远程仓库"

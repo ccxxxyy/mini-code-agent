@@ -639,13 +639,13 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 | | mini | mewcode |
 |---|---|---|
-| Pre-tool hook 拒绝 | ✅ 代码层 `HookAction.BLOCK`（P50 起已接线）+ **`[[hooks]]` 配置声明式拒绝规则**（fnmatch 工具名 + 参数子串/正则匹配） | ✅ 配置文件 hook `reject: true` 抛 `ToolRejectedError` 阻止执行 |
+| Pre-tool hook 拒绝 | ✅ 代码层 `HookAction.BLOCK`+ **`[[hooks]]` 配置声明式规则**（fnmatch 工具名 + 参数子串/正则匹配；支持 `action = "confirm"` 弹 y/a/n 确认框） | ✅ 配置文件 hook `reject: true` 抛 `ToolRejectedError` 阻止执行 |
 
 **实现前的勘误**：本条原描述"Hook 只能观察，不能阻止"已陈旧——`HookAction.BLOCK` 在 `_run_tool_pipeline` 早已接线（工具不执行，LLM 收到 "Blocked by hook: <reason>"）。对照 mewcode 源码后确认**真实差距是用户入口**：mewcode 的拒绝 hook 从配置文件加载（event/条件/reject/reason），mini 只能写 Python 代码注册。
 
 **已完成**（声明式规则）：
-1. `tools/hooks.py` — `HookRule` dataclass + `parse_hook_rules()`（非法条目告警跳过，不阻断启动）+ `register_hook_rules()`（注册为 PRE_TOOL BLOCK hook）
-2. 匹配语义：`tool`（fnmatch 模式，默认 `*`）+ `contains`（参数值子串，可选）+ `regex`（re.search 正则，可选，与 contains 同时给则须同时命中；非法正则告警跳过）+ `arg`（限定只查某参数，可选）；命中即 BLOCK，`reason` 回给 LLM
+1. `tools/hooks.py` — `HookRule` dataclass + `parse_hook_rules()`（非法条目告警跳过，不阻断启动）+ `register_hook_rules()`（注册为 PRE_TOOL BLOCK/CONFIRM hook，按 `action` 字段区分）
+2. 匹配语义：`tool`（fnmatch 模式，默认 `*`）+ `contains`（参数值子串，可选）+ `regex`（re.search 正则，可选，与 contains 同时给则须同时命中；非法正则告警跳过）+ `arg`（限定只查某参数，可选）；命中即按 `action` 裁决（默认 BLOCK；`"confirm"` 弹 y/a/n 确认），`reason` 回给 LLM
 3. `AgentConfig.hooks` 字段——TOML `[[hooks]]` 经 `_merge` 自动落入；`app.py` 启动时注册并提示数量
 4. 配置示例（给 docs/spec.md 加只读锁，5 行配置替代 10 行 Python）：
 
@@ -659,7 +659,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 5. 11 个测试：工具名匹配 / fnmatch 模式 / arg 限定 / 任意参数子串 / regex（含 AND 语义与非法正则跳过）/ 默认 reason / 非法条目跳过 / TOML 往返 / **端到端**（AgentLoop 流水线内拦截，文件未写入且 LLM 收到原因）
 
-**与 mewcode 的差异**：mewcode 的 hook 还支持 command/prompt/http/agent 四种动作类型和条件表达式引擎；mini 只做拒绝规则（7.2 的主题），观察类扩展已有 EventBus 订阅者机制覆盖，不重复建设。
+**与 mewcode 的差异**：mewcode 的 hook 还支持 command/prompt/http/agent 四种动作类型和条件表达式引擎；mini 做拒绝（block）与确认两种规则，观察类扩展已有 EventBus 订阅者机制覆盖（含 `listener_dirs` 零代码插件），不重复建设。
 
 ---
 
@@ -816,7 +816,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | ✅ 完成 | 9.1 | 会话自动清理 | 磁盘管理 | 已完成 |
 | ✅ 完成 | 9.2 | 会话压缩边界 | 恢复性能 | 已完成 |
 | ✅ 完成 | 4.6 | 记忆导出/导入（P61） | 互操作：export/import .md + scope 路由 | 已完成 |
-| ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则） | 自动化控制 | 已完成 |
+| ✅ 完成 | 7.2 | Hook 拒绝工具执行（[[hooks]] 声明式规则;支持 action="confirm" 弹窗确认） | 自动化控制 | 已完成 |
 | ✅ 完成 | 1.1 | LLM 摘要压缩接入（P64.2） | LLM 语义摘要设为默认，失败回退提取式 | 已完成 |
 | ✅ 完成 | — | 压缩检查前移 + 摘要前缀指令（P64.3） | 纯对话场景压缩触发 + 防 LLM 翻会话文件 | 已完成 |
 | ✅ 完成 | 4.7 | 压缩双阈值（P65） | 硬阈值绕过熔断器，紧急情况走完整级联而非粗暴截断 | 已完成 |
