@@ -180,14 +180,14 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="allow",
-            description="Add an ALLOW permission rule (usage: /allow <command|path> <pattern>)",
+            description="Manage ALLOW rules (/allow [remove] <command|path|tool> <pattern>)",
             handler=_make_permission_rule(app, "allow"),
         )
     )
     reg.register(
         SlashCommand(
             name="deny",
-            description="Add a DENY permission rule (usage: /deny <command|path> <pattern>)",
+            description="Manage DENY rules (/deny [remove] <command|path|tool> <pattern>)",
             handler=_make_permission_rule(app, "deny"),
         )
     )
@@ -1432,6 +1432,12 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
 
     level = PermissionLevel.ALLOW if level_name == "allow" else PermissionLevel.DENY
 
+    scope_map = {
+        "command": PermissionScope.COMMAND,
+        "path": PermissionScope.PATH,
+        "tool": PermissionScope.TOOL,
+    }
+
     async def handler(args: str, ctx: Any) -> str:
         pm = app.permission_manager
         raw = args.strip()
@@ -1440,11 +1446,20 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
             rules = pm.list_rules()
             filtered = [r for r in rules if r.level == level]
             if not filtered:
-                return f"No {level_name} rules.\nUsage: /{level_name} <command|path> <pattern>"
+                return f"No {level_name} rules.\nUsage: /{level_name} <command|path|tool> <pattern>"
             lines = [f"**{level_name.upper()} Rules ({len(filtered)})：**"]
             for r in filtered:
-                lines.append(f"  [{r.scope.value}] `{r.pattern}` — {r.reason or 'runtime'}")
+                # Escape [scope] -- markdown eats bare brackets as ref links
+                # 转义 [scope]——markdown 会把裸方括号当引用链接吞掉
+                lines.append(f"  \\[{r.scope.value}] `{r.pattern}` — {r.reason or 'runtime'}")
             return "\n".join(lines)
+
+        removing = False
+        if raw.startswith("remove ") or raw == "remove":
+            removing = True
+            raw = raw[len("remove") :].strip()
+            if not raw:
+                return f"Usage: /{level_name} remove <command|path|tool> <pattern>"
 
         save = False
         if "--save" in raw:
@@ -1453,18 +1468,26 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
 
         parts = raw.split(maxsplit=1)
         if len(parts) < 2:
-            return f"Usage: /{level_name} <command|path> <pattern> [--save]"
+            return f"Usage: /{level_name} [remove] <command|path|tool> <pattern> [--save]"
 
         scope_str = parts[0].lower()
         pattern = parts[1].strip().strip("\"'")
 
-        scope_map = {"command": PermissionScope.COMMAND, "path": PermissionScope.PATH}
         scope = scope_map.get(scope_str)
         if scope is None:
-            return f"Unknown scope: `{scope_str}`. Use `command` or `path`."
+            return f"Unknown scope: `{scope_str}`. Use `command`, `path` or `tool`."
 
         if not pattern:
             return f"Usage: /{level_name} {scope_str} <pattern>"
+
+        if removing:
+            # Session-only removal: rules loaded from permissions.toml will
+            # be back on next startup unless the file itself is edited.
+            # 仅移除会话内规则：来自 permissions.toml 的规则下次启动仍会加载，
+            # 需手动编辑文件。
+            if pm.remove_rule(scope, pattern, level):
+                return f"Removed {level_name} rule: \\[{scope_str}] `{pattern}`"
+            return f"No such rule: {level_name} \\[{scope_str}] `{pattern}`"
 
         reason = "slash command (saved)" if save else "slash command"
         rule = PermissionRule(scope=scope, pattern=pattern, level=level, reason=reason)
@@ -1474,9 +1497,9 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
             return str(e)
 
         if not added:
-            return f"Rule already exists: {level_name} {scope_str} `{pattern}`"
+            return f"Rule already exists: {level_name} \\[{scope_str}] `{pattern}`"
 
-        result = f"Added {level_name} rule: [{scope_str}] `{pattern}`"
+        result = f"Added {level_name} rule: \\[{scope_str}] `{pattern}`"
         if save:
             project_dir = app.session.metadata.project_dir
             toml_path = Path(project_dir) / ".mini-agent" / "permissions.toml"

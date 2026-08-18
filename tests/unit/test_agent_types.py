@@ -5,10 +5,16 @@ import pytest
 
 from mini_agent.core.agent_types import (
     AGENT_TYPES,
+    DEFAULT_AGENT_TYPE,
     AgentTypeDefinition,
     get_agent_type,
 )
 from mini_agent.core.subagent import _intersect_tools
+
+
+def test_default_agent_type_is_valid():
+    assert DEFAULT_AGENT_TYPE in AGENT_TYPES
+    assert get_agent_type(DEFAULT_AGENT_TYPE).name == DEFAULT_AGENT_TYPE
 
 
 def test_get_agent_type_known():

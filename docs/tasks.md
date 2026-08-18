@@ -1918,3 +1918,49 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P78.4 验证
 - [x] 13 个新测试（add_rule 基础/deny/去重/空pattern/空白pattern/事件/静默 + remove_rule 2 + list_rules 2 + save_rule_to_file 4），912 个测试全过，ruff clean
+## Phase 79: 工具级权限与通用检查入口 (P79)
+
+> todo-code-quality 扩展点 #9 `PermissionScope.TOOL` + #15 `PermissionManager.check()` 接入（issue #175）。
+> **前因**：权限系统只有 COMMAND/PATH 两个生效 scope，用户无法按工具名拦截/信任；`check()` 名为通用入口实际绕过危险命令确认和 PathGuard，外部消费者直接用会踩陷阱。**后果**：三级 scope 齐备（工具门先于资源检查），`check()` 按 scope 分发后成为真正的单点检查入口。详述见 tech-notes §79。
+
+### P79.1 PermissionManager
+- [x] `security/permission.py` — 新增 `check_tool(tool_name) -> PermissionDecision | None`：显式 TOOL 规则 + 会话授权判定，无匹配返回 None（落回资源级检查）
+- [x] `security/permission.py` — `check()` 重构为按 scope 分发的通用入口：COMMAND → `_check_command_request`（危险模式确认）、PATH → `_check_path_request`（DENY 规则→PathGuard→通用）、其余 → `_check_generic`（原 check() 逻辑）；`check_command`/`check_path` 复用同一批内部管道无递归
+- [x] `security/permission.py` — `_SCOPE_SECTIONS` 映射：`save_rule_to_file`/`load_rule_files` 支持 `[tools]` 节
+- [x] `security/permission.py` — `would_ask()` 开头加工具级预判：显式工具规则直接判定不弹窗
+
+### P79.2 接入点
+- [x] `core/agent_loop.py` — `_check_permission()` 所有工具调用先过工具门：DENY 拦截、ALLOW 整体信任（跳过命令/路径检查）、None 落回原有路由；事件 scope="tool" 带 matched_rule
+- [x] `extensions/builtin_commands.py` — `/allow` `/deny` 新增 `tool` scope（用法/报错文案同步）
+- [x] `extensions/builtin_commands.py` — 新增 `remove` 子命令（`/deny remove tool bash`，scope+pattern+level 精确移除会话内规则；TOML 来源规则下次启动仍加载）；修复输出中 `[scope]` 被 markdown 当引用链接吞掉（`\[` 转义）
+- [x] `permissions.toml.example` — 新增 `[tools]` 节示例与语义说明
+
+### P79.3 验证
+- [x] 22 个新测试（check_tool 六态 + check() 分发四路 + [tools] 持久化两向 + would_ask + agent_loop 集成四例 + /allow /deny 处理器五例），934 个测试全过，ruff clean
+- [x] 真实 LLM 验证（`experiments/verify_tool_permission.py`，deepseek-v4-flash-0731）四阶段全过：TOOL deny 拦截 LLM 的 bash 调用 / 对照组危险命令弹确认 / TOOL allow 零弹窗 / check() 三 scope 分发 / [tools] 往返持久化
+
+## Phase 80: 默认 Agent 类型接线 (P80)
+
+> todo-code-quality 扩展点 #10 `DEFAULT_AGENT_TYPE` 接入。
+> **前因**：常量定义后零引用，未指定类型的 SubAgent 走独立内联 `SUBAGENT_SYSTEM_PROMPT`——与 `_WORKER_PROMPT` 几乎逐字重复的双份维护点。**后果**：未指定类型统一回退 worker 档案（prompt/工具单一路径），但保留 config 迭代预算不被 50 静默覆盖。详述见 tech-notes §80。
+
+### P80.1 实现
+- [x] `core/subagent.py` — `SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`；删除内联 `SUBAGENT_SYSTEM_PROMPT`
+- [x] 迭代预算不对称语义：未显式选类型保留 `config.max_agent_iterations`（用户可配优先）；显式选类型仍采纳类型档案（worker=50）
+
+### P80.2 验证
+- [x] 4 个新测试（常量合法性 + 回退 worker 模板 + 保留 config 预算 + 显式类型覆盖），938 个测试全过，ruff clean
+- [x] 真实 LLM 验证（`experiments/verify_default_agent_type.py`，deepseek-v4-flash-0731）两阶段全过：未指定类型 spawn 完成真实写文件任务（worker 模板 + config 预算 80 + 全工具集）；对照组 verify 类型仍 20 轮 + 只读 + PASS 判定
+
+## Phase 81: slice_window 删除——拓展点 #5/#16 了结 (P81)
+
+> todo-code-quality 拓展点 #5/#16 `Conversation.slice_window()` 的处置。
+> **前因**：#16 是 #5 的重复行（表格自注"同 #5"），实为一处；方法零生产调用方，语义有坑（未计数消息按零成本通过）且会切断工具对（严格 API 400），职责已被 ContextManager/Compressor 完全取代。**后果**：判定为"设计变更后的残留物"删除而非接入——修好再接入等于重抄 `_compute_keep_split` 制造双份维护点。详述见 tech-notes §81。
+
+### P81.1 处置
+- [x] `models/message.py` — 删除 `slice_window()` 方法
+- [x] `tests/unit/test_models.py` — 删除对应单测；grep 确认源码零残留
+- [x] 拓展点清单收口：15 处实际条目，13 已接入、#5 已删除、仅 #8 保留
+
+### P81.2 验证
+- [x] 937 个测试全过（938 − 1 个随删测试），ruff clean

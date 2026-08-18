@@ -229,10 +229,11 @@ input = 2.0
 output = 8.0
 
 # 顶级配置（不属于任何段；注意必须写在所有 [段] 和 [[hooks]] 之前才算顶级）
-max_agent_iterations = 50    # ReAct 循环最大迭代数
+max_agent_iterations = 50    # ReAct 循环最大迭代数（主循环与未指定类型的 SubAgent 共用；
+                             # /spawn --type 显式选类型时采纳类型档案预算，见 P80）
 theme = "default"            # "default" | "dark" | "light"
 listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
-                             # 事件监听插件目录（issue #166）：目录下每个 *.py 文件是一个插件，
+                             # 事件监听插件目录：目录下每个 *.py 文件是一个插件，
                              # 定义 register(bus)（订阅特定事件）或 on_event(event)（自动订阅全部事件，
                              # 同步/异步均可）。插件异常被隔离并记日志，不影响主流程。用于统计/调试，
                              # 如把所有事件落盘 JSONL。下划线开头的文件跳过。
@@ -539,7 +540,7 @@ auto_extract = false   # 关闭后改用 /memory add 手动添加
 
 ## 权限规则文件（permissions.toml）
 
-自定义哪些命令/路径免确认放行、哪些无条件拒绝——不用改代码。
+自定义哪些命令/路径/工具免确认放行、哪些无条件拒绝——不用改代码。
 
 **位置**（两级，同时生效）：
 
@@ -558,9 +559,15 @@ deny = ["docker rm *"]                               # 无条件拒绝
 [paths]
 allow = ["D:/shared/workspace/*"]    # 放行项目外路径（默认项目外要确认）
 deny = ["*secrets*", "*.key"]        # 拒绝访问（项目内路径也拦）
+
+[tools]
+allow = ["glob"]           # 整体信任该工具（跳过命令/路径级检查，慎用）
+deny = ["delete_file"]     # 直接拦截整个工具
 ```
 
 **优先级**：`deny 规则 > allow 规则 > 内置默认`（危险命令确认 / 敏感路径拒绝 / 项目内放行）。deny 最优先——即使路径在项目内也会被拦。
+
+**工具级规则（P79）**：`[tools]` 节按工具名匹配（支持 glob），在命令/路径检查**之前**评估——`deny` 直接拦截整个工具；`allow` 整体信任该工具，跳过后续资源检查（`allow = ["bash"]` 意味着危险命令也不再确认，慎用）；无匹配规则的工具照常走命令/路径检查。
 
 **匹配语法**：glob 风格。`git *` 匹配 `git status` 但不匹配 `github`；`*secrets*` 匹配任何含 secrets 的路径。
 
@@ -568,10 +575,11 @@ deny = ["*secrets*", "*.key"]        # 拒绝访问（项目内路径也拦）
 
 **修改后生效**：重启 mini（启动时加载一次）。或在运行中使用 `/allow` `/deny` 命令实时添加规则——带 `--save` 标志的规则会写入项目级 permissions.toml，下次启动自动加载。
 
-**运行时管理**（P78）：
+**运行时管理**（P78/P79）：
 ```
 /allow command "docker *"          # 本会话放行所有 docker 命令
 /deny path "*/secrets/*"           # 本会话拒绝 secrets 路径
+/deny tool delete_file             # 本会话拦截 delete_file 工具
 /allow command "npm *" --save      # 放行并持久化到 .mini-agent/permissions.toml
 /deny                              # 列出当前所有 DENY 规则
 ```

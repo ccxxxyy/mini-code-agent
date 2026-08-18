@@ -241,3 +241,75 @@ async def test_spawn_parallel_with_agent_type(tmp_path):
     assert len(ids) == 2
     results = await mgr.wait_all(ids)
     assert all(r.success for r in results)
+
+
+# --- DEFAULT_AGENT_TYPE fallback (extension point #10) ---
+# --- 默认 Agent 类型回退（拓展点 #10） ---
+
+
+async def test_untyped_subagent_uses_default_type(tmp_path):
+    """No agent_type -> the DEFAULT_AGENT_TYPE (worker) profile applies.
+    未指定类型 -> 采用 DEFAULT_AGENT_TYPE（worker）档案。"""
+    from mini_agent.core.agent_types import DEFAULT_AGENT_TYPE
+
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    registry.register(WriteFileTool())
+
+    agent = SubAgent(
+        task="do something",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+    )
+    worker = get_agent_type(DEFAULT_AGENT_TYPE)
+    # Same prompt template as the default type (formatted with runtime values)
+    # 与默认类型同一提示词模板（用运行时值格式化）
+    head = worker.system_prompt.split("{", 1)[0]
+    assert agent._conversation.system_prompt.startswith(head)
+    # worker keeps all tools 保留全部工具
+    assert agent._loop._tools.get("write_file") is not None
+
+
+async def test_untyped_subagent_keeps_config_iterations(tmp_path):
+    """Untyped spawn keeps config.max_agent_iterations, NOT the worker
+    type's 50 -- the config is user-tunable and must win when no type is
+    explicitly requested. 未指定类型时保留 config 的迭代预算而非 worker 的
+    50——用户可配值优先。"""
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    config = AgentConfig()
+    config.max_agent_iterations = 7
+    agent = SubAgent(
+        task="do something",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=config,
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+    )
+    assert agent._loop._config.max_agent_iterations == 7
+    assert "7" in agent._conversation.system_prompt  # iteration_budget 注入
+
+
+async def test_typed_subagent_still_overrides_iterations(tmp_path):
+    """Explicit type opt-in adopts the type's budget (worker = 50).
+    显式选类型仍采纳类型预算（worker = 50）。"""
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+
+    config = AgentConfig()
+    config.max_agent_iterations = 7
+    agent = SubAgent(
+        task="do something",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=config,
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+        agent_type=get_agent_type("worker"),
+    )
+    assert agent._loop._config.max_agent_iterations == 50

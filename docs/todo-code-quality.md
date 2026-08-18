@@ -81,7 +81,7 @@
 
 ---
 
-### 🟢 有意预留的扩展点（16 处，其中 #1/#2/#4/#6/#7/#11/#12/#13/#14 已接入）
+### 🟢 有意预留的扩展点（15 处；#1/#2/#3/#4/#6/#7/#9/#10/#11/#12/#13/#14/#15 已接入，#5 删除）
 
 这些是公开 API 表面，当前无调用方但为外部消费者或未来功能预留（标 ✅ 的已有真实调用方）。除非要精简代码量，否则建议保留。
 
@@ -91,19 +91,17 @@
 | 2 | `ToolRegistry.filter()` | `tools/base.py:212` | ✅ 已接入：`AgentTeam.start()` 非写文件步骤 + `SubAgent.__init__` 工具过滤均通过 `filter()` |
 | 3 | `PermissionManager.add_rule()` | `security/permission.py:94` | ✅ 已接入：增强为带验证/去重/事件发射的完整方法；新增 `remove_rule()` 和 `list_rules()`；`/allow` `/deny` 斜杠命令运行时动态管理权限规则；`_load_rules_from_config` 和 `load_rule_files` 统一走 `add_rule()`；新增 `PermissionRuleAddedEvent` / `PermissionRuleRemovedEvent` 事件 |
 | 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | ✅ 已接入：`/model` 无参数时显示可用 Provider 列表 |
-| 5 | `Conversation.slice_window()` | `models/message.py:105` | 按 token 窗口截取消息——ContextManager 替代了但方法本身有独立价值 |
+| 5 | `Conversation.slice_window()` | ~~`models/message.py`~~ | ✅ 已删除（P81）：属"设计变更后的残留物"而非健康预留——被 ContextManager/Compressor 完全取代；且自身语义有坑（`token_count or 0` 使未计数消息按零成本通过，预算失效）并会切断 tool_use/tool_result 配对（严格 API 400，压缩链路已为此类 bug 修过 P71 等多阶段）；修好再接入等于重抄 `_compute_keep_split`。零生产调用方，连同单测删除 |
 | 6 | `Plan.is_complete` | `core/planner.py:74` | ✅ 已接入：`AgentTeam.start()` 用 `while not plan.is_complete` 替代手动 pending 列表 |
 | 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
-| 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | 异步权限判定的中间状态 |
-| 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | 工具级权限控制（当前只有 COMMAND 和 PATH） |
-| 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | 默认 Agent 类型常量——应在 `SubAgent.__init__` 中引用但实际用了 `None` |
+| 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | 待接入（一个任务三部分）：PENDING 不做 `check()` 返回值（asyncio 的 await 吞掉中间态；LLM API 要求 tool_use/tool_result 配对，停放工具调用必伪造结果污染对话），而做**跨进程/跨连接边界上的持久化中间状态**——① pane worker 跨进程审批通道（主体，修真实安全缺口：`--pane` worker 现无权限门直跑危险命令）：worker 侧 `RemoteConfirm` 回调写 `~/.mini-agent/workers/<id>.perm-request.json` 记 PENDING 后轮询决定文件（超时安全拒绝），父进程监视请求文件弹既有 y/a/n 框写回决定，复用 worker 协议文件+原子写+轮询模式；② remote/Web 断连排队：客户端断开时权限请求记 PENDING 排队等重连作答，超时兜底；③ 事件可观测（顺带，~20 行）：弹窗打开期间先发 `PermissionCheckEvent(decision="pending")`，resolve 后发终态，`/trace` 显示 `-> PENDING (awaiting user)` |
+| 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | ✅ 已接入（P79）：`PermissionManager.check_tool()` 工具级门——显式 TOOL 规则 DENY 直接拦截工具、ALLOW 整体信任（跳过命令/路径资源检查）、无匹配返回 None 落回资源级检查；`agent_loop._check_permission()` 对所有工具调用先过工具门；`/allow` `/deny` 支持 `tool` scope；permissions.toml 新增 `[tools]` 节（load/save 均支持）；`would_ask` 工具级规则直接判定不弹窗 |
+| 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | ✅ 已接入（P80）：`SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`（worker），删除与 `_WORKER_PROMPT` 重复的内联 `SUBAGENT_SYSTEM_PROMPT`；未显式选类型时保留 `config.max_agent_iterations`（用户可配值优先，不被 worker 的 50 静默覆盖），显式选类型仍采纳类型完整档案 |
 | 11 | `SessionMetadata.tags` | `models/session.py:22` | ✅ 已接入：`/session tag`/`untag`/`tags` 子命令 + `/session list --tag` 按标签过滤 |
 | 12 | `UserMessageEvent.is_slash_command` | `models/events.py:24` | ✅ 已接入：斜杠命令分支 emit 事件设 `is_slash_command=True`，AuditLogger 记录 + TraceRenderer 显示 |
 | 13 | `LLMRequestEvent.estimated_tokens` | `models/events.py:34` | ✅ 已接入：`agent_loop._think()` 从 ContextManager 填入预估 token，TraceRenderer 显示 |
 | 14 | `PermissionRequest.tool_name` | `models/permissions.py:39` | ✅ 已接入：`check_path()` 新增 `tool_name` 参数，`agent_loop._check_permission()` 传入 `tc.name` |
-| 15 | `PermissionManager.check()` | `security/permission.py:156` | 通用权限检查入口——当前只被 `check_path` 内部调用，但外部消费者可能直接用 |
-| 16 | `Conversation.slice_window()` | `models/message.py:105` | 同 #5（重复列出待确认是否与 ContextManager 有重叠可合并） |
-
+| 15 | `PermissionManager.check()` | `security/permission.py` | ✅ 已接入（P79）：重构为真正的通用检查入口——按 `request.scope` 分发到 COMMAND（危险模式确认管道）/ PATH（DENY 规则→PathGuard→通用管道，operation 从 context 解析）/ TOOL（通用管道），任意消费者构造 `PermissionRequest` 一次调用即得正确判定；原通用逻辑抽为 `_check_generic()`，`check_path`/`check_command` 复用同一批内部管道无递归 |
 ---
 
 ##  ✅ 文档与仓库卫生

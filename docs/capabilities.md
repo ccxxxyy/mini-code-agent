@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，912 个测试全部通过。
+> 当前版本 v1.0.0，937 个测试全部通过。
 
 ---
 
@@ -110,7 +110,7 @@
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
-- 声明式规则（comparison 7.2 + issue #167）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason + action），`action = "block"`（默认）命中即拒绝工具执行，`action = "confirm"` 命中弹 y/a/n 确认框由用户裁决——给某目录加只读锁或给 git push 加人工闸门只需 5 行配置，无需写 Python
+- 声明式规则（comparison 7.2）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason + action），`action = "block"`（默认）命中即拒绝工具执行，`action = "confirm"` 命中弹 y/a/n 确认框由用户裁决——给某目录加只读锁或给 git push 加人工闸门只需 5 行配置，无需写 Python
 
 **验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）+ 20 个声明式规则测试（含 AgentLoop 端到端拦截 + CONFIRM y/n/always/无回调四路径端到端）
 
@@ -156,6 +156,7 @@
 
 **实现**（`core/subagent.py`）：
 - SubAgent：复用 AgentLoop，每个子 Agent 拥有独立对话上下文 + 克隆的工具注册表（可白名单限制）+ 独立工作目录
+- 4 种 Agent 类型（P48）：explore/plan/verify 只读档案 + worker 全能档案，各带专属 prompt/工具白名单/迭代预算；未指定类型回退默认 worker 档案（P80，保留 config 迭代预算）
 - SubAgentManager：spawn（asyncio.create_task 后台启动）/ spawn_parallel（批量并发）/ wait_all（gather 收集）/ cancel / timeout 超时取消
 - 失败即数据：子 Agent 异常转 SubAgentResult(success=False)，不炸编排
 - Mailbox 跨 Agent 通信（P58）：共享文件式收件箱，SubAgent 运行中通过 send_message 互发消息、wait_message 阻塞等待；spawn_parallel 预生成 id 让兄弟 Agent 互见（id + 任务摘要）
@@ -202,7 +203,7 @@
 | LLM API | httpx 直连（不依赖厂商 SDK），OpenAI Chat Completions + OpenAI Responses API（o1/o3/o4-mini，含 thinking round-trip + tool pairing repair + 错误分类）+ Anthropic 三 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42） |
 | 流式响应 | SSE 逐行解析 → StreamChunk 统一抽象 → Rich Live 实时渲染；截断恢复——finish_reason="length" 自动翻倍 max_tokens 重试最多 3 次（P44） |
 | 多轮对话 | Conversation 全量重放，工具调用配对协议（tool_calls ↔ tool_call_id） |
-| 对话管理器 | Conversation 类：append / to_api_messages / slice_window / token 累计 |
+| 对话管理器 | Conversation 类：append / to_api_messages / token 累计（窗口截取由 ContextManager/Compressor 负责） |
 
 ### ✅ 层面 2：Agent 核心机制
 
@@ -227,7 +228,7 @@
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML） |
 | 上下文压缩 | 三级级联（75% 软阈值 + 90% 硬阈值绕过熔断器 + /compact 手动） |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
@@ -261,7 +262,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 912 个测试全部通过（约 90 秒，零网络依赖），单元 55 文件 + 集成 4 文件 |
+| 测试 | 937 个测试全部通过（约 90 秒，零网络依赖），单元 56 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

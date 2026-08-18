@@ -231,3 +231,113 @@ async def test_permission_check_event_emitted(tool_context):
     assert evt.scope == "path"
     assert evt.decision == "granted"
     assert evt.reason == "path_guard:project_dir"
+
+
+# --- Tool-level permission gate (PermissionScope.TOOL, extension point #9) ---
+# --- 工具级权限门（PermissionScope.TOOL，拓展点 #9） ---
+
+
+async def test_tool_deny_rule_blocks_tool(tool_context):
+    """A TOOL deny rule blocks the tool outright, even for a harmless command.
+    TOOL 拒绝规则直接拦截工具，即使命令本身无害。"""
+    from mini_agent.models.permissions import PermissionLevel, PermissionRule, PermissionScope
+
+    loop = make_secured_loop(
+        [tool_call("bash", {"command": "echo hi"}), text("done")],
+        tool_context,
+    )
+    loop._permissions.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.DENY)
+    )
+    conv = Conversation()
+    await loop.run(conv)
+
+    tool_msg = [m for m in conv.messages if m.role == Role.TOOL][0]
+    assert tool_msg.tool_result.is_error
+    assert "Permission denied" in tool_msg.tool_result.output
+
+
+async def test_tool_allow_rule_skips_resource_checks(tool_context):
+    """A TOOL allow rule trusts the tool wholesale: dangerous commands run
+    without confirmation. TOOL 允许规则整体信任工具：危险命令不确认直接执行。"""
+    from mini_agent.models.permissions import PermissionLevel, PermissionRule, PermissionScope
+
+    asked = []
+
+    async def confirm(prompt):
+        asked.append(prompt)
+        return False
+
+    loop = make_secured_loop(
+        [tool_call("bash", {"command": "rm -rf ./nonexistent || echo ran"}), text("done")],
+        tool_context,
+        confirm=confirm,
+    )
+    loop._permissions.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.ALLOW)
+    )
+    conv = Conversation()
+    await loop.run(conv)
+
+    tool_msg = [m for m in conv.messages if m.role == Role.TOOL][0]
+    assert "Permission denied" not in tool_msg.tool_result.output
+    assert asked == []  # no confirmation prompt 没有弹确认框
+
+
+async def test_tool_gate_event_scope(tool_context):
+    """The tool gate emits PermissionCheckEvent with scope=tool and the
+    matched rule. 工具门发射 scope=tool 且带命中规则的 PermissionCheckEvent。"""
+    from mini_agent.models.events import PermissionCheckEvent
+    from mini_agent.models.permissions import PermissionLevel, PermissionRule, PermissionScope
+
+    events = []
+
+    loop = make_secured_loop(
+        [tool_call("bash", {"command": "echo hi"}), text("done")],
+        tool_context,
+    )
+    loop._permissions.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.DENY)
+    )
+
+    async def collect(e: PermissionCheckEvent) -> None:
+        events.append(e)
+
+    loop._event_bus.on(PermissionCheckEvent, collect)
+
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert len(events) == 1
+    evt = events[0]
+    assert evt.scope == "tool"
+    assert evt.resource == "bash"
+    assert evt.decision == "denied"
+    assert evt.matched_rule == "deny:bash"
+
+
+async def test_no_tool_rule_falls_through_to_resource_checks(tool_context):
+    """Without a TOOL rule, checks fall through to command/path routing.
+    无 TOOL 规则时继续走命令/路径路由。"""
+    from mini_agent.models.events import PermissionCheckEvent
+
+    f = tool_context.working_dir / "ft.txt"
+    f.write_text("x", encoding="utf-8")
+
+    events = []
+
+    loop = make_secured_loop(
+        [tool_call("read_file", {"file_path": str(f)}), text("done")],
+        tool_context,
+    )
+
+    async def collect(e: PermissionCheckEvent) -> None:
+        events.append(e)
+
+    loop._event_bus.on(PermissionCheckEvent, collect)
+
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert events[0].scope == "path"
+    assert events[0].decision == "granted"

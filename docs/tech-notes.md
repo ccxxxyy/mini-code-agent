@@ -364,8 +364,12 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 **评估顺序**（`security/permission.py`），与 Claude Code 同构：
 
 ```
-显式 DENY 规则 → 显式 ALLOW 规则 → 会话授权 → 默认模式(allow/ask/deny)
+工具级门(TOOL 规则) → 显式 DENY 规则 → 显式 ALLOW 规则 → 会话授权 → 默认模式(allow/ask/deny)
 ```
+
+**三级 scope**：`tool`（工具名）/ `command`（bash 命令）/ `path`（文件路径）。工具级门（P79，扩展点 #9）在资源级检查之前评估：TOOL DENY 直接拦截整个工具，TOOL ALLOW 整体信任（跳过命令/路径检查），无匹配落回资源级检查——默认模式刻意不参与工具门，否则 deny 模式会在工具层拦掉项目内读取。
+
+**通用检查入口**（P79，扩展点 #15）：`check(request)` 按 `request.scope` 分发到 COMMAND / PATH / 通用管道，任意消费者构造 `PermissionRequest` 一次调用即得正确判定；`check_command` / `check_path` / `check_tool` 是各 scope 的便捷入口，共用内部管道无递归。
 
 **危险命令检测**用 13 条正则覆盖高危模式：
 
@@ -2613,12 +2617,79 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 - 13 个新测试（add_rule 验证/去重/事件/静默 + remove_rule + list_rules + save_rule_to_file），912 个全过
 - 规则生命周期：不带 `--save` 仅当前会话；带 `--save` 持久化到 TOML
 
+# 第七十九部分：工具级权限与通用检查入口（P79 — 扩展点 #9/#15）
+
+## 79.1 动机
+
+权限系统此前只有两个生效的 scope：COMMAND（bash 命令）和 PATH（文件路径）。`PermissionScope.TOOL` 枚举值（扩展点 #9）从第一天就存在但零消费——用户想"这个会话禁用 delete_file 工具"没有任何入口，只能逐条 deny 路径。同时 `PermissionManager.check()`（扩展点 #15）名为通用入口，实际只被 `check_path` 尾部调用：外部消费者拿着 COMMAND scope 的 `PermissionRequest` 调 `check()` 会**绕过危险命令确认**（check() 只走规则+默认模式），拿着 PATH scope 的请求会**绕过 PathGuard**——"通用入口"实为陷阱。
+
+## 79.2 实现
+
+**工具级门**（`check_tool(tool_name) -> PermissionDecision | None`）：构造 TOOL scope 请求走 `_check_rules_only()`——显式 TOOL 规则和会话授权判定，无匹配返回 `None`。`agent_loop._check_permission()` 对**所有**工具调用先过这道门：DENY 拦截、ALLOW 整体信任（跳过命令/路径检查）、None 落回原有资源级路由。事件照常发射（scope="tool"，带 matched_rule）。
+
+**通用入口重构**（`check(request)`）：按 `request.scope` 分发——COMMAND → `_check_command_request()`（含危险模式确认），PATH → `_check_path_request()`（DENY 规则 → PathGuard → 通用管道，operation 从 request.context 前缀解析），其余 → `_check_generic()`（原 check() 逻辑）。`check_command`/`check_path` 改为构造请求后调分发目标，同一批内部管道无递归。
+
+**配套接入**：`/allow` `/deny` 新增 `tool` scope 和 `remove` 子命令（`/deny remove tool bash` 调 `remove_rule()` 精确移除会话内规则——TOML 来源的规则下次启动仍加载）；permissions.toml 新增 `[tools]` 节（`load_rule_files` 解析 + `save_rule_to_file` 经 `_SCOPE_SECTIONS` 映射回写）；`would_ask()` 开头加工具级预判——显式工具规则直接判定，不弹窗（流式执行预提交不受影响）。顺带修复输出转义：`Added ... [tool] \`x\`` 中的 `[tool]` 被 markdown 当未定义引用链接吞掉，改为 `\\[tool]` 转义。
+
+## 79.3 权衡
+
+- **默认模式为什么不参与工具门**：若工具门无规则时落到默认模式，deny 模式会在工具层拦掉 read_file——PathGuard 的项目内放行永远走不到，等于 deny 模式下 Agent 全瘫。`None` 落回资源级检查保持了原有行为的完整性。
+- **TOOL ALLOW 为什么跳过资源检查**：`/allow tool bash` 若只在工具层放行、危险命令照旧确认，则该规则对 bash 近乎空操作（普通命令本来就自动放行）。整体信任语义让规则有真实效果，代价是危险命令也不确认——文档标注"慎用"。
+- **operation 从 context 前缀解析**：PATH 分发需要 read/write 语义，`PermissionRequest` 没有 operation 字段。约定 `check_path` 写入的 context 以操作名开头（"write access ..."），外部消费者不写 context 时默认按 read 处理——宽松但安全（write 比 read 严格，误判为 read 只影响溢写缓存这一处只读放行）。
+
+## 79.4 后果与验证
+
+- 12/16 扩展点已接入（新增 #9/#15）
+- 22 个新测试（check_tool 六态 + check() 分发四路 + [tools] 持久化两向 + would_ask + agent_loop 集成四例 + /allow /deny 处理器五例），934 个全过，ruff clean
+- 真实 LLM 验证（`experiments/verify_tool_permission.py`，deepseek-v4-flash-0731）四阶段全过：TOOL deny 拦下 LLM 发起的 `echo hello`（事件 scope=tool、rule=deny:bash）；对照组危险命令 `git commit` 弹确认；TOOL allow 后同一危险命令零弹窗执行；check() 三 scope 分发判定正确；[tools] 节 save/load 往返生效
+- 规则文件格式向后兼容：旧 permissions.toml 无 `[tools]` 节照常加载
+
+# 第八十部分：默认 Agent 类型接线（P80 — 扩展点 #10）
+
+## 80.1 动机
+
+P48 引入 4 种 Agent 类型（explore/plan/worker/verify）时定义了 `DEFAULT_AGENT_TYPE = "worker"` 常量，但 `SubAgent.__init__` 的未指定类型分支没有引用它，而是走一条独立的内联 `SUBAGENT_SYSTEM_PROMPT` 旧路径——该 prompt 与 `_WORKER_PROMPT` 几乎逐字重复（只多一句中文报告提示），改一处忘另一处的典型隐患。
+
+## 80.2 实现
+
+`SubAgent.__init__`：`agent_type is None` 时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`，工具/提示词逻辑与显式类型统一为一条路径；删除 `SUBAGENT_SYSTEM_PROMPT`。`SubAgentManager.spawn`/`worker.py` 传 None 的调用方零改动自动获益。
+
+## 80.3 权衡：迭代预算的不对称
+
+worker 类型档案是 `max_iterations=50`，而 `config.max_agent_iterations` 默认 80 且用户可配。若未指定类型也整体采纳 worker 档案，用户配置的预算会被静默压到 50——SubAgent 提前熔断且用户难以察觉。因此保留不对称语义：**未显式选类型 → 保留 config 预算（仅统一 prompt/工具逻辑）；显式选类型 → 采纳类型完整档案（含 50 轮预算）**。这与改动前的行为完全一致（改前未指定类型也用 config 预算），向后兼容优先。
+
+## 80.4 后果与验证
+
+- 13/16 扩展点已接入（新增 #10）；`SUBAGENT_SYSTEM_PROMPT` 双份维护点消除
+- 4 个新测试（DEFAULT_AGENT_TYPE 合法性 + 未指定类型走 worker 模板 + 未指定类型保留 config 预算 + 显式类型仍覆盖），938 个全过，ruff clean
+- 真实 LLM 验证（`experiments/verify_default_agent_type.py`，deepseek-v4-flash-0731）两阶段全过：未指定类型的 spawn 用 worker 模板 + config 预算 80 + 全工具集完成真实写文件任务；对照组显式 verify 类型仍是 20 轮预算 + 只读工具集 + PASS 判定
+- 行为差异仅一处：旧内联 prompt 里的 "(Chinese task -> Chinese report)" 示例短语消失，语言跟随规则本身仍在（"Respond in the same language the task is written in"）
+
+# 第八十一部分：slice_window 删除——拓展点 #5/#16 的了结（P81）
+
+## 81.1 动机
+
+拓展点清单最后两行都指向 `Conversation.slice_window()`：#16 自己标注"同 #5（重复列出）"，故实为一处。分析后判定它不是健康的预留 API 而是**设计变更后的残留物**：按 token 从尾部截取消息的职责已被 ContextManager/Compressor 完全取代，且后者带着五个阶段的教训（工具对对齐、计数兜底、三重锚点、目标缩放）做得严格更对。
+
+## 81.2 为什么删而不是接入
+
+- **语义有坑**：`cost = msg.token_count or 0`——未计数消息按零成本通过、循环不 break，预算形同虚设；compressor 后来全部改用 `token_count or count_tokens(...)` 兜底，slice_window 是这个教训之前的产物
+- **安全隐患**：尾部截取可切断 tool_use/tool_result 配对产生孤儿——严格 API 直接 400，正是压缩链路已付费修过的 bug 类（P71 等）
+- **修好 = 重复**：补齐兜底计数 + 工具对对齐等于重抄 `_compute_keep_split`，制造 P80 刚消灭的那种双份维护点
+- **零需求**：80 个阶段零生产调用方；已接入的 13 个拓展点每个都有真实消费者，为打勾硬造消费者违背接入标准
+
+## 81.3 后果
+
+- 删除 `slice_window()` 方法 + 对应单测；grep 确认源码零残留（spec.md 为历史设计文档按惯例保留）
+- 拓展点清单收口：15 处实际条目中 13 已接入、#5 已删除、仅 #8 `PermissionDecision.PENDING` 待接入——已在 todo-code-quality 定义为一个三部分任务（pane worker 跨进程审批通道为主体 + remote 断连排队 + pending 事件可观测；PENDING 不做 check() 返回值而做跨进程边界的持久化中间状态）
+- 937 个测试全过（938 减去随死方法删除的 1 个测试），ruff clean
+
 # 附录：贯穿各阶段的通用设计原则
 
 1. **接口先行**：LLMProvider / Tool / HookFn / CompressionStrategy / MCPTransport 都是先定契约再做实现，Mock 测试与扩展（AnthropicProvider 一行注册接入、MCP 工具透明挂载）都吃这个红利
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——912 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——937 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

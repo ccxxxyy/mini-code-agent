@@ -104,18 +104,3 @@ class Conversation:
             else:
                 result.append({"role": msg.role.value, "content": msg.content})
         return result
-
-    def slice_window(self, max_tokens: int) -> list[Message]:
-        """Return the most recent messages fitting within max_tokens.
-        返回能容纳在 max_tokens 内的最近消息。
-        """
-        selected: list[Message] = []
-        remaining = max_tokens
-        for msg in reversed(self.messages):
-            cost = msg.token_count or 0
-            if cost > remaining:
-                break
-            selected.append(msg)
-            remaining -= cost
-        selected.reverse()
-        return selected

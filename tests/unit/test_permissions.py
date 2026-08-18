@@ -482,3 +482,236 @@ def test_save_rule_to_file_creates_parent_dirs(tmp_path):
     )
     PermissionManager.save_rule_to_file(toml_path, rule)
     assert toml_path.is_file()
+
+
+# --- PermissionManager.check_tool() (extension point #9) ---
+# --- 工具级权限门（拓展点 #9） ---
+
+
+async def test_check_tool_deny_rule(path_guard):
+    pm = make_pm(path_guard)
+    pm.add_rule(
+        PermissionRule(
+            scope=PermissionScope.TOOL, pattern="delete_file", level=PermissionLevel.DENY
+        )
+    )
+    assert await pm.check_tool("delete_file") == PermissionDecision.DENIED
+
+
+async def test_check_tool_allow_rule(path_guard):
+    pm = make_pm(path_guard)
+    pm.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.ALLOW)
+    )
+    assert await pm.check_tool("bash") == PermissionDecision.GRANTED
+
+
+async def test_check_tool_no_rule_returns_none(path_guard):
+    # No explicit rule -> None so callers fall through to resource checks
+    # 无显式规则 -> None，调用方继续做资源级检查
+    pm = make_pm(path_guard)
+    assert await pm.check_tool("bash") is None
+
+
+async def test_check_tool_glob_pattern(path_guard):
+    pm = make_pm(path_guard)
+    pm.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="*_file", level=PermissionLevel.DENY)
+    )
+    assert await pm.check_tool("delete_file") == PermissionDecision.DENIED
+    assert await pm.check_tool("glob") is None
+
+
+async def test_check_tool_session_grant(path_guard):
+    pm = make_pm(path_guard)
+    pm.grant_session_permission(PermissionScope.TOOL, "todo_write")
+    assert await pm.check_tool("todo_write") == PermissionDecision.GRANTED
+
+
+async def test_check_tool_deny_wins_over_allow(path_guard):
+    pm = make_pm(path_guard)
+    pm.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.ALLOW)
+    )
+    pm.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.DENY)
+    )
+    assert await pm.check_tool("bash") == PermissionDecision.DENIED
+
+
+# --- PermissionManager.check() universal dispatch (extension point #15) ---
+# --- check() 按 scope 分发的通用入口（拓展点 #15） ---
+
+
+async def test_check_dispatches_command_scope(path_guard):
+    # COMMAND scope goes through the full command pipeline: dangerous
+    # patterns confirm even though no explicit rule matches
+    # COMMAND scope 走完整命令管道：无规则匹配时危险模式仍需确认
+    from mini_agent.models.permissions import PermissionRequest
+
+    asked = []
+
+    async def confirm(prompt: str) -> bool:
+        asked.append(prompt)
+        return True
+
+    pm = make_pm(path_guard, confirm=confirm)
+    request = PermissionRequest(scope=PermissionScope.COMMAND, resource="rm -rf ./build")
+    assert await pm.check(request) == PermissionDecision.GRANTED
+    assert len(asked) == 1
+
+    # Normal command auto-allows without prompting 普通命令不弹窗直接放行
+    request2 = PermissionRequest(scope=PermissionScope.COMMAND, resource="echo hi")
+    assert await pm.check(request2) == PermissionDecision.GRANTED
+    assert len(asked) == 1
+
+
+async def test_check_dispatches_path_scope(path_guard, project_dir):
+    # PATH scope goes through PathGuard: project files grant without asking
+    # PATH scope 走 PathGuard：项目内文件不询问直接放行
+    from mini_agent.models.permissions import PermissionRequest
+
+    pm = make_pm(path_guard)
+    request = PermissionRequest(scope=PermissionScope.PATH, resource=str(project_dir / "a.py"))
+    assert await pm.check(request) == PermissionDecision.GRANTED
+    assert pm.last_decision_reason == "path_guard:project_dir"
+
+
+async def test_check_path_scope_write_operation_from_context(path_guard):
+    # Spill cache: read auto-allows, write asks -- context carries the op
+    # 溢写缓存：读自动放行、写要询问——operation 从 context 解析
+    from mini_agent.models.permissions import PermissionRequest
+
+    pm = make_pm(path_guard)  # no UI -> ask becomes deny 无 UI -> 询问变拒绝
+    spill = Path.home() / ".mini-agent" / "cache" / "results" / "s1" / "r.txt"
+    read_req = PermissionRequest(
+        scope=PermissionScope.PATH, resource=str(spill), context="read access"
+    )
+    assert await pm.check(read_req) == PermissionDecision.GRANTED
+    write_req = PermissionRequest(
+        scope=PermissionScope.PATH, resource=str(spill), context="write access"
+    )
+    assert await pm.check(write_req) == PermissionDecision.DENIED
+
+
+async def test_check_tool_scope_generic_default_mode(path_guard):
+    # TOOL scope with no rule falls to default mode via the generic pipeline
+    # TOOL scope 无规则时经通用管道落到默认模式
+    from mini_agent.models.permissions import PermissionRequest
+
+    pm_allow = make_pm(path_guard, mode="allow")
+    request = PermissionRequest(scope=PermissionScope.TOOL, resource="bash", tool_name="bash")
+    assert await pm_allow.check(request) == PermissionDecision.GRANTED
+
+    pm_deny = make_pm(path_guard, mode="deny")
+    assert await pm_deny.check(request) == PermissionDecision.DENIED
+
+
+# --- TOOL rules in permissions.toml ---
+
+
+def test_save_rule_to_file_tool_scope(tmp_path):
+    toml_path = tmp_path / "permissions.toml"
+    rule = PermissionRule(
+        scope=PermissionScope.TOOL,
+        pattern="delete_file",
+        level=PermissionLevel.DENY,
+    )
+    PermissionManager.save_rule_to_file(toml_path, rule)
+
+    import tomllib
+
+    with open(toml_path, "rb") as f:
+        data = tomllib.load(f)
+    assert "delete_file" in data["tools"]["deny"]
+
+
+async def test_load_rule_files_tools_section(path_guard, tmp_path):
+    toml_path = tmp_path / "permissions.toml"
+    toml_path.write_text('[tools]\nallow = ["glob"]\ndeny = ["delete_file"]\n', encoding="utf-8")
+    pm = make_pm(path_guard)
+    count = pm.load_rule_files(user_file=toml_path)
+    assert count == 2
+    assert await pm.check_tool("delete_file") == PermissionDecision.DENIED
+    assert await pm.check_tool("glob") == PermissionDecision.GRANTED
+
+
+# --- /allow /deny slash command handler ---
+# --- /allow /deny 斜杠命令处理器 ---
+
+
+def _make_handler(pm, level_name):
+    from types import SimpleNamespace
+
+    from mini_agent.extensions.builtin_commands import _make_permission_rule
+
+    app = SimpleNamespace(permission_manager=pm)
+    return _make_permission_rule(app, level_name)
+
+
+async def test_slash_deny_tool_add_and_remove(path_guard):
+    pm = make_pm(path_guard)
+    deny = _make_handler(pm, "deny")
+
+    out = await deny("tool bash", None)
+    assert "Added deny rule" in out
+    assert await pm.check_tool("bash") == PermissionDecision.DENIED
+
+    out = await deny("remove tool bash", None)
+    assert "Removed deny rule" in out
+    assert await pm.check_tool("bash") is None
+
+    out = await deny("remove tool bash", None)
+    assert "No such rule" in out
+
+
+async def test_slash_allow_remove_wrong_level_not_removed(path_guard):
+    # /deny remove must not remove an ALLOW rule of the same scope+pattern
+    # /deny remove 不能移除同 scope+pattern 的 ALLOW 规则
+    pm = make_pm(path_guard)
+    allow = _make_handler(pm, "allow")
+    deny = _make_handler(pm, "deny")
+
+    await allow("tool bash", None)
+    out = await deny("remove tool bash", None)
+    assert "No such rule" in out
+    assert await pm.check_tool("bash") == PermissionDecision.GRANTED
+
+
+async def test_slash_rule_unknown_scope(path_guard):
+    pm = make_pm(path_guard)
+    deny = _make_handler(pm, "deny")
+    out = await deny("foo bar", None)
+    assert "Unknown scope" in out
+
+
+async def test_slash_rule_list_escapes_scope_brackets(path_guard):
+    # [tool] must be escaped or markdown swallows it as a reference link
+    # [tool] 必须转义，否则 markdown 会把它当引用链接吞掉
+    pm = make_pm(path_guard)
+    deny = _make_handler(pm, "deny")
+    out = await deny("tool delete_file", None)
+    assert "\\[tool]" in out
+    listing = await deny("", None)
+    assert "\\[tool]" in listing
+
+
+async def test_slash_remove_without_args_shows_usage(path_guard):
+    pm = make_pm(path_guard)
+    deny = _make_handler(pm, "deny")
+    out = await deny("remove", None)
+    assert "Usage" in out
+
+
+# --- would_ask with tool rules ---
+
+
+def test_would_ask_tool_rule_resolves(path_guard):
+    # An explicit tool rule resolves without prompting, even for a
+    # dangerous command 显式工具规则直接判定，危险命令也不弹窗
+    pm = make_pm(path_guard)
+    assert pm.would_ask("bash", {"command": "rm -rf ./build"}) is True
+    pm.add_rule(
+        PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.ALLOW)
+    )
+    assert pm.would_ask("bash", {"command": "rm -rf ./build"}) is False

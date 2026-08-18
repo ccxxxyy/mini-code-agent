@@ -54,6 +54,13 @@ DANGEROUS_COMMAND_PATTERNS = [
 # 返回 True（允许一次）、False（拒绝）或 "always"（本会话内始终允许）。
 ConfirmCallback = Callable[[str], Awaitable[bool | str]]
 
+# TOML section name per scope (permissions.toml) 各 scope 对应的 TOML 节名
+_SCOPE_SECTIONS: dict[PermissionScope, str] = {
+    PermissionScope.COMMAND: "commands",
+    PermissionScope.PATH: "paths",
+    PermissionScope.TOOL: "tools",
+}
+
 
 class PermissionManager:
     """Evaluates permission requests. Prompts user when needed.
@@ -156,7 +163,7 @@ class PermissionManager:
         将规则追加到 TOML 权限文件，不存在则创建。"""
         import tomllib
 
-        section = "commands" if rule.scope == PermissionScope.COMMAND else "paths"
+        section = _SCOPE_SECTIONS[rule.scope]
         level_key = rule.level.value  # "allow" or "deny"
 
         data: dict = {}
@@ -171,7 +178,7 @@ class PermissionManager:
 
         path.parent.mkdir(parents=True, exist_ok=True)
         lines: list[str] = []
-        for sec in ("commands", "paths"):
+        for sec in ("commands", "paths", "tools"):
             sec_data = data.get(sec)
             if not sec_data:
                 continue
@@ -199,6 +206,9 @@ class PermissionManager:
             [paths]
             allow = ["D:/shared/*"]
             deny = ["*/secrets/*"]
+            [tools]
+            allow = ["glob"]
+            deny = ["delete_file"]
 
         Returns the number of rules loaded. Missing files are skipped;
         malformed files are skipped with a warning (startup must not crash).
@@ -222,6 +232,7 @@ class PermissionManager:
             for section, scope in (
                 ("commands", PermissionScope.COMMAND),
                 ("paths", PermissionScope.PATH),
+                ("tools", PermissionScope.TOOL),
             ):
                 table = data.get(section, {})
                 if not isinstance(table, dict):
@@ -246,13 +257,28 @@ class PermissionManager:
         self._session_grants.add((scope, pattern))
 
     async def check(self, request: PermissionRequest) -> PermissionDecision:
-        """Evaluate a permission request.
+        """Universal permission check entry -- dispatches by scope so any
+        consumer can evaluate any request with a single call.
 
-        Order: explicit DENY -> explicit ALLOW -> session grants -> default mode.
+        COMMAND -> full command pipeline (dangerous-pattern confirmation).
+        PATH    -> full path pipeline (DENY rules -> PathGuard -> generic).
+        TOOL    -> generic pipeline (rules -> session grants -> default mode).
 
-        评估权限请求。
-        顺序：显式 DENY -> 显式 ALLOW -> 会话授权 -> 默认模式。
+        通用权限检查入口——按 scope 分发，任意消费者一次调用即可评估任意请求。
+        COMMAND -> 完整命令管道（危险模式确认）。
+        PATH    -> 完整路径管道（DENY 规则 -> PathGuard -> 通用）。
+        TOOL    -> 通用管道（规则 -> 会话授权 -> 默认模式）。
         """
+        if request.scope == PermissionScope.COMMAND:
+            return await self._check_command_request(request)
+        if request.scope == PermissionScope.PATH:
+            operation = "write" if request.context.startswith("write") else "read"
+            return await self._check_path_request(request, operation)
+        return await self._check_generic(request)
+
+    async def _check_generic(self, request: PermissionRequest) -> PermissionDecision:
+        """Generic pipeline: explicit rules -> session grants -> default mode.
+        通用管道：显式规则 -> 会话授权 -> 默认模式。"""
         decision = await self._check_rules_only(request)
         if decision is not None:
             return decision
@@ -266,17 +292,49 @@ class PermissionManager:
             return PermissionDecision.DENIED
         return await self._ask_user(request)
 
+    async def check_tool(self, tool_name: str) -> PermissionDecision | None:
+        """Tool-level gate: explicit TOOL rules and session grants only.
+
+        Returns None when nothing matches -- callers fall through to
+        resource-level checks (command/path). An ALLOW rule here means the
+        user trusts the tool wholesale (skips resource checks); default
+        mode deliberately does NOT apply, or deny mode would block even
+        project-dir reads at the tool level.
+
+        工具级门：只看显式 TOOL 规则和会话授权。无匹配返回 None——调用方
+        继续做资源级检查（命令/路径）。ALLOW 表示用户整体信任该工具
+        （跳过资源检查）；默认模式刻意不参与，否则 deny 模式会在工具层
+        拦掉项目内读取。"""
+        request = PermissionRequest(
+            scope=PermissionScope.TOOL,
+            resource=tool_name,
+            tool_name=tool_name,
+        )
+        return await self._check_rules_only(request)
+
     async def check_path(
         self, path: Path, operation: str = "read", tool_name: str = ""
     ) -> PermissionDecision:
         """Check file path access: explicit DENY rules -> PathGuard -> rules.
-        检查文件路径访问：显式 DENY 规则 -> PathGuard -> 其余规则。
+        检查文件路径访问：显式 DENY 规则 -> PathGuard -> 其余规则。"""
+        request = PermissionRequest(
+            scope=PermissionScope.PATH,
+            resource=str(path),
+            tool_name=tool_name,
+            context=f"{operation} access outside project directory",
+        )
+        return await self._check_path_request(request, operation)
 
-        Explicit DENY rules come FIRST -- otherwise PathGuard's project-dir
-        ALLOW short-circuits them, and a user's `deny = ["*/secrets/*"]`
-        for an in-project path would silently never apply.
-        显式 DENY 规则最优先——否则 PathGuard 的项目内 ALLOW 会短路它们，
-        用户对项目内路径写的 deny 规则会静默失效。"""
+    async def _check_path_request(
+        self, request: PermissionRequest, operation: str
+    ) -> PermissionDecision:
+        """Path pipeline. Explicit DENY rules come FIRST -- otherwise
+        PathGuard's project-dir ALLOW short-circuits them, and a user's
+        `deny = ["*/secrets/*"]` for an in-project path would silently
+        never apply.
+        路径管道。显式 DENY 规则最优先——否则 PathGuard 的项目内 ALLOW
+        会短路它们，用户对项目内路径写的 deny 规则会静默失效。"""
+        path = Path(request.resource)
         if self._deny_rule_matches(PermissionScope.PATH, str(path)):
             return PermissionDecision.DENIED
         level = self._path_guard.check(path, operation)
@@ -286,13 +344,7 @@ class PermissionManager:
         if level == PermissionLevel.ALLOW:
             self.last_decision_reason = "path_guard:project_dir"
             return PermissionDecision.GRANTED
-        request = PermissionRequest(
-            scope=PermissionScope.PATH,
-            resource=str(path),
-            tool_name=tool_name,
-            context=f"{operation} access outside project directory",
-        )
-        return await self.check(request)
+        return await self._check_generic(request)
 
     def _deny_rule_matches(self, scope: PermissionScope, resource: str) -> bool:
         for rule in self._rules:
@@ -313,6 +365,12 @@ class PermissionManager:
             resource=command,
             tool_name="bash",
         )
+        return await self._check_command_request(request)
+
+    async def _check_command_request(self, request: PermissionRequest) -> PermissionDecision:
+        """Command pipeline: rules -> dangerous-pattern confirm -> default mode.
+        命令管道：规则 -> 危险模式确认 -> 默认模式。"""
+        command = request.resource
 
         # Explicit rules and session grants first 先检查显式规则和会话授权
         decision = await self._check_rules_only(request)
@@ -378,6 +436,13 @@ class PermissionManager:
     # 会弹窗的延迟到流结束后（弹窗不能和流式渲染交错）。不弹窗、无副作用。
 
     def would_ask(self, tool_name: str, arguments: dict) -> bool:
+        # Explicit tool-level rule resolves without prompting
+        # 显式工具级规则直接判定，不弹窗
+        tool_request = PermissionRequest(
+            scope=PermissionScope.TOOL, resource=tool_name, tool_name=tool_name
+        )
+        if self._rules_would_resolve(tool_request):
+            return False
         if tool_name == "bash":
             return self._would_ask_command(str(arguments.get("command", "")))
         if tool_name in ("read_file", "glob", "grep", "write_file", "edit_file", "delete_file"):
