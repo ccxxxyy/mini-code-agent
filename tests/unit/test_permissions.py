@@ -715,3 +715,71 @@ def test_would_ask_tool_rule_resolves(path_guard):
         PermissionRule(scope=PermissionScope.TOOL, pattern="bash", level=PermissionLevel.ALLOW)
     )
     assert pm.would_ask("bash", {"command": "rm -rf ./build"}) is False
+
+
+# --- PENDING event ---
+
+
+async def test_ask_user_emits_pending_event(path_guard):
+    """_ask_user() emits a PermissionCheckEvent with decision='pending' before awaiting."""
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import PermissionCheckEvent
+
+    bus = EventBus()
+    events: list[PermissionCheckEvent] = []
+
+    async def collect(e: PermissionCheckEvent) -> None:
+        events.append(e)
+
+    bus.on(PermissionCheckEvent, collect)
+
+    async def fake_confirm(prompt: str) -> bool:
+        return True
+
+    pm = PermissionManager(
+        config=SecurityConfig(permission_mode="ask"),
+        path_guard=path_guard,
+        confirm_callback=fake_confirm,
+        event_bus=bus,
+    )
+    decision = await pm.check_command("rm -rf /tmp/foo")
+    assert decision == PermissionDecision.GRANTED
+    pending_events = [e for e in events if e.decision == "pending"]
+    assert len(pending_events) == 1
+    assert pending_events[0].reason == "awaiting_user"
+
+
+async def test_pending_event_has_correct_fields(path_guard):
+    """PENDING event carries scope, resource, tool_name."""
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import PermissionCheckEvent
+    from mini_agent.models.permissions import PermissionRequest
+
+    bus = EventBus()
+    events: list[PermissionCheckEvent] = []
+
+    async def collect(e: PermissionCheckEvent) -> None:
+        events.append(e)
+
+    bus.on(PermissionCheckEvent, collect)
+
+    async def fake_confirm(prompt: str) -> bool:
+        return False
+
+    pm = PermissionManager(
+        config=SecurityConfig(permission_mode="ask"),
+        path_guard=path_guard,
+        confirm_callback=fake_confirm,
+        event_bus=bus,
+    )
+    request = PermissionRequest(
+        scope=PermissionScope.COMMAND,
+        resource="git push",
+        tool_name="bash",
+        context="dangerous command detected",
+    )
+    await pm.check(request)
+    pending = [e for e in events if e.decision == "pending"]
+    assert len(pending) == 1
+    assert pending[0].scope == "command"
+    assert pending[0].tool_name == "bash"

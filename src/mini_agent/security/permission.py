@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mini_agent.models.config import SecurityConfig
-from mini_agent.models.events import PermissionRuleAddedEvent, PermissionRuleRemovedEvent
+from mini_agent.models.events import (
+    PermissionCheckEvent,
+    PermissionRuleAddedEvent,
+    PermissionRuleRemovedEvent,
+)
 from mini_agent.models.permissions import (
     PermissionDecision,
     PermissionLevel,
@@ -488,6 +492,18 @@ class PermissionManager:
             # 无可用 UI -> 默认拒绝（安全起见）
             self.last_decision_reason = "no_ui:default_deny"
             return PermissionDecision.DENIED
+        # Emit PENDING event before awaiting user response
+        # 等待用户响应前发射 PENDING 事件
+        if self._event_bus is not None:
+            await self._event_bus.emit(
+                PermissionCheckEvent(
+                    tool_name=request.tool_name,
+                    scope=request.scope.value,
+                    resource=request.resource[:120],
+                    decision=PermissionDecision.PENDING.value,
+                    reason="awaiting_user",
+                )
+            )
         prompt = f"Allow {request.scope.value} access to: {request.resource}"
         if request.context:
             prompt += f"\n({request.context})"

@@ -284,6 +284,7 @@ class Application:
             working_dir=working_dir,
             worktree_manager=self.worktree_manager,
             model_name=worker_model,
+            confirm_callback=self.terminal.confirm,
         )
 
         # Inject SubAgentManager into ToolContext so spawn_agents tool can use it

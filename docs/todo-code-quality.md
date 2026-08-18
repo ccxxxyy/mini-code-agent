@@ -50,7 +50,7 @@
 
 ---
 
-## ☐ 死代码清理（27 处）
+## ✅ 死代码清理（27 处）
 
 27 处死代码分为三类：**真正遗忘应接入的**（6 处，✅ 已全部修复）、**设计变更后的残留物**（5 处，✅ 已全部删除）、**有意预留的扩展点**（16 处）。
 
@@ -81,9 +81,8 @@
 
 ---
 
-### 🟢 有意预留的扩展点（15 处；#1/#2/#3/#4/#6/#7/#9/#10/#11/#12/#13/#14/#15 已接入，#5 删除）
+### 🟢 有意预留的扩展点（15 处；#1/#2/#3/#4/#6/#7/#8/#9/#10/#11/#12/#13/#14/#15 已接入，#5 删除）
 
-这些是公开 API 表面，当前无调用方但为外部消费者或未来功能预留（标 ✅ 的已有真实调用方）。除非要精简代码量，否则建议保留。
 
 | # | 项 | 位置 | 预留用途 |
 |---|---|---|---|
@@ -94,7 +93,7 @@
 | 5 | `Conversation.slice_window()` | ~~`models/message.py`~~ | ✅ 已删除（P81）：属"设计变更后的残留物"而非健康预留——被 ContextManager/Compressor 完全取代；且自身语义有坑（`token_count or 0` 使未计数消息按零成本通过，预算失效）并会切断 tool_use/tool_result 配对（严格 API 400，压缩链路已为此类 bug 修过 P71 等多阶段）；修好再接入等于重抄 `_compute_keep_split`。零生产调用方，连同单测删除 |
 | 6 | `Plan.is_complete` | `core/planner.py:74` | ✅ 已接入：`AgentTeam.start()` 用 `while not plan.is_complete` 替代手动 pending 列表 |
 | 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
-| 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | 待接入（一个任务三部分）：PENDING 不做 `check()` 返回值（asyncio 的 await 吞掉中间态；LLM API 要求 tool_use/tool_result 配对，停放工具调用必伪造结果污染对话），而做**跨进程/跨连接边界上的持久化中间状态**——① pane worker 跨进程审批通道（主体，修真实安全缺口：`--pane` worker 现无权限门直跑危险命令）：worker 侧 `RemoteConfirm` 回调写 `~/.mini-agent/workers/<id>.perm-request.json` 记 PENDING 后轮询决定文件（超时安全拒绝），父进程监视请求文件弹既有 y/a/n 框写回决定，复用 worker 协议文件+原子写+轮询模式；② remote/Web 断连排队：客户端断开时权限请求记 PENDING 排队等重连作答，超时兜底；③ 事件可观测（顺带，~20 行）：弹窗打开期间先发 `PermissionCheckEvent(decision="pending")`，resolve 后发终态，`/trace` 显示 `-> PENDING (awaiting user)` |
+| 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | ✅ 已接入：三部分——① pane worker 跨进程审批通道（`security/remote_confirm.py` `RemoteConfirm` 回调写 `~/.mini-agent/workers/<id>.perm-request.json` 记 PENDING 后轮询决策文件，超时 120s 安全拒绝；`worker.py` 搭建完整权限栈 `PathGuard`+`PermissionManager`+`RemoteConfirm`；`SubAgent` 新增 `permission_manager` 参数传入 `AgentLoop`；`SubAgentManager._collect_pane_result()` 轮询权限请求并通过父进程 `confirm_callback` 中转决策；`app.py` 传 `terminal.confirm` 给 `SubAgentManager`）；② remote/Web 断连排队（`server.py`：`_pending_prompts` 跟踪请求文本，最后客户端断开启动 `_disconnect_timeout` 120s 后安全拒绝，重连时 `_replay_pending_confirms` 重发待处理请求）；③ 事件可观测（`permission.py._ask_user()` 在 `await confirm` 前发射 `PermissionCheckEvent(decision="pending", reason="awaiting_user")`，`trace.py` 用 `theme.warning` 色显示 `PENDING (awaiting user)`） |
 | 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | ✅ 已接入（P79）：`PermissionManager.check_tool()` 工具级门——显式 TOOL 规则 DENY 直接拦截工具、ALLOW 整体信任（跳过命令/路径资源检查）、无匹配返回 None 落回资源级检查；`agent_loop._check_permission()` 对所有工具调用先过工具门；`/allow` `/deny` 支持 `tool` scope；permissions.toml 新增 `[tools]` 节（load/save 均支持）；`would_ask` 工具级规则直接判定不弹窗 |
 | 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | ✅ 已接入（P80）：`SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`（worker），删除与 `_WORKER_PROMPT` 重复的内联 `SUBAGENT_SYSTEM_PROMPT`；未显式选类型时保留 `config.max_agent_iterations`（用户可配值优先，不被 worker 的 50 静默覆盖），显式选类型仍采纳类型完整档案 |
 | 11 | `SessionMetadata.tags` | `models/session.py:22` | ✅ 已接入：`/session tag`/`untag`/`tags` 子命令 + `/session list --tag` 按标签过滤 |

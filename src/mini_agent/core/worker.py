@@ -88,6 +88,9 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
     from mini_agent.core.subagent import SubAgent
     from mini_agent.events.bus import EventBus
     from mini_agent.llm.registry import ProviderRegistry
+    from mini_agent.security.path_guard import PathGuard
+    from mini_agent.security.permission import PermissionManager
+    from mini_agent.security.remote_confirm import RemoteConfirm
     from mini_agent.tools.base import ToolRegistry
     from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
 
@@ -100,6 +103,27 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
         if tool.schema.name in config.tools.enabled_tools:
             registry.register(tool)
 
+    # Permission stack: file-based confirm relayed through the parent process
+    # 权限栈：基于文件的确认，通过父进程中转
+    workers_dir = Path(spec.result_path).parent
+    event_bus = EventBus()
+    path_guard = PathGuard(
+        tool_config=config.tools,
+        security_config=config.security,
+        project_dir=Path(spec.working_dir),
+    )
+    remote_confirm = RemoteConfirm(workers_dir, spec.agent_id)
+    permission_manager = PermissionManager(
+        config=config.security,
+        path_guard=path_guard,
+        confirm_callback=remote_confirm,
+        event_bus=event_bus,
+    )
+    permission_manager.load_rule_files(
+        user_file=Path.home() / ".mini-agent" / "permissions.toml",
+        project_file=Path(spec.working_dir) / ".mini-agent" / "permissions.toml",
+    )
+
     mailbox = Mailbox(Path(spec.mailbox_dir))
     header = f"[worker {spec.name or spec.agent_id}]"
     print(f"{header} task: {spec.task}", flush=True)
@@ -109,7 +133,7 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
         llm=llm,
         tool_registry=registry,
         config=config,
-        event_bus=EventBus(),
+        event_bus=event_bus,
         working_dir=Path(spec.working_dir),
         allowed_tools=spec.allowed_tools,
         model_name=config.llm.model,
@@ -118,6 +142,7 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
         agent_id=spec.agent_id,
         peers=[tuple(p) for p in spec.peers] or None,
         name=spec.name,
+        permission_manager=permission_manager,
     )
     # Pane visibility: stream LLM text and tool activity to stdout
     # 窗格可见性：LLM 文本与工具活动流式打到 stdout

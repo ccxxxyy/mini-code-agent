@@ -82,11 +82,19 @@ class TraceRenderer:
     async def _on_permission(self, e: PermissionCheckEvent) -> None:
         if not self.enabled:
             return
-        color = self.theme.success if e.decision == "granted" else self.theme.error
+        if e.decision == "pending":
+            color = self.theme.warning
+            label = "PENDING (awaiting user)"
+        elif e.decision == "granted":
+            color = self.theme.success
+            label = "GRANTED"
+        else:
+            color = self.theme.error
+            label = e.decision.upper()
         self._line(
             "perm",
             f"{e.scope} [dim]{e.resource[:60]}[/dim] [dim]->[/dim] "
-            f"[{color}]{e.decision.upper()}[/{color}] [dim]({e.reason})[/dim]",
+            f"[{color}]{label}[/{color}] [dim]({e.reason})[/dim]",
         )
 
     async def _on_tool_start(self, e: ToolCallStartEvent) -> None:
