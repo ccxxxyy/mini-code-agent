@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **897 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **912 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -293,6 +293,8 @@
 4. 现有的 `DANGEROUS_COMMAND_PATTERNS` 和 `SENSITIVE_PATTERNS` 仍作为内置默认值
 
 代码改动：`security/permission.py` ~40 行。
+
+P78 进一步增强：`add_rule()` 带校验/去重/事件发射，`/allow` `/deny` 斜杠命令运行时动态管理规则（`--save` 持久化到 TOML）——用户无需重启即可调整权限策略。
 
 ### 3.3 Plan 模式只读权限 ✅ 已实现（P49）
 

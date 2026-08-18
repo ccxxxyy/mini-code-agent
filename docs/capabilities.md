@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，897 个测试全部通过。
+> 当前版本 v1.0.0，912 个测试全部通过。
 
 ---
 
@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 15 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /exit
+- 24 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -220,14 +220,14 @@
 |---|---|
 | MCP 协议 | JSON-RPC 握手 + 工具发现 + Adapter 透明挂载（见核心功能 4） |
 | Skill 技能包 | SKILL.md 装载/激活/触发（见核心功能 5） |
-| Slash Command | 11 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
+| Slash Command | 24 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
 | Hook 生命周期钩子 | 7 阶段 × 4 裁决 + 优先级链 + 短路（见核心功能 7） |
 
 ### ✅ 层面 4：工程化功能
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝 |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML） |
 | 上下文压缩 | 三级级联（75% 软阈值 + 90% 硬阈值绕过熔断器 + /compact 手动） |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
@@ -261,7 +261,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 897 个测试全部通过（约 90 秒，零网络依赖），单元 55 文件 + 集成 4 文件 |
+| 测试 | 912 个测试全部通过（约 90 秒，零网络依赖），单元 55 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

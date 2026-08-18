@@ -82,9 +82,9 @@ while True:
 
 **核心模式**：工具执行前过一道门控——自动放行 / 弹窗确认 / 直接拒绝。
 
-**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。P34.3 实战加固：LLM 曾擅自执行 git commit——DANGEROUS_COMMAND_PATTERNS 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需确认），印证"提示词是软约束、权限确认是硬闸门"。
+**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。P34.3 实战加固：LLM 曾擅自执行 git commit——DANGEROUS_COMMAND_PATTERNS 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需确认），印证"提示词是软约束、权限确认是硬闸门"。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。
 
-**判断标准**：框架有没有工具执行前的权限检查？危险命令（rm、sudo）有没有拦截？用户能不能控制拦截策略？
+**判断标准**：框架有没有工具执行前的权限检查？危险命令（rm、sudo）有没有拦截？用户能不能控制拦截策略（不仅能在启动前配文件，还能在运行中动态调整）？
 
 ---
 

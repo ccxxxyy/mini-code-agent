@@ -80,6 +80,27 @@ class PermissionCheckEvent(Event):
     matched_rule: str = ""  # matched rule pattern for audit trail 匹配的规则模式——供审计追踪
 
 
+@dataclass
+class PermissionRuleAddedEvent(Event):
+    """Emitted when a permission rule is dynamically added at runtime.
+    运行时动态添加权限规则时发射。"""
+
+    scope: str = ""
+    pattern: str = ""
+    level: str = ""
+    reason: str = ""
+
+
+@dataclass
+class PermissionRuleRemovedEvent(Event):
+    """Emitted when a permission rule is dynamically removed at runtime.
+    运行时动态移除权限规则时发射。"""
+
+    scope: str = ""
+    pattern: str = ""
+    level: str = ""
+
+
 # --- Agent Events ---
 
 

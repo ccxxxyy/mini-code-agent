@@ -1893,3 +1893,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 10 个新测试（filter 2 + is_complete 2 + tags 4 + tool_name 2），897 个测试全过，ruff clean
 - [x] 真实终端验证：tag/untag/tags/save/list --tag 全链路 + 审计日志 tool_name 字段确认
 - [x] 真实终端暴露 tag 名贪心 bug → 当场修复（`split()[0]` 只取首词）
+
+## Phase 78: 运行时权限规则管理 (P78)
+
+> todo-code-quality 扩展点 #3 `PermissionManager.add_rule()` 接入。
+
+### P78.1 PermissionManager 增强
+- [x] `security/permission.py` — `add_rule()` 从一行 append 增强为带校验（空 pattern 抛 ValueError）、去重（scope+pattern+level 三元组）、事件发射（`PermissionRuleAddedEvent`）的完整方法，返回 `bool`
+- [x] `security/permission.py` — `__init__` 新增 `event_bus: EventBus | None` 参数
+- [x] `security/permission.py` — `_load_rules_from_config()` 和 `load_rule_files()` 统一走 `add_rule(_silent=True)`
+- [x] `security/permission.py` — 新增 `remove_rule(scope, pattern, level) -> bool`，发射 `PermissionRuleRemovedEvent`
+- [x] `security/permission.py` — 新增 `list_rules() -> list[PermissionRule]`，返回副本
+- [x] `security/permission.py` — 新增 `save_rule_to_file(path, rule)` 静态方法：读取已有 TOML → 合并去重 → 回写
+
+### P78.2 事件与装配
+- [x] `models/events.py` — 新增 `PermissionRuleAddedEvent` 和 `PermissionRuleRemovedEvent`
+- [x] `events/types.py` — 导出两个新事件
+- [x] `app.py` — `PermissionManager(event_bus=self.event_bus)` 装配
+
+### P78.3 `/allow` `/deny` 斜杠命令
+- [x] `extensions/builtin_commands.py` — `/allow <command|path> <pattern> [--save]` 添加 ALLOW 规则
+- [x] `extensions/builtin_commands.py` — `/deny <command|path> <pattern> [--save]` 添加 DENY 规则
+- [x] 无参数列出该级别全部规则；`--save` 追加写入项目级 `.mini-agent/permissions.toml`
+
+### P78.4 验证
+- [x] 13 个新测试（add_rule 基础/deny/去重/空pattern/空白pattern/事件/静默 + remove_rule 2 + list_rules 2 + save_rule_to_file 4），912 个测试全过，ruff clean

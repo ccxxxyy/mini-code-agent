@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-793%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-912%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,7 +19,7 @@
 | **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~14,000 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~16,000 lines of readable Python, MIT licensed |
 
 ## Features
 
@@ -150,6 +150,8 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/memory [add\|delete\|consolidate\|export\|import]` | View, add, delete, consolidate, export or import memories |
 | `/session save\|list\|load\|delete\|tag\|untag\|tags` | Session management (tag for classification, list --tag to filter) |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | Manage skill packs |
+| `/allow <command\|path> <pattern> [--save]` | Add ALLOW permission rule (runtime, `--save` persists to TOML) |
+| `/deny <command\|path> <pattern> [--save]` | Add DENY permission rule (runtime, `--save` persists to TOML) |
 | `/compact` | Compress conversation history |
 | `/clear` | Clear conversation |
 | `/exit` | Exit |
@@ -195,10 +197,10 @@ mini-code-agent/
 │   ├── llm/         # Provider abstraction (OpenAI-compatible)
 │   ├── config/      # Layered config loading (TOML + env + CLI)
 │   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 876 tests, 80%+ coverage
+├── tests/           # 912 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 4 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
-└── docs/            # 13 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
+└── docs/            # 14 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
 ```
 
 **Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) decoupled via EventBus. All I/O is async. Zero vendor SDK dependency — just httpx.
@@ -215,12 +217,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 876 tests
+uv run pytest tests/           # 912 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P76, 76 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P78, 78 phases).
 
 ## Publishing to PyPI
 

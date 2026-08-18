@@ -186,6 +186,7 @@ class Application:
             config=config.security,
             path_guard=path_guard,
             confirm_callback=self.terminal.confirm,
+            event_bus=self.event_bus,
         )
         # User-defined permission rules 用户自定义权限规则文件
         self.permission_manager.load_rule_files(
