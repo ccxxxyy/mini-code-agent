@@ -45,13 +45,3 @@ def test_conversation_tool_call_messages():
     assert api[0]["tool_calls"][0]["function"]["name"] == "read_file"
     assert api[1]["role"] == "tool"
     assert api[1]["tool_call_id"] == "tc_1"
-
-
-def test_conversation_slice_window():
-    conv = Conversation()
-    for i in range(10):
-        conv.append(Message(role=Role.USER, content=f"msg {i}", token_count=100))
-
-    sliced = conv.slice_window(350)
-    assert len(sliced) == 3
-    assert sliced[0].content == "msg 7"

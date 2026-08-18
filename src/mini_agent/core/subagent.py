@@ -16,7 +16,7 @@ from pathlib import Path
 from mini_agent.config import detect_shell
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.core.agent_state import AgentPhase
-from mini_agent.core.agent_types import AgentTypeDefinition, get_agent_type
+from mini_agent.core.agent_types import DEFAULT_AGENT_TYPE, AgentTypeDefinition, get_agent_type
 from mini_agent.core.mailbox import Mailbox
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider
@@ -25,32 +25,6 @@ from mini_agent.models.events import SubAgentCompleteEvent, SubAgentSpawnEvent
 from mini_agent.models.message import Conversation, Message, Role
 from mini_agent.models.session import Session
 from mini_agent.tools.base import ToolContext, ToolRegistry
-
-SUBAGENT_SYSTEM_PROMPT = """You are a focused sub-agent working on a single delegated task.
-Working directory: {working_dir}
-Platform: {platform}
-Shell: {shell}
-
-Complete the task using the available tools, then give a concise final report.
-Do not ask questions -- make reasonable decisions autonomously.
-Your final message is your report back to the orchestrator.
-Respond in the same language the task is written in (Chinese task -> Chinese report).
-
-BUDGET: you have roughly {iteration_budget} think-act rounds before you are \
-force-stopped. Plan your tool usage: prioritize the most important \
-files/actions first, sample instead of reading everything, and when the \
-budget is running low, STOP exploring and write out your findings/deliverables \
-immediately. A partial deliverable is far better than being cut off with \
-nothing written.
-
-Rules:
-- Write ALL output files inside the working directory shown above, using \
-relative paths (e.g. "report.md"). NEVER write to /tmp or other absolute \
-paths outside the working directory.
-- Use platform-appropriate shell commands. On Windows use dir/type/findstr, \
-NOT ls/cat/grep.
-- If a file or resource the task mentions does not exist, report that fact \
-and stop -- do NOT retry in a loop."""
 
 MAILBOX_NOTICE = """
 
@@ -132,15 +106,21 @@ class SubAgent:
         self._mailbox = mailbox
         effective_dir = worktree_path or working_dir
 
-        if agent_type is not None:
+        if agent_type is None:
+            # Untyped spawn falls back to the default type's prompt/tools
+            # but keeps the caller's iteration budget --
+            # config.max_agent_iterations is user-tunable and must not be
+            # silently overridden by the type profile.
+            # 未指定类型时回退到默认类型的提示词/工具，但保留调用方的迭代
+            # 预算——config.max_agent_iterations 用户可配，不能被类型档案
+            # 静默覆盖。
+            agent_type = get_agent_type(DEFAULT_AGENT_TYPE)
+            effective_config = config
+        else:
             effective_config = copy.copy(config)
             effective_config.max_agent_iterations = agent_type.max_iterations
-            effective_tools = _intersect_tools(agent_type.allowed_tools, allowed_tools)
-            prompt_template = agent_type.system_prompt
-        else:
-            effective_config = config
-            effective_tools = allowed_tools
-            prompt_template = SUBAGENT_SYSTEM_PROMPT
+        effective_tools = _intersect_tools(agent_type.allowed_tools, allowed_tools)
+        prompt_template = agent_type.system_prompt
 
         registry = tool_registry.clone()
         registry.unregister("spawn_agents")

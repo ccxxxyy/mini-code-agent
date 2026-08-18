@@ -185,4 +185,17 @@ uv run python experiments/verify_circuit_breaker.py --model gpt-4o-mini
 - 差异：旧消息摘要交给 LLM 生成语义摘要（保留任务目标/已完成步骤/关键发现/未决问题）
 - 防递归：摘要调用是一次性直连 LLM 请求，不经过 AgentLoop
 - 失败回退：LLM 调用异常/空响应时退回提取式拼接，压缩链永不中断
-- 未接入默认压缩链（保持向后兼容），显式传入 `Compressor([DropToolResults(), LLMSummarizeOldest(llm), SlidingWindow()])` 启用
+- 已接入默认压缩链：`MemoryConfig.llm_summarize = True`（默认开启）时 app.py 装配 `LLMSummarizeOldest` 替换提取式 `SummarizeOldest`；`llm_summarize = false` 恢复旧行为（本节写作时尚未接入，现状已变）
+
+## 附：功能验证脚本（verify_*.py）
+
+与上面的对照实验不同，这些是单功能的真实 LLM 验收脚本（全部 `uv run python experiments/<脚本>` 直接运行，断言失败即非零退出）：
+
+| 脚本 | 验证内容 |
+|---|---|
+| `verify_circuit_breaker.py` | 压缩熔断器五阶段（即实验 4） |
+| `verify_summary_prompt.py` | P67 结构化摘要 prompt（analysis + 9 节 summary） |
+| `verify_summary_recall.py` | 压缩后摘要信息可召回 |
+| `verify_token_keep_window.py` | P68 token 驱动保留窗口随压缩目标缩放 |
+| `verify_tool_permission.py` | P79 工具级权限门 + check() 通用入口四阶段（TOOL deny 拦截 / 对照组危险命令确认 / TOOL allow 零弹窗 / [tools] 持久化往返） |
+| `verify_default_agent_type.py` | P80 未指定类型回退 DEFAULT_AGENT_TYPE（worker 档案 + 保留 config 迭代预算）两阶段 |

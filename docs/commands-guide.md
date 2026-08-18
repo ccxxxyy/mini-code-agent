@@ -99,7 +99,7 @@
 | `--pane` | 需要 tmux 会话、Windows Terminal 会话（分屏）或装有 wt.exe 的任意终端（降级为共享窗口 mini-agents 的新标签页）。无可用后端时明确报错 |
 | `--wait` | 阻塞至完成（上限 900 秒），期间显示进度面板；不加则用 `/spawn wait` 二段式收集 |
 | `--isolated` | 每个 agent 独占 worktree，结果附合并提示 |
-| `--type` | explore/plan/verify 为只读工具集，worker 全工具 |
+| `--type` | explore/plan/verify 为只读工具集，worker 全工具。不指定时回退默认 worker 类型档案（P80），但保留配置的 `max_agent_iterations` 迭代预算；显式指定则采纳类型档案预算（worker=50/verify=20 等） |
 
 注意事项：
 - 需要相互通信（send_message/wait_message）的任务必须**一次 `-p` 派发**，分次派发是串行的
@@ -139,9 +139,12 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 /allow                            # 列出当前所有 ALLOW 规则
 /allow command "docker *"         # 允许所有 docker 命令
 /allow path "D:/shared/*"         # 允许读写指定路径
+/allow tool bash                  # 整体信任 bash 工具（跳过命令级检查，慎用）
 /allow command "npm *" --save     # 允许并持久化到 .mini-agent/permissions.toml
+/allow remove tool bash           # 移除本会话中的 ALLOW 规则
 ```
-scope 必须是 `command` 或 `path`，pattern 使用 glob 匹配。  
+scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。  
+`tool` scope 按工具名匹配，在命令/路径检查之前评估：allow 整体信任该工具（危险命令也不再确认）；deny 直接拦截整个工具。  
 不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。  
 重复规则自动去重，不会重复添加。
 
@@ -150,9 +153,12 @@ scope 必须是 `command` 或 `path`，pattern 使用 glob 匹配。
 /deny                             # 列出当前所有 DENY 规则
 /deny command "rm -rf *"          # 拒绝所有 rm -rf 命令
 /deny path "*/secrets/*"          # 拒绝访问 secrets 路径
+/deny tool delete_file            # 直接拦截 delete_file 工具
 /deny path "*.pem" --save         # 拒绝并持久化
+/deny remove tool delete_file     # 移除本会话中的 DENY 规则
 ```
-语法与 `/allow` 相同。DENY 优先级高于 ALLOW（评估顺序：DENY → ALLOW → 会话授权 → 默认模式）。
+语法与 `/allow` 相同。DENY 优先级高于 ALLOW（评估顺序：DENY → ALLOW → 会话授权 → 默认模式）。  
+`remove` 只移除当前会话规则表中的规则（scope+pattern+level 精确匹配）；来自 permissions.toml 的规则下次启动仍会加载，需编辑文件本身。
 
 ### /tools
 列出所有已注册工具（内置 + MCP，含 dispatch 模式的搜索提示）。无参数。

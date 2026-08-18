@@ -296,6 +296,8 @@
 
 P78 进一步增强：`add_rule()` 带校验/去重/事件发射，`/allow` `/deny` 斜杠命令运行时动态管理规则（`--save` 持久化到 TOML）——用户无需重启即可调整权限策略。
 
+P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny tool <name>`，工具门在命令/路径检查之前评估（deny 拦工具、allow 整体信任）；`check()` 重构为按 scope 分发的通用检查入口，任意消费者构造 `PermissionRequest` 一次调用即得正确判定。
+
 ### 3.3 Plan 模式只读权限 ✅ 已实现（P49）
 
 | | mini | mewcode |
@@ -570,7 +572,9 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - `SpawnAgentsTool` 新增 `agent_type` 字段，LLM 可自主选择类型
 - `/spawn --type explore <task>` 命令行指定
 - `_intersect_tools()` 辅助函数：agent_type 工具白名单与调用方 `allowed_tools` 取交集
-- 向后兼容：不指定 agent_type 时行为与 P48 前完全一致
+- 向后兼容：不指定 agent_type 时行为与 P48 前完全一致（P48 时通过独立内联 prompt 实现；P80 起改为回退默认 worker 档案，行为仍等价，见下）
+
+P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`（worker），删除与 `_WORKER_PROMPT` 逐字重复的内联 `SUBAGENT_SYSTEM_PROMPT`——prompt/工具过滤统一为单一路径；未显式选类型保留 `config.max_agent_iterations`（用户可配值优先），显式选类型仍采纳类型完整档案。
 
 ### 6.4 多后端 spawn ✅ 已实现
 

@@ -790,7 +790,15 @@ class AgentLoop:
         scope = "tool"
         resource = tc.name
 
-        if tc.name == "bash":
+        # 0. Tool-level gate: explicit TOOL rules decide outright.
+        # DENY blocks the tool; ALLOW trusts it wholesale (skips resource
+        # checks); no rule falls through to command/path routing below.
+        # 工具级门：显式 TOOL 规则直接判定。DENY 拦截工具；ALLOW 整体信任
+        # （跳过资源检查）；无规则则继续走下面的命令/路径路由。
+        tool_decision = await self._permissions.check_tool(tc.name)
+        if tool_decision is not None:
+            decision = tool_decision
+        elif tc.name == "bash":
             scope = "command"
             resource = str(tc.arguments.get("command", ""))
             decision = await self._permissions.check_command(resource)

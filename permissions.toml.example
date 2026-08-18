@@ -34,3 +34,15 @@ deny = [
     # "*/secrets/*",
     # "*.key",
 ]
+
+[tools]
+# 工具级控制：deny 直接拦截整个工具；allow 整体信任该工具
+# （跳过命令/路径级检查——危险命令也不再确认，慎用）
+# Tool-level control: deny blocks the whole tool; allow trusts it wholesale
+# (skips command/path checks -- even dangerous commands stop confirming, use with care)
+allow = [
+    # "glob",
+]
+deny = [
+    # "delete_file",
+]

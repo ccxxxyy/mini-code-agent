@@ -82,7 +82,7 @@ while True:
 
 **核心模式**：工具执行前过一道门控——自动放行 / 弹窗确认 / 直接拒绝。
 
-**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。P34.3 实战加固：LLM 曾擅自执行 git commit——DANGEROUS_COMMAND_PATTERNS 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需确认），印证"提示词是软约束、权限确认是硬闸门"。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。
+**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。P34.3 实战加固：LLM 曾擅自执行 git commit——DANGEROUS_COMMAND_PATTERNS 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需确认），印证"提示词是软约束、权限确认是硬闸门"。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。P79 补上工具级 scope：`/deny tool delete_file` 直接拦掉整个工具（在命令/路径检查之前评估），`check()` 重构为按 scope 分发的通用检查入口。
 
 **判断标准**：框架有没有工具执行前的权限检查？危险命令（rm、sudo）有没有拦截？用户能不能控制拦截策略（不仅能在启动前配文件，还能在运行中动态调整）？
 
@@ -126,7 +126,7 @@ while True:
 
 **为什么需要**：子代理有自己**独立的对话历史**（fresh messages[]），互不干扰。父代理只收取结果摘要，上下文保持干净。没有子代理，做 10 件独立的事就要 10 倍的上下文。
 
-**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。
+**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。4 种 Agent 类型档案（explore/plan/worker/verify，P48），未指定类型回退 `DEFAULT_AGENT_TYPE`（worker）档案且保留配置的迭代预算（P80）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。
 
 **判断标准**：子代理是否有独立的上下文？父子之间是否只传递结果而非完整历史？
 

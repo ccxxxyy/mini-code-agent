@@ -1429,3 +1429,52 @@
 ### 测试
 - [x] 13 个新测试，912 个全过，ruff clean
 - [x] 原有 27 个 permission 测试 + 9 个 permission_files 测试不受影响（行为等价）
+## Phase 79 检查项：工具级权限与通用检查入口（扩展点 #9/#15）
+
+### check_tool 工具级门
+- [x] check_tool(tool_name) 显式 TOOL 规则 + 会话授权判定，无匹配返回 None
+- [x] TOOL DENY 直接拦截工具（无害命令也拦）
+- [x] TOOL ALLOW 整体信任（危险命令零弹窗执行）
+- [x] 无 TOOL 规则落回命令/路径资源级检查（行为与改前完全一致）
+- [x] DENY 优先于 ALLOW；工具名支持 glob 匹配
+- [x] agent_loop._check_permission 所有工具调用先过工具门，事件 scope="tool" 带 matched_rule
+- [x] would_ask 显式工具规则直接判定不弹窗（流式预提交一致）
+
+### check() 通用入口
+- [x] COMMAND scope 请求经 check() 走危险模式确认（不再绕过）
+- [x] PATH scope 请求经 check() 走 DENY 规则 → PathGuard（不再绕过）
+- [x] operation 从 request.context 前缀解析（write 前缀 → write，其余 read）
+- [x] TOOL/其他 scope 走通用管道（规则 → 会话授权 → 默认模式）
+- [x] check_command/check_path/check_tool 复用同一批内部管道，无递归
+
+### 规则持久化与命令
+- [x] permissions.toml [tools] 节加载生效（load_rule_files）
+- [x] save_rule_to_file TOOL 规则写入 [tools] 节；旧文件无 [tools] 节向后兼容
+- [x] /allow tool <name> 与 /deny tool <name>（含 --save）
+- [x] /allow remove 与 /deny remove 子命令（scope+pattern+level 精确移除会话内规则；level 不匹配不误删）
+- [x] 输出中 [scope] 转义，不再被 markdown 当引用链接吞掉
+- [x] permissions.toml.example 补 [tools] 示例
+
+### 测试与验证
+- [x] 22 个新测试，934 个全过，ruff clean
+- [x] 真实 LLM 四阶段验证（experiments/verify_tool_permission.py）：deny 拦截 / 对照组弹确认 / allow 零弹窗 / check() 分发 / TOML 往返
+
+## Phase 80 检查项：默认 Agent 类型接线（扩展点 #10）
+
+### DEFAULT_AGENT_TYPE 回退
+- [x] SubAgent 未指定 agent_type 时使用 get_agent_type(DEFAULT_AGENT_TYPE)（worker）的提示词模板
+- [x] 未指定类型保留 config.max_agent_iterations（不被 worker 的 50 覆盖），预算正确注入 prompt
+- [x] 显式指定类型仍采纳类型完整档案（worker=50 / verify=20 + 只读工具集）
+- [x] 内联 SUBAGENT_SYSTEM_PROMPT 已删除，无残留引用
+- [x] DEFAULT_AGENT_TYPE 是 AGENT_TYPES 中的合法键
+
+### 测试与验证
+- [x] 4 个新测试，938 个全过，ruff clean
+- [x] 真实 LLM 两阶段验证（experiments/verify_default_agent_type.py）：未指定类型完成真实任务 / 显式类型对照组不变
+
+## Phase 81 检查项：slice_window 删除（拓展点 #5/#16 了结）
+
+- [x] Conversation.slice_window() 方法已删除，源码/测试零残留（spec.md 历史文档按惯例保留）
+- [x] #16 确认为 #5 重复行，清单标注实为 15 处
+- [x] capabilities.md 对话管理器行更新（窗口截取职责归 ContextManager/Compressor）
+- [x] 937 个测试全过，ruff clean
