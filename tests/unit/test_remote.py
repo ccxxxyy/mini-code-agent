@@ -99,6 +99,67 @@ def test_cli_remote_token():
     assert args2.remote_token == ""
 
 
+# --- Disconnect queuing ---
+
+
+@pytest.mark.asyncio
+async def test_disconnect_timeout_denies_pending():
+    """When timeout expires, all pending futures are denied."""
+    from mini_agent.remote.server import RemoteServer
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+
+    server = object.__new__(RemoteServer)
+    server._pending_confirms = {"req1": future}
+    server._pending_prompts = {"req1": "Allow?"}
+
+    await server._disconnect_timeout(timeout=0.05)
+    assert future.done()
+    assert future.result() is False
+    assert len(server._pending_confirms) == 0
+    assert len(server._pending_prompts) == 0
+
+
+@pytest.mark.asyncio
+async def test_disconnect_timeout_cancelled_on_reconnect():
+    """Cancelling the timeout task should not deny futures."""
+    from mini_agent.remote.server import RemoteServer
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+
+    server = object.__new__(RemoteServer)
+    server._pending_confirms = {"req1": future}
+    server._pending_prompts = {"req1": "Allow?"}
+
+    task = asyncio.create_task(server._disconnect_timeout(timeout=10.0))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert not future.done()
+
+
+@pytest.mark.asyncio
+async def test_resolve_cleans_prompt():
+    """Resolving a permission should clean up _pending_prompts."""
+    from mini_agent.remote.server import RemoteServer
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+
+    server = object.__new__(RemoteServer)
+    server._pending_confirms = {"req1": future}
+    server._pending_prompts = {"req1": "Allow?"}
+
+    server._resolve_permission("req1", "y")
+    assert "req1" not in server._pending_prompts
+    assert future.result() is True
+
+
 def test_cli_default_no_remote():
     from mini_agent.cli import parse_args
 

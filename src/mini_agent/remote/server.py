@@ -46,6 +46,8 @@ class RemoteServer:
         self._token = token
         self._clients: set[Any] = set()
         self._pending_confirms: dict[str, asyncio.Future] = {}
+        self._pending_prompts: dict[str, str] = {}
+        self._disconnect_timeout_task: asyncio.Task | None = None
         self._running_turn: asyncio.Task | None = None
 
         # Wrap terminal to intercept UI calls and send to WebSocket
@@ -148,6 +150,9 @@ class RemoteServer:
                 return
 
         self._clients.add(websocket)
+        if self._disconnect_timeout_task and not self._disconnect_timeout_task.done():
+            self._disconnect_timeout_task.cancel()
+            self._disconnect_timeout_task = None
         self._wire_callbacks()
 
         model = self._app.agent_loop.model_name or "unknown"
@@ -171,6 +176,7 @@ class RemoteServer:
             pass
         await self._replay_history(websocket)
         await self._send_commands(websocket)
+        await self._replay_pending_confirms(websocket)
 
         try:
             async for raw in websocket:
@@ -236,6 +242,8 @@ class RemoteServer:
             pass
         finally:
             self._clients.discard(websocket)
+            if not self._clients and self._pending_confirms:
+                self._disconnect_timeout_task = asyncio.create_task(self._disconnect_timeout())
 
     async def _replay_history(self, websocket: Any) -> None:
         """Send existing conversation history to a single newly connected client."""
@@ -334,6 +342,7 @@ class RemoteServer:
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         self._pending_confirms[req_id] = future
+        self._pending_prompts[req_id] = prompt
         self._event_loop = loop
         await self._ws_send("permission_request", id=req_id, prompt=prompt)
         return await future
@@ -341,6 +350,7 @@ class RemoteServer:
     def _resolve_permission(self, req_id: str, decision: str) -> None:
         """Resolve a permission Future (called from WS handler)."""
         future = self._pending_confirms.pop(req_id, None)
+        self._pending_prompts.pop(req_id, None)
         if not future or future.done():
             return
         if decision == "y":
@@ -349,6 +359,34 @@ class RemoteServer:
             future.set_result("always")
         else:
             future.set_result(False)
+
+    async def _disconnect_timeout(self, timeout: float = 120.0) -> None:
+        """Deny all pending permissions if no client reconnects within timeout.
+        若超时内无客户端重连，拒绝所有待处理权限请求。"""
+        try:
+            await asyncio.sleep(timeout)
+        except asyncio.CancelledError:
+            return
+        for req_id, future in list(self._pending_confirms.items()):
+            if not future.done():
+                future.set_result(False)
+        self._pending_confirms.clear()
+        self._pending_prompts.clear()
+
+    async def _replay_pending_confirms(self, websocket: Any) -> None:
+        """Re-send pending permission requests to a newly connected client.
+        向新连接的客户端重发待处理的权限请求。"""
+        for req_id, prompt in list(self._pending_prompts.items()):
+            if req_id in self._pending_confirms and not self._pending_confirms[req_id].done():
+                try:
+                    await websocket.send(
+                        json.dumps(
+                            {"type": "permission_request", "id": req_id, "prompt": prompt},
+                            ensure_ascii=False,
+                        )
+                    )
+                except Exception:
+                    logger.debug("WS replay pending confirm failed", exc_info=True)
 
     def _safe_send(self, event_type: str, **data: Any) -> None:
         """Non-async wrapper used by RemoteTerminalAdapter.

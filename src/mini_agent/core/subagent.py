@@ -24,6 +24,7 @@ from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import SubAgentCompleteEvent, SubAgentSpawnEvent
 from mini_agent.models.message import Conversation, Message, Role
 from mini_agent.models.session import Session
+from mini_agent.security.permission import ConfirmCallback, PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 
 MAILBOX_NOTICE = """
@@ -98,6 +99,7 @@ class SubAgent:
         agent_id: str | None = None,
         peers: list[tuple[str, str, str]] | None = None,
         name: str = "",
+        permission_manager: PermissionManager | None = None,
     ) -> None:
         self.agent_id = agent_id or uuid.uuid4().hex[:8]
         self.name = name
@@ -145,6 +147,7 @@ class SubAgent:
             event_bus=event_bus,
             config=effective_config,
             tool_context=tool_context,
+            permission_manager=permission_manager,
         )
         self._loop.model_name = model_name
         if mailbox is not None:
@@ -283,6 +286,7 @@ class SubAgentManager:
         worktree_manager=None,
         model_name: str = "",
         mailbox: Mailbox | None = None,
+        confirm_callback: ConfirmCallback | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
@@ -291,6 +295,7 @@ class SubAgentManager:
         self._working_dir = working_dir
         self._worktree_manager = worktree_manager
         self._model_name = model_name
+        self._confirm_callback = confirm_callback
         self._active: dict[str, _ActiveAgent] = {}
         if mailbox is None:
             mailbox = Mailbox(working_dir / ".mini-agent" / "mailboxes")
@@ -441,7 +446,9 @@ class SubAgentManager:
             raise ValueError(f"Pane spawn failed: {e}") from e
 
         proxy = _PaneWorkerProxy(agent_id, task)
-        handle = asyncio.create_task(self._collect_pane_result(proxy, task, result_path, timeout))
+        handle = asyncio.create_task(
+            self._collect_pane_result(proxy, task, result_path, timeout, workers_dir)
+        )
         self._active[agent_id] = _ActiveAgent(
             agent=proxy, task_handle=handle, started_at=time.monotonic()
         )
@@ -449,10 +456,18 @@ class SubAgentManager:
         return agent_id
 
     async def _collect_pane_result(
-        self, proxy: _PaneWorkerProxy, task: str, result_path: Path, timeout: float
+        self,
+        proxy: _PaneWorkerProxy,
+        task: str,
+        result_path: Path,
+        timeout: float,
+        workers_dir: Path,
     ) -> SubAgentResult:
         """Poll for the worker's result file (written atomically by the
-        worker process). 轮询 worker 进程原子写出的结果文件。"""
+        worker process) and relay permission requests from the worker.
+        轮询 worker 进程原子写出的结果文件，并中转 worker 的权限请求。"""
+        from mini_agent.security.remote_confirm import read_request, write_decision
+
         required = {
             "agent_id",
             "task",
@@ -464,6 +479,17 @@ class SubAgentManager:
         }
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and not proxy._cancelled:
+            # Check for pending permission requests from the worker
+            # 检查 worker 的待处理权限请求
+            req = read_request(workers_dir, proxy.agent_id)
+            if req and req.get("status") == "pending":
+                request_id = req["request_id"]
+                prompt_text = req.get("prompt", "Worker permission request")
+                decision = await self._resolve_worker_permission(
+                    f"[pane worker {proxy.agent_id}] {prompt_text}"
+                )
+                write_decision(workers_dir, proxy.agent_id, request_id, decision)
+
             if result_path.is_file():
                 try:
                     data = json.loads(result_path.read_text(encoding="utf-8"))
@@ -488,10 +514,26 @@ class SubAgentManager:
                         tokens_used=int(data.get("tokens_used", 0)),
                     )
             await asyncio.sleep(0.5)
+
+        # Clean up orphaned permission files on timeout/cancel
+        # 超时/取消时清理孤立的权限文件
+        for suffix in (".perm-request.json", ".perm-decision.json"):
+            (workers_dir / f"{proxy.agent_id}{suffix}").unlink(missing_ok=True)
+
         reason = "Cancelled" if proxy._cancelled else "Pane worker timed out (no result file)"
         return SubAgentResult(
             agent_id=proxy.agent_id, task=task, success=False, output="", error=reason
         )
+
+    async def _resolve_worker_permission(self, prompt: str) -> str:
+        """Relay a worker's permission request to the parent's confirm callback.
+        将 worker 的权限请求转发给父进程的确认回调。"""
+        if self._confirm_callback is None:
+            return "n"
+        answer = await self._confirm_callback(prompt)
+        if answer == "always":
+            return "a"
+        return "y" if answer else "n"
 
     async def wait(self, agent_id: str, timeout: float | None = None) -> SubAgentResult:
         """Wait for a specific sub-agent to complete. 等待指定的 SubAgent 完成。"""
