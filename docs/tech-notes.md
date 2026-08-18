@@ -379,6 +379,14 @@ Windows: del /s /q、rmdir /s、format c:
 
 **会话授权**：用户批准一次后可 `grant_session_permission(scope, pattern)` 记入会话白名单，同类操作不再重复弹窗。
 
+**运行时规则管理**（扩展点 #3 接入）：
+- `add_rule(rule, *, _silent=False) -> bool`：运行时动态添加规则，带空 pattern 校验、去重、事件发射（`PermissionRuleAddedEvent`）。`_silent=True` 用于启动加载阶段（不发事件）
+- `remove_rule(scope, pattern, level) -> bool`：按三元组移除，发射 `PermissionRuleRemovedEvent`
+- `list_rules() -> list[PermissionRule]`：返回规则列表副本供外部查看
+- `save_rule_to_file(path, rule)`：将规则追加到 TOML 权限文件（读取已有内容 → 合并去重 → 回写）
+- `/allow` `/deny` 斜杠命令：`/allow command "docker *"` 添加 ALLOW 规则，`/deny path "*/secrets/*"` 添加 DENY 规则，`--save` 标志持久化到项目级 `permissions.toml`
+- `_load_rules_from_config()` 和 `load_rule_files()` 统一走 `add_rule(_silent=True)`，保证所有规则入口单一
+
 ### 关键安全默认值
 
 **无 UI 时拒绝**：`confirm_callback=None`（脚本模式/CI）时，所有需要确认的操作直接 DENY——安全系统的默认值必须是安全的（fail-safe），绝不能"没人在就放行"。
@@ -434,11 +442,11 @@ Windows: del /s /q、rmdir /s、format c:
 
 ### TUI 确认闭环
 
-`PermissionManager(confirm_callback=terminal.confirm)` 完成接线：权限系统需要问人时，Rich Panel 弹出黄色警告框，`y/n` 输入即裁决。依赖方向是 App 装配时注入回调，安全层本身不 import UI。
+`PermissionManager(config, path_guard, confirm_callback=terminal.confirm, event_bus=event_bus)` 完成接线：权限系统需要问人时，Rich Panel 弹出黄色警告框，`y/n` 输入即裁决。依赖方向是 App 装配时注入回调，安全层本身不 import UI。`event_bus` 用于发射 `PermissionRuleAddedEvent` / `PermissionRuleRemovedEvent`。
 
 ## 3.6 测试验证矩阵
 
-35 个 P3 测试（总计 81 个）覆盖：
+49 个 P3 测试（含 add_rule/remove_rule/list_rules/save_rule_to_file 13 个新增）覆盖：
 
 | 层 | 测试要点 |
 |---|---|
@@ -2566,9 +2574,44 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 
 ### 77.3 后果
 
-- 9/16 扩展点已有真实调用方（#1/#2/#4/#6/#7/#11/#12/#13/#14），剩余 7 个是纯 API 表面预留
+- 10/16 扩展点已有真实调用方（#1/#2/#3/#4/#6/#7/#11/#12/#13/#14），剩余 6 个是纯 API 表面预留
 - `/session` 从 4 个子命令扩展到 7 个（save/list/load/delete/tag/untag/tags）
 - 10 个新测试，897 个全过
+
+# 第七十八部分：运行时权限规则管理（P78 — 扩展点 #3）
+
+## 78.1 动机
+
+`PermissionManager.add_rule()` 是 16 个预留扩展点中的 #3，原始实现仅一行 `self._rules.append(rule)`，零调用方。用户在会话中发现新的命令/路径需要放行或拦截时，只能编辑 TOML 文件并重启——运行时动态管理权限规则是明确需求。
+
+## 78.2 实现
+
+**PermissionManager 增强**（`security/permission.py`）：
+- `add_rule(rule, *, _silent=False) -> bool`：空 pattern 校验（`ValueError`）→ 三元组去重（scope+pattern+level）→ 追加 `_rules` → 发射 `PermissionRuleAddedEvent`（`_silent=True` 跳过事件，供启动阶段使用）。返回 `False` 表示重复
+- `remove_rule(scope, pattern, level) -> bool`：按三元组查找移除 → 发射 `PermissionRuleRemovedEvent`
+- `list_rules() -> list[PermissionRule]`：返回副本，供 `/allow` `/deny` 无参列出
+- `save_rule_to_file(path, rule)`（静态方法）：`tomllib.load` 读取已有 TOML → 合并去重 → 回写。自动创建父目录
+- `__init__` 新增 `event_bus: EventBus | None` 参数
+- `_load_rules_from_config()` 和 `load_rule_files()` 统一走 `add_rule(_silent=True)`，保证规则入口单一
+
+**事件类型**（`models/events.py`）：
+- `PermissionRuleAddedEvent(scope, pattern, level, reason)`
+- `PermissionRuleRemovedEvent(scope, pattern, level)`
+
+**斜杠命令**（`extensions/builtin_commands.py`）：
+- `/allow <command|path> <pattern> [--save]`：添加 ALLOW 规则
+- `/deny <command|path> <pattern> [--save]`：添加 DENY 规则
+- 无参数：列出该级别的全部规则
+- `--save`：追加写入项目级 `.mini-agent/permissions.toml`，重启自动加载
+
+**装配**（`app.py`）：`PermissionManager(event_bus=self.event_bus)` 一行接线。
+
+## 78.3 后果
+
+- 10/16 扩展点已接入（新增 #3）
+- 可见斜杠命令从 22 个增至 24 个（`/allow` `/deny`）
+- 13 个新测试（add_rule 验证/去重/事件/静默 + remove_rule + list_rules + save_rule_to_file），912 个全过
+- 规则生命周期：不带 `--save` 仅当前会话；带 `--save` 持久化到 TOML
 
 # 附录：贯穿各阶段的通用设计原则
 
@@ -2576,6 +2619,6 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——897 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——912 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合

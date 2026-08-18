@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-793%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-912%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -284,7 +284,9 @@ mini-code-agent/
     ├── config-guide.md         # 配置文件与上下文文件完全指南
     ├── agent-architecture.md   # Agent 架构原理与 S01-S20 实现解析
     ├── terminal-guide.md       # 各系统各终端的打开方法与兼容性指南
-    └── comparison-mewcode.md   # 与 mewcode-python 的详细对比与增强路线
+    ├── comparison-mewcode.md   # 与 mewcode-python 的详细对比与增强路线
+    ├── commands-guide.md       # 全部斜杠命令的完整语法与示例
+    └── todo-code-quality.md    # 代码质量待办与扩展点追踪
 ```
 
 ## 开发状态
@@ -352,8 +354,9 @@ mini-code-agent/
 - [x] P61：记忆导出/导入
 - [x] P62：压缩熔断器（连续 N 次压缩无效后跳过，防死循环烧 token）
 - [x] P63：压缩恢复附件含文件内容（烤入最近 5 文件内容 + 用户请求，消除 9.2 诚实差异 #1）
+- [x] P78：运行时权限规则管理（`/allow` `/deny` 斜杠命令动态添加权限规则，`--save` 持久化到 TOML；add_rule 增强校验/去重/事件；扩展点 #3 接入）
 
-**全部阶段已完成，897 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，912 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -826,6 +829,8 @@ uv run python experiments/deadlock_induction.py --all
 | `/plan` | 进入/退出 Plan 模式（只读规划，不执行工具） |
 | `/tools` | 列出已注册工具 |
 | `/skill [activate\|deactivate <名称>]` | 技能包管理 |
+| `/allow <command\|path> <模式> [--save]` | 运行时添加 ALLOW 权限规则（`--save` 持久化到 TOML） |
+| `/deny <command\|path> <模式> [--save]` | 运行时添加 DENY 权限规则（`--save` 持久化到 TOML） |
 | `/exit` | 退出 |
 
 全部命令的完整语法、参数与示例见 [docs/commands-guide.md](docs/commands-guide.md)。

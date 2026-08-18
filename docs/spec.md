@@ -936,10 +936,30 @@ class PermissionManager:
     """Evaluates permission requests against rules.
     Prompts user when needed."""
 
-    def __init__(self, config: SecurityConfig, event_bus: EventBus): ...
+    def __init__(
+        self, config: SecurityConfig, path_guard: PathGuard,
+        confirm_callback: ConfirmCallback | None = None,
+        event_bus: EventBus | None = None,
+    ): ...
 
-    def add_rule(self, rule: PermissionRule) -> None: ...
-    def remove_rule(self, rule: PermissionRule) -> None: ...
+    def add_rule(self, rule: PermissionRule, *, _silent: bool = False) -> bool:
+        """Add a permission rule at runtime. Validates pattern,
+        deduplicates, emits PermissionRuleAddedEvent. Returns False
+        if duplicate."""
+        ...
+    def remove_rule(
+        self, scope: PermissionScope, pattern: str, level: PermissionLevel
+    ) -> bool:
+        """Remove a rule by scope+pattern+level. Emits
+        PermissionRuleRemovedEvent. Returns True if found."""
+        ...
+    def list_rules(self) -> list[PermissionRule]:
+        """Return a copy of the current rule list for introspection."""
+        ...
+    @staticmethod
+    def save_rule_to_file(path: Path, rule: PermissionRule) -> None:
+        """Append a rule to a TOML permission file, creating if needed."""
+        ...
     def load_rules_from_config(self, config: SecurityConfig) -> None: ...
 
     async def check(self, request: PermissionRequest) -> PermissionDecision:
@@ -1073,7 +1093,7 @@ class SlashCommandRegistry:
 
     # Built-in commands registered in __init__:
     # /help, /clear, /status, /model, /compact, /memory, /session,
-    # /plan, /tools, /mcp, /skill, /quit
+    # /plan, /tools, /mcp, /skill, /allow, /deny, /quit
 ```
 
 ### 4.13 `core/subagent.py` -- 子 Agent 分发
@@ -1401,6 +1421,21 @@ class PermissionRequestEvent(Event):
 class PermissionDecisionEvent(Event):
     request: PermissionRequest | None = None
     decision: PermissionDecision | None = None
+
+@dataclass
+class PermissionRuleAddedEvent(Event):
+    """Emitted when a permission rule is dynamically added at runtime."""
+    scope: str = ""
+    pattern: str = ""
+    level: str = ""
+    reason: str = ""
+
+@dataclass
+class PermissionRuleRemovedEvent(Event):
+    """Emitted when a permission rule is dynamically removed at runtime."""
+    scope: str = ""
+    pattern: str = ""
+    level: str = ""
 
 # --- Session Events ---
 @dataclass

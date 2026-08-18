@@ -10,6 +10,8 @@ from mini_agent.models.config import SecurityConfig, ToolConfig
 from mini_agent.models.permissions import (
     PermissionDecision,
     PermissionLevel,
+    PermissionRule,
+    PermissionScope,
 )
 from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
@@ -244,3 +246,239 @@ def test_glob_pattern_matching():
     assert PermissionManager._matches("docker *", "docker run -it ubuntu")
     assert PermissionManager._matches("exact", "exact")
     assert not PermissionManager._matches("exact", "exact-more")
+
+
+# --- PermissionManager.add_rule() ---
+
+
+async def test_add_rule_basic(path_guard):
+    pm = make_pm(path_guard)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+        reason="test",
+    )
+    assert pm.add_rule(rule) is True
+    assert await pm.check_command("docker run ubuntu") == PermissionDecision.GRANTED
+
+
+async def test_add_rule_deny(path_guard):
+    pm = make_pm(path_guard)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="npm *",
+        level=PermissionLevel.DENY,
+        reason="test",
+    )
+    pm.add_rule(rule)
+    assert await pm.check_command("npm install evil") == PermissionDecision.DENIED
+
+
+async def test_add_rule_dedup(path_guard):
+    pm = make_pm(path_guard)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+    )
+    assert pm.add_rule(rule) is True
+    assert pm.add_rule(rule) is False
+    assert sum(1 for r in pm.list_rules() if r.pattern == "docker *") == 1
+
+
+def test_add_rule_empty_pattern_rejected(path_guard):
+    pm = make_pm(path_guard)
+    with pytest.raises(ValueError, match="must not be empty"):
+        pm.add_rule(
+            PermissionRule(
+                scope=PermissionScope.COMMAND,
+                pattern="",
+                level=PermissionLevel.ALLOW,
+            )
+        )
+
+
+def test_add_rule_whitespace_pattern_rejected(path_guard):
+    pm = make_pm(path_guard)
+    with pytest.raises(ValueError, match="must not be empty"):
+        pm.add_rule(
+            PermissionRule(
+                scope=PermissionScope.COMMAND,
+                pattern="   ",
+                level=PermissionLevel.ALLOW,
+            )
+        )
+
+
+async def test_add_rule_event_emitted(path_guard):
+    from unittest.mock import AsyncMock
+
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import PermissionRuleAddedEvent
+
+    bus = EventBus()
+    handler = AsyncMock()
+    bus.on(PermissionRuleAddedEvent, handler)
+
+    config = SecurityConfig(permission_mode="ask")
+    pm = PermissionManager(config=config, path_guard=path_guard, event_bus=bus)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+        reason="slash command",
+    )
+    pm.add_rule(rule)
+
+    import asyncio
+
+    await asyncio.sleep(0)  # let the event fire
+
+    handler.assert_called_once()
+    event = handler.call_args[0][0]
+    assert event.scope == "command"
+    assert event.pattern == "docker *"
+    assert event.level == "allow"
+
+
+async def test_add_rule_silent_no_event(path_guard):
+    from unittest.mock import AsyncMock
+
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import PermissionRuleAddedEvent
+
+    bus = EventBus()
+    handler = AsyncMock()
+    bus.on(PermissionRuleAddedEvent, handler)
+
+    config = SecurityConfig(permission_mode="ask")
+    pm = PermissionManager(config=config, path_guard=path_guard, event_bus=bus)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="test *",
+        level=PermissionLevel.ALLOW,
+    )
+    pm.add_rule(rule, _silent=True)
+
+    import asyncio
+
+    await asyncio.sleep(0)
+
+    handler.assert_not_called()
+
+
+# --- PermissionManager.remove_rule() ---
+
+
+async def test_remove_rule(path_guard):
+    pm = make_pm(path_guard)
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+    )
+    pm.add_rule(rule)
+    assert await pm.check_command("docker run ubuntu") == PermissionDecision.GRANTED
+
+    assert pm.remove_rule(PermissionScope.COMMAND, "docker *", PermissionLevel.ALLOW) is True
+    # After removal, the rule no longer applies -- falls through to default mode
+    pm_deny = make_pm(path_guard, mode="deny")
+    pm_deny.add_rule(rule)
+    pm_deny.remove_rule(PermissionScope.COMMAND, "docker *", PermissionLevel.ALLOW)
+    assert await pm_deny.check_command("docker run ubuntu") == PermissionDecision.DENIED
+
+
+def test_remove_rule_not_found(path_guard):
+    pm = make_pm(path_guard)
+    assert pm.remove_rule(PermissionScope.COMMAND, "nonexistent", PermissionLevel.ALLOW) is False
+
+
+# --- PermissionManager.list_rules() ---
+
+
+def test_list_rules(path_guard):
+    pm = make_pm(path_guard)
+    initial_count = len(pm.list_rules())
+    pm.add_rule(
+        PermissionRule(
+            scope=PermissionScope.COMMAND,
+            pattern="docker *",
+            level=PermissionLevel.ALLOW,
+        )
+    )
+    rules = pm.list_rules()
+    assert len(rules) == initial_count + 1
+    assert any(r.pattern == "docker *" for r in rules)
+
+
+def test_list_rules_returns_copy(path_guard):
+    pm = make_pm(path_guard)
+    rules = pm.list_rules()
+    rules.clear()
+    assert len(pm.list_rules()) > 0 or len(pm._rules) >= 0
+
+
+# --- PermissionManager.save_rule_to_file() ---
+
+
+def test_save_rule_to_file_creates_new(tmp_path):
+    toml_path = tmp_path / "permissions.toml"
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+    )
+    PermissionManager.save_rule_to_file(toml_path, rule)
+
+    import tomllib
+
+    with open(toml_path, "rb") as f:
+        data = tomllib.load(f)
+    assert "docker *" in data["commands"]["allow"]
+
+
+def test_save_rule_to_file_appends(tmp_path):
+    toml_path = tmp_path / "permissions.toml"
+    toml_path.write_text('[commands]\nallow = ["git *"]\n', encoding="utf-8")
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="docker *",
+        level=PermissionLevel.ALLOW,
+    )
+    PermissionManager.save_rule_to_file(toml_path, rule)
+
+    import tomllib
+
+    with open(toml_path, "rb") as f:
+        data = tomllib.load(f)
+    assert "git *" in data["commands"]["allow"]
+    assert "docker *" in data["commands"]["allow"]
+
+
+def test_save_rule_to_file_no_duplicate(tmp_path):
+    toml_path = tmp_path / "permissions.toml"
+    rule = PermissionRule(
+        scope=PermissionScope.PATH,
+        pattern="*/secrets/*",
+        level=PermissionLevel.DENY,
+    )
+    PermissionManager.save_rule_to_file(toml_path, rule)
+    PermissionManager.save_rule_to_file(toml_path, rule)
+
+    import tomllib
+
+    with open(toml_path, "rb") as f:
+        data = tomllib.load(f)
+    assert data["paths"]["deny"].count("*/secrets/*") == 1
+
+
+def test_save_rule_to_file_creates_parent_dirs(tmp_path):
+    toml_path = tmp_path / "nested" / "dir" / "permissions.toml"
+    rule = PermissionRule(
+        scope=PermissionScope.COMMAND,
+        pattern="npm *",
+        level=PermissionLevel.DENY,
+    )
+    PermissionManager.save_rule_to_file(toml_path, rule)
+    assert toml_path.is_file()

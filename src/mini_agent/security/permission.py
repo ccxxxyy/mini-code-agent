@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mini_agent.models.config import SecurityConfig
+from mini_agent.models.events import PermissionRuleAddedEvent, PermissionRuleRemovedEvent
 from mini_agent.models.permissions import (
     PermissionDecision,
     PermissionLevel,
@@ -17,6 +20,9 @@ from mini_agent.models.permissions import (
     PermissionScope,
 )
 from mini_agent.security.path_guard import PathGuard
+
+if TYPE_CHECKING:
+    from mini_agent.events.bus import EventBus
 
 # Patterns that flag a command as dangerous (confirm before running)
 # 用于标记危险命令的模式（执行前需要确认）
@@ -58,10 +64,12 @@ class PermissionManager:
         config: SecurityConfig,
         path_guard: PathGuard,
         confirm_callback: ConfirmCallback | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._config = config
         self._path_guard = path_guard
         self._confirm = confirm_callback
+        self._event_bus = event_bus
         self._rules: list[PermissionRule] = []
         self._session_grants: set[tuple[PermissionScope, str]] = set()
         # OS sandbox auto-allows normal commands (kernel provides isolation)
@@ -74,26 +82,107 @@ class PermissionManager:
 
     def _load_rules_from_config(self, config: SecurityConfig) -> None:
         for pattern in config.denied_commands:
-            self._rules.append(
+            self.add_rule(
                 PermissionRule(
                     scope=PermissionScope.COMMAND,
                     pattern=pattern,
                     level=PermissionLevel.DENY,
                     reason="denied by config",
-                )
+                ),
+                _silent=True,
             )
         for pattern in config.allowed_commands:
-            self._rules.append(
+            self.add_rule(
                 PermissionRule(
                     scope=PermissionScope.COMMAND,
                     pattern=pattern,
                     level=PermissionLevel.ALLOW,
                     reason="allowed by config",
-                )
+                ),
+                _silent=True,
             )
 
-    def add_rule(self, rule: PermissionRule) -> None:
+    def add_rule(self, rule: PermissionRule, *, _silent: bool = False) -> bool:
+        """Add a permission rule at runtime. Returns False if duplicate.
+        运行时添加权限规则。重复则返回 False。"""
+        if not rule.pattern or not rule.pattern.strip():
+            raise ValueError("Permission rule pattern must not be empty")
+        if any(
+            r.scope == rule.scope and r.pattern == rule.pattern and r.level == rule.level
+            for r in self._rules
+        ):
+            return False
         self._rules.append(rule)
+        if not _silent and self._event_bus is not None:
+            asyncio.get_event_loop().create_task(
+                self._event_bus.emit(
+                    PermissionRuleAddedEvent(
+                        scope=rule.scope.value,
+                        pattern=rule.pattern,
+                        level=rule.level.value,
+                        reason=rule.reason,
+                    )
+                )
+            )
+        return True
+
+    def remove_rule(self, scope: PermissionScope, pattern: str, level: PermissionLevel) -> bool:
+        """Remove a rule by scope+pattern+level. Returns True if found and removed.
+        按 scope+pattern+level 移除规则。找到并移除返回 True。"""
+        for i, rule in enumerate(self._rules):
+            if rule.scope == scope and rule.pattern == pattern and rule.level == level:
+                self._rules.pop(i)
+                if self._event_bus is not None:
+                    asyncio.get_event_loop().create_task(
+                        self._event_bus.emit(
+                            PermissionRuleRemovedEvent(
+                                scope=scope.value,
+                                pattern=pattern,
+                                level=level.value,
+                            )
+                        )
+                    )
+                return True
+        return False
+
+    def list_rules(self) -> list[PermissionRule]:
+        """Return a copy of the current rule list for introspection.
+        返回当前规则列表的副本，供外部查看。"""
+        return list(self._rules)
+
+    @staticmethod
+    def save_rule_to_file(path: Path, rule: PermissionRule) -> None:
+        """Append a rule to a TOML permission file, creating it if needed.
+        将规则追加到 TOML 权限文件，不存在则创建。"""
+        import tomllib
+
+        section = "commands" if rule.scope == PermissionScope.COMMAND else "paths"
+        level_key = rule.level.value  # "allow" or "deny"
+
+        data: dict = {}
+        if path.is_file():
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+
+        table = data.setdefault(section, {})
+        entries = table.setdefault(level_key, [])
+        if rule.pattern not in entries:
+            entries.append(rule.pattern)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines: list[str] = []
+        for sec in ("commands", "paths"):
+            sec_data = data.get(sec)
+            if not sec_data:
+                continue
+            lines.append(f"[{sec}]")
+            for lk in ("allow", "deny"):
+                vals = sec_data.get(lk, [])
+                if vals:
+                    formatted = ", ".join(f'"{v}"' for v in vals)
+                    lines.append(f"{lk} = [{formatted}]")
+            lines.append("")
+        path.write_text("\n".join(lines), encoding="utf-8")
 
     def load_rule_files(
         self,
@@ -141,12 +230,14 @@ class PermissionManager:
                 for level_key, level in levels:
                     for pattern in table.get(level_key, []):
                         if isinstance(pattern, str) and pattern:
-                            self._rules.append(
+                            added = self.add_rule(
                                 PermissionRule(
                                     scope=scope, pattern=pattern, level=level, reason=reason
-                                )
+                                ),
+                                _silent=True,
                             )
-                            count += 1
+                            if added:
+                                count += 1
         return count
 
     def grant_session_permission(self, scope: PermissionScope, pattern: str) -> None:

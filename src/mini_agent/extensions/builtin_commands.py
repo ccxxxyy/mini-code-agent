@@ -179,6 +179,20 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="allow",
+            description="Add an ALLOW permission rule (usage: /allow <command|path> <pattern>)",
+            handler=_make_permission_rule(app, "allow"),
+        )
+    )
+    reg.register(
+        SlashCommand(
+            name="deny",
+            description="Add a DENY permission rule (usage: /deny <command|path> <pattern>)",
+            handler=_make_permission_rule(app, "deny"),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="quit",
             description="Exit the agent",
             handler=_make_quit(),
@@ -1405,6 +1419,73 @@ def _make_team(app: Application) -> HandlerFn:
         tokens = sum(r.tokens_used for r in report.results)
         header = f"**Team Run [{status}]** — {len(report.plan.steps)} steps, {tokens} tokens"
         return f"{header}\n\n{report.summary()}"
+
+    return handler
+
+
+def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
+    from mini_agent.models.permissions import (
+        PermissionLevel,
+        PermissionRule,
+        PermissionScope,
+    )
+
+    level = PermissionLevel.ALLOW if level_name == "allow" else PermissionLevel.DENY
+
+    async def handler(args: str, ctx: Any) -> str:
+        pm = app.permission_manager
+        raw = args.strip()
+
+        if not raw:
+            rules = pm.list_rules()
+            filtered = [r for r in rules if r.level == level]
+            if not filtered:
+                return f"No {level_name} rules.\nUsage: /{level_name} <command|path> <pattern>"
+            lines = [f"**{level_name.upper()} Rules ({len(filtered)})：**"]
+            for r in filtered:
+                lines.append(f"  [{r.scope.value}] `{r.pattern}` — {r.reason or 'runtime'}")
+            return "\n".join(lines)
+
+        save = False
+        if "--save" in raw:
+            save = True
+            raw = raw.replace("--save", "").strip()
+
+        parts = raw.split(maxsplit=1)
+        if len(parts) < 2:
+            return f"Usage: /{level_name} <command|path> <pattern> [--save]"
+
+        scope_str = parts[0].lower()
+        pattern = parts[1].strip().strip("\"'")
+
+        scope_map = {"command": PermissionScope.COMMAND, "path": PermissionScope.PATH}
+        scope = scope_map.get(scope_str)
+        if scope is None:
+            return f"Unknown scope: `{scope_str}`. Use `command` or `path`."
+
+        if not pattern:
+            return f"Usage: /{level_name} {scope_str} <pattern>"
+
+        reason = "slash command (saved)" if save else "slash command"
+        rule = PermissionRule(scope=scope, pattern=pattern, level=level, reason=reason)
+        try:
+            added = pm.add_rule(rule)
+        except ValueError as e:
+            return str(e)
+
+        if not added:
+            return f"Rule already exists: {level_name} {scope_str} `{pattern}`"
+
+        result = f"Added {level_name} rule: [{scope_str}] `{pattern}`"
+        if save:
+            project_dir = app.session.metadata.project_dir
+            toml_path = Path(project_dir) / ".mini-agent" / "permissions.toml"
+            try:
+                pm.save_rule_to_file(toml_path, rule)
+                result += f" (saved to {toml_path})"
+            except OSError as e:
+                result += f" (save failed: {e})"
+        return result
 
     return handler
 

@@ -1,6 +1,6 @@
 # 命令参考（Slash Commands Guide）
 
-全部 22 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
+全部 24 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
 
 > 各行输出的来源与开关见 output-guide.md；配置项见 config-guide.md。
 
@@ -133,6 +133,26 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 /audit off       # 停止
 /audit verify    # 校验哈希链完整性（检测篡改）
 ```
+
+### /allow — 运行时添加 ALLOW 权限规则
+```
+/allow                            # 列出当前所有 ALLOW 规则
+/allow command "docker *"         # 允许所有 docker 命令
+/allow path "D:/shared/*"         # 允许读写指定路径
+/allow command "npm *" --save     # 允许并持久化到 .mini-agent/permissions.toml
+```
+scope 必须是 `command` 或 `path`，pattern 使用 glob 匹配。  
+不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。  
+重复规则自动去重，不会重复添加。
+
+### /deny — 运行时添加 DENY 权限规则
+```
+/deny                             # 列出当前所有 DENY 规则
+/deny command "rm -rf *"          # 拒绝所有 rm -rf 命令
+/deny path "*/secrets/*"          # 拒绝访问 secrets 路径
+/deny path "*.pem" --save         # 拒绝并持久化
+```
+语法与 `/allow` 相同。DENY 优先级高于 ALLOW（评估顺序：DENY → ALLOW → 会话授权 → 默认模式）。
 
 ### /tools
 列出所有已注册工具（内置 + MCP，含 dispatch 模式的搜索提示）。无参数。

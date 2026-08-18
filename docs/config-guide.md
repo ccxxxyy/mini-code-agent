@@ -566,7 +566,15 @@ deny = ["*secrets*", "*.key"]        # 拒绝访问（项目内路径也拦）
 
 **验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<pattern>` 作为判定依据。
 
-**修改后生效**：重启 mini（启动时加载一次）。
+**修改后生效**：重启 mini（启动时加载一次）。或在运行中使用 `/allow` `/deny` 命令实时添加规则——带 `--save` 标志的规则会写入项目级 permissions.toml，下次启动自动加载。
+
+**运行时管理**（P78）：
+```
+/allow command "docker *"          # 本会话放行所有 docker 命令
+/deny path "*/secrets/*"           # 本会话拒绝 secrets 路径
+/allow command "npm *" --save      # 放行并持久化到 .mini-agent/permissions.toml
+/deny                              # 列出当前所有 DENY 规则
+```
 
 ---
 

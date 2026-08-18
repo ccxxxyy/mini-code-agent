@@ -1398,3 +1398,34 @@
 
 ### 测试
 - [x] 10 个新测试（filter 2 + is_complete 2 + tags 4 + tool_name 2），897 个全过
+
+## Phase 78 检查项：运行时权限规则管理（扩展点 #3）
+
+### PermissionManager.add_rule() 增强
+- [x] 空 pattern 抛 ValueError
+- [x] scope+pattern+level 三元组去重，重复返回 False
+- [x] 非静默模式发射 PermissionRuleAddedEvent（event_bus 注入）
+- [x] _silent=True 跳过事件发射（启动加载阶段使用）
+- [x] _load_rules_from_config 和 load_rule_files 统一走 add_rule(_silent=True)
+
+### 新增方法
+- [x] remove_rule(scope, pattern, level) -> bool，发射 PermissionRuleRemovedEvent
+- [x] list_rules() -> list[PermissionRule]，返回副本
+- [x] save_rule_to_file(path, rule) 静态方法：读取 TOML → 合并去重 → 回写，自动创建父目录
+
+### 事件与装配
+- [x] PermissionRuleAddedEvent(scope, pattern, level, reason)
+- [x] PermissionRuleRemovedEvent(scope, pattern, level)
+- [x] events/types.py 导出
+- [x] app.py 传入 event_bus=self.event_bus
+
+### /allow /deny 斜杠命令
+- [x] /allow command "docker *" — 添加 ALLOW 规则
+- [x] /deny path "*/secrets/*" — 添加 DENY 规则
+- [x] 无参数列出该级别全部规则
+- [x] --save 追加写入项目级 .mini-agent/permissions.toml
+- [x] 重复规则提示 "Rule already exists"
+
+### 测试
+- [x] 13 个新测试，912 个全过，ruff clean
+- [x] 原有 27 个 permission 测试 + 9 个 permission_files 测试不受影响（行为等价）
