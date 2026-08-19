@@ -363,6 +363,27 @@ class Application:
         self.slash_commands = SlashCommandRegistry()
         register_builtin_commands(self)
 
+        # Plugin ecosystem (P83): pip packages / local files registering
+        # tools, commands, skills -- loaded before completion wiring so
+        # plugin commands land in the `/` dropdown.
+        # 插件生态：pip 包 / 本地文件注册工具、命令、技能——在补全接线前
+        # 加载，让插件命令进入 `/` 下拉。
+        from mini_agent.extensions.plugin_loader import PluginContext, load_plugins
+
+        plugin_ctx = PluginContext(
+            tool_registry=self.tool_registry,
+            slash_commands=self.slash_commands,
+            skill_registry=self.skill_registry,
+            event_bus=self.event_bus,
+            config=config,
+        )
+        self.loaded_plugins = load_plugins(config.plugin_dirs, plugin_ctx, config.disabled_plugins)
+        if self.loaded_plugins:
+            self.terminal.show_info(
+                f"Loaded {len(self.loaded_plugins)} plugin(s): "
+                + ", ".join(p.name for p in self.loaded_plugins)
+            )
+
         # Wire slash command completions + @file completions to terminal
         # 将斜杠命令补全 + @文件补全接入终端
         self.terminal.set_working_dir(working_dir)

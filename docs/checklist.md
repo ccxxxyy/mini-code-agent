@@ -1477,3 +1477,24 @@
 - [x] Conversation.slice_window() 方法已删除，源码/测试零残留（spec.md 历史文档按惯例保留）
 - [x] capabilities.md 对话管理器行更新（窗口截取职责归 ContextManager/Compressor）
 - [x] 937 个测试全过，ruff clean
+
+## Phase 82 检查项：PermissionDecision.PENDING 跨进程权限协议
+
+- [x] `security/remote_confirm.py` RemoteConfirm 文件协议：worker 写 `<agent_id>.perm-request.json` → 父进程 0.5s 轮询中转 `terminal.confirm` → 写回 decision；超时 120s 安全拒绝，文件 finally 清理
+- [x] `worker.py` 搭建完整权限栈（PathGuard + PermissionManager + RemoteConfirm）并加载 permissions.toml 规则——pane worker 不再自动放行全部工具调用
+- [x] 远程/浏览器模式断连排队：`_pending_prompts` 存活断连、重连 `_replay_pending_confirms()` 重发、120s 超时 deny all
+- [x] `_ask_user()` 弹窗前发射 `PermissionCheckEvent(decision="pending")`，`/trace` 以 warning 色显示 `PENDING (awaiting user)`
+- [x] 15 个新测试（test_remote_confirm 10 + test_permissions 2 + test_remote 3），952 passed + 1 skipped，ruff clean
+- [x] E2E 验证脚本 `experiments/verify_pending.py`：4/4 全过（y→GRANTED / n→DENIED / a→GRANTED+always / timeout→DENIED）
+- [x] 真实 LLM 终端验证：`/trace` 显示 PENDING → GRANTED 两行事件
+
+## Phase 83 检查项：插件生态 plugin_loader
+
+- [x] `extensions/plugin_loader.py`：四钩子契约（register 全控优先 / register_tools/commands/skills 专用）+ 双通道发现（entry_points `mini_agent.plugins` + `plugin_dirs`）+ 三层异常隔离 + 重名告警
+- [x] `SkillRegistry.register()` 编程注册的技能在 load_all()/reload() 后存活（`_external` 合并）
+- [x] `plugin_dirs` / `disabled_plugins` 配置字段生效（TOML 顶级键，loader 零改动）
+- [x] 插件工具不受 `enabled_tools` 白名单约束（安装即 opt-in，docstring 有论证）
+- [x] `/plugins` 命令展示插件名/来源/注册的工具/命令/技能（快照差分）
+- [x] 示例插件 `examples/plugins/word_count_plugin.py` 三钩子全演示
+- [x] 16 个新测试，968 passed + 1 skipped，覆盖率门禁通过，ruff clean
+- [x] 真实运行验证：启动横幅 / /plugins 表格 / /greet / haiku-mode 技能 / 真实 LLM 调用 word_count 工具 / disabled_plugins 禁用生效

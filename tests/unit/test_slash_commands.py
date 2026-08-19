@@ -79,3 +79,14 @@ async def test_unregister():
     assert reg.get("temp") is not None
     reg.unregister("temp")
     assert reg.get("temp") is None
+
+
+def test_names_includes_hidden():
+    reg = SlashCommandRegistry()
+
+    async def handler(args, ctx):
+        return "ok"
+
+    reg.register(SlashCommand(name="visible", description="x", handler=handler))
+    reg.register(SlashCommand(name="secret", description="x", handler=handler, hidden=True))
+    assert reg.names() == {"visible", "secret"}

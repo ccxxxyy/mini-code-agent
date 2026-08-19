@@ -15,7 +15,7 @@ uv run ruff format src/ tests/   # 格式化
 ## 架构要点
 
 - 五层架构：交互层(ui/) → 引擎层(core/) → 工具层(tools/) → 记忆层(memory/) → 安全层(security/)，通过 events/bus.py 的 EventBus 解耦
-- 其他模块：llm/（Provider 抽象，httpx 直连无 SDK）、remote/（WebSocket 浏览器模式）、extensions/（斜杠命令/技能/事件监听插件）、config/（分层配置加载）
+- 其他模块：llm/（Provider 抽象，httpx 直连无 SDK）、remote/（WebSocket 浏览器模式）、extensions/（斜杠命令/技能/事件监听/插件生态）、config/（分层配置加载）
 - 所有 I/O 全异步（asyncio）
 - 核心数据模型用 dataclass（models/）
 - 配置分层：CLI 参数 > 环境变量 > .env > 项目配置 > 用户配置 > 默认值

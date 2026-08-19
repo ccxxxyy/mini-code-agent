@@ -504,6 +504,7 @@ cache_creation = 3.0                 # 缓存创建价（可选）
 | 功能 | 配置方式 | 说明 |
 |------|----------|------|
 | **事件监听插件** | `listener_dirs` 列表 | 目录下的 `*.py` 文件自动注册为 EventBus 监听器 |
+| **插件生态** | `plugin_dirs` / `disabled_plugins` | 本地 `*.py` 或 pip 包（`mini_agent.plugins` entry point）注册工具/命令/技能，`/plugins` 查看 |
 | **技能系统** | `skill_dirs` 列表 | `skills/*/SKILL.md` 定义可复用的 LLM 指令模板 |
 | **OS 沙箱** | `[security] sandbox = true` | Linux bwrap / macOS seatbelt 内核级隔离 |
 | **压缩调优** | `[memory]` 段 | 软/硬压缩阈值、熔断器、溢写预算等 |

@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，953 个测试全部通过。
+> 当前版本 v1.1.0，969 个测试全部通过。
 
 ---
 
@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 25 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
+- 26 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /plugins /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -221,8 +221,9 @@
 |---|---|
 | MCP 协议 | JSON-RPC 握手 + 工具发现 + Adapter 透明挂载（见核心功能 4） |
 | Skill 技能包 | SKILL.md 装载/激活/触发（见核心功能 5） |
-| Slash Command | 25 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
+| Slash Command | 26 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
 | Hook 生命周期钩子 | 11 阶段 × 4 裁决 + 优先级链 + 短路（见核心功能 7） |
+| 插件生态 | pip 包（`mini_agent.plugins` entry point）/ 本地 `.py` 文件（`plugin_dirs`）注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示 |
 
 ### ✅ 层面 4：工程化功能
 
@@ -250,7 +251,7 @@
 | 要求点 | 实现 |
 |---|---|
 | spec.md | `docs/spec.md` — 15 章完整架构规格（目录结构/分层架构/数据模型/模块接口/数据流/状态机/安全模型/开发阶段） |
-| tasks.md | `docs/tasks.md` — P1-P82 全部任务清单，逐项打勾并附验证依据 |
+| tasks.md | `docs/tasks.md` — P1-P83 全部任务清单，逐项打勾并附验证依据 |
 | checklist.md | `docs/checklist.md` — 每阶段验收检查清单，全部核查通过 |
 | CLAUDE.md | 项目根目录 — 常用命令/架构要点/代码规范的项目指令 |
 | 附加文档 | 15 个专题文档：tech-notes（技术原理）、roadmap（演进路线）、agent-architecture（架构解析）、config-guide（配置指南）、commands-guide（命令参考）、comparison-mewcode（mewcode 对比）、comparison-config-cc（CC 配置对比）、output-guide / terminal-guide / positioning / todo-code-quality 等，及本文档 |
@@ -261,8 +262,8 @@
 
 | 维度 | 数据 |
 |---|---|
-| 源文件 | 98 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 953 个测试全部通过（约 90 秒，零网络依赖），单元 57 文件 + 集成 4 文件 |
+| 源文件 | 99 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
+| 测试 | 969 个测试全部通过（约 90 秒，零网络依赖），单元 58 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

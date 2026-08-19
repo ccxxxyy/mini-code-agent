@@ -33,6 +33,9 @@ class SkillRegistry:
         self._skills: dict[str, Skill] = {}
         self._active: set[str] = set()
         self._skill_dirs = skill_dirs or []
+        # Programmatically registered skills (plugin API) -- survive load_all()
+        # 编程式注册的技能（插件 API）——load_all() 后仍保留
+        self._external: dict[str, Skill] = {}
 
     def load_all(self) -> None:
         """Scan skill directories and load all valid skill packs.
@@ -49,6 +52,16 @@ class SkillRegistry:
                         skill = self._parse_skill_file(skill_file)
                         if skill:
                             self._skills[skill.name] = skill
+        self._skills.update(self._external)
+
+    def register(self, skill: Skill) -> None:
+        """Programmatically register a skill (plugin API).
+        Survives load_all()/reload() -- unlike SKILL.md packs it has no disk
+        presence, so it is kept in a separate dict merged after each rescan.
+        编程式注册技能（插件 API，P83）。load_all()/reload() 后仍保留——
+        与 SKILL.md 技能包不同它没有磁盘存在，因此单独存放并在每次重扫后合并。"""
+        self._external[skill.name] = skill
+        self._skills[skill.name] = skill
 
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)

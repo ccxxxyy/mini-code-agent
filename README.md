@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-953%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-969%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -19,7 +19,7 @@
 | **Conversation control** | Server-side | Local data ownership — `/undo` + `/fork` + `/record` + `/replay` |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
-| **Codebase** | Proprietary | ~16,000 lines of readable Python, MIT licensed |
+| **Codebase** | Proprietary | ~16,500 lines of readable Python, MIT licensed |
 
 ## Features
 
@@ -164,6 +164,7 @@ mini --remote --remote-token "my-secret"
 | `/memory [add\|delete\|consolidate\|export\|import]` | View, add, delete, consolidate, export or import memories |
 | `/session save\|list\|load\|delete\|tag\|untag\|tags` | Session management (tag for classification, list --tag to filter) |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | Manage skill packs |
+| `/plugins` | List loaded plugins (tools/commands/skills each registered) |
 | `/allow [remove] <command\|path\|tool> <pattern> [--save]` | Manage ALLOW permission rules (runtime, `--save` persists to TOML) |
 | `/deny [remove] <command\|path\|tool> <pattern> [--save]` | Manage DENY permission rules (runtime, `--save` persists to TOML) |
 | `/compact` | Compress conversation history |
@@ -207,14 +208,15 @@ mini-code-agent/
 │   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/seatbelt), worktree isolation, remote confirm (cross-process)
 │   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher
 │   ├── remote/      # WebSocket server + browser UI (--remote mode, disconnect queuing)
-│   ├── extensions/  # Slash commands (25), skills (4 built-in), hooks (11 stages), event listener plugins
+│   ├── extensions/  # Slash commands (26), skills (4 built-in), hooks (11 stages), event listener + tool/command/skill plugins
 │   ├── llm/         # Provider abstraction: OpenAI Chat Completions + Responses API + Anthropic, token counter
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 953 tests, 80%+ coverage
+├── tests/           # 969 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
+├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
 └── docs/            # 15 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
 ```
 
@@ -232,18 +234,18 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 953 tests
+uv run pytest tests/           # 969 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P82, 82 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P83, 83 phases).
 
 ## Publishing to PyPI
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 # GitHub Actions auto-publishes via Trusted Publisher
 ```
 

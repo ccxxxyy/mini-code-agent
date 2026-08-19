@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent 后续演进路线图
 
-> 当前版本 v1.0.0，P1-P82。
+> 当前版本 v1.1.0，P1-P83。
 > 本文档收录开发过程中**有意推迟**的增强项——每一项在代码里都预留了升级插槽，
 > 按优先级和工作量组织，作为后续版本的开发依据。
 
@@ -102,7 +102,7 @@
 | 接口冻结 ✅ | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿（CHANGELOG.md），v1.0.0 语义版本承诺向后兼容 |
 | 覆盖率门禁 ✅ | pytest-cov 80.36%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
 | PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
-| 插件生态（有意延后） | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能——见"明确不做"：没有用户基础前是过早投资 |
+| 插件生态 ✅ | P83 实现：`extensions/plugin_loader.py` 四钩子契约（register/register_tools/commands/skills）+ 双通道发现（`mini_agent.plugins` entry point + `plugin_dirs` 本地文件），`/plugins` 命令展示 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
 | 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 12 个） |
 | 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
@@ -147,7 +147,7 @@
 
 | 项 | 说明 | 工作量 |
 |---|---|---|
-| 插件生态（plugin_loader） | 第三方 pip 包注册工具/命令/技能——`event_listeners.py` 已有插件加载基础，扩展为通用 `register_tools/commands/skills` + `entry_points` 发现 | ~1 天 |
+| ✅ 插件生态（plugin_loader） | 第三方 pip 包（`mini_agent.plugins` entry point）/ 本地 `.py` 文件（`plugin_dirs`）注册工具/命令/技能；四钩子契约、三层异常隔离、`disabled_plugins` 禁用、`/plugins` 展示。详见 tech-notes §83 | 已完成 |
 | Anthropic Provider E2E 验证 | 代码就绪（含 P37 prompt 缓存），注册 Anthropic Console 获取 API key 即可验证流式/tool_use/thinking/token 计数 | ~2 小时 |
 | CC 对照评测数据补齐 | `benchmarks/` 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） | — |
 

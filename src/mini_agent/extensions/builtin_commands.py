@@ -88,6 +88,13 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="plugins",
+            description="List loaded plugins and what each registered",
+            handler=_make_plugins(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="trace",
             description="Toggle agent internals trace (usage: /trace [on|off])",
             handler=_make_trace(app),
@@ -959,6 +966,29 @@ def _make_tools(app: Application) -> HandlerFn:
         for t in sorted(tools, key=lambda x: x.schema.name):
             lines.append(f"  `{t.schema.name}` — {t.schema.description[:80]}")
         return "\n".join(lines)
+
+    return handler
+
+
+def _make_plugins(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        plugins = getattr(app, "loaded_plugins", [])
+        if not plugins:
+            return (
+                "No plugins loaded. Drop .py files in ./.mini-agent/plugins "
+                "or pip-install a package exposing the mini_agent.plugins entry point.\n"
+                "未加载插件。将 .py 文件放入 ./.mini-agent/plugins，"
+                "或 pip 安装声明了 mini_agent.plugins entry point 的包。"
+            )
+        lines = [f"**Loaded Plugins 已加载插件 ({len(plugins)})：**", ""]
+        lines.append("| Plugin | Source | Tools | Commands | Skills |")
+        lines.append("|---|---|---|---|---|")
+        for p in plugins:
+            lines.append(
+                f"| {p.name} | {p.source} | {', '.join(p.tools) or '—'} "
+                f"| {', '.join(p.commands) or '—'} | {', '.join(p.skills) or '—'} |"
+            )
+        return MARKDOWN_RESULT + "\n".join(lines)
 
     return handler
 

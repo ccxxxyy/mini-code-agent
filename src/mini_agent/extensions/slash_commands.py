@@ -41,6 +41,11 @@ class SlashCommandRegistry:
     def get(self, name: str) -> SlashCommand | None:
         return self._commands.get(name)
 
+    def names(self) -> set[str]:
+        """All registered command names, hidden included (plugin loader diffing).
+        全部已注册命令名，含隐藏命令（供插件加载器差分快照）。"""
+        return set(self._commands)
+
     def list_commands(self) -> list[SlashCommand]:
         """Visible commands, alphabetically sorted -- feeds /help, the
         unknown-command hint and the `/` dropdown completer.
