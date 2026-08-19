@@ -82,7 +82,7 @@
 ### 功能完整性
 - [x] PermissionManager 评估顺序正确（DENY → ALLOW → Session → Default，单测锁定）
 - [x] PathGuard 敏感目录拒绝生效（.ssh/.aws/.gnupg + 敏感文件模式）
-- [x] 危险 bash 命令触发确认弹窗（13 条正则，即使 allow 模式也确认）
+- [x] 危险 bash 命令触发确认弹窗（19 条正则，即使 allow 模式也确认）
 - [x] 用户选择 "always allow" 后同类操作不再弹窗（confirm 支持 y/a/n 三选，"a" 写入会话白名单，单测验证）
 - [x] Hook PRE_TOOL 能阻止工具执行（BLOCK 短路 + reason 回传 LLM）
 - [x] Hook POST_TOOL 能观察工具结果（集成测试验证）
@@ -324,7 +324,7 @@
 ## Phase 14 检查项：LLM 自主派生 SubAgent
 
 ### 功能完整性
-- [x] spawn_agents 工具注册到 ToolRegistry，/tools 显示 7 个内置工具
+- [x] spawn_agents 工具注册到 ToolRegistry，/tools 显示 7 个内置工具（当前 12 个）
 - [x] LLM 在 ReAct 循环中自主调用 spawn_agents 派生多个子代理并行执行
 - [x] 子代理结果汇总为 ToolResult 回传 LLM，LLM 据此继续推理给出最终回答
 - [x] 支持 isolated=true 参数（Git worktree 隔离）
@@ -937,7 +937,7 @@
 - [x] `tool_search` 新内置工具：LLM 搜索 dispatch 工具
 - [x] `mcp_call` 新内置工具：LLM 调用 dispatch 工具
 - [x] `ToolContext.mcp_manager` 注入
-- [x] 10 个内置工具（原 8 + tool_search + mcp_call）
+- [x] 12 个内置工具：read_file、write_file、edit_file、delete_file、bash、glob、grep、spawn_agents、send_message、wait_message、tool_search、mcp_call
 - [x] eager 模式行为完全不变（向后兼容）
 - [x] 13 个新测试（test_tool_search.py），总计 582 个全过
 
@@ -1044,7 +1044,7 @@
 - [x] 真实 LLM 四类拓扑验证通过：1→1、2→1 汇聚、1→2 判别寻址、1↔1 五轮乒乓（零死锁/丢消息/幻觉 id）
 - [x] 20 个新测试（test_mailbox.py 18 + test_mailbox_e2e.py 2），总计 671 个全过
 
-## Phase 58.4 检查项：Mailbox 增强（拉平 mewcode 差距）
+## Phase 58.4 检查项：Mailbox 增强
 
 - [x] `to='*'` 广播——排除发送者、返回收件人列表、空团队报错
 - [x] `type=request` 自动分配 request_id 并在工具输出回显；`type=response` 缺 request_id 报错；非法 type 报错列出合法值
@@ -1472,9 +1472,8 @@
 - [x] 4 个新测试，938 个全过，ruff clean
 - [x] 真实 LLM 两阶段验证（experiments/verify_default_agent_type.py）：未指定类型完成真实任务 / 显式类型对照组不变
 
-## Phase 81 检查项：slice_window 删除（拓展点 #5/#16 了结）
+## Phase 81 检查项：slice_window 删除
 
 - [x] Conversation.slice_window() 方法已删除，源码/测试零残留（spec.md 历史文档按惯例保留）
-- [x] #16 确认为 #5 重复行，清单标注实为 15 处
 - [x] capabilities.md 对话管理器行更新（窗口截取职责归 ContextManager/Compressor）
 - [x] 937 个测试全过，ruff clean

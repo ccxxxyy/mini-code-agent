@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent：完整架构规格说明
 
-> **历史文档说明**：本规格是项目启动时的原始设计（P1 之前定稿），部分数字反映当时的规划而非现状——如"6 个内置工具"现已扩展为 12 个（新增 delete_file、spawn_agents、send_message、wait_message、tool_search、mcp_call）。项目当前状态以 README / capabilities.md / tasks.md 为准；本文档保留原貌作为设计基线。
+本文档是项目的架构设计基线——定义目录结构、分层架构、核心模块接口和开发阶段划分。目录树和数字随开发持续同步更新。
 
 ## 1. 项目目录结构
 
@@ -8,9 +8,11 @@
 mini-code-agent/
 ├── pyproject.toml                    # Project metadata, dependencies, entry points
 ├── uv.lock                          # uv lockfile
-├── README.md
+├── README.md                        # 英文项目介绍与快速上手
+├── README-zh.md                     # 中文项目介绍与快速上手
+├── CHANGELOG.md                     # 版本变更日志
+├── CLAUDE.md                        # 项目指令文件（LLM 上下文注入）
 ├── LICENSE
-├── CLAUDE.md                        # Project instructions for Claude Code
 ├── .python-version                  # 3.11+
 │
 ├── src/
@@ -24,15 +26,22 @@ mini-code-agent/
 │       │   ├── __init__.py
 │       │   ├── agent_loop.py        # ReAct agent loop state machine
 │       │   ├── agent_state.py       # AgentState dataclass + state transitions
-│       │   ├── agent_types.py       # Agent type definitions (explore/plan/worker/verify) (P48)
+│       │   ├── agent_types.py       # Agent type definitions (explore/plan/worker/verify)
+│       │   ├── cost_tracker.py      # Cost tracking per model (EventBus subscriber)
+│       │   ├── mailbox.py           # Cross-agent file-based mailbox (inter-process)
 │       │   ├── planner.py           # Plan mode — structured task decomposition
+│       │   ├── spawn_backends.py    # Pane spawn backends (tmux / Windows Terminal)
 │       │   ├── subagent.py          # SubAgent spawning and lifecycle
-│       │   └── team.py              # Agent Teams — multi-agent coordination
+│       │   ├── task_store.py        # Persistent task store (/todo)
+│       │   ├── team.py              # Agent Teams — multi-agent coordination
+│       │   ├── tool_recorder.py     # Tool chain recording (/record, /replay)
+│       │   └── worker.py            # Headless pane worker mode (--worker)
 │       │
 │       ├── llm/                     # === LLM PROVIDER ABSTRACTION ===
 │       │   ├── __init__.py
 │       │   ├── base.py              # LLMProvider ABC, LLMResponse, streaming types
-│       │   ├── openai_provider.py   # OpenAI / compatible API provider
+│       │   ├── openai_provider.py   # OpenAI / compatible API provider (Chat Completions)
+│       │   ├── openai_responses_provider.py # OpenAI Responses API (o1/o3/o4-mini)
 │       │   ├── anthropic_provider.py# Claude API provider
 │       │   ├── registry.py          # Provider registry + factory
 │       │   └── token_counter.py     # Token counting per provider
@@ -48,14 +57,20 @@ mini-code-agent/
 │       ├── tools/                   # === TOOL LAYER ===
 │       │   ├── __init__.py
 │       │   ├── base.py              # Tool ABC, ToolRegistry, ToolContext
-│       │   ├── builtin/             # 10 core tools
+│       │   ├── builtin/             # 12 core tools
 │       │   │   ├── __init__.py
 │       │   │   ├── read_file.py     # ReadFile tool
 │       │   │   ├── write_file.py    # WriteFile tool
 │       │   │   ├── edit_file.py     # EditFile tool
+│       │   │   ├── delete_file.py   # DeleteFile tool
 │       │   │   ├── bash.py          # Bash tool
 │       │   │   ├── glob_tool.py     # Glob tool
-│       │   │   └── grep.py          # Grep tool
+│       │   │   ├── grep.py          # Grep tool
+│       │   │   ├── spawn_agents.py  # SubAgent spawning tool
+│       │   │   ├── send_message.py  # Inter-agent messaging (send)
+│       │   │   ├── wait_message.py  # Inter-agent messaging (receive)
+│       │   │   ├── tool_search.py   # Dynamic tool discovery (MCP dispatch)
+│       │   │   └── mcp_call.py      # MCP tool invocation
 │       │   ├── mcp/                 # MCP client integration
 │       │   │   ├── __init__.py
 │       │   │   ├── client.py        # MCPManager — manages server connections
@@ -65,17 +80,30 @@ mini-code-agent/
 │       │
 │       ├── memory/                  # === MEMORY LAYER ===
 │       │   ├── __init__.py
+│       │   ├── _utils.py            # Shared helpers (strip_json_fence, etc.)
 │       │   ├── context.py           # ContextManager — window tracking, overflow
 │       │   ├── compressor.py        # Compression strategies (summarize, drop, etc.)
+│       │   ├── consolidation.py     # Semantic memory consolidation
+│       │   ├── extraction.py        # Memory extraction — pull learnings from convos
+│       │   ├── file_snapshots.py    # Per-turn file snapshots for /undo
+│       │   ├── interop.py           # Memory format interop (import/export)
 │       │   ├── persistent.py        # Cross-session memory (project + user level)
+│       │   ├── project_context.py   # Project context loading (CLAUDE.md etc.)
+│       │   ├── recall.py            # Selective memory recall
 │       │   ├── session_store.py     # Session save/restore (JSON on disk)
-│       │   └── extraction.py        # Memory extraction — pull learnings from convos
+│       │   └── tool_result_cache.py # Spill-to-disk cache for oversized tool results
 │       │
 │       ├── security/                # === SECURITY LAYER ===
 │       │   ├── __init__.py
 │       │   ├── permission.py        # PermissionManager — allow/deny/ask
 │       │   ├── path_guard.py        # Path restriction enforcement
-│       │   └── worktree.py          # Git worktree isolation manager
+│       │   ├── remote_confirm.py    # File-based remote permission for pane workers
+│       │   ├── audit.py             # Audit logger (JSONL event trail)
+│       │   ├── worktree.py          # Git worktree isolation manager
+│       │   └── sandbox/             # OS-level sandbox backends
+│       │       ├── __init__.py
+│       │       ├── bwrap.py         # Linux bubblewrap backend
+│       │       └── seatbelt.py      # macOS sandbox-exec backend
 │       │
 │       ├── ui/                      # === INTERACTION LAYER ===
 │       │   ├── __init__.py
@@ -83,10 +111,16 @@ mini-code-agent/
 │       │   ├── renderer.py          # Streaming output renderer (markdown, code, etc.)
 │       │   ├── input_handler.py     # Input handling, key bindings, multi-line
 │       │   ├── components.py        # Reusable UI components (spinners, panels, etc.)
-│       │   └── themes.py            # Color themes and styles
+│       │   ├── themes.py            # Color themes and styles
+│       │   ├── trace.py             # Trace renderer (real-time agent internals)
+│       │   ├── teach.py             # Teach mode renderer (tool chain explanation)
+│       │   ├── board.py             # Progress board (sub-agent status display)
+│       │   └── esc_watcher.py       # Double-Esc cancellation watcher
 │       │
 │       ├── extensions/              # === EXTENSION PROTOCOLS ===
 │       │   ├── __init__.py
+│       │   ├── builtin_commands.py  # Built-in slash command registration
+│       │   ├── event_listeners.py   # Event listener plugin loader
 │       │   ├── skills.py            # Skill system — load/register/invoke skill packs
 │       │   └── slash_commands.py    # Slash command registry + execution
 │       │
@@ -95,38 +129,56 @@ mini-code-agent/
 │       │   ├── bus.py               # EventBus — pub/sub async event dispatch
 │       │   └── types.py             # Re-exports from models/events.py + helpers
 │       │
+│       ├── remote/                  # === REMOTE / BROWSER MODE ===
+│       │   ├── __init__.py
+│       │   ├── server.py            # WebSocket server (browser UI bridge)
+│       │   ├── terminal.py          # RemoteTerminalAdapter (intercept UI calls)
+│       │   └── web_ui.py            # Single-page HTML/JS browser client
+│       │
 │       └── config/                  # === CONFIGURATION ===
 │           ├── __init__.py
 │           ├── loader.py            # Layered config loading (global -> project -> session)
-│           └── defaults.py          # Default configuration values
+│           ├── defaults.py          # Default configuration values
+│           └── environment.py       # Shell / platform detection helpers
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/
+│   ├── unit/                        # 57 unit test files, 953 tests
 │   │   ├── test_agent_loop.py
-│   │   ├── test_tools.py
-│   │   ├── test_llm_providers.py
-│   │   ├── test_memory.py
 │   │   ├── test_permissions.py
-│   │   ├── test_events.py
-│   │   ├── test_config.py
-│   │   └── test_models.py
-│   ├── integration/
-│   │   ├── test_mcp_client.py
-│   │   ├── test_agent_e2e.py
-│   │   ├── test_session_persistence.py
-│   │   └── test_worktree.py
-│   └── fixtures/
-│       ├── sample_configs/
-│       └── mock_servers/
+│   │   ├── test_remote_confirm.py
+│   │   ├── ...                      # (57 files total)
+│   └── integration/                 # 4 integration test files
+│       ├── test_mcp_client.py
+│       ├── test_agent_e2e.py
+│       ├── test_session_persistence.py
+│       └── test_worktree.py
 │
-├── docs/
-│   └── spec.md                      # This architecture document
+├── docs/                            # 15 个专题文档
+│   ├── spec.md                      # 完整架构规格说明（本文档，设计基线）
+│   ├── agent-architecture.md        # 五层架构详解与模块交互图
+│   ├── capabilities.md              # 功能全景与验收状态总览
+│   ├── checklist.md                 # 分阶段验收清单（P1-P82 逐项打勾）
+│   ├── commands-guide.md            # 25 个斜杠命令完整语法与示例
+│   ├── comparison-config-cc.md      # 配置系统对比：mini vs Claude Code
+│   ├── comparison-mewcode.md        # 功能对照：mini vs mewcode-python
+│   ├── config-guide.md              # 配置文件与上下文文件完全指南
+│   ├── output-guide.md              # 终端输出格式与样式说明
+│   ├── positioning.md               # 项目定位与技术亮点
+│   ├── roadmap.md                   # 开发路线图与里程碑
+│   ├── tasks.md                     # 开发任务全记录（P1-P82）
+│   ├── tech-notes.md                # 技术笔记（实现细节与决策记录）
+│   ├── terminal-guide.md            # 各系统终端打开方法与兼容性
+│   └── todo-code-quality.md         # 代码质量待做清单与扩展点跟踪
 │
 └── skills/                          # Built-in skill packs (shipped with project)
     ├── code_review/
     │   └── SKILL.md
-    └── init_project/
+    ├── init_project/
+    │   └── SKILL.md
+    ├── offline-ollama/
+    │   └── SKILL.md
+    └── teach-mode/
         └── SKILL.md
 ```
 
@@ -135,14 +187,14 @@ mini-code-agent/
 ## 2. 分层架构图
 
 ```
-+------------------------------------------------------------------+
-|                    INTERACTION LAYER (ui/)                         |
++-------------------------------------------------------------------+
+|                    INTERACTION LAYER (ui/)                        |
 |                                                                   |
-|  +----------+ +----------+ +------------+ +-----------------+    |
+|  +----------+ +----------+ +------------+ +-----------------+     |
 |  | Terminal  | | Renderer | |   Input    | |   Slash Cmds    |    |
-|  |  (Rich)  | |(Markdown | |  Handler   | |  + Skills       |    |
-|  |          | | Streaming| |(PromptTk)  | |                 |    |
-|  +----+-----+ +----+-----+ +-----+------+ +-------+---------+    |
+|  |  (Rich)  | |(Markdown | |  Handler   | |  + Skills       |     |
+|  |          | | Streaming| |(PromptTk)  | |                 |     |
+|  +----+-----+ +----+-----+ +-----+------+ +-------+---------+     |
 |       |            |             |                 |              |
 +-------+------------+-------------+-----------------+--------------+
         |      EVENT BUS (events/bus.py)             |
@@ -150,10 +202,10 @@ mini-code-agent/
         +--+  async pub/sub -- all layers emit & +---+
            |  subscribe to typed events          |
            +---------+---------------------------+
-+--------------------+---------------------------------------------+
-|                    |     ENGINE LAYER (core/)                      |
++--------------------+----------------------------------------------+
+|                    |     ENGINE LAYER (core/)                     |
 |                    v                                              |
-|  +----------------------------------------------------------+    |
+|  +----------------------------------------------------------+     |
 |  |                   Agent Loop (ReAct)                      |    |
 |  |  +----------+  +------------+  +----------------------+   |    |
 |  |  | Planner  |  | SubAgent   |  |   Agent Teams        |   |    |
@@ -162,44 +214,44 @@ mini-code-agent/
 |  +----------+------------------------------------------------+    |
 |             |                                                     |
 |  +----------v------------------------------------------------+    |
-|  |              LLM Provider Abstraction (llm/)               |    |
+|  |              LLM Provider Abstraction (llm/)              |    |
 |  |   +----------+  +------------+  +------------------+      |    |
 |  |   | OpenAI   |  | Anthropic  |  |  Custom Provider |      |    |
 |  |   +----------+  +------------+  +------------------+      |    |
 |  +------------------------------------------------------------+   |
 |                                                                   |
 +-------------------------------------------------------------------+
-|                    TOOL LAYER (tools/)                             |
+|                    TOOL LAYER (tools/)                            |
 |                                                                   |
-|  +--------------------------------------------+  +-----------+   |
+|  +--------------------------------------------+  +-----------+    |
 |  |            Tool Registry                    |  |  Hook     |   |
 |  |  +------------+  +-----------------------+  |  |  Chain    |   |
-|  |  | Built-in   |  |    MCP Client         |  |  | pre/post |   |
-|  |  | (10 tools) |  | (external servers)    |  |  | confirm  |   |
+|  |  | Built-in   |  |    MCP Client         |  |  | pre/post |    |
+|  |  | (12 tools) |  | (external servers)    |  |  | confirm  |    |
 |  |  +------------+  +-----------------------+  |  +-----------+   |
-|  +--------------------------------------------+                  |
+|  +--------------------------------------------+                   |
 |                                                                   |
 +-------------------------------------------------------------------+
-|                    MEMORY LAYER (memory/)                          |
+|                    MEMORY LAYER (memory/)                         |
 |                                                                   |
-|  +--------------+ +--------------+ +----------------------+      |
-|  |   Context    | |  Compressor  | |   Persistent Memory  |      |
-|  |   Manager    | |  (auto-trim) | | (project + user)     |      |
-|  +--------------+ +--------------+ +----------------------+      |
-|  +--------------+ +--------------------------------------+       |
-|  | Session Store| |      Memory Extraction               |       |
-|  +--------------+ +--------------------------------------+       |
+|  +--------------+ +--------------+ +----------------------+       |
+|  |   Context    | |  Compressor  | |   Persistent Memory  |       |
+|  |   Manager    | |  (auto-trim) | | (project + user)     |       |
+|  +--------------+ +--------------+ +----------------------+       |
+|  +--------------+ +--------------------------------------+        |
+|  | Session Store| |      Memory Extraction               |        |
+|  +--------------+ +--------------------------------------+        |
 |                                                                   |
 +-------------------------------------------------------------------+
 |                    SECURITY LAYER (security/)                     |
 |                                                                   |
-|  +--------------+ +--------------+ +----------------------+      |
-|  | Permission   | |  Path Guard  | |   Worktree Isolation |      |
-|  |  Manager     | |              | |                      |      |
-|  +--------------+ +--------------+ +----------------------+      |
-|  +------------------------------------------------------------+  |
-|  |              Tool Filter                                    |  |
-|  +------------------------------------------------------------+  |
+|  +--------------+ +--------------+ +----------------------+       |
+|  | Permission   | |  Path Guard  | |   Worktree Isolation |       |
+|  |  Manager     | |              | |                      |       |
+|  +--------------+ +--------------+ +----------------------+       |
+|  +--------------+ +------------------------------------------+    |
+|  |   Audit      | |   OS Sandbox (bwrap / seatbelt)          |    |
+|  +--------------+ +------------------------------------------+    |
 +-------------------------------------------------------------------+
 ```
 
@@ -220,7 +272,7 @@ from enum import Enum
 from typing import Any
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -271,7 +323,6 @@ class Conversation:
 
     def append(self, message: Message) -> None: ...
     def to_api_messages(self) -> list[dict[str, Any]]: ...
-    def slice_window(self, max_tokens: int) -> list[Message]: ...
     def get_messages_by_role(self, role: Role) -> list[Message]: ...
 ```
 
@@ -284,7 +335,7 @@ from enum import Enum
 from typing import Any
 
 
-class AgentPhase(str, Enum):
+class AgentPhase(StrEnum):
     IDLE = "idle"                    # Waiting for user input
     THINKING = "thinking"            # LLM is generating
     TOOL_CALLING = "tool_calling"    # Executing tool(s)
@@ -300,8 +351,7 @@ class AgentState:
     """Mutable state of an agent loop instance."""
     phase: AgentPhase = AgentPhase.IDLE
     iteration: int = 0              # Current ReAct loop iteration
-    max_iterations: int = 50        # Hard cap on loop iterations
-    pending_tool_calls: list[ToolCall] = field(default_factory=list)
+    max_iterations: int = 50        # Hard cap (AgentConfig overrides to 80)
     last_tool_results: list[ToolResult] = field(default_factory=list)
     error: Exception | None = None
     plan: list[PlanStep] | None = None         # Active plan (plan mode)
@@ -317,13 +367,16 @@ class AgentState:
         ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class PlanStep:
     """A single step in a structured plan."""
     index: int
     description: str
-    status: str = "pending"          # pending | in_progress | completed | skipped
-    substeps: list[str] = field(default_factory=list)
+    role: str = ""
+    status: str = "pending"          # pending | in_progress | completed | failed
+    result: str = ""
+    depends_on: list[int] = field(default_factory=list)
+    writes_files: bool = False
 ```
 
 ### 3.3 会话 (`models/session.py`)
@@ -345,17 +398,14 @@ class SessionMetadata:
     total_turns: int = 0
     total_tokens_used: int = 0
     tags: list[str] = field(default_factory=list)
+    closed_cleanly: bool = False         # Flipped True on graceful exit; False = crash
 
 
 @dataclass
 class Session:
     """A complete agent session that can be persisted and restored."""
-    metadata: SessionMetadata
+    metadata: SessionMetadata = field(default_factory=SessionMetadata)
     conversation: Conversation = field(default_factory=Conversation)
-    agent_state: AgentState = field(default_factory=AgentState)
-    active_mcp_servers: list[str] = field(default_factory=list)
-    active_skills: list[str] = field(default_factory=list)
-    worktree_path: Path | None = None
 
     def serialize(self) -> dict: ...
     @classmethod
@@ -385,7 +435,9 @@ class LLMConfig:
 @dataclass
 class ToolConfig:
     enabled_tools: list[str] = field(default_factory=lambda: [
-        "read_file", "write_file", "edit_file", "bash", "glob", "grep"
+        "read_file", "write_file", "edit_file", "delete_file",
+        "bash", "glob", "grep", "spawn_agents",
+        "send_message", "wait_message", "tool_search", "mcp_call",
     ])
     bash_timeout: float = 120.0
     max_file_size: int = 10_000_000       # 10MB
@@ -399,9 +451,11 @@ class ToolConfig:
 class MCPServerConfig:
     command: str = ""                     # For stdio transport
     args: list[str] = field(default_factory=list)
-    url: str = ""                         # For HTTP transport
+    url: str = ""                         # For HTTP/SSE transport
     env: dict[str, str] = field(default_factory=dict)
-    transport: str = "stdio"              # stdio | http
+    headers: dict[str, str] = field(default_factory=dict)
+    transport: str = "stdio"              # stdio | http | sse
+    loading: str = "eager"                # eager | dispatch
 
 
 @dataclass
@@ -436,7 +490,7 @@ class AgentConfig:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
-    max_agent_iterations: int = 50
+    max_agent_iterations: int = 80
     enable_plan_mode: bool = False  # 启动时是否开启 plan 模式（app.py 读取此值赋给 agent_loop.plan_mode）
     skill_dirs: list[str] = field(default_factory=lambda: [
         "./skills", "~/.mini-agent/skills"
@@ -452,13 +506,13 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class PermissionLevel(str, Enum):
+class PermissionLevel(StrEnum):
     ALLOW = "allow"          # Always permitted
     ASK = "ask"              # Prompt user for confirmation
     DENY = "deny"            # Always blocked
 
 
-class PermissionScope(str, Enum):
+class PermissionScope(StrEnum):
     TOOL = "tool"            # Permission for a specific tool
     PATH = "path"            # Permission for a file/directory path
     COMMAND = "command"      # Permission for a bash command pattern
@@ -483,7 +537,7 @@ class PermissionRequest:
     matched_rule: PermissionRule | None = None  # PermissionManager 赋值，经 PermissionCheckEvent 传递到 AuditLogger
 
 
-class PermissionDecision(str, Enum):
+class PermissionDecision(StrEnum):
     GRANTED = "granted"
     DENIED = "denied"
     PENDING = "pending"              # Waiting for user response
@@ -761,7 +815,7 @@ from enum import Enum
 from typing import Callable, Awaitable
 
 
-class HookStage(str, Enum):
+class HookStage(StrEnum):
     PRE_TOOL = "pre_tool"            # Before tool execution
     POST_TOOL = "post_tool"          # After tool execution
     PRE_LLM = "pre_llm"             # Before LLM call
@@ -782,7 +836,7 @@ class HookContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class HookAction(str, Enum):
+class HookAction(StrEnum):
     CONTINUE = "continue"            # Proceed normally
     BLOCK = "block"                  # Block the operation
     MODIFY = "modify"                # Proceed with modified context
@@ -1091,9 +1145,11 @@ class SlashCommandRegistry:
 
     def is_slash_command(self, text: str) -> bool: ...
 
-    # Built-in commands registered in __init__:
+    # Built-in commands registered in __init__ (25 visible + 1 hidden):
     # /help, /clear, /status, /model, /compact, /memory, /session,
-    # /plan, /tools, /mcp, /skill, /allow, /deny, /quit
+    # /plan, /tools, /skill, /allow, /deny, /exit, /undo, /fork,
+    # /trace, /explain, /audit, /theme, /spawn, /team, /todo,
+    # /cost, /record, /replay, /quit (hidden alias for /exit)
 ```
 
 ### 4.13 `core/subagent.py` -- 子 Agent 分发
@@ -1232,7 +1288,7 @@ User types message in terminal
 +------------------------------------------------------------------+
 | 1. INTERACTION LAYER                                              |
 |    InputHandler.get_user_input() -> raw text                      |
-|    SlashCommandRegistry.is_slash_command(text)?                    |
+|    SlashCommandRegistry.is_slash_command(text)?                   |
 |    +-- YES -> SlashCommandRegistry.execute() -> render result     |
 |    +-- NO  -> Continue to engine                                  |
 |    SkillRegistry.match_triggers(text) -> auto-activate skills     |
@@ -1251,7 +1307,7 @@ User types message in terminal
 |    |      HookManager.run(PRE_LLM)                           |    |
 |    |      LLMProvider.stream(messages, tools) -> chunks      |    |
 |    |      EventBus.emit(LLMStreamChunkEvent) per chunk       |    |
-|    |      Terminal.render_stream() <- UI shows live           |    |
+|    |      Terminal.render_stream() <- UI shows live          |    |
 |    |      Assemble full LLMResponse                          |    |
 |    |      HookManager.run(POST_LLM)                          |    |
 |    |                                                         |    |
@@ -1715,8 +1771,8 @@ Return ToolResult
                |    |          v                                  |
                |    |    +----------------+                       |
                |    |    | has_tool_calls?|                       |
-               |    |    +---+--------+--+                       |
-               |    |   NO   |        | YES                      |
+               |    |    +---+--------+--+                        |
+               |    |   NO   |        | YES                       |
                |    |        |        v                           |
                |    |        | +--------------+                   |
                |    |        | | TOOL_CALLING |  execute tools    |
@@ -2005,32 +2061,7 @@ class PathGuard:
         ...
 ```
 
-### 11.3 工具过滤器 (`security/tool_filter.py`)
-
-```python
-class ToolFilter:
-    """Filters available tools based on context."""
-
-    def __init__(self, config: SecurityConfig): ...
-
-    def filter_for_context(
-        self,
-        all_tools: list[Tool],
-        context: ToolFilterContext,
-    ) -> list[Tool]:
-        """Return only the tools allowed in the given context."""
-        ...
-
-
-@dataclass
-class ToolFilterContext:
-    is_subagent: bool = False
-    subagent_allowed_tools: list[str] | None = None
-    active_skill: Skill | None = None
-    worktree_path: Path | None = None
-```
-
-### 11.4 Worktree 工作树隔离 (`security/worktree.py`)
+### 11.3 Worktree 工作树隔离 (`security/worktree.py`)
 
 ```python
 class WorktreeManager:
@@ -2200,7 +2231,7 @@ Priority (highest to lowest):
 +------------------------------------------------+
 |  Environment variables (MINI_AGENT_MODEL, etc.) |
 +------------------------------------------------+
-|  Session config (runtime changes via /config)   |
+|  .env file (project root, auto-loaded)          |
 +------------------------------------------------+
 |  Project config (.mini-agent/config.toml)       |  <- Per-project
 +------------------------------------------------+
@@ -2449,7 +2480,6 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 8. `core/agent_state.py` -- AgentState, AgentPhase
 9. `core/agent_loop.py` -- Full ReAct loop
 10. `ui/terminal.py` -- Extend: tool call rendering, spinners, confirmations
-11. `core/errors.py` -- Error hierarchy
 
 **交付物**：Agent 能接收如"读取 README 并总结"的任务，自主调用 ReadFile，处理结果并回答。多步工具链正常运行。
 
@@ -2465,8 +2495,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 1. `models/permissions.py` -- Permission types
 2. `security/permission.py` -- PermissionManager
 3. `security/path_guard.py` -- PathGuard
-4. `security/tool_filter.py` -- ToolFilter
-5. `tools/hooks.py` -- HookManager, HookContext, built-in hooks
+4. `tools/hooks.py` -- HookManager, HookContext, built-in hooks
 6. Wire hooks into agent loop (pre/post tool, pre/post LLM)
 7. `ui/terminal.py` -- Extend: permission confirmation dialogs
 
@@ -2507,7 +2536,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 3. `tools/mcp/transport.py` -- Stdio and HTTP transport
 4. `tools/mcp/client.py` -- MCPManager
 5. `tools/mcp/adapter.py` -- MCPToolAdapter
-6. `extensions/plugin_loader.py` -- Dynamic discovery
+6. `extensions/event_listeners.py` -- Event listener plugin loader
 7. Built-in skill packs (code_review, init_project)
 8. `llm/anthropic_provider.py` -- Second LLM provider (Claude)
 

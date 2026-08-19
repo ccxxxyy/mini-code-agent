@@ -1,6 +1,6 @@
 # 代码质量待做清单
 
-已修复的问题标 ✅，待修复的标 ☐。
+代码审查发现的问题跟踪——死代码清理、重复逻辑抽取、扩展点接入。已修复的问题标 ✅，待修复的标 ☐。
 
 ## ✅ 已修复
 
@@ -108,7 +108,7 @@
 以下问题来自 `analysis-shortcomings.md` 的逐条验证，已确认为真实问题。
 
 ### ✅ spec.md 与现状脱节（已验证）
-- ~~`docs/spec.md` 自修正写"8 个内置工具"~~ ✅ 已修正为 10
+- ~~`docs/spec.md` 自修正写"8 个内置工具"~~ ✅ 已修正为 12
 - ✅ spec.md 目录树已删除不存在的 `extensions/plugin_loader.py`、`config/schema.py`、`core/errors.py`、`security/tool_filter.py`
 - spec.md 目录树写"6 core tools"——属历史设计文档，已有 disclaimer 说明
 
@@ -230,10 +230,8 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 ## ✅ 远程/浏览器模式（P57）
 
 ### 仍存在的已知局限
-- ~~单客户端~~ ✅ 已完成（`self._clients: set` 广播，多标签页同步输出）
-- ~~无认证~~ ✅ 已完成（`--remote-token` 可选 token 认证，WS+HTTP 双通道验证）。仍无 TLS（明文 `ws://`）
-- ~~浏览器刷新丢失会话~~ ✅ 已完成（`_replay_history()` 回放对话历史，服务器重启仍丢失）
-- ~~Markdown 不支持图片~~ ✅ 已支持（`![alt](url)` → `<img>`，仅公网 URL 可加载）
+
+见 [roadmap.md](roadmap.md) "已知限制"章节（远程模式：无 TLS / 服务器重启丢失 / 图片仅公网 URL / 共享会话）。
 
 ### 建议改进优先级
 1. ~~刷新时重放历史~~ ✅ 已完成（`_replay_history()`）

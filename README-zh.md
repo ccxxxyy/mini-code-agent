@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-912%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-953%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -220,6 +220,10 @@ mini-agent --remote
 ```bash
 mini --remote --host 0.0.0.0 --port 9000
 # 浏览器:    http://0.0.0.0:9000
+
+# 带 token 认证：
+mini --remote --remote-token "my-secret"
+# 浏览器:    http://localhost:8765?token=my-secret
 ```
 
 ### 7. 常用 CLI 参数
@@ -230,11 +234,13 @@ mini --model gpt-4o      # 指定模型
 mini --provider openai   # 指定 Provider
 mini --base-url URL      # 自定义 API 地址
 mini --remote            # 远程/浏览器模式
-mini --port 9000         # 自定义 WebSocket 端口
+mini --port 9000         # 自定义端口
+mini --host 0.0.0.0      # 自定义主机（允许外部访问）
+mini --remote-token x    # 远程模式 token 认证
 mini --version           # 查看版本
 ```
 
-> 以下示例中 `mini` 和 `uv run mini-agent` 可互换使用。
+> `mini` 和 `mini-agent` 是同一个程序的两个入口（pyproject.toml 注册了两个别名）。pip 安装后直接用 `mini`；源码运行用 `uv run mini`。本文档后续示例统一用 `mini`。
 
 ## 支持的环境变量
 
@@ -261,17 +267,18 @@ mini-code-agent/
 │   └── mini_agent/
 │       ├── cli.py              # CLI 入口
 │       ├── app.py              # 应用编排器
-│       ├── models/             # 核心数据模型
-│       ├── events/             # 事件总线系统
-│       ├── config/             # 分层配置加载
-│       ├── llm/                # LLM Provider 抽象层
-│       ├── ui/                 # TUI 终端界面（主题、补全、流式渲染）
-│       ├── tools/              # 工具系统（12 内置工具 + MCP + Hook）
-│       ├── core/               # Agent 引擎（ReAct 循环、SubAgent、团队）
-│       ├── memory/             # 记忆系统（压缩、会话、跨会话记忆）
-│       ├── security/           # 安全层（权限、路径守卫、worktree）
-│       └── extensions/         # 扩展协议（Skill、Slash 命令、事件监听插件）
-├── tests/                      # 测试
+│       ├── core/               # Agent 引擎（ReAct 循环、状态机、SubAgent、团队、Planner、Mailbox、Pane Worker、成本跟踪、任务存储、工具录制、Agent 类型、窗格后端）
+│       ├── tools/              # 工具系统（12 内置工具 + MCP 协议 stdio/HTTP/SSE eager/dispatch + Hook 11 阶段）
+│       ├── memory/             # 记忆系统（四级压缩级联、持久记忆、会话存储、提取、召回、合并、文件快照、溢写缓存、项目上下文）
+│       ├── security/           # 安全层（权限、路径守卫、审计、OS 沙箱 bwrap/seatbelt、worktree 隔离、跨进程权限确认）
+│       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、双 Esc 中断）
+│       ├── remote/             # 远程/浏览器模式（WebSocket 服务器 + 嵌入式 HTML/JS 客户端、断连排队）
+│       ├── extensions/         # 扩展协议（25 个斜杠命令、4 个技能包、事件监听插件）
+│       ├── llm/                # LLM Provider 抽象层（OpenAI Chat Completions + Responses API + Anthropic、Token 计数）
+│       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
+│       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
+│       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
+├── tests/                      # 953 个测试（57 单元 + 4 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -285,8 +292,11 @@ mini-code-agent/
     ├── agent-architecture.md   # Agent 架构原理与 S01-S20 实现解析
     ├── terminal-guide.md       # 各系统各终端的打开方法与兼容性指南
     ├── comparison-mewcode.md   # 与 mewcode-python 的详细对比与增强路线
+    ├── comparison-config-cc.md # 配置系统对比：mini vs Claude Code
     ├── commands-guide.md       # 全部斜杠命令的完整语法与示例
     └── todo-code-quality.md    # 代码质量待办与扩展点追踪
+├── skills/                         # 4 个内置技能包（code_review / init_project / offline-ollama / teach-mode）
+├── experiments/                    # 10 个机制实验脚本（压缩 A/B、模型混编、死循环诱导、熔断器验证等）
 ```
 
 ## 开发状态
@@ -354,9 +364,26 @@ mini-code-agent/
 - [x] P61：记忆导出/导入
 - [x] P62：压缩熔断器（连续 N 次压缩无效后跳过，防死循环烧 token）
 - [x] P63：压缩恢复附件含文件内容（烤入最近 5 文件内容 + 用户请求，消除 9.2 诚实差异 #1）
+- [x] P64：聚合工具结果溢写预算 + LLM 摘要压缩默认启用 + 压缩检查前移
+- [x] P65：压缩双阈值（软 75% 受熔断器控制 + 硬 90% 绕过熔断器）
+- [x] P67：摘要 prompt 结构化（analysis 草稿 + 9 节 summary）
+- [x] P68：保留窗口按压缩目标缩放
+- [x] P69：DropToolResults 尊重保留窗口（修复重读死循环 36→4 迭代）
+- [x] P70：恢复附件预算随窗口缩放 + 嵌套摘要前传
+- [x] P71：SlidingWindow 摘要锚点
+- [x] P72：摘要偶发重试（2 次后回退提取式）
+- [x] P73：摘要 prompt 超长收缩重试（丢最旧 20% + cap 缩 20%，≤3 轮）
+- [x] P74：最小前缀检查 + /todo 歧义前缀检测
+- [x] P75：Hook 确认裁决 CONFIRM 接入（`[[hooks]] action = "confirm"` 弹 y/a/n 确认框）+ 遗忘代码 6 处接入 + 事件监听插件
+- [x] P76：三个轻量扩展点接入（/model Provider 列表 + 斜杠命令事件标记 + LLM 请求预估 token）
+- [x] P77：四个中级扩展点接入（ToolRegistry.filter + Plan.is_complete + SessionMetadata.tags + PermissionRequest.tool_name）
 - [x] P78：运行时权限规则管理（`/allow` `/deny` 斜杠命令动态添加权限规则，`--save` 持久化到 TOML；add_rule 增强校验/去重/事件；扩展点 #3 接入）
+- [x] P79：工具级权限 PermissionScope.TOOL
+- [x] P80：DEFAULT_AGENT_TYPE 接入
+- [x] P81：Conversation.slice_window 删除
+- [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 
-**全部阶段已完成，912 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，953 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -375,6 +402,9 @@ mini-code-agent/
 /spawn 读取README统计总行数          # 派生单个后台 agent，立即返回 agent_id
 /spawn -p 分析src结构 | 分析测试覆盖   # 用 | 分隔并行派生多个
 /spawn --isolated 重构这个模块        # 在独立 Git worktree 中执行（改动隔离）
+/spawn --type explore 分析项目结构    # 指定类型：explore/plan/worker(默认)/verify
+/spawn --pane 执行部署检查            # 在可见终端窗格运行（独立进程，实时观看）
+/spawn --wait 跑一遍测试              # 派发+进度面板+结果一条命令完成
 /spawn list                          # 查看活跃 agent 及其阶段
 /spawn wait                          # 等待全部完成（期间显示实时进度面板）
 /spawn wait <id>                     # 等待指定 agent
@@ -458,7 +488,7 @@ Original session a1b2c3d4 saved -- return with /session load a1b2c3d4
 
 **/undo vs /fork 怎么选**：确定这轮没用 → `/undo` 删掉；不确定、想两边都保留 → `/fork` 分叉。
 
-> 这是 Claude Code 没有的能力——CC 的对话历史在服务端不可操作，本项目的对话是本地自持有的数据结构，回滚和分叉天然可行。
+> 本项目的对话是本地自持有的数据结构——回滚、分叉、录制/回放天然可行，数据主权完全在用户手中。
 
 ## 工具链录制/回放：/record 与 /replay
 
@@ -611,7 +641,7 @@ tools:               # 该技能建议使用的工具（可省略）
 
 ## 成本仪表盘：/cost 与预算警告
 
-按 token 付费的用户（DeepSeek 等 API）需要知道自己花了多少钱——CC 订阅制没有这个问题，本项目专门做了成本可观测：
+按 token 付费的用户（DeepSeek 等 API）需要知道自己花了多少钱——本项目内置了完整的成本可观测：
 
 ### 配置价格（一次性）
 
@@ -715,8 +745,8 @@ Agent 有工具能力后，最大的风险之一是**死循环**：LLM 反复调
 
 为了防止这种情况，项目实现了**三重熔断**机制（代码在 `core/agent_loop.py` 的 `_should_continue()` 方法中）：
 
-1. **迭代上限**：每次对话最多跑 N 轮（默认 50），超过就强制停止
-2. **同工具检测**（双层）：①同一工具用完全相同的参数被连续调用 6 次 → 停止；②同一工具名连续 8 轮迭代每轮都出现（不看参数，实验后新增的 v2 层）→ 停止
+1. **迭代上限**：每次对话最多跑 N 轮（默认 80），超过就强制停止
+2. **同工具检测**（双层）：①同一工具用完全相同的参数被连续调用 6 次 → 停止；②同一工具名连续 15 轮迭代每轮都出现（不看参数，实验后新增的 v2 层）→ 停止
 3. **预算警告**：session/总账达到预算 80% 时警告，100% 时提示超支（软提醒，不硬停）
 
 这三个机制在单元测试中用 MockLLM（假 LLM）验证过——但**从没在真实 LLM 下测过**。MockLLM 会机械地返回完全相同的工具调用，真实 LLM 的行为可能完全不同。所以需要用真实 LLM 实际跑一遍来验证。
@@ -759,7 +789,7 @@ Agent 有工具能力后，最大的风险之一是**死循环**：LLM 反复调
 
 这是这个实验**最有价值的发现**：一个在单元测试中正确通过的安全机制，**在真实场景中形同虚设**。
 
-**已修复（v2）**：新增第二层检测——同一个**工具名**（忽略参数）连续 8 轮迭代每轮都出现，判定为死循环。按轮统计而非按调用次数统计：一轮内并行读 10 个文件是正常批量工作（不触发），每轮读一次持续 8 轮才是真循环（触发）。第一版按调用次数统计曾误杀"并行读所有文档"的场景，实战验证后修正。
+**已修复（v2）**：新增第二层检测——同一个**工具名**（忽略参数）连续 15 轮迭代每轮都出现，判定为死循环。按轮统计而非按调用次数统计：一轮内并行读 10 个文件是正常批量工作（不触发），每轮读一次持续 8 轮才是真循环（触发）。第一版按调用次数统计曾误杀"并行读所有文档"的场景，实战验证后修正。
 
 **3. "直到完美"类任务是最危险的死循环模式**
 
@@ -773,7 +803,7 @@ Agent 有工具能力后，最大的风险之一是**死循环**：LLM 反复调
 
 #### 对日常使用的影响
 
-- 默认的 `max_iterations=50` 足够安全——最坏情况也在 50 轮内停止
+- 默认的 `max_iterations=80` 足够安全——最坏情况也在 80 轮内停止
 - 遇到开放式改进类任务（"帮我把这篇文章改到完美"），Agent 可能会循环较多轮——这是正常的，迭代上限会兜底
 - 实验用的强硬提示只在 `experiments/deadlock_induction.py` 里，`mini` 命令的正常 system prompt 完全不受影响
 
@@ -828,9 +858,9 @@ uv run python experiments/deadlock_induction.py --all
 | `/team <任务>` | LLM 规划 + 并行执行（详见上方多 Agent 章节） |
 | `/plan` | 进入/退出 Plan 模式（只读规划，不执行工具） |
 | `/tools` | 列出已注册工具 |
-| `/skill [activate\|deactivate <名称>]` | 技能包管理 |
-| `/allow <command\|path> <模式> [--save]` | 运行时添加 ALLOW 权限规则（`--save` 持久化到 TOML） |
-| `/deny <command\|path> <模式> [--save]` | 运行时添加 DENY 权限规则（`--save` 持久化到 TOML） |
+| `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | 技能包管理 |
+| `/allow [remove] <command\|path\|tool> <模式> [--save]` | 运行时添加 ALLOW 权限规则（`--save` 持久化到 TOML） |
+| `/deny [remove] <command\|path\|tool> <模式> [--save]` | 运行时添加 DENY 权限规则（`--save` 持久化到 TOML） |
 | `/exit` | 退出 |
 
 全部命令的完整语法、参数与示例见 [docs/commands-guide.md](docs/commands-guide.md)。

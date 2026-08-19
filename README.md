@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-937%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-953%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -15,8 +15,8 @@
 
 | | Claude Code | Mini-Code-Agent |
 |---|---|---|
-| **Cost model** | Subscription ($) | Pay-per-token — built-in cost dashboard (`/cost`) |
-| **Conversation control** | Server-side, no undo | Local — `/undo` rollback + `/fork` branching |
+| **Cost model** | Subscription or API | Any provider pay-per-token — built-in `/cost` dashboard |
+| **Conversation control** | Server-side | Local data ownership — `/undo` + `/fork` + `/record` + `/replay` |
 | **Extensibility** | Closed | Open tools/hooks/skills/MCP |
 | **Transparency** | Black box | `/trace` shows every decision in real time |
 | **Codebase** | Proprietary | ~16,000 lines of readable Python, MIT licensed |
@@ -37,9 +37,19 @@
 
 📋 **Persistent Tasks** — `/todo` with dependency tracking (`--after`), survives restarts
 
-🔌 **MCP Protocol** — stdio + HTTP transport, connect any MCP-compatible tool server via config
+🔌 **MCP Protocol** — stdio + HTTP + SSE transport, connect any MCP-compatible tool server via config; `loading = "dispatch"` for lazy discovery
+
+🔒 **OS Sandbox** — Linux bubblewrap + macOS seatbelt kernel-level isolation (optional `[security] sandbox = true`)
 
 🎨 **Themes** — dark/light/default, markdown heading colors follow theme
+
+🔍 **Transparency** — `/trace` shows every agent decision in real time (phases, permissions, tool timing, LLM metadata)
+
+📚 **Teaching & Audit** — `/explain` shows why each tool is called; `/audit` logs all actions with hash-chain tamper detection
+
+💾 **Session Management** — auto-save with crash recovery, `/session tag`/`list --tag` classification, `/fork` branching
+
+🌳 **Worktree Isolation** — `/spawn --isolated` runs agents in separate git worktrees (parallel file changes don't conflict)
 
 📄 **Context-Aware** — auto-reads `CLAUDE.md` / `AGENT.md` project instructions at startup; `@file` inline references with Tab completion
 
@@ -124,6 +134,10 @@ mini-agent --remote
 ```bash
 mini --remote --host 0.0.0.0 --port 9000
 # Browser: http://0.0.0.0:9000
+
+# With token authentication:
+mini --remote --remote-token "my-secret"
+# Browser: http://localhost:8765?token=my-secret
 ```
 
 ## Commands
@@ -134,7 +148,7 @@ mini --remote --host 0.0.0.0 --port 9000
 | `/status` | Session info (model, tokens, cost) |
 | `/model [name]` | View or switch LLM model |
 | `/cost [turns\|reset]` | Cost dashboard: per-model breakdown, budget tracking |
-| `/todo [add\|done\|start\|delete\|clear]` | Persistent task list with dependency graph |
+| `/todo [add\|done\|start\|fail\|delete\|clear]` | Persistent task list with dependency graph |
 | `/undo [N]` | Roll back N turns — files restored too |
 | `/fork [N]` | Branch conversation into a new session |
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
@@ -187,23 +201,24 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 ```
 mini-code-agent/
 ├── src/mini_agent/
-│   ├── core/        # Agent loop, sub-agents, teams, planner, cost tracker
-│   ├── tools/       # 12 built-in tools + MCP protocol (stdio + HTTP)
-│   ├── memory/      # Context compression, persistent memory, file snapshots
-│   ├── security/    # Permissions, path guard, git worktree isolation
-│   ├── ui/          # Rich terminal rendering, themes, prompt toolkit
-│   ├── remote/      # WebSocket server + browser UI (--remote mode)
-│   ├── extensions/  # Slash commands, skills, hooks, event listener plugins
-│   ├── llm/         # Provider abstraction (OpenAI-compatible)
-│   ├── config/      # Layered config loading (TOML + env + CLI)
-│   └── models/      # Dataclasses (messages, events, config, sessions)
-├── tests/           # 937 tests, 80%+ coverage
+│   ├── core/        # Agent loop, state, sub-agents, teams, planner, mailbox, pane worker, cost tracker, task store, tool recorder, agent types, spawn backends
+│   ├── tools/       # 12 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/dispatch) + hook system
+│   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
+│   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/seatbelt), worktree isolation, remote confirm (cross-process)
+│   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher
+│   ├── remote/      # WebSocket server + browser UI (--remote mode, disconnect queuing)
+│   ├── extensions/  # Slash commands (25), skills (4 built-in), hooks (11 stages), event listener plugins
+│   ├── llm/         # Provider abstraction: OpenAI Chat Completions + Responses API + Anthropic, token counter
+│   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
+│   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
+│   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
+├── tests/           # 953 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
-├── experiments/     # 4 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
-└── docs/            # 14 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
+├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
+└── docs/            # 15 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
 ```
 
-**Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) decoupled via EventBus. All I/O is async. Zero vendor SDK dependency — just httpx.
+**Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) + remote/extensions/llm/config/models, decoupled via EventBus. All I/O is async. Zero vendor SDK — just httpx.
 
 ## S01–S20 Coverage
 
@@ -217,12 +232,12 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 937 tests
+uv run pytest tests/           # 953 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
 
-See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P78, 78 phases).
+See [docs/tasks.md](docs/tasks.md) for the full development history (P1–P82, 82 phases).
 
 ## Publishing to PyPI
 

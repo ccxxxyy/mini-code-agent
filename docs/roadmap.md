@@ -1,6 +1,6 @@
 ﻿# Mini-Code-Agent 后续演进路线图
 
-> 当前版本 v1.0.0，P1-P78。
+> 当前版本 v1.0.0，P1-P82。
 > 本文档收录开发过程中**有意推迟**的增强项——每一项在代码里都预留了升级插槽，
 > 按优先级和工作量组织，作为后续版本的开发依据。
 
@@ -38,7 +38,7 @@
 
 ### 2.1 /theme 命令切换主题 ✅ 已完成
 
-> 已实现：三套主题（default/dark/light）全面接入 6 个 UI 文件（terminal/input_handler/trace/teach/board/confirm），`/theme` 列出/切换/持久化（`~/.mini-agent/.theme`），运行时切换即时生效（prompt session 重建 + 共享 theme 引用）。7 个新测试，276 个全过。
+> 已实现：三套主题（default/dark/light）全面接入 6 个 UI 文件（terminal/input_handler/trace/teach/board/themes），`/theme` 列出/切换/持久化（`~/.mini-agent/.theme`），运行时切换即时生效（prompt session 重建 + 共享 theme 引用）。7 个新测试，276 个全过。
 - **工作量**：中（改色引用面较广，~200 行）
 
 ### 2.2 SubAgent 进度实时面板 ✅ 已完成
@@ -104,7 +104,7 @@
 | PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
 | 插件生态（有意延后） | plugin_loader 完善：第三方 pip 包可注册工具/命令/技能——见"明确不做"：没有用户基础前是过早投资 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
-| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具） |
+| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 12 个） |
 | 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
 | 对话分叉/回滚 ✅ | P26 实现：/undo 轮次回滚 + /fork 深拷贝分叉（差异化能力——CC 服务端历史做不到） |
 | 操作级撤销 ✅ | P27 实现：每轮文件快照（5 轮保留/30MB 上限/磁盘存储会话结束清空），/undo 新建删掉/修改还原/删除找回 |
@@ -127,7 +127,7 @@
 
 ---
 
-## 七、剩余待办清单（P36 后的完整盘点）
+## 六、剩余待办清单（P36 后的完整盘点）
 
 ### 待用户手动操作（代码侧已就绪）
 
@@ -143,16 +143,42 @@
 | ✅ **死循环诱导实验** | 5 场景 × 2 臂实测：迭代上限是唯一可靠硬熔断，same-tool-6x 在真实 LLM 下从未触发（LLM 每次微调参数绕过签名检测）。详见 experiments/README.md 实验 3 | 已完成 |
 | ✅ **压缩-重读膨胀根治** | P36 双层修复：①>50K 工具结果溢写磁盘只留预览（源头减量，SubAgent 同样受保护）；②压缩后在摘要注入"已读文件清单"（断重读循环）。详见 tech-notes §36 | 已完成 |
 
+### 待做（可实现，按需推进）
+
+| 项 | 说明 | 工作量 |
+|---|---|---|
+| 插件生态（plugin_loader） | 第三方 pip 包注册工具/命令/技能——`event_listeners.py` 已有插件加载基础，扩展为通用 `register_tools/commands/skills` + `entry_points` 发现 | ~1 天 |
+| Anthropic Provider E2E 验证 | 代码就绪（含 P37 prompt 缓存），注册 Anthropic Console 获取 API key 即可验证流式/tool_use/thinking/token 计数 | ~2 小时 |
+| CC 对照评测数据补齐 | `benchmarks/` 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） | — |
+
+### 已知限制（各文档的"诚实边界"统一收录于此）
+
+**Pane Worker（`/spawn --pane`）：**
+- cancel 是尽力而为——停止等待收集，不强杀窗格进程
+- wait 超时（900s）后完成的结果成孤儿，可手动查 `~/.mini-agent/workers/<id>.result.json`
+- macOS 窗格由 tmux 覆盖，不做 iTerm2 专属后端
+
+**远程/浏览器模式（`--remote`）：**
+- 无 TLS（明文 `ws://`），可选 token 认证（`--remote-token`）但不加密传输
+- 服务器重启后丢失会话（远程模式未接入 SessionStore）
+- 浏览器图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
+- 所有客户端共享同一会话（无独立会话隔离）
+
+**上下文压缩：**
+- bash 命令修改的文件无法被 /undo 恢复（无文件系统快照）
+- `aggregate_spill_chars` < 单文件大小的极端参数下，豁免读回计入累计会链式溢写-读回（默认 200K 无此问题）
+
+**Anthropic Provider：**
+- 代码就绪含 prompt 缓存，但从未连接真实 Claude API 进行 E2E 验证
+
 ### 明确不做（有意决策，非遗漏）
 
 | 项 | 理由 |
 |---|---|
-| 插件生态（plugin_loader） | 没有用户基础前是过早投资——生态建设需要先有用户 |
 | S14 Cron 定时调度 | 终端交互工具用 OS 的 cron/Task Scheduler 更合适 |
-| MCP SSE 长连接 | POST 请求-响应已覆盖全部工具功能，ABC 留有 SSETransport 扩展位 |
 | bash 文件变更跟踪 | 需要文件系统快照对比，成本远超收益（undo/汇总的已知盲区） |
 
-## 六、优先级建议
+## 七、优先级建议
 
 如果按"用户可感知价值 / 工作量"排序，建议实施顺序：
 

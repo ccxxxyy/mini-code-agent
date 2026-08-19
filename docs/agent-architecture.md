@@ -82,7 +82,7 @@ while True:
 
 **核心模式**：工具执行前过一道门控——自动放行 / 弹窗确认 / 直接拒绝。
 
-**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。P34.3 实战加固：LLM 曾擅自执行 git commit——DANGEROUS_COMMAND_PATTERNS 扩充为拦截全部 git 状态修改命令（commit/push/reset/stash/rebase/checkout/restore/clean 均需确认），印证"提示词是软约束、权限确认是硬闸门"。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。P79 补上工具级 scope：`/deny tool delete_file` 直接拦掉整个工具（在命令/路径检查之前评估），`check()` 重构为按 scope 分发的通用检查入口。
+**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。19 条危险命令正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh）。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。P79 补上工具级 scope：`/deny tool delete_file` 直接拦掉整个工具（在命令/路径检查之前评估），`check()` 重构为按 scope 分发的通用检查入口。P82 pane worker 跨进程权限审批：`security/remote_confirm.py` RemoteConfirm 文件协议，worker 写请求 JSON → 父进程轮询中转 → 超时安全拒绝；弹窗前发射 `PermissionCheckEvent(decision="pending")` 事件。
 
 **判断标准**：框架有没有工具执行前的权限检查？危险命令（rm、sudo）有没有拦截？用户能不能控制拦截策略（不仅能在启动前配文件，还能在运行中动态调整）？
 
@@ -98,7 +98,7 @@ while True:
 
 **核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、或只做旁路操作（记日志）。
 
-**本项目实现**：`tools/hooks.py` HookManager 支持 7 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则（comparison 7.2）——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 config-guide.md。
+**本项目实现**：`tools/hooks.py` HookManager 支持 11 个 HookStage（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 config-guide.md。
 
 **判断标准**：框架是否提供工具执行前后的扩展点？能不能在不改源码的情况下加审计/拦截？
 
@@ -126,7 +126,7 @@ while True:
 
 **为什么需要**：子代理有自己**独立的对话历史**（fresh messages[]），互不干扰。父代理只收取结果摘要，上下文保持干净。没有子代理，做 10 件独立的事就要 10 倍的上下文。
 
-**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。4 种 Agent 类型档案（explore/plan/worker/verify，P48），未指定类型回退 `DEFAULT_AGENT_TYPE`（worker）档案且保留配置的迭代预算（P80）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。
+**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。4 种 Agent 类型档案（explore/plan/worker/verify，P48），未指定类型回退 `DEFAULT_AGENT_TYPE`（worker）档案且保留配置的迭代预算（P80）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。`/spawn --pane` 可在独立终端窗格中运行子代理（tmux split-window / Windows Terminal split-pane / wt-window 降级），worker 通过文件协议跨进程中转权限确认（P82 RemoteConfirm）。
 
 **判断标准**：子代理是否有独立的上下文？父子之间是否只传递结果而非完整历史？
 
@@ -160,7 +160,7 @@ while True:
 3. LLM 总结（高成本但高质量）
 4. 滑动窗口兜底（暴力截断，最后防线）
 
-**本项目实现**：`memory/compressor.py` 三级级联 + `memory/context.py` 75% 阈值触发 + `agent_loop.py` 发送前溢出兜底（P20）。
+**本项目实现**：`memory/compressor.py` 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest 抽取式 → SlidingWindow 兜底）+ `memory/context.py` 双阈值触发（软 75% 受熔断器控制 + 硬 90% 绕过熔断器）+ token 驱动保留窗口（替代固定 6 条，P65-P68）+ LLM 结构化摘要（9 节 analysis+summary，P67）+ 摘要重试与超长收缩（P72-P73）+ 聚合溢写（单轮累计工具结果超 200K 字符按大小降序溢写磁盘，P64.1）。
 
 **判断标准**：Agent 对话 100 轮后还能工作吗？有没有多级压缩策略？有没有最终的溢出兜底？
 
@@ -174,7 +174,7 @@ while True:
 
 **为什么需要**：三个子系统——**选择**（什么值得记）、**提取**（从对话中抽取）、**整合**（去重合并）。不是所有信息都值得记——"你好"不值得，"我喜欢简洁注释"值得。
 
-**本项目实现**：`memory/persistent.py` PersistentMemory + `memory/extraction.py` LLM 结构化提取（P30 从 regex 升级）+ PRE_LLM hook 自动注入。三类提取：preference / convention / fact。60% 词重叠去重。
+**本项目实现**：`memory/persistent.py` PersistentMemory（用户级 + 项目级双层）+ `memory/extraction.py` LLM 结构化提取（P30 从 regex 升级）+ `memory/recall.py` 选择性召回 + `memory/consolidation.py` 语义合并 + PRE_LLM hook 自动注入。三类提取：preference / convention / fact。60% 词重叠去重。
 
 **判断标准**：Agent 重启后还记得上次的偏好吗？记忆是自动提取的还是必须手动？有没有去重防膨胀？
 
@@ -188,7 +188,7 @@ while True:
 
 **为什么需要**：System prompt 应该是多个片段的运行时拼接——基础身份 + 工具描述 + 项目指令 + 记忆 + 技能 prompt。不同会话、不同项目、不同技能激活状态下，prompt 内容不同。
 
-**本项目实现**：`app.py` SYSTEM_PROMPT 模板（{model}/{working_dir}/{platform}/{shell} 占位符）+ 项目指令注入（P25 CLAUDE.md/AGENT.md）+ 记忆注入（PRE_LLM hook）+ 技能 prompt（activate 时拼接）。
+**本项目实现**：`app.py` SYSTEM_PROMPT 模板（{model}/{working_dir}/{platform}/{shell} 占位符）+ `memory/project_context.py` 项目指令注入（AGENT.md > CLAUDE.md > .mini-agent/instructions.md 三选一 + 用户级 instructions.md 共存，P25）+ 记忆注入（PRE_LLM hook）+ 技能 prompt（activate 时拼接）。
 
 **判断标准**：System prompt 是硬编码的还是运行时组装的？能不能根据上下文动态变化？
 
@@ -202,7 +202,7 @@ while True:
 
 **为什么需要**：真实环境里错误是常态。一个健壮的 Agent 应该：重试失败操作、压缩过长上下文、在必要时切换模型。
 
-**本项目实现**：`app.py` `_friendly_error`（HTTP 异常转用户友好提示）+ `core/agent_state.py` 熔断器（双层死循环检测：同签名 6 次 + 同工具名连续 8 轮，防无限递归）+ 溢出兜底（P20）+ `stopped_early` 标志优雅终止。
+**本项目实现**：`app.py` `_friendly_error`（HTTP 异常转用户友好提示）+ `agent_loop.py` 熔断器（双层死循环检测：同工具+参数签名连续 6 次 + 同一工具出现在连续 15 轮每轮中，防无限递归）+ 溢出兜底（P20）+ `stopped_early` 标志优雅终止 + max_tokens 截断自动翻倍重试（最多 3 次，P44）。
 
 **判断标准**：Agent 遇到 API 错误会直接崩溃还是有恢复策略？有没有防无限循环的熔断？
 
@@ -306,7 +306,7 @@ while True:
 
 **为什么需要**：Agent 不可能内置所有工具。MCP（Model Context Protocol）是标准化的工具扩展协议——第三方写一个 MCP server，Agent 通过配置即可接入，无需改代码。
 
-**本项目实现**：`tools/mcp/` 三层架构（transport/client/adapter）。支持 stdio（子进程）+ HTTP（远程服务器）双传输。MCPToolAdapter 把外部工具包装成和内置工具完全一样的 Tool 对象——Agent 看不出区别。config.toml `[mcp.servers.*]` 配置即连。
+**本项目实现**：`tools/mcp/` 三层架构（transport/client/adapter）。支持 stdio（子进程）+ HTTP + SSE 三种传输。MCPToolAdapter 把外部工具包装成和内置工具完全一样的 Tool 对象——Agent 看不出区别。config.toml `[mcp.servers.*]` 配置即连。支持 `loading = "dispatch"` 延迟加载模式——工具不进全局列表，LLM 通过 tool_search 工具按需发现和调用（适合工具数量很多的 MCP 服务器）。
 
 **判断标准**：Agent 能不能无代码接入外部工具？有没有标准化的工具扩展协议？多传输支持？
 
@@ -320,13 +320,11 @@ while True:
 
 **核心洞察**：所有机制都是**附加到**循环上的，不是**替代**循环。S01 的循环从头到尾没变过——权限在工具执行前门控（S03）、Hook 在循环插入点触发（S04）、压缩在上下文满时介入（S08）、子代理开新循环（S06）。架构是**洋葱模型**：循环在最内层，每层机制包裹在外面。
 
-**本项目实现**：`app.py` Application 类——统一编排 AgentLoop + ToolRegistry + PermissionManager + HookManager + ContextManager + SubAgentManager + MCPManager + CostTracker + ToolRecorder + FileSnapshotStore + TaskStore + SkillRegistry + TraceRenderer + TeachRenderer + AuditLogger。一个类，所有机制。
+**本项目实现**：`app.py` Application 类——统一编排 AgentLoop + ToolRegistry + PermissionManager + HookManager + ContextManager + SubAgentManager + MCPManager + CostTracker + ToolRecorder + FileSnapshotStore + TaskStore + SkillRegistry + TraceRenderer + TeachRenderer + AuditLogger + EventListenerLoader + PersistentMemory + SessionStore + ToolResultCache + EscWatcher + SlashCommandRegistry + Mailbox + WorktreeManager。一个类，所有机制。
 
 ---
 
 ## 三、如何判断一个 Agent 框架是否完善
-
-用以下检查清单——每项对应一个 S 层：
 
 | 检查项 | 对应 | 问法 |
 |---|---|---|
@@ -360,7 +358,7 @@ while True:
 
 Agent 的核心循环（S01）**永远不改**——所有新能力都以以下三种方式接入：
 - **注册**：工具注册到 ToolRegistry（S02）
-- **订阅**：EventBus 订阅者（TraceRenderer 订阅 8 种事件 / AuditLogger 订阅 4 种事件 / CostTracker / ToolRecorder——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `bus.on_any` 注册为全局监听，异常隔离不影响主流程
+- **订阅**：EventBus 订阅者（Trace 订阅 8 种事件 / Audit 订阅 4 种 / Teach 订阅 2 种 / Recorder 订阅 2 种 / Cost 订阅 1 种，共 17 个订阅——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `extensions/event_listeners.py` 加载注册，异常隔离不影响主流程
 - **钩子**：HookManager 注册 handler（PRE_LLM 记忆注入 / SESSION_END 记忆提取）
 
 这意味着你可以**拿掉任何一个机制**（如删掉 CostTracker），Agent 照常工作——机制是可插拔的。
@@ -373,7 +371,7 @@ Agent 的核心循环（S01）**永远不改**——所有新能力都以以下�
 
 ### 4.3 EventBus 解耦 > 直接调用
 
-5 个 EventBus 纯订阅者（Trace / Teach / Audit / Recorder / Cost），Agent 循环只管 emit 事件，**不知道也不关心**有谁在监听。好处：
+5 个内置 EventBus 订阅者（Trace / Teach / Audit / Recorder / Cost）+ 外部插件订阅者（listener_dirs 加载），Agent 循环只管 emit 事件，**不知道也不关心**有谁在监听。好处：
 - 新增功能零改循环代码
 - 订阅者互不影响（一个崩溃不影响其他）
 - 可在运行时 attach/detach（/trace on/off）

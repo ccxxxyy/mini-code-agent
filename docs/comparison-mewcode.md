@@ -10,12 +10,12 @@
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
-| 源码行数 | ~14,000 行 | ~15,000+ 行 |
+| 源码行数 | ~16,000 行 | ~15,000+ 行 |
 | Python 版本 | 3.11+（用 tomllib、StrEnum 等 3.11 特性） | 3.12+（用 type 语法） |
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量已接近（14,000 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
+**差距**：代码量已接近（16,000 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -50,13 +50,13 @@
 | TUI | Rich + prompt_toolkit（2 个） | Textual（1 个，但更重） |
 | MCP | httpx 手写 JSON-RPC | `mcp` 官方 SDK |
 | HTTP | httpx | httpx |
-| WebSocket | 无 | `websockets` |
-| 总第三方依赖 | **4 个**（httpx/rich/prompt_toolkit/pydantic） | **7 个**（anthropic/openai/pyyaml/pydantic/mcp/textual/websockets） |
+| WebSocket | `websockets`（可选依赖，`[remote]` 组） | `websockets` |
+| 总第三方依赖 | **4 个核心**（httpx/rich/prompt_toolkit/pydantic）+ 可选（websockets/tiktoken） | **7 个**（anthropic/openai/pyyaml/pydantic/mcp/textual/websockets） |
 
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
-- 用户可以审计全部代码（14,000 行 vs 15000 行 + SDK 黑盒）
+- 用户可以审计全部代码（~16,000 行 vs ~15,000 行 + SDK 黑盒）
 
 **增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **912 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **953 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -92,7 +92,7 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 事件系统 | **EventBus**（5 个订阅者：Trace/Teach/Audit/Recorder/Cost，共订阅 8+4+3+2+1=18 种事件） | 无独立事件总线（组件间直接回调） |
+| 事件系统 | **EventBus**（5 个订阅者：Trace/Teach/Audit/Recorder/Cost，共订阅 8+2+4+2+1=17 种事件） | 无独立事件总线（组件间直接回调） |
 | 解耦程度 | 五层架构通过 EventBus 解耦，单向依赖 | 组件间直接引用较多 |
 | 观测能力 | `/trace`、`/explain`、`/audit` 三个独立观测维度 | `/trace` |
 
@@ -104,15 +104,15 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 文档数量 | **13 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
+| 文档数量 | **15 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
-| 技术笔记 | tech-notes.md（58 个部分，设计决策记录） | 无 |
+| 技术笔记 | tech-notes.md（78 个专题，设计决策记录） | 无 |
 | 配置指南 | config-guide.md（全配置文件说明） | config.yaml.example |
-| 命令参考 | commands-guide.md（22 个命令完整语法/参数/示例） | 无 |
+| 命令参考 | commands-guide.md（25 个命令完整语法/参数/示例） | 无 |
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
-| 实验报告 | experiments/README.md（3 个实验完整数据） | 无 |
+| 实验报告 | experiments/（10 个实验脚本 + 数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
-| 开发历史 | tasks.md（P1-P58 完整记录） | 无 |
+| 开发历史 | tasks.md（P1-P82 完整记录） | 无 |
 
 **差距**：此维度 mini **远超** mewcode。
 
@@ -246,7 +246,7 @@
 - `tool_search` 新工具：LLM 按关键词搜索 dispatch 工具的 name/description，返回完整 schema
 - `mcp_call` 新工具：LLM 调用 dispatch 模式发现的工具（server + tool + arguments）
 - `ToolContext.mcp_manager` 字段注入
-- 10 个内置工具（原 8 + tool_search + mcp_call）
+- 12 个内置工具（原 8 + tool_search + mcp_call + send_message + wait_message）
 
 ---
 
@@ -608,7 +608,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 **验证**：24 个单测（探测含 wt-window 降级/命令构造/失败路径/WorkerSpec 往返/管理器收集/超时/取消/桩文件拒绝/崩溃护栏/worker MockLLM 全链路/4 进程并发零丢失）+ **真实 LLM 跨进程 E2E**：worker 子进程注册（父进程注册表实时可见）→ send_message 跨进程送达 main → 注销 → 结果文件收集，全链路 PASS；另经六轮交互式真实使用验证（多窗格并发、失败路径、大任务长时等待）
 
-**诚实边界**：iTerm2 后端未做（无 macOS 验证环境，照 mewcode 抄 AppleScript 属于无法验证的代码）；pane worker 的 cancel 是尽力而为（停止等待收集，不强杀窗格进程）；worker 进程无权限弹窗（与 in-process SubAgent 一致——本就不接权限管理器）；wait 超时（900s）后完成的结果成孤儿，可手动查 `~/.mini-agent/workers/<id>.result.json`。
+**已知限制**：见 [roadmap.md](roadmap.md) "已知限制"章节。P82 已修复 worker 权限缺口：完整权限栈（PathGuard + PermissionManager + RemoteConfirm 文件协议），危险命令通过文件中转到父进程弹窗确认（超时 120s 安全拒绝）。
 
 ### 6.5 Worktree 完善 ✅ 已实现（P54）
 
@@ -738,7 +738,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 | 1 | 恢复附件含文件内容 | `build_recovery_attachment()` 把最近 5 个文件的实际内容（截断到 5000 tokens/个）+ 活跃 skill + 工具列表烤进摘要消息 | ~~只记文件路径，通过 `_inject_read_files` 提醒 LLM 不要重读~~ | ✅ 已消除（9.2a），见 9.2a 小节 |
 | 2 | keep 消息自包含 | `CompactBoundary.keep` 把尾部消息序列化到边界记录内（JSONL 追加式，边界是自包含的恢复点） | 尾部消息作为普通消息存在 JSON messages 数组中 | mini 用单 JSON 覆写式存储，尾部消息天然与边界同文件，自包含性等价——仅格式层差异 |
 | 3 | 工具对对齐 | `_align_keep_start_to_tool_pair()` 确保 keep 边界不切断 tool_use/tool_result 配对（切断会导致 API 400 错误） | ~~`KEEP_RECENT=6` 固定切分，可能切断~~ | ✅ 已消除（9.2b/P60 + P150 token 驱动替代固定 6），见 9.2b 小节 |
-| 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | 无 | 独立防护机制，可作为后续增强单独实现 |
+| 4 | 压缩熔断器 | `CompactCircuitBreaker`——连续失败 3 次后停止重试 | ~~无~~ | ✅ 已消除（9.2c）：`ContextManager` 内置熔断器，`compress_max_failures=3` |
 
 ### 9.2a 压缩恢复附件含文件内容 ✅ 已实现
 
@@ -782,7 +782,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 | `/fork` 对话分叉 | 深拷贝会话独立分支 | 可加：`/fork list` 查看所有分支 |
 | `/record` + `/replay` | 零 LLM 调用工具链重放 | 可加：从 YAML/JSON 导入录制（手写工具链） |
 | `/cost` 成本仪表盘 | 按模型分账 + 双层预算 | 可加：硬预算（到额停止） |
-| 机制实验框架 | 3 个对照实验 + 数据 | 可加：实验 4（压缩恢复效果 A/B） |
+| 机制实验框架 | 10 个实验脚本 + 数据 | 可加：更多对照实验 |
 | `/explain` 教学模式 | 工具调用教学面板 | 可加：新手引导教程 |
 | 死循环诱导数据 | 真实 LLM 下的熔断行为数据 | 已完成 |
 | 全中英双语注释 | 336 条注释全部中英对照 | 保持 |
@@ -831,7 +831,6 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 | ✅ 完成 | 9.2b | 压缩工具对对齐（P60） | 9.2 诚实差异 #3 消除：keep 边界对齐 + SlidingWindow 孤儿防护 | 已完成 |
 | ✅ 完成 | 9.2c | 压缩熔断器 | 9.2 诚实差异 #4 消除：`ContextManager` 内置熔断器，连续 N 次压缩无效后跳过 | 已完成 |
 | ✅ 完成 | 4.1a | 聚合工具结果预算（P64.1） | 多工具单条不超阈值、合计撑爆上下文；含读回豁免/预览 2000/小结果豁免三配套 | 已完成 |
-| ⚪ P4 | 6.4a | iTerm2 窗格后端 | 6.4 诚实边界：无 macOS 验证环境，未实现 | 半天（需 Mac） |
 | ✅ 完成 | — | 摘要 prompt 结构化（P67） | mewcode 风格 `<analysis>` 草稿 + 9 节 `<summary>` 结构化输出，只注入 summary 块；回退可观测 | 已完成 |
 | ✅ 完成 | — | 保留窗口按压缩目标缩放（P68） | 下限/硬顶随 target 缩放，修复小窗口下摘要级数学失效、压缩退化为纯截断 | 已完成 |
 | ✅ 完成 | — | DropToolResults 尊重保留窗口（P69） | Stage 1 不再截断模型工作集，修复"以为工具坏了"重读死循环（36 迭代→4） | 已完成 |
