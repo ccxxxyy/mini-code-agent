@@ -82,7 +82,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="skill",
-            description="Manage skills (/skill [list|activate|deactivate|install|uninstall])",
+            description="Manage skills (list/activate/deactivate/install/uninstall/reload)",
             handler=_make_skill(app),
         )
     )
@@ -138,7 +138,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="todo",
-            description="Task list with dependencies (usage: /todo [add|done|start|delete|clear])",
+            description="Task list with dependencies (add/done/start/fail/delete/clear)",
             handler=_make_todo(app),
         )
     )

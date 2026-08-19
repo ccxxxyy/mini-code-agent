@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.0.0，937 个测试全部通过。
+> 当前版本 v1.0.0，953 个测试全部通过。
 
 ---
 
@@ -48,7 +48,7 @@
 **实现**（`core/agent_loop.py`）：
 - ReAct 循环：THINK（LLM 流式生成）→ 有 tool_calls 则 ACT（执行工具）→ OBSERVE（结果写回对话）→ 回到 THINK，直到 LLM 给出最终回答
 - 自主性本质：工具结果作为 TOOL 消息进入对话，LLM 看到结果自然继续推理——循环不含任务逻辑，所有决策由 LLM 做出
-- 熔断保护：max_iterations 上限（50）、用户取消、双层死循环检测（同签名连续 6 次 + 同工具名连续 8 轮每轮出现——P35 实验后升级 v2，不误杀批量并行）
+- 熔断保护：max_iterations 上限（80）、用户取消、双层死循环检测（同签名连续 6 次 + 同一工具出现在连续 15 轮每轮中——P35 实验后升级 v2，不误杀批量并行）
 
 **验证**：8 个 MockLLM 单测覆盖完整链路；真实 API 验证 Agent 自主多步执行（一次任务里自主 glob→read→回答）
 
@@ -59,7 +59,7 @@
 **要求**：无缝挂载任意符合 MCP 规范的外部工具服务（GitHub、Slack、数据库、12306 等）。
 
 **实现**（`tools/mcp/`）：
-- `transport.py`：StdioTransport — 启动 MCP 服务器子进程，JSON-RPC 2.0 通信
+- `transport.py`：StdioTransport（子进程）+ HTTPTransport（远程服务器）+ SSE 三种传输，JSON-RPC 2.0 通信
 - `client.py`：MCPManager — 标准握手（initialize → initialized → tools/list）、多服务器管理、工具调用代理
 - `adapter.py`：MCPToolAdapter — MCP 工具的 inputSchema 自动转为内部 ToolSchema，以 `mcp_{server}_` 前缀注册进同一个 ToolRegistry
 - 无缝的含义：适配后的 MCP 工具和内置工具走完全相同的调用管道——权限检查、Hook 链、错误处理自动生效
@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 24 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
+- 25 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -103,8 +103,8 @@
 **要求**：危险命令会问你，敏感目录会拦截，Agent 有能力但不会失控。
 
 **实现**（`tools/hooks.py` + `security/`）：
-- Hook 框架：7 个生命周期阶段（PRE_TOOL/POST_TOOL/PRE_LLM/POST_LLM/SESSION_START/END/USER_INPUT）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
-- 危险命令确认：13 条正则（rm -rf/sudo/force push/curl|sh/format 等）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
+- Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
+- 危险命令确认：19 条正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - fail-safe：无 UI 时默认拒绝
@@ -213,7 +213,7 @@
 | Tools 工具系统 | Tool ABC（schema + execute 双成员）+ ToolRegistry（注册/克隆/过滤）+ 参数校验 |
 | ReAct 范式 | think → act → observe 循环，失败即数据（错误回传 LLM 自纠错） |
 | Agent Loop 主循环 | `core/agent_loop.py` 状态机（8 个 AgentPhase），三重熔断护栏 |
-| 事件流 | `events/bus.py` 异步发布订阅 EventBus（on/on_any/off/off_any，handler 异常隔离并记日志），14 种类型化事件贯穿全部组件；`listener_dirs` 目录 *.py 插件零代码接入全局监听|
+| 事件流 | `events/bus.py` 异步发布订阅 EventBus（on/on_any/off/off_any，handler 异常隔离并记日志），14 种类型化事件贯穿全部组件，5 个内置订阅者共 17 个订阅（Trace 8/Audit 4/Teach 2/Recorder 2/Cost 1）；`listener_dirs` 目录 *.py 插件零代码接入全局监听 |
 
 ### ✅ 层面 3：能力拓展协议
 
@@ -221,15 +221,15 @@
 |---|---|
 | MCP 协议 | JSON-RPC 握手 + 工具发现 + Adapter 透明挂载（见核心功能 4） |
 | Skill 技能包 | SKILL.md 装载/激活/触发（见核心功能 5） |
-| Slash Command | 24 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
-| Hook 生命周期钩子 | 7 阶段 × 4 裁决 + 优先级链 + 短路（见核心功能 7） |
+| Slash Command | 25 内置 + 自定义注册 + 下拉补全（见核心功能 6） |
+| Hook 生命周期钩子 | 11 阶段 × 4 裁决 + 优先级链 + 短路（见核心功能 7） |
 
 ### ✅ 层面 4：工程化功能
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；13 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML） |
-| 上下文压缩 | 三级级联（75% 软阈值 + 90% 硬阈值绕过熔断器 + /compact 手动） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；19 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件） |
+| 上下文压缩 | 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow），双阈值（75% 软 + 90% 硬绕过熔断器），token 驱动保留窗口，聚合溢写，/compact 手动 |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
 | 跨会话记忆 | 项目级 + 用户级双层 JSON 存储 + 关键词/标签搜索 |
@@ -250,10 +250,10 @@
 | 要求点 | 实现 |
 |---|---|
 | spec.md | `docs/spec.md` — 15 章完整架构规格（目录结构/分层架构/数据模型/模块接口/数据流/状态机/安全模型/开发阶段） |
-| tasks.md | `docs/tasks.md` — P1-P58 全部任务清单，逐项打勾并附验证依据 |
+| tasks.md | `docs/tasks.md` — P1-P82 全部任务清单，逐项打勾并附验证依据 |
 | checklist.md | `docs/checklist.md` — 每阶段验收检查清单，全部核查通过 |
 | CLAUDE.md | 项目根目录 — 常用命令/架构要点/代码规范的项目指令 |
-| 附加文档 | `docs/tech-notes.md`（技术原理与选型）、`docs/roadmap.md`（演进路线）、本文档（能力对照） |
+| 附加文档 | 15 个专题文档：tech-notes（技术原理）、roadmap（演进路线）、agent-architecture（架构解析）、config-guide（配置指南）、commands-guide（命令参考）、comparison-mewcode（mewcode 对比）、comparison-config-cc（CC 配置对比）、output-guide / terminal-guide / positioning / todo-code-quality 等，及本文档 |
 
 ---
 
@@ -261,15 +261,15 @@
 
 | 维度 | 数据 |
 |---|---|
-| 源文件 | 92 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 937 个测试全部通过（约 90 秒，零网络依赖），单元 56 文件 + 集成 4 文件 |
+| 源文件 | 98 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
+| 测试 | 953 个测试全部通过（约 90 秒，零网络依赖），单元 57 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
 | 评测 | 10 个标准编程任务 **10/10 通过**，总成本 $0.0015，详见 `benchmarks/README.md` |
 | 机制透明 | `/trace` 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息）——商用 Agent 给不了的白盒能力 |
 | 垂直场景 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（哈希链防篡改 JSONL + `/audit verify` 完整性校验）+ offline-ollama 内网离线 Skill——"因为拥有源码所以能做"的三个活证据 |
-| 机制实验 | `experiments/` 三项：① 压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）；② 强弱模型混编（发现：strong-weak 帕累托最优）；③ 死循环诱导（发现：迭代上限是唯一可靠硬熔断，same-tool-6x 在真实 LLM 下从未触发→已升级 v2 按轮检测并实战修正误杀）——从"做了个项目"到"做了研究" |
+| 机制实验 | `experiments/` 10 个实验脚本：压缩策略 A/B（发现：压缩的隐性代价是重复劳动，工具调用翻 2-5 倍）、强弱模型混编（发现：strong-weak 帕累托最优）、死循环诱导（发现：迭代上限是唯一可靠硬熔断→已升级 v2）、压缩熔断器验证、摘要 prompt 验证、token 保留窗口验证、摘要召回验证、默认 Agent 类型验证、工具权限验证、跨进程 PENDING 协议验证——从"做了个项目"到"做了研究" |
 | 流式中断 | 双 Esc 优雅中断流式输出（守护线程 + cancelled 标志），不用 Ctrl+C 冒险杀进程 |
 | 长记忆自动化 | PRE_LLM hook 自动注入记忆 + SESSION_END hook 自动提取偏好——用户无感知的跨会话记忆 |
 | 溢出兜底 | 发送前 token 预检（P20）+ 超限强制 SlidingWindow 截断——三级压缩走完仍超窗时的最终防线，杜绝 API 400 |
@@ -288,13 +288,13 @@
 | Windows 终端适配 | UTF-8 加固/流式防重影/按键防吞/无控制台兜底/emoji 降级（P34）——CMD/PowerShell/Windows Terminal 全兼容；P34.3 补修 bash GBK 解码、git 命令确认闸门、Git Bash（mintty）降级运行与代理字符清洗，各终端指南见 terminal-guide.md |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
-## 如实说明：有意简化（历史记录，多数已升级）
+## 早期简化项（全部已升级）
 
-以下为 mini 早期实现的合理取舍，**不影响需求达成**。带 ✅ 的已在后续阶段升级：
+以下为 mini 早期实现的合理取舍，**已在后续阶段全部升级**：
 
 1. ✅ 压缩链 Stage 2 已默认使用 LLM 语义摘要（P64.2，`llm_summarize=True`），失败自动回退提取式
 2. ✅ 记忆提取已从正则升级为 LLM 结构化提取（P30）
-3. ✅ MCP HTTP transport 已实现（P31，含 headers 认证）
+3. ✅ MCP HTTP transport 已实现（P31，含 headers 认证 + SSE）
 4. ✅ 多个 tool_calls 已改为权限预检串行 + 执行并行（P17，asyncio.gather + 审计锁）；P38 进一步升级为流式执行（组装完成即跑，不等流结束）
 
 ---

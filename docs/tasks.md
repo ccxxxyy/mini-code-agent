@@ -1,5 +1,7 @@
 # Mini-Code-Agent 开发任务清单
 
+P1-P82 每个阶段的任务分解、实现记录与验收结果。每条任务用 `[x]` 标记完成、`[ ]` 标记待做。
+
 ## Phase 1: 基础对话 (P1)
 
 ### P1.1 项目初始化
@@ -1964,3 +1966,33 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P81.2 验证
 - [x] 937 个测试全过（938 − 1 个随删测试），ruff clean
+
+---
+
+## Phase 82: PermissionDecision.PENDING（P82）
+
+扩展点 #8 接入——三部分实现，修真实安全缺口。
+
+### P82.1 Part 3：事件可观测
+- [x] `security/permission.py` — `_ask_user()` 在 await confirm 前发射 `PermissionCheckEvent(decision="pending", reason="awaiting_user")`
+- [x] `ui/trace.py` — 三态颜色：PENDING 用 warning 色显示 `PENDING (awaiting user)`
+
+### P82.2 Part 1：Pane worker 跨进程权限审批（主体，修安全缺口）
+- [x] 新建 `security/remote_confirm.py` — `RemoteConfirm` 类：写 `.perm-request.json` → 轮询 `.perm-decision.json` → 超时 120s 安全拒绝
+- [x] `core/worker.py` — worker 端搭建完整权限栈（PathGuard + PermissionManager + RemoteConfirm + 加载 permissions.toml）
+- [x] `core/subagent.py` — `SubAgent` 新增 `permission_manager` 参数传入 `AgentLoop`
+- [x] `core/subagent.py` — `SubAgentManager` 新增 `confirm_callback` 参数 + `_resolve_worker_permission()` 方法
+- [x] `core/subagent.py` — `_collect_pane_result()` 轮询权限请求并通过父进程 confirm_callback 中转决策
+- [x] `app.py` — 传 `terminal.confirm` 给 `SubAgentManager`
+
+### P82.3 Part 2：远程/浏览器模式断连排队
+- [x] `remote/server.py` — `_pending_prompts` 跟踪请求文本
+- [x] `remote/server.py` — 最后客户端断开启动 `_disconnect_timeout()` 120s 后安全拒绝
+- [x] `remote/server.py` — 重连时 `_replay_pending_confirms()` 重发待处理请求
+- [x] `remote/server.py` — `_resolve_permission()` 同步清理 `_pending_prompts`
+
+### P82.4 验证
+- [x] 15 个新测试：test_remote_confirm（10）+ test_permissions（2）+ test_remote（3）
+- [x] E2E 验证脚本 `experiments/verify_pending.py`：4/4 全过（allow/deny/always/timeout）
+- [x] 真实 LLM 终端验证：`/trace` 显示 PENDING → GRANTED 两行事件
+- [x] 952 passed, 1 skipped, ruff clean

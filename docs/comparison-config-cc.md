@@ -295,7 +295,7 @@ CC 的 hooks 是**命令式脚本**——配置指定一个 shell 命令，CC �
 
 脚本通过环境变量接收上下文（`$TOOL_NAME`、`$TOOL_INPUT` 等），退出码 `0` = 继续、`2` = 阻止工具调用。stdout 内容回传给 LLM。
 
-支持的 hook 时机：`PreToolUse`、`PostToolUse`、`Notification`、`Stop`。
+常用 hook 时机：`PreToolUse`、`PostToolUse`、`Notification`、`Stop` 等。
 
 这意味着用户可以在 hook 里**运行任意程序**——调 linter、发通知、改参数，能力极强但需要写脚本。
 
@@ -405,13 +405,13 @@ mini 独有的 `loading` 字段：
 
 ### CC 的实现
 
-CC 绑定 Anthropic 自家模型（Claude 系列），通过 OAuth 登录或 API key 认证。模型选择通过 `/model` 命令或 CLI 参数：
+CC 主要绑定 Claude 系列模型，通过 OAuth 登录或 API key 认证。模型选择通过 `/model` 命令或 CLI 参数：
 
 ```bash
 claude --model claude-sonnet-4-20250514
 ```
 
-CC 不支持第三方模型（无 base_url 概念），不支持模型 Profile 切换。
+CC 可在 Claude 家族内切换模型，Max 订阅还支持部分第三方模型。无 `base_url` 概念，不支持任意 OpenAI 兼容 API。不支持多模型 Profile 预配切换。
 
 ### mini 的实现
 
@@ -454,7 +454,7 @@ MINI_AGENT_WORKER_PROFILE=fast
 
 | 维度 | CC | mini |
 |------|-----|------|
-| 支持模型 | 仅 Claude 系列 | 任意 OpenAI 兼容 + Anthropic 原生 |
+| 支持模型 | Claude 系列为主（Max 订阅支持部分第三方） | 任意 OpenAI 兼容 + Anthropic 原生 |
 | 认证方式 | OAuth 登录 / Anthropic API key | 任意 API key + base_url |
 | 模型切换 | `/model` 在 Claude 家族内切换 | `/model` 在任意预配 Profile 间切换 |
 | 多模型分工 | 不支持 | Planner/Worker 独立 Profile |

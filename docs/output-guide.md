@@ -27,12 +27,12 @@
   - hello world                             ← ⑦ Diff 预览（edit_file 专属）
   + goodbye world                           ← ⑦
 
-已把 a.txt 中的 hello 改为 goodbye。       ← ⑧ LLM 流式回复（Markdown 渲染）
+已把 a.txt 中的 hello 改为 goodbye。       ← ⑨ LLM 流式回复（Markdown 渲染）
 
   files changed this turn:                  ← ⑩ 文件变更汇总
     ~ a.txt                                 ← ⑩
 
-  tokens: 3307 this turn / 3307 total       ← ⑨ Token 统计行
+  tokens: 3307 this turn / 3307 total       ← ⑪ Token 统计行
 ```
 
 ---
@@ -43,7 +43,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 来源 | `ui/input_handler.py` `create_prompt_session` → prompt_toolkit `message="> "` |
+| 来源 | `ui/input_handler.py` `create_prompt_session` → prompt_toolkit `message=HTML("<prompt>> </prompt>")` |
 | 颜色 | 跟随主题 `theme.primary`（`/theme dark` 可换色） |
 | 关闭方法 | 不可关闭（关了没法输入） |
 
@@ -90,7 +90,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 来源 | `ui/terminal.py` `show_tool_result`（被 `agent_loop.on_tool_end` 回调触发，签名为 `(result, duration_ms)`） |
+| 来源 | `ui/terminal.py` `show_tool_result`（被 `agent_loop.on_tool_end` 回调触发，签名为 `(self, name: str, output: str, is_error: bool = False, metadata: dict | None = None)`） |
 | 触发 | 每次工具执行完成时 |
 | 成功 | `╰─ ✓ 行数, 字符数`（绿色 ✓） |
 | 失败 | `╰─ ✗ 错误预览`（红色 ✗，截断 300 字符） |
@@ -102,10 +102,19 @@
 |---|---|
 | 来源 | `ui/terminal.py` `_render_diff`（在 `show_tool_result` 内，检测 `metadata["diff"]`） |
 | 触发 | edit_file 成功且 metadata 含 diff 时 |
-| 内容 | 删除行：红色文字 + 深红整行背景 `#3d0000`；新增行：绿色文字 + 深绿整行背景 `#002d00` |
+| 内容 | 删除行：`white on dark_red` 整行背景；新增行：`white on dark_green` 整行背景（Rich 命名色，兼容 Windows） |
 | 关闭方法 | `edit_file.py` 中删除生成 diff 的代码块（约 10 行），或 `terminal.py` `_render_diff` 里 `return` 提前退出 |
 
-### ⑧ LLM 流式回复（Markdown 渲染）
+### ⑧ LLM 思考过程（Thinking）
+
+| 项 | 说明 |
+|---|---|
+| 来源 | `ui/terminal.py` `feed_thinking`（被 `agent_loop.on_thinking_delta` 回调触发） |
+| 触发 | LLM 返回 reasoning_content / thinking delta 时（DeepSeek R1、o1/o3 等推理模型） |
+| 样式 | dim italic（淡色斜体），逐 token 直接写入终端（不走 Live 缓冲） |
+| 关闭方法 | `app.py` 中将 `self.agent_loop.on_thinking_delta` 设为 `None` |
+
+### ⑨ LLM 流式回复（Markdown 渲染）  
 
 | 项 | 说明 |
 |---|---|
@@ -113,15 +122,6 @@
 | 触发 | LLM 返回 text delta 时（非 tool_call 的文本输出） |
 | 机制 | `on_stream_start` → Live 启动；`on_stream_delta` → 逐段提交式渲染；`on_stream_end(full_text)` → Live 关闭 |
 | 关闭方法 | 不可关闭（关了就看不到 LLM 的回答） |
-
-### ⑨ Token 统计行
-
-| 项 | 说明 |
-|---|---|
-| 来源 | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
-| 触发 | 每轮对话完成后（agent_loop.run 返回后） |
-| 内容 | 配置价格后带金额 `tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)` |
-| 关闭方法 | `app.py` `_handle_turn` 中注释掉 `self.terminal.show_info(...)` 那行 |
 
 ### ⑩ 文件变更汇总
 
@@ -132,7 +132,16 @@
 | 内容 | `files changed this turn:` + 每个文件一行（`+ 路径` 绿=新建，`~ 路径` 黄=修改，`- 路径` 红=删除） |
 | 关闭方法 | `app.py` `_handle_turn` 中删除 `show_file_changes` 调用行 |
 
-### ⑪ 预算警告行
+### ⑪ Token 统计行
+
+| 项 | 说明 |
+|---|---|
+| 来源 | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
+| 触发 | 每轮对话完成后（文件变更汇总之后） |
+| 内容 | 配置价格后带金额 `tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)` |
+| 关闭方法 | `app.py` `_handle_turn` 中注释掉 `self.terminal.show_info(...)` 那行 |
+
+### ⑫ 预算警告行
 
 | 项 | 说明 |
 |---|---|
@@ -148,12 +157,19 @@
 | 输出 | 来源 | 触发 |
 |---|---|---|
 | 欢迎标题 `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | 启动时 |
+| `context: loaded <文件名>` | `app.py` 启动 | 项目指令文件（AGENT.md/CLAUDE.md）注入成功时 |
+| `Loaded N hook rule(s) from config` | `app.py` 启动 | config.toml 有 `[[hooks]]` 规则时 |
+| `Loaded N event listener(s): xxx` | `app.py` 启动 | listener_dirs 有 *.py 插件时 |
+| `MCP: xxx connected (N tools)` | `app.py` 启动 | MCP 服务器连接成功时 |
+| `Cleaned N stale session(s)` | `app.py` 启动 | 自动清理超龄会话时 |
+| `Cleaned N stale worktree(s)` | `app.py` 启动 | 自动清理超龄 worktree 时 |
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串；默认纯文本原样打印，带 `MARKDOWN_RESULT` 哨兵的（spawn 报告）走 Markdown 渲染，行内代码（文件名/agent id）亮橙色 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中 |
+| thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时 |
 | `Goodbye!` | `app.py` `run()` finally | 正常退出时 |
 | `Interrupted.` | `app.py` `_handle_turn` except | Ctrl+C / 双 Esc 中断时 |
 
@@ -181,7 +197,8 @@
                 │
                 ├─→ agent_loop.run()
                 │     │
-                │     ├─→ _think()  ─→ on_stream_start/delta/end ─→ StreamRenderer (⑧)
+                │     ├─→ _think()  ─→ on_thinking_delta          ─→ feed_thinking (⑧)
+                │     │               on_stream_start/delta/end   ─→ StreamRenderer (⑨)
                 │     │               on_tool_call_assembling     ─→ console.print (②)
                 │     │
                 │     ├─→ _act()   ─→ on_tool_start              ─→ show_tool_call (⑤)
@@ -192,7 +209,7 @@
                 │                           ─→ TeachRenderer (④)
                 │                           ─→ AuditLogger (无可见输出)
                 │
-                └─→ show_info("tokens: ...") (⑨)
+                └─→ show_file_changes (⑩) → show_info("tokens: ...") (⑪) → budget_warning (⑫)
 ```
 
 **核心原则**：agent_loop 不直接 print——所有输出通过**回调**（on_xxx）或**EventBus 订阅者**间接到达终端。这意味着任何输出都可以通过设回调为 None 或 detach 订阅者来关闭，不需要改 agent_loop 代码。
@@ -201,4 +218,4 @@
 
 ## 附：终端环境差异
 
-不同终端（Windows Terminal / CMD / PowerShell / Git Bash / macOS / Linux）下输出与输入体验有差异——比如 Git Bash 直接运行会降级为朴素输入模式（无补全菜单）。各系统各终端的打开方法、兼容等级、问题排查见 [terminal-guide.md](terminal-guide.md)。
+不同终端（Windows Terminal / CMD / PowerShell / Git Bash / macOS / Linux）下输出与输入体验有差异。各系统各终端的打开方法、兼容等级、问题排查见 [terminal-guide.md](terminal-guide.md)。

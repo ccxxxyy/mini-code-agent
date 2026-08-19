@@ -277,7 +277,7 @@ IDLE + TurnCompleteEvent(iterations, tools_called, tokens)
 
 1. **迭代上限**：`iteration >= max_iterations`（默认 50）硬停
 2. **用户取消**：`cancel()` 置标志位，循环与工具执行两处检查
-3. **死循环检测**：滑动窗口记录最近工具名，**同一工具连续 6 次** → 判定卡死强制停止（LLM 反复读同一个文件是常见故障模式）
+3. **死循环检测**（双层）：同工具+参数签名连续 6 次 → 判定卡死；同一工具出现在连续 15 轮每轮中 → 判定卡死（P35 升级 v2，按轮检测不误杀批量并行）
 
 ### UI 解耦：回调注入而非直接依赖
 
@@ -287,7 +287,7 @@ loop.on_tool_start   = lambda tc: terminal.show_tool_call(...)
 loop.on_tool_end     = lambda tr: terminal.show_tool_result(...)
 ```
 
-AgentLoop 完全不 import UI 模块，只暴露五个可选回调（不设置就静默运行）。收益：单元测试用列表收集回调验证行为；P6 的 SubAgent 复用同一个 AgentLoop 而不带 UI。
+AgentLoop 完全不 import UI 模块，只暴露七个可选回调（on_stream_start/delta/end、on_thinking_delta、on_tool_start/end、on_tool_call_assembling，不设置就静默运行）。收益：单元测试用列表收集回调验证行为；P6 的 SubAgent 复用同一个 AgentLoop 而不带 UI。
 
 ### 设计权衡
 
@@ -337,16 +337,18 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 ### 实现原理
 
-三级判定策略（`security/path_guard.py`），按优先级：
+五级判定策略（`security/path_guard.py`），按优先级：
 
 ```
-1. 敏感目录（~/.ssh, ~/.aws, ~/.gnupg）        → DENY  硬拒绝
-2. 敏感文件模式（.env, *.pem, *.key, id_rsa*,
-   credentials*, *secret* ...）                → DENY  硬拒绝
-   例外：.env.example / .env.sample（模板非机密）
+1. 敏感目录（~/.ssh, ~/.aws, ~/.gnupg，可配）   → DENY  硬拒绝
+2. 敏感文件模式（.env, .env.*, *.pem, *.key,
+   id_rsa*, id_ed25519*, credentials*,
+   *secret*, *.p12, *.pfx，共 10 种）          → DENY  硬拒绝
+   例外：.env.example / .env.sample / .env.template
 3. 项目目录内                                   → ALLOW 自动放行
-4. 显式 allowed_paths                           → ALLOW
-5. 其余（项目外）                               → ASK   交用户决定
+4. 溢写缓存目录只读（~/.mini-agent/cache/results/） → ALLOW
+5. 显式 allowed_paths（可配）                   → ALLOW
+6. 其余（项目外）                               → ASK   交用户决定
 ```
 
 实现要点：
@@ -371,11 +373,12 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 **通用检查入口**（P79，扩展点 #15）：`check(request)` 按 `request.scope` 分发到 COMMAND / PATH / 通用管道，任意消费者构造 `PermissionRequest` 一次调用即得正确判定；`check_command` / `check_path` / `check_tool` 是各 scope 的便捷入口，共用内部管道无递归。
 
-**危险命令检测**用 13 条正则覆盖高危模式：
+**危险命令检测**用 19 条正则覆盖高危模式：
 
 ```
-rm -rf / rm -r / rm -f、sudo、chmod 777、mkfs、dd if=、
-git push --force、git reset --hard、curl|sh、wget|sh、
+rm -rf / rm -r / rm -f、sudo、chmod 777、mkfs、dd if=、>/dev/sd、
+git push/commit/reset/stash/rebase/checkout/restore/clean、
+curl|sh、wget|sh、
 Windows: del /s /q、rmdir /s、format c:
 ```
 
@@ -541,9 +544,9 @@ After:  read_file → 前 200 字符 + "... (2000 lines, 45000 chars total, trun
 
 跳过已压缩的（`msg.compressed == True`），避免重复处理。
 
-**Stage 2: SummarizeOldest（摘要旧消息）**
+**Stage 2: LLMSummarizeOldest（LLM 语义摘要，默认）**
 
-token 驱动保留窗口（P150）：从尾部反向累计 token，满足 `KEEP_RECENT_TOKENS`(10K) 且 `MIN_KEEP_MESSAGES`(5) 时停止，硬顶 `KEEP_MAX_TOKENS`(40K)。短消息全保留（不浪费），长消息少保留（不超限）。保留的消息不动，之前的所有消息提取为一条摘要。当前实现是**提取式摘要**（每条消息取角色 + 前 300 字符 / 工具名 / 结果状态），不调 LLM：
+token 驱动保留窗口（P65-P68）：从尾部反向累计 token，满足 `KEEP_RECENT_TOKENS`(10K) 且 `MIN_KEEP_MESSAGES`(5) 时停止，硬顶 `KEEP_MAX_TOKENS`(40K)，三者均按压缩目标缩放。保留的消息不动，之前的所有消息由 LLM 生成结构化摘要（`<analysis>` 草稿 + 9 节 `<summary>`，P67）。LLM 失败自动回退**提取式摘要**（每条消息取角色 + 前 300 字符 / 工具名 / 结果状态），不调 LLM：
 
 ```
 [Compressed conversation history]
@@ -563,7 +566,7 @@ token 驱动保留窗口（P150）：从尾部反向累计 token，满足 `KEEP_
 
 ```
 Compressor.compress(conversation, target_tokens):
-    for strategy in [DropToolResults, SummarizeOldest, SlidingWindow]:
+    for strategy in [DropToolResults, LLMSummarizeOldest, SlidingWindow]:
         recount total tokens
         if total <= target: break
         strategy.compress(conversation, target)
@@ -1047,7 +1050,7 @@ positioning.md 方向 3 提出"垂直场景定制"——CC 覆盖不好的场景
 
 ### 教学模式（EventBus 订阅者 + Skill 辅助）
 
-`/explain on` 开启 `ui/teach.py` 的 TeachRenderer。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 `ToolCallStartEvent`，在每次工具调用前**确定性打印** Rich Panel 教学面板——包含 "Why this tool"（为什么选这个工具）、"Args"（实际参数）、"Params guide"（参数含义）。6 个内置工具各有专属文案，MCP 等未知工具用默认兜底。
+`/explain on` 开启 `ui/teach.py` 的 TeachRenderer。它是一个纯 EventBus 订阅者（与 TraceRenderer 同范式），订阅 `ToolCallStartEvent`，在每次工具调用前**确定性打印** Rich Panel 教学面板——包含 "Why this tool"（为什么选这个工具）、"Args"（实际参数）、"Params guide"（参数含义）。原始 6 个内置工具（read_file/write_file/edit_file/bash/glob/grep）各有专属文案，其余工具（delete_file/spawn_agents 等）和 MCP 工具用默认兜底。
 
 **从 Skill 注入到 EventBus 硬注入的演进**：最初尝试纯 Skill 方案（注入 system prompt 指令让 LLM "自觉"解释），但实测发现小模型对格式指令遵从度低——教学段要么不出现要么挪到末尾。改为 EventBus 订阅者后 100% 确定性输出，不依赖 LLM 能力。`skills/teach-mode/SKILL.md` 保留作为辅助（让 LLM 输出推理 walkthrough），两者互补。
 
@@ -1612,7 +1615,7 @@ P36 上线后实测"详细介绍所有文档"：溢写生效（tech-notes 60K+ �
 - `ToolResult` 是 frozen dataclass——溢写通过重建实现（与 `DropToolResults` 同模式），`metadata` 带 `spilled_path`/`full_chars` 供排查
 - 错误结果永不溢写（错误信息本来就该完整可见）
 - 文件路径只存在于 `tc.arguments`——记录点选在 agent_loop（同时看得到调用参数和结果），而非改 read_file 的 metadata
-- 预览长度取 `min(500, threshold)`——防止极小阈值下预览本身超阈值
+- 预览长度取 `min(PREVIEW_CHARS, threshold)`（PREVIEW_CHARS 初始 500，P64.1 升至 2000）——防止极小阈值下预览本身超阈值
 - 缓存生命周期：主会话正常退出时清理；SubAgent 在 `run()` 的 finally 里清理
 
 # 第三十七部分：Anthropic Prompt 缓存（P37）
@@ -1665,7 +1668,7 @@ Chat Completions 协议没有"单个工具调用结束"事件，但有两个可�
 
 ## 40.1 从硬编码到用户可配
 
-危险命令模式和敏感路径此前硬编码在 `DANGEROUS_COMMAND_PATTERNS` / `SENSITIVE_PATTERNS`——用户想"docker build 免确认"必须改源码。P40 支持两级 TOML 规则文件（用户级 `~/.mini-agent/permissions.toml` + 项目级 `.mini-agent/permissions.toml`），`load_rule_files()` 启动时解析 `[commands]`/`[paths]` 的 allow/deny 列表为 `PermissionRule` 追加进现有规则表——评估逻辑零改动，完全复用 `check()` 的 DENY→ALLOW→session→mode 顺序。文件缺失跳过、格式错误警告不崩（启动韧性优先）。
+危险命令模式和敏感路径此前硬编码在 `DANGEROUS_COMMAND_PATTERNS` / `SENSITIVE_FILE_PATTERNS`——用户想"docker build 免确认"必须改源码。P40 支持两级 TOML 规则文件（用户级 `~/.mini-agent/permissions.toml` + 项目级 `.mini-agent/permissions.toml`），`load_rule_files()` 启动时解析 `[commands]`/`[paths]`/`[tools]`（P79 新增）的 allow/deny 列表为 `PermissionRule` 追加进现有规则表——评估逻辑零改动，完全复用 `check()` 的 DENY→ALLOW→session→mode 顺序。文件缺失跳过、格式错误警告不崩（启动韧性优先）。
 
 ## 40.2 顺带修复的盲区：PATH deny 被项目内放行短路
 
@@ -1786,7 +1789,7 @@ token 计数驱动压缩阈值判断（75% 水位触发）。此前无 tiktoken 
 三处加强：
 1. `_COORDINATOR_PREFIX` 注入 Planner prompt——"你是 COORDINATOR，只分解和分派，不能直接读写文件，给 Worker 足够独立工作的上下文"
 2. `max_steps` 从 5 放宽到至少 8——Coordinator 不能自己兜底（"最后一步我自己来"），必须把任务拆得更细让 Workers 各自独立
-3. 项目扫描从 2 级/80 行加深到 3 级/120 行——`_scan_project_structure()` 重构为递归实现（`_scan_dir()`），coordinator 模式下给 Planner 看到 `src/core/engine.py` 级别的文件而非只看到 `src/core/` 目录名
+3. 项目扫描从 2 级/80 行加深到 3 级/120 行——`_scan_project_structure()` 重构为递归实现（`_scan_dir()`），coordinator 模式下给 Planner 看到 `core/agent_loop.py` 级别的文件而非只看到 `core/` 目录名
 
 入口：`/team --coordinator <task>` flag 解析（同 `--isolated` 的模式），通过 `TeamConfig.coordinator` 和 `Planner(coordinator=True)` 贯穿数据流。
 
@@ -2001,6 +2004,14 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 - **uninstall 按 name 不按目录名**：skill 名和目录名可能不同（如目录叫 `code_review/` 但 SKILL.md 里 name 是 `code-review`）
 - **不支持热重载**：install 后调 `load_all()` 重新扫描全部目录——简单可靠。热重载是 8.2 的范围
 
+# 第五十七部分：远程/浏览器模式（P57）
+
+P57 是大功能（WebSocket 服务器 + 嵌入式浏览器 UI + 11 项增强），实现细节和设计决策记录在以下位置：
+
+- 架构与协议设计：[comparison-mewcode.md §5.2](comparison-mewcode.md)（NDJSON 协议 12 种事件 + 3 种客户端消息、浏览器 UI 功能清单、安全与容错、测试覆盖）
+- 已知限制与后续改进：[roadmap.md "已知限制"](roadmap.md)（无 TLS、服务器重启丢会话、共享会话）
+- P82 断连排队增强：[todo-code-quality.md 扩展点 #8](todo-code-quality.md)（PermissionDecision.PENDING 跨连接持久化）
+
 # 第五十八部分：Mailbox 跨 Agent 通信（P58）
 
 ## 58.1 为什么需要：SubAgent 是"派出去等结果"模式
@@ -2101,7 +2112,7 @@ P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入�
 
 ### 59.4 实测暴露：纯 SlidingWindow 路径
 
-消息数 ≤ `MIN_KEEP_MESSAGES`(5) 时 SummarizeOldest 跳过（P150 前为固定 `KEEP_RECENT=6`），只有 SlidingWindow 执行——SlidingWindow 不创建摘要消息，边界录不到。
+消息数 ≤ `MIN_KEEP_MESSAGES`(5) 时 SummarizeOldest 跳过（P65 前为固定 `KEEP_RECENT=6`），只有 SlidingWindow 执行——SlidingWindow 不创建摘要消息，边界录不到。
 
 修复：`check_and_compress` 在 `_inject_read_files`（它会插入一条 compressed SYSTEM 消息）之后兜底检查，若 `compact_boundary` 仍为 None 则从这条消息创建边界。两层保底：Compressor 内部录 + ContextManager 外部兜底。
 
@@ -2115,7 +2126,7 @@ mewcode 的 `build_recovery_attachment()` 把最近 5 个文件的实际内容�
 
 ### 60.1 问题：固定切分切断工具对
 
-P150 之前 `SummarizeOldest.KEEP_RECENT=6` 固定从尾部数 6 条切分（已改为 token 驱动的 `_compute_keep_split`）。若切分点恰好落在 TOOL 消息上，其对应的 tool_use（assistant 的 tool_calls 消息）被摘要吞掉，kept 开头是孤儿 tool result——严格的 API（OpenAI 官方、Anthropic）会直接 400 拒绝。
+P65 之前 `SummarizeOldest.KEEP_RECENT=6` 固定从尾部数 6 条切分（已改为 token 驱动的 `_compute_keep_split`）。若切分点恰好落在 TOOL 消息上，其对应的 tool_use（assistant 的 tool_calls 消息）被摘要吞掉，kept 开头是孤儿 tool result——严格的 API（OpenAI 官方、Anthropic）会直接 400 拒绝。
 
 ### 60.2 修复：边界回退对齐
 
@@ -2148,7 +2159,7 @@ SlidingWindow 方向相反：按 token 预算从尾部选取，向前扩会超�
 `check_and_compress()` 在 `usage_ratio >= 0.75` 时触发压缩。但压缩不一定降低 token——两种实际场景：
 
 1. **已读文件列表过长**：agent 读了上百个文件后，`_inject_read_files()` 注入的清单本身几百 token，压缩减少的量被注入量抵消甚至反超（实测 150 文件时 2040 → 3183 tokens，token 不降反增）
-2. **对话已压到极限**：经几轮压缩后只剩 system prompt + 摘要 + 最近几条消息，三级级联（DropToolResults → SummarizeOldest → SlidingWindow）均无可操作空间
+2. **对话已压到极限**：经几轮压缩后只剩 system prompt + 摘要 + 最近几条消息，三级级联（DropToolResults → LLMSummarizeOldest → SlidingWindow）均无可操作空间
 
 没有熔断器时，每轮工具调用后都会白跑一次完整的三级压缩链。
 
@@ -2582,7 +2593,7 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 - `/session` 从 4 个子命令扩展到 7 个（save/list/load/delete/tag/untag/tags）
 - 10 个新测试，897 个全过
 
-# 第七十八部分：运行时权限规则管理（P78 — 扩展点 #3）
+# 78. 运行时权限规则管理
 
 ## 78.1 动机
 
@@ -2617,7 +2628,7 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 - 13 个新测试（add_rule 验证/去重/事件/静默 + remove_rule + list_rules + save_rule_to_file），912 个全过
 - 规则生命周期：不带 `--save` 仅当前会话；带 `--save` 持久化到 TOML
 
-# 第七十九部分：工具级权限与通用检查入口（P79 — 扩展点 #9/#15）
+# 79. 工具级权限与通用检查入口
 
 ## 79.1 动机
 
@@ -2644,7 +2655,7 @@ todo-code-quality 审计的 16 个有意预留扩展点中，P76 接入了 3 个
 - 真实 LLM 验证（`experiments/verify_tool_permission.py`，deepseek-v4-flash-0731）四阶段全过：TOOL deny 拦下 LLM 发起的 `echo hello`（事件 scope=tool、rule=deny:bash）；对照组危险命令 `git commit` 弹确认；TOOL allow 后同一危险命令零弹窗执行；check() 三 scope 分发判定正确；[tools] 节 save/load 往返生效
 - 规则文件格式向后兼容：旧 permissions.toml 无 `[tools]` 节照常加载
 
-# 第八十部分：默认 Agent 类型接线（P80 — 扩展点 #10）
+# 80. 默认 Agent 类型接线
 
 ## 80.1 动机
 
@@ -2665,7 +2676,7 @@ worker 类型档案是 `max_iterations=50`，而 `config.max_agent_iterations` �
 - 真实 LLM 验证（`experiments/verify_default_agent_type.py`，deepseek-v4-flash-0731）两阶段全过：未指定类型的 spawn 用 worker 模板 + config 预算 80 + 全工具集完成真实写文件任务；对照组显式 verify 类型仍是 20 轮预算 + 只读工具集 + PASS 判定
 - 行为差异仅一处：旧内联 prompt 里的 "(Chinese task -> Chinese report)" 示例短语消失，语言跟随规则本身仍在（"Respond in the same language the task is written in"）
 
-# 第八十一部分：slice_window 删除——拓展点 #5/#16 的了结（P81）
+# 81. slice_window 删除
 
 ## 81.1 动机
 
@@ -2690,6 +2701,47 @@ worker 类型档案是 `max_iterations=50`，而 `config.max_agent_iterations` �
 2. **失败即数据**：所有错误（权限拒绝、Hook 阻止、工具异常、SubAgent 失败）都转成携带原因的结果对象进入数据流，上层可见可决策；异常只用于程序性 bug
 3. **默认安全（fail-safe）**：无 UI 默认拒绝、敏感文件优先于项目放行、危险命令无视 allow 模式、dirty worktree 拒绝删除
 4. **分层不越界**：工具层不 import 交互层（回调注入）、引擎层不 import UI（事件+回调）、记忆层延迟注入打破循环依赖、MCP 工具经 Adapter 走统一 Tool 接口——依赖方向永远单向向下
-5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——937 个测试约 90 秒跑完
+5. **一切可测**：延迟初始化解 TTY 依赖、MockLLM/FakeMCPManager 解外部服务依赖、tmp_path 解文件系统依赖、真实 git 仓库 fixture 做集成测试、Console(record=True) 捕获渲染输出——953 个测试约 90 秒跑完
 6. **渐进式增强**：压缩用提取式→可升级 LLM 摘要；记忆提取用正则→可升级 LLM 分析；MCP 只做 stdio→预留 HTTP 插槽；每个模块保持简单可测但留有升级路径
 7. **复用而非新造**：SubAgent 复用 AgentLoop、AgentTeam 复用 Planner+SubAgentManager、MCP 工具复用整条安全管道、/trace 复用 EventBus 事件流、/explain 复用 Skill 激活、/audit 复用 EventBus 订阅、/spawn /team 是 SubAgentManager/AgentTeam 的命令行壳——新能力尽量是既有组件的组合
+
+# 82. PermissionDecision.PENDING 跨进程权限协议
+
+## 82.1 为什么需要：pane worker 无权限门
+
+`/spawn --pane` 的 worker 在独立进程中运行 `mini-agent --worker <spec.json>`。`_run_worker_inner()` 创建 `SubAgent` 时不传 `PermissionManager`，`AgentLoop._act()` 看到 `self._permissions is None` 后对所有工具调用返回 `PermissionDecision.GRANTED`——包括 `rm -rf /`、`git push --force` 等危险命令，零用户确认。
+
+同时，远程/浏览器模式（`server.py`）的 `_confirm_via_ws()` 创建的 asyncio.Future 在所有 WebSocket 客户端断开时永远挂起——agent loop 阻塞，无超时无降级。
+
+## 82.2 方案：文件协议 + 断连排队 + PENDING 事件
+
+**Part 1（主体）：跨进程文件协议**
+
+复用 worker 已有的文件协议模式（spec JSON → result JSON → 原子写 → 轮询收集）：
+
+1. `security/remote_confirm.py` — `RemoteConfirm(workers_dir, agent_id)` 实现 `ConfirmCallback` 签名
+2. Worker 侧：写 `<agent_id>.perm-request.json`（含 request_id/prompt/status=pending），轮询 `<agent_id>.perm-decision.json`，超时 120s 返回 False（安全拒绝）
+3. Parent 侧：`_collect_pane_result()` 已有 0.5s 轮询循环，增加 `read_request()` 检查 → 发现请求 → `_resolve_worker_permission()` 调父进程的 `terminal.confirm` → `write_decision()` 写回
+4. 文件由 worker 侧 finally 清理；parent 超时/取消后清理孤文件
+
+`SubAgent.__init__` 新增 `permission_manager` 参数直传 `AgentLoop`；`worker.py` 搭建 PathGuard + PermissionManager + RemoteConfirm 完整权限栈并加载 permissions.toml 规则。
+
+**Part 2：断连排队**
+
+`server.py` 新增 `_pending_prompts: dict[str, str]`（req_id → prompt 文本）和 `_disconnect_timeout_task`。最后客户端断开时启动 120s 超时任务（deny all），重连时取消超时并 `_replay_pending_confirms()` 重发待处理请求。
+
+**Part 3：PENDING 事件**
+
+`permission.py._ask_user()` 在 `await self._confirm(prompt)` 前发射 `PermissionCheckEvent(decision="pending", reason="awaiting_user")`。`trace.py._on_permission()` 增加 pending 分支用 `theme.warning` 色显示 `PENDING (awaiting user)`。
+
+## 82.3 设计权衡
+
+- **PENDING 不做 check() 的返回值**：asyncio 的 await 吞掉中间态（调用方无法区分"正在等"和"还没问"）；LLM API 要求 tool_use/tool_result 配对，停放工具调用必伪造结果污染对话。PENDING 的语义是**跨进程/跨连接边界上的持久化中间状态**，不是权限判定结果
+- **文件协议而非 IPC**：复用 worker 已有的 spec/result 文件模式（原子写 + 轮询 + schema 校验），零新依赖；跨进程 socket/pipe 在 Windows 上复杂度高且需要新的错误处理
+- **单文件 per worker**：每个 worker 同一时刻最多一个权限请求（AgentLoop 的 `_confirm_lock` 串行化确认弹窗），文件名用 agent_id 而非 request_id——简化轮询逻辑
+
+## 82.4 验证
+
+- 15 个新测试（test_remote_confirm 10 + test_permissions 2 + test_remote 3）
+- `experiments/verify_pending.py` 全管道 E2E：4/4 通过（y→GRANTED / n→DENIED / a→GRANTED+always / timeout→DENIED），每步带时间戳检查点和取证 JSON
+- 真实 LLM 终端验证：`/trace` 显示 `perm command ... → PENDING (awaiting user)` → `GRANTED (user_confirm:yes)` 两行事件

@@ -1,12 +1,12 @@
 # 命令参考（Slash Commands Guide）
 
-全部 24 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
+全部 25 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
 
 > 各行输出的来源与开关见 output-guide.md；配置项见 config-guide.md。
 
 ---
 
-## 会话与状态
+## 一、会话与状态
 
 ### /status
 显示会话状态。无参数。
@@ -16,7 +16,7 @@
 清空对话历史（system prompt 与记忆注入保留）。无参数。
 
 ### /compact
-手动压缩对话历史（触发三级压缩级联）。无参数。**会调用 LLM**（摘要策略时）。
+手动压缩对话历史（触发四级压缩级联：DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow）。无参数。**会调用 LLM**（LLM 摘要策略时）。
 
 ### /session — 会话管理
 ```
@@ -50,7 +50,7 @@
 
 ---
 
-## 模型与成本
+## 二、模型与成本
 
 ### /model [name]
 无参数：显示当前模型、可用 Provider 列表（`openai`/`anthropic`/`openai-responses`）与可切换档案。带参数：热切换到命名档案（档案通过环境变量 `MINI_AGENT_MODELS` + `MODEL_<NAME>_*` 定义，见 config-guide）。
@@ -58,7 +58,7 @@
 /model            # 查看当前模型 + 可用 Provider + 档案
 /model smart      # 切换到 smart 档案
 ```
-注意：`/model` 切换的是模型名和 API key 等参数，不切换 provider。要从 Chat Completions 切换到 Responses API（o1/o3），需在 config.toml 里改 `provider = "openai-responses"`，重启生效。
+注意：切换到命名档案时会**同时切换** provider（如从 openai 切到 anthropic）。裸模型名（不匹配任何档案）则沿用当前 provider 和密钥。
 
 ### /cost [turns|reset]
 ```
@@ -70,7 +70,7 @@
 
 ---
 
-## SubAgent 与多 Agent
+## 三、SubAgent 与多 Agent
 
 ### /spawn — SubAgent 派发（本节最复杂的命令）
 
@@ -119,7 +119,7 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 
 ---
 
-## 观测与调试
+## 四、观测与调试
 
 ### /trace [on|off]
 实时显示 Agent 内部状态：ReAct 阶段切换、权限判定（含命中规则）、工具耗时、LLM token 元信息。
@@ -165,7 +165,7 @@ scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。
 
 ---
 
-## 记忆与任务
+## 五、记忆与任务
 
 ### /memory — 跨会话记忆
 ```
@@ -192,7 +192,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 
 ---
 
-## 录制与回放
+## 六、录制与回放
 
 ### /record — 录制工具调用序列
 ```
@@ -214,7 +214,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 
 ---
 
-## 扩展
+## 七、扩展
 
 ### /skill — 技能包管理
 ```
@@ -234,7 +234,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 
 ---
 
-## 通用行为
+## 八、通用行为
 
 - 命令在本地执行，输错命令名会提示全部可用命令
 - 命令 handler 抛异常不会杀死会话（显示 "Command failed: ..." 后继续）

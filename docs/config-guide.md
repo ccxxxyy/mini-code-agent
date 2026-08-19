@@ -30,6 +30,10 @@
 | 环境变量（`MINI_AGENT_*` / `OPENAI_*`） | 会话级 | 高 | 临时覆盖 |
 | CLI 参数（`--model` 等） | 单次启动 | 最高 | 一次性覆盖 |
 
+另有**权限规则文件** `permissions.toml`（用户级 `~/.mini-agent/` + 项目级 `<项目>/.mini-agent/`，两级叠加），独立于 config.toml（因 `[tools]` 节名冲突无法合并），详见下方"权限规则文件"章节。
+
+项目根目录提供三个模板文件供复制使用：`config.toml.example`、`permissions.toml.example`、`.env.example`。
+
 **完整优先级链**（右边覆盖左边）：
 
 ```
@@ -61,6 +65,7 @@
 | `~/.mini-agent/cost_ledger.json` | 用户级 | 成本累计总账（每轮自动写入；`/cost reset` 确认后清零并重置起始日期，删文件等效） |
 | `<项目>/.mini-agent/tasks.json` | 项目级 | 持久化任务列表（`/todo` 管理，跨会话保留，手编辑 JSON 也可） |
 | `<项目>/.mini-agent/undo_snapshots/` | 项目级 | undo 文件快照（**临时**——会话结束自动清空） |
+| `~/.mini-agent/input_history` | 用户级 | 跨会话输入历史（↑ 键翻历史，自动写入） |
 
 ### 组件生命周期一览
 
@@ -87,7 +92,7 @@
 
 ---
 
-## 快速上手：在任意目录使用 mini-agent
+## 三、快速上手：在任意目录使用 mini-agent
 
 默认情况下，API key 只在有 `.env` 文件的项目目录下生效。要在**任意目录**启动 `mini`，需要做以下**任一**配置：
 
@@ -166,7 +171,7 @@ mini              # 启动 Agent
 
 ---
 
-## 三、config.toml 使用说明
+## 四、config.toml 使用说明
 
 ### 创建
 
@@ -186,15 +191,19 @@ mkdir .mini-agent && copy config.toml.example .mini-agent\config.toml
 ```toml
 [llm]
 provider = "openai"          # "openai"（Chat Completions）| "openai-responses"（Responses API，o1/o3/o4-mini）| "anthropic"
-model = "deepseek-chat"      # 模型名
+model = "deepseek-chat"      # 模型名（默认 "gpt-4o"）
+api_key = "sk-..."           # API 密钥（建议放 .env 而非此处）
+base_url = "https://api.deepseek.com/v1"  # API 地址（默认 None，用 Provider 内置地址）
 temperature = 0.0
 max_tokens = 4096            # 单次回复上限；截断时自动翻倍重试最多 3 次（P44），此值是重试的起点
 timeout = 120.0
+# extra = {}                 # 透传给 API 的额外参数（如 top_p、stop 等）
 
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
 max_file_size = 10000000     # 文件读取上限（字节）
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call"]
+allowed_paths = []           # 额外放行的项目外路径（默认空）
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
 
 [memory]
@@ -206,10 +215,23 @@ spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留
 aggregate_spill_chars = 200000 # 单轮工具结果累计字符预算：超出时按大小降序强制溢写（0 = 禁用）——防"每条不超、合计撑爆"
 session_cleanup_days = 30    # 超过此天数的旧会话启动时自动清理（0 = 禁用）——未正常关闭的保留供崩溃恢复
 compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳过（0 = 禁用）——防已读文件列表过长时的死循环
+llm_summarize = true         # LLM 语义摘要压缩（默认开启）；false 退回提取式截断（无 LLM 调用）
+recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入）
+recall_top_k = 5             # 选择性召回时 LLM 挑选的最大条数
+consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并（0 = 禁用）
+# persistent_memory_dir = "~/.mini-agent/memory"     # 用户级记忆目录
+# project_memory_file = ".mini-agent/memory.json"    # 项目级记忆文件
 
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）
-allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单
+allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单（默认空），命中即放行（含危险命令）
+denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝列表（默认值），命中即拒绝
+# 注意：denied_commands 是 glob 精确匹配拒绝。另有 19 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
+# 用于弹窗确认（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
+# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh）——这些不可配，但可通过
+# allowed_commands 放行或 sandbox_auto_allow 免确认。
+worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
+worktree_max_age_days = 7    # 超过此天数的干净 worktree 启动时自动清理（0 = 禁用）
 sandbox = false              # OS 级沙箱（Linux bwrap / macOS seatbelt），true 启用
 sandbox_auto_allow = false   # 沙箱下危险命令免确认（deny 规则仍拦）
 sandbox_network = false      # 允许沙箱内网络访问
@@ -221,17 +243,26 @@ user_instructions_file = "~/.mini-agent/instructions.md"   # 用户级全局指�
 max_chars = 8000             # 单文件截断长度（字符）
 
 [cost]                       # 成本仪表盘（P29）
-budget = 5.0                 # 会话预算上限（元），0 = 不限
-total_budget = 50.0          # 累计总账预算上限（元），0 = 不限
+budget = 5.0                 # 会话预算上限（元），0 = 不限（默认 0）
+total_budget = 50.0          # 累计总账预算上限（元），0 = 不限（默认 0）
 currency = "¥"
 [cost.pricing.deepseek-chat] # 每模型价格（元/百万 token）
 input = 2.0
 output = 8.0
+# cache_read = 0.5            # 可选：缓存读取价（未配则按 input 价计）
+# cache_creation = 3.0        # 可选：缓存创建价（未配则按 input 价计）
 
 # 顶级配置（不属于任何段；注意必须写在所有 [段] 和 [[hooks]] 之前才算顶级）
-max_agent_iterations = 50    # ReAct 循环最大迭代数（主循环与未指定类型的 SubAgent 共用；
+max_agent_iterations = 80    # ReAct 循环最大迭代数（主循环与未指定类型的 SubAgent 共用；
                              # /spawn --type 显式选类型时采纳类型档案预算，见 P80）
 theme = "default"            # "default" | "dark" | "light"
+streaming_tool_execution = true  # 流式期间工具调用一组装完成就开始执行（false 等流结束再执行）
+enable_plan_mode = false     # 启动时进入只读计划模式（/plan on 运行时切换）
+# self_verify = false        # 实验性：LLM 自动验证工具结果
+# planner_profile = ""       # /team Planner 使用的 LLM Profile 名（空 = 用主模型）
+# worker_profile = ""        # SubAgent worker 使用的 LLM Profile 名（空 = 用主模型）
+skill_dirs = ["./skills", "~/.mini-agent/skills"]
+                             # 技能包目录：每个子目录含 SKILL.md（YAML 前置 + prompt 正文）
 listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
                              # 事件监听插件目录：目录下每个 *.py 文件是一个插件，
                              # 定义 register(bus)（订阅特定事件）或 on_event(event)（自动订阅全部事件，
@@ -266,12 +297,46 @@ reason = "push 会影响远程仓库"
 [mcp.servers.github]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
-transport = "stdio"
+transport = "stdio"                  # "stdio"（子进程）| "http"（远程）| "sse"
+loading = "eager"                    # "eager"（默认，全部注册）| "dispatch"（按需搜索+调用）
 
 # [mcp.servers.remote-api]
 # url = "http://localhost:8080/mcp"
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
+# loading = "dispatch"               # 大量工具时推荐延迟加载
+```
+
+### 多模型 Profile（环境变量配置）
+
+预配多套模型参数，运行时 `/model` 一键切换。全部通过环境变量定义：
+
+```bash
+# 定义两个 Profile：fast 和 strong
+MINI_AGENT_MODELS=fast,strong
+
+# fast Profile 参数
+MODEL_FAST_MODEL=deepseek-chat
+MODEL_FAST_API_KEY=sk-fast-key
+MODEL_FAST_BASE_URL=https://api.deepseek.com/v1
+
+# strong Profile 参数（可切换 Provider）
+MODEL_STRONG_MODEL=claude-sonnet-4-20250514
+MODEL_STRONG_PROVIDER=anthropic
+MODEL_STRONG_API_KEY=sk-ant-strong-key
+```
+
+运行时：
+```
+/model           # 列出所有可用 Profile
+/model fast      # 切换到 fast（DeepSeek）
+/model strong    # 切换到 strong（Claude）
+```
+
+**强弱模型混编**——Planner 用强模型规划、Worker 用快模型执行：
+```bash
+MINI_AGENT_PLANNER_PROFILE=strong    # /team 的 Planner 用 strong Profile
+MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 ```
 
 ### 修改后生效方式
@@ -384,7 +449,7 @@ reason = "push 会影响远程仓库"
 
 ---
 
-## 四、上下文文件使用说明
+## 五、上下文文件使用说明
 
 ### 项目指令（AGENT.md / CLAUDE.md / .mini-agent/instructions.md）
 
@@ -446,7 +511,7 @@ user_instructions_file = "~/my-notes/ai-rules.md"
 
 ---
 
-## 五、常见问题
+## 六、常见问题
 
 **Q：config.toml 和 CLAUDE.md 都是"项目级"，有什么区别？**
 A：config.toml 是给**程序**读的参数（改了影响程序行为，如超时/主题）；CLAUDE.md 是给**LLM**读的自然语言（改了影响 LLM 的回答，程序行为不变）。
@@ -468,7 +533,7 @@ A：指令文件是**你手写**的静态约定，启动注入；记忆是**LLM 
 
 ---
 
-## 六、自动记忆提取详解
+## 七、自动记忆提取详解
 
 记忆系统**完全自动**——不需要手动打开任何开关，默认开启。
 
@@ -508,7 +573,7 @@ PRE_LLM hook → 自动读取记忆 → 注入 system prompt → LLM 从第一�
 |---|---|
 | 存储位置 | `~/.mini-agent/memory/user_memory.json`（跨项目）+ `<项目>/.mini-agent/memory.json`（项目级） |
 | 有效期 | **永久**——文件在磁盘上不删就一直在 |
-| 注入方式 | 每次 LLM 调用前自动注入 system prompt（最多 10 条） |
+| 注入方式 | 每次 LLM 调用前自动注入 system prompt（≤10 条全部注入；>10 条时 LLM 选最相关的 5 条） |
 | 手动添加 | `/memory add 我喜欢某某某`（不等退出，立即生效） |
 | 查看 | `/memory` |
 | 删除 | `/memory delete <ID或关键词>`（ID 可从 `/memory` 列表复制，也可用内容关键词匹配） |
@@ -538,7 +603,7 @@ auto_extract = false   # 关闭后改用 /memory add 手动添加
 
 ---
 
-## 权限规则文件（permissions.toml）
+## 八、权限规则文件（permissions.toml）
 
 自定义哪些命令/路径/工具免确认放行、哪些无条件拒绝——不用改代码。
 
@@ -567,6 +632,15 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 **优先级**：`deny 规则 > allow 规则 > 内置默认`（危险命令确认 / 敏感路径拒绝 / 项目内放行）。deny 最优先——即使路径在项目内也会被拦。
 
+**内置路径保护**（PathGuard，不需配置，代码固定）：
+
+评估顺序（先匹配先决定）：
+1. `denied_paths`（`~/.ssh`/`~/.aws`/`~/.gnupg`，config.toml 可配） → 硬拒绝
+2. 敏感文件名模式（`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`，共 10 种） → 硬拒绝（项目内也拦）；`.env.example`/`.env.sample`/`.env.template` 豁免
+3. 项目目录内 → 自动放行
+4. `allowed_paths` 中的路径（config.toml 可配） → 自动放行
+5. 以上都不匹配 → 询问用户（`permission_mode = "ask"` 时）
+
 **工具级规则（P79）**：`[tools]` 节按工具名匹配（支持 glob），在命令/路径检查**之前**评估——`deny` 直接拦截整个工具；`allow` 整体信任该工具，跳过后续资源检查（`allow = ["bash"]` 意味着危险命令也不再确认，慎用）；无匹配规则的工具照常走命令/路径检查。
 
 **匹配语法**：glob 风格。`git *` 匹配 `git status` 但不匹配 `github`；`*secrets*` 匹配任何含 secrets 的路径。
@@ -586,7 +660,7 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 ---
 
-## OS 级沙箱（sandbox）
+## 九、OS 级沙箱（sandbox）
 
 内核级别隔离 bash 命令的执行环境——即使命令通过了权限检查，也只能在受限范围内操作。
 
