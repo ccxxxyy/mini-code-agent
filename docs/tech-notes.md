@@ -2745,3 +2745,40 @@ worker 类型档案是 `max_iterations=50`，而 `config.max_agent_iterations` �
 - 15 个新测试（test_remote_confirm 10 + test_permissions 2 + test_remote 3）
 - `experiments/verify_pending.py` 全管道 E2E：4/4 通过（y→GRANTED / n→DENIED / a→GRANTED+always / timeout→DENIED），每步带时间戳检查点和取证 JSON
 - 真实 LLM 终端验证：`/trace` 显示 `perm command ... → PENDING (awaiting user)` → `GRANTED (user_confirm:yes)` 两行事件
+
+# 83. 插件生态：pip 包与本地文件注册工具/命令/技能
+
+## 83.1 基础就绪
+
+P74（event_listeners 零代码监听插件）已经把文件式插件加载的全部基础打好：importlib 动态导入、契约函数发现、三层异常隔离、加载名回报。PyPI 发布（P33）后 `pip install mini-code-agent` 可用，entry point 发现有了宿主。剩下的工作只是把"只能挂事件监听"泛化为"能注册工具/命令/技能"。
+
+## 83.2 方案：四钩子契约 + 双通道发现
+
+`extensions/plugin_loader.py`（P83）：
+
+**契约**（模块级可选钩子，沿袭 event_listeners 的 register 优先先例）：
+- `register(ctx: PluginContext)` — 全控钩子，定义时优先且只运行它（ctx 暴露 tool_registry / slash_commands / skill_registry / event_bus / config）
+- `register_tools(registry)` / `register_commands(registry)` / `register_skills(registry)` — 专用钩子，各拿对应注册表
+- 都没有 → 警告跳过
+
+**发现双通道**：
+1. pip 包：`importlib.metadata.entry_points(group="mini_agent.plugins")`，包内 `[project.entry-points."mini_agent.plugins"] my_plugin = "my_pkg.plugin"` 声明
+2. 本地文件：`plugin_dirs` 目录（默认 `./.mini-agent/plugins` + `~/.mini-agent/plugins`）的 `.py` 文件——免打包本地开发，信任边界与 listener_dirs/config.toml 相同（§74 论证沿用）
+
+先 entry points 后目录；同名时目录文件让位并告警。`disabled_plugins` 按 entry-point 名或文件 stem 禁用。
+
+**装配点**：app.py 在 `register_builtin_commands` 之后、终端补全接线之前加载——插件命令能进 `/` 下拉。`/plugins` 命令展示每个插件注册了哪些工具/命令/技能（钩子前后注册表 key-set 快照差分统计，对全控钩子同样有效）。
+
+## 83.3 设计权衡
+
+- **插件工具不受 `enabled_tools` 白名单约束**：白名单枚举的是内置工具；安装插件本身就是 opt-in 动作，`disabled_plugins` 是关闭开关。若让白名单管插件工具，每装一个插件都要改配置，违背"装上即用"
+- **SkillRegistry 加 `_external` dict 而非贡献 skill_dirs**：`load_all()` 会 clear `_skills` 且被 `/skill reload` 重新触发——目录贡献方案需要新 API 加重扫，还强迫插件打包 SKILL.md 数据文件。编程注册的技能单独存放、每次重扫后合并，天然在热重载后存活
+- **`entry_points` 顶层导入**：`from importlib.metadata import entry_points` 放模块顶层而非函数内——留出 monkeypatch 的测试缝，假 EntryPoint（`.name` + `.load()`）即可离线测试发现逻辑
+- **三层异常隔离沿袭 §74**：导入失败 / 钩子异常 / 运行期异常都只警告不传播，坏插件绝不影响 Agent 主流程；钩子异常时整个插件记录丢弃（不出现在 /plugins），但已注册进注册表的条目不回滚——回滚需要注册表事务语义，成本远超收益（钩子内部分成功属罕见路径，日志已可定位）
+
+## 83.4 验证
+
+- 16 个新测试：test_plugin_loader 14（三钩子/register 优先/导入失败隔离/钩子异常隔离/无钩子警告/下划线与缺失目录/disabled 文件+entry point/entry point 发现与失败隔离/重名告警//plugins 命令两态）+ test_skills 编程注册存活 load_all + test_slash_commands names() 含 hidden
+- 968 passed, 1 skipped，覆盖率门禁通过，ruff clean
+- 真实运行验证（examples/plugins/word_count_plugin.py 复制进 ./.mini-agent/plugins）：启动横幅 "Loaded 1 plugin(s)"、`/plugins` 表格、`/greet` 输出、`/skill list` 见 haiku-mode、真实 LLM 成功调用 word_count 工具（words=9 chars=43 lines=1）、`disabled_plugins` 置顶级后插件确实不加载
+- 验证中的教训：TOML 顶级键必须写在所有 `[section]` 之前——追加到文件末尾会落进最后一个 section 而静默失效，config.toml.example 的示例块因此放在"顶级配置"注释区

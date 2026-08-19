@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-953%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-969%20passed-brightgreen)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -273,12 +273,12 @@ mini-code-agent/
 │       ├── security/           # 安全层（权限、路径守卫、审计、OS 沙箱 bwrap/seatbelt、worktree 隔离、跨进程权限确认）
 │       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、双 Esc 中断）
 │       ├── remote/             # 远程/浏览器模式（WebSocket 服务器 + 嵌入式 HTML/JS 客户端、断连排队）
-│       ├── extensions/         # 扩展协议（25 个斜杠命令、4 个技能包、事件监听插件）
+│       ├── extensions/         # 扩展协议（26 个斜杠命令、4 个技能包、事件监听插件、插件生态 plugin_loader）
 │       ├── llm/                # LLM Provider 抽象层（OpenAI Chat Completions + Responses API + Anthropic、Token 计数）
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 953 个测试（57 单元 + 4 集成），80%+ 覆盖率
+├── tests/                      # 969 个测试（58 单元 + 4 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -382,8 +382,9 @@ mini-code-agent/
 - [x] P80：DEFAULT_AGENT_TYPE 接入
 - [x] P81：Conversation.slice_window 删除
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
+- [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，953 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，969 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -859,6 +860,7 @@ uv run python experiments/deadlock_induction.py --all
 | `/plan` | 进入/退出 Plan 模式（只读规划，不执行工具） |
 | `/tools` | 列出已注册工具 |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | 技能包管理 |
+| `/plugins` | 列出已加载插件（各自注册的工具/命令/技能） |
 | `/allow [remove] <command\|path\|tool> <模式> [--save]` | 运行时添加 ALLOW 权限规则（`--save` 持久化到 TOML） |
 | `/deny [remove] <command\|path\|tool> <模式> [--save]` | 运行时添加 DENY 权限规则（`--save` 持久化到 TOML） |
 | `/exit` | 退出 |
@@ -874,8 +876,8 @@ uv run python experiments/deadlock_induction.py --all
 ```bash
 # 1. 确保 pypi.org 已注册 + 配置 Trusted Publisher（GitHub ccxxxyy/mini-code-agent）
 # 2. 打 tag 并推送
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 # 3. GitHub Actions 自动构建并发布
 # 4. 验证
 pip install mini-code-agent && mini --version

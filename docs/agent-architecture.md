@@ -320,7 +320,7 @@ while True:
 
 **核心洞察**：所有机制都是**附加到**循环上的，不是**替代**循环。S01 的循环从头到尾没变过——权限在工具执行前门控（S03）、Hook 在循环插入点触发（S04）、压缩在上下文满时介入（S08）、子代理开新循环（S06）。架构是**洋葱模型**：循环在最内层，每层机制包裹在外面。
 
-**本项目实现**：`app.py` Application 类——统一编排 AgentLoop + ToolRegistry + PermissionManager + HookManager + ContextManager + SubAgentManager + MCPManager + CostTracker + ToolRecorder + FileSnapshotStore + TaskStore + SkillRegistry + TraceRenderer + TeachRenderer + AuditLogger + EventListenerLoader + PersistentMemory + SessionStore + ToolResultCache + EscWatcher + SlashCommandRegistry + Mailbox + WorktreeManager。一个类，所有机制。
+**本项目实现**：`app.py` Application 类——统一编排 AgentLoop + ToolRegistry + PermissionManager + HookManager + ContextManager + SubAgentManager + MCPManager + CostTracker + ToolRecorder + FileSnapshotStore + TaskStore + SkillRegistry + TraceRenderer + TeachRenderer + AuditLogger + EventListenerLoader + PersistentMemory + SessionStore + ToolResultCache + EscWatcher + SlashCommandRegistry + Mailbox + WorktreeManager + PluginLoader。一个类，所有机制。
 
 ---
 

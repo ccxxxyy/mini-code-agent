@@ -1,6 +1,6 @@
 # Mini-Code-Agent 开发任务清单
 
-P1-P82 每个阶段的任务分解、实现记录与验收结果。每条任务用 `[x]` 标记完成、`[ ]` 标记待做。
+P1-P83 每个阶段的任务分解、实现记录与验收结果。每条任务用 `[x]` 标记完成、`[ ]` 标记待做。
 
 ## Phase 1: 基础对话 (P1)
 
@@ -1996,3 +1996,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] E2E 验证脚本 `experiments/verify_pending.py`：4/4 全过（allow/deny/always/timeout）
 - [x] 真实 LLM 终端验证：`/trace` 显示 PENDING → GRANTED 两行事件
 - [x] 952 passed, 1 skipped, ruff clean
+
+---
+
+## Phase 83: 插件生态 plugin_loader（P83）
+
+第三方 pip 包 / 本地文件注册工具/命令/技能。
+
+### P83.1 核心实现
+- [x] `extensions/plugin_loader.py` — PluginContext / LoadedPlugin / load_plugins；四钩子契约（register 全控优先 + register_tools/commands/skills 专用）；entry_points(`mini_agent.plugins`) + plugin_dirs 双通道发现；三层异常隔离；重名告警
+- [x] `extensions/skills.py` — `register(skill)` 编程注册 + `_external` dict（load_all/reload 后存活）
+- [x] `extensions/slash_commands.py` — `names()`（含 hidden，供差分快照）
+- [x] `models/config.py` — `plugin_dirs`（默认 ./.mini-agent/plugins + ~/.mini-agent/plugins）+ `disabled_plugins`
+- [x] `app.py` — register_builtin_commands 后、补全接线前装配（插件命令进 `/` 下拉）
+- [x] `builtin_commands.py` — `/plugins` 命令（表格展示各插件注册的工具/命令/技能）
+- [x] `config.toml.example` — plugin_dirs / disabled_plugins 示例
+- [x] `examples/plugins/word_count_plugin.py` — 三钩子示例插件（word_count 工具 + /greet 命令 + haiku-mode 技能）
+
+### P83.2 验证
+- [x] 16 个新测试：test_plugin_loader 14 + test_skills 1 + test_slash_commands 1
+- [x] 968 passed, 1 skipped，覆盖率门禁通过，ruff clean
+- [x] 真实运行：启动横幅 + /plugins 表格 + /greet + /skill list 见 haiku-mode + 真实 LLM 调用 word_count 工具 + disabled_plugins 禁用生效

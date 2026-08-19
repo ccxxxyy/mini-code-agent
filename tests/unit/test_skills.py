@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mini_agent.extensions.skills import SkillRegistry
+from mini_agent.extensions.skills import Skill, SkillRegistry
 from mini_agent.models.message import Conversation
 
 pytestmark = pytest.mark.asyncio
@@ -252,3 +252,12 @@ def test_load_all_clears_stale(tmp_path):
     shutil.rmtree(str(d))
     reg.load_all()
     assert reg.get("stale") is None
+
+
+def test_programmatic_register_survives_load_all(tmp_path):
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.register(Skill(name="plugin-skill", description="P83", prompt="stay"))
+    assert reg.get("plugin-skill") is not None
+
+    reg.load_all()
+    assert reg.get("plugin-skill") is not None

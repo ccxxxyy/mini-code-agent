@@ -109,7 +109,7 @@
 
 ### ✅ spec.md 与现状脱节（已验证）
 - ~~`docs/spec.md` 自修正写"8 个内置工具"~~ ✅ 已修正为 12
-- ✅ spec.md 目录树已删除不存在的 `extensions/plugin_loader.py`、`config/schema.py`、`core/errors.py`、`security/tool_filter.py`
+- ✅ spec.md 目录树已删除不存在的 `config/schema.py`、`core/errors.py`、`security/tool_filter.py`
 - spec.md 目录树写"6 core tools"——属历史设计文档，已有 disclaimer 说明
 
 ### ✅ .gitignore 遗漏（已验证）

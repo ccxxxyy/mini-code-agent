@@ -169,4 +169,12 @@ class AgentConfig:
     listener_dirs: list[str] = field(
         default_factory=lambda: ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
     )
+    # Plugin dirs: *.py files registering tools/commands/skills (P83).
+    # pip packages register via the mini_agent.plugins entry-point group instead.
+    # 插件目录：*.py 文件注册工具/命令/技能；pip 包走 mini_agent.plugins entry point。
+    plugin_dirs: list[str] = field(
+        default_factory=lambda: ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
+    )
+    # Plugins to skip, by entry-point name or file stem 按 entry-point 名或文件名禁用插件
+    disabled_plugins: list[str] = field(default_factory=list)
     theme: str = "default"

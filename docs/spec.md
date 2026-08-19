@@ -121,6 +121,7 @@ mini-code-agent/
 │       │   ├── __init__.py
 │       │   ├── builtin_commands.py  # Built-in slash command registration
 │       │   ├── event_listeners.py   # Event listener plugin loader
+│       │   ├── plugin_loader.py     # Plugin ecosystem — pip/file plugins registering tools/commands/skills
 │       │   ├── skills.py            # Skill system — load/register/invoke skill packs
 │       │   └── slash_commands.py    # Slash command registry + execution
 │       │
@@ -143,7 +144,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 57 unit test files, 953 tests
+│   ├── unit/                        # 58 unit test files, 969 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -158,28 +159,32 @@ mini-code-agent/
 │   ├── spec.md                      # 完整架构规格说明（本文档，设计基线）
 │   ├── agent-architecture.md        # 五层架构详解与模块交互图
 │   ├── capabilities.md              # 功能全景与验收状态总览
-│   ├── checklist.md                 # 分阶段验收清单（P1-P82 逐项打勾）
-│   ├── commands-guide.md            # 25 个斜杠命令完整语法与示例
+│   ├── checklist.md                 # 分阶段验收清单（P1-P83 逐项打勾）
+│   ├── commands-guide.md            # 26 个斜杠命令完整语法与示例
 │   ├── comparison-config-cc.md      # 配置系统对比：mini vs Claude Code
 │   ├── comparison-mewcode.md        # 功能对照：mini vs mewcode-python
 │   ├── config-guide.md              # 配置文件与上下文文件完全指南
 │   ├── output-guide.md              # 终端输出格式与样式说明
 │   ├── positioning.md               # 项目定位与技术亮点
 │   ├── roadmap.md                   # 开发路线图与里程碑
-│   ├── tasks.md                     # 开发任务全记录（P1-P82）
+│   ├── tasks.md                     # 开发任务全记录（P1-P83）
 │   ├── tech-notes.md                # 技术笔记（实现细节与决策记录）
 │   ├── terminal-guide.md            # 各系统终端打开方法与兼容性
 │   └── todo-code-quality.md         # 代码质量待做清单与扩展点跟踪
 │
-└── skills/                          # Built-in skill packs (shipped with project)
-    ├── code_review/
-    │   └── SKILL.md
-    ├── init_project/
-    │   └── SKILL.md
-    ├── offline-ollama/
-    │   └── SKILL.md
-    └── teach-mode/
-        └── SKILL.md
+├── skills/                          # Built-in skill packs (shipped with project)
+│   ├── code_review/
+│   │   └── SKILL.md
+│   ├── init_project/
+│   │   └── SKILL.md
+│   ├── offline-ollama/
+│   │   └── SKILL.md
+│   └── teach-mode/
+│       └── SKILL.md
+│
+└── examples/
+    └── plugins/
+        └── word_count_plugin.py     # Example plugin  — demos all three register hooks
 ```
 
 ---
@@ -2537,6 +2542,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 4. `tools/mcp/client.py` -- MCPManager
 5. `tools/mcp/adapter.py` -- MCPToolAdapter
 6. `extensions/event_listeners.py` -- Event listener plugin loader
+6b. `extensions/plugin_loader.py` -- Plugin ecosystem: entry-point + dir discovery, register hooks
 7. Built-in skill packs (code_review, init_project)
 8. `llm/anthropic_provider.py` -- Second LLM provider (Claude)
 
@@ -2589,7 +2595,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 
 **3. 全异步到底。** 所有 I/O 操作（LLM 调用、工具执行、MCP 调用、文件 I/O）均为异步。这使得通过 `asyncio.gather()` 并行执行工具成为可能，并在长时间操作期间保持 UI 响应。prompt_toolkit 的异步支持（`run_async()`）可自然集成。
 
-**4. dataclass 优先的数据模型。** 核心数据结构使用 `@dataclass`（多数为 `frozen=True` 以保证不可变）。Pydantic 用于两个场景：工具参数定义（`params_model`，P46/P47，自动生成 JSON Schema + 类型校验）和配置验证（`config/schema.py`）。其余模型不使用 Pydantic 以保持依赖图精简。
+**4. dataclass 优先的数据模型。** 核心数据结构使用 `@dataclass`（多数为 `frozen=True` 以保证不可变）。Pydantic 仅用于工具参数定义（`params_model`，P46/P47，自动生成 JSON Schema + 类型校验）；配置验证走 dataclass + 分层覆盖（`config/loader.py`），未引入 Pydantic（早期设想的 `config/schema.py` 未实现且无需求）。其余模型不使用 Pydantic 以保持依赖图精简。
 
 **5. Provider 抽象使用直接 HTTP。** LLM Provider 使用 `httpx.AsyncClient`，而非依赖供应商 SDK（`openai`、`anthropic`）。这消除了重量级的传递依赖，完全掌控流式行为，并且轻松支持任何 OpenAI 兼容端点。供应商 SDK 可作为可选安装项，用于更精确的 token 计数。
 

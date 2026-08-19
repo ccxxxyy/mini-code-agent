@@ -160,6 +160,7 @@
 | `context: loaded <文件名>` | `app.py` 启动 | 项目指令文件（AGENT.md/CLAUDE.md）注入成功时 |
 | `Loaded N hook rule(s) from config` | `app.py` 启动 | config.toml 有 `[[hooks]]` 规则时 |
 | `Loaded N event listener(s): xxx` | `app.py` 启动 | listener_dirs 有 *.py 插件时 |
+| `Loaded N plugin(s): xxx` | `app.py` 启动 | plugin_dirs 有 *.py 插件或装有 `mini_agent.plugins` entry point 包时（P83）；详情用 `/plugins` 查看 |
 | `MCP: xxx connected (N tools)` | `app.py` 启动 | MCP 服务器连接成功时 |
 | `Cleaned N stale session(s)` | `app.py` 启动 | 自动清理超龄会话时 |
 | `Cleaned N stale worktree(s)` | `app.py` 启动 | 自动清理超龄 worktree 时 |
@@ -186,6 +187,8 @@
 | **开启审计日志落盘** | `/audit on`（终端无可见输出，写入 `~/.mini-agent/audit.jsonl`） |
 | **验证审计日志完整性** | `/audit verify` |
 | **切换颜色主题** | `/theme dark` / `/theme light` / `/theme default` |
+| **查看已加载插件详情** | `/plugins`（启动行 `Loaded N plugin(s)` 的展开版：各插件注册的工具/命令/技能） |
+| **禁用某个插件（不再出现在启动行）** | config.toml 顶级 `disabled_plugins = ["<名>"]`，或从 plugin_dirs 目录移走文件 |
 | **查看所有命令** | `/help` |
 
 ---

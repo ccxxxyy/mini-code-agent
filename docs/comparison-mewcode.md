@@ -10,12 +10,12 @@
 
 | | mini-code-agent | mewcode-python |
 |---|---|---|
-| 源码行数 | ~16,000 行 | ~15,000+ 行 |
+| 源码行数 | ~16,500 行 | ~15,000+ 行 |
 | Python 版本 | 3.11+（用 tomllib、StrEnum 等 3.11 特性） | 3.12+（用 type 语法） |
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量已接近（16,000 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
+**差距**：代码量已接近（16,500 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -56,7 +56,7 @@
 **差距**：mini 的依赖更少更轻——这是**有意的设计取向**，不是弱点。零 SDK 意味着：
 - 不受 SDK 版本更新的破坏性变更影响
 - 安装快（pip install 秒装 vs SDK 拖一堆传递依赖）
-- 用户可以审计全部代码（~16,000 行 vs ~15,000 行 + SDK 黑盒）
+- 用户可以审计全部代码（~16,500 行 vs ~15,000 行 + SDK 黑盒）
 
 **增强方向**：保持最小依赖原则。Pydantic 已引入用于工具 Schema 自动生成（P46），如后续需要 websockets（远程模式）按需单独引入。
 
@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **953 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **969 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -112,7 +112,7 @@
 | 终端指南 | terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/（10 个实验脚本 + 数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
-| 开发历史 | tasks.md（P1-P82 完整记录） | 无 |
+| 开发历史 | tasks.md（P1-P83 完整记录） | 无 |
 
 **差距**：此维度 mini **远超** mewcode。
 

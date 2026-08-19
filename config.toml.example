@@ -61,6 +61,12 @@
 # max_agent_iterations = 50
 # theme = "default"          # "default" | "dark" | "light"
 
+# 插件生态：第三方注册工具/命令/技能
+# 本地文件插件目录（.py 文件，契约见 extensions/plugin_loader.py docstring）
+# plugin_dirs = ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
+# 禁用插件：按 entry-point 名或文件名（去 .py 后缀）匹配
+# disabled_plugins = ["some_plugin"]
+
 # MCP 服务器配置（启动时自动连接，工具注册为 mcp_<服务器名>_<工具名>）
 # stdio 传输（子进程）
 # [mcp.servers.github]

@@ -226,6 +226,11 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 /skill reload                # 热重载技能目录（改完 SKILL.md 不用重启）
 ```
 
+### /plugins
+列出已加载插件及各自注册的工具/命令/技能。无参数。
+插件两种安装方式：`.py` 文件放入 `./.mini-agent/plugins`（或 `~/.mini-agent/plugins`），
+或 pip 安装声明了 `mini_agent.plugins` entry point 的包。`disabled_plugins` 配置可禁用。
+
 ### /theme [default|dark|light]
 切换配色主题并持久化到 `~/.mini-agent/.theme`。无参数显示当前主题。
 

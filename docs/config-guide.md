@@ -268,6 +268,20 @@ listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
                              # 定义 register(bus)（订阅特定事件）或 on_event(event)（自动订阅全部事件，
                              # 同步/异步均可）。插件异常被隔离并记日志，不影响主流程。用于统计/调试，
                              # 如把所有事件落盘 JSONL。下划线开头的文件跳过。
+plugin_dirs = ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
+                             # 插件目录：目录下每个 *.py 文件是一个插件（`_` 开头跳过），
+                             # 可定义 register(ctx)（全控钩子，定义时优先且只运行它）或
+                             # register_tools(registry) / register_commands(registry) /
+                             # register_skills(registry) 专用钩子，注册工具/斜杠命令/技能。
+                             # pip 包插件不走此目录，改在包内声明 entry point：
+                             #   [project.entry-points."mini_agent.plugins"]
+                             #   my_plugin = "my_pkg.plugin"
+                             # 加载顺序：entry point 先、目录后，重名时目录文件让位并告警。
+                             # 异常三层隔离（导入/钩子/运行时），坏插件绝不影响主流程。
+                             # 插件工具不受 [tools].enabled_tools 白名单约束（安装即 opt-in）。
+                             # 示例插件见 examples/plugins/word_count_plugin.py；/plugins 查看已加载。
+# disabled_plugins = ["some_plugin"]
+                             # 禁用插件：按 entry-point 名或文件名（去 .py 后缀）匹配
 
 # 声明式 Hook 规则——命中即拒绝工具执行（默认）或弹窗确认，reason 回给 LLM
 # 可写多条 [[hooks]]；非法条目告警跳过不阻断启动
