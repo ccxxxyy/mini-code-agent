@@ -531,8 +531,9 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 **修复**：① `hmac.compare_digest` 替代 `!=`（constant-time，消除时序侧信道）；② 启动输出加安全提醒（token 在 URL、建议 reverse proxy + TLS），纠正"token = 安全"的错误预期。回归测试 `test_token_comparison_uses_constant_time`（源码检查确认 compare_digest 存在）。
 **有意保留**：③ TLS 需证书 + 架构变更（建议 reverse proxy，非 agent 职责）；④ 多 client 共享会话是设计意图（roadmap 已知限制已注明"无独立会话隔离"）。
 
-☐ **A6【低·正确性】spill readback 前缀判断可误判**
-`memory/tool_result_cache.py:74-75` 用 `abs_path.startswith(abs(cache_dir))` 判断读回。若存在兄弟目录 `results_evil`（cache_dir=`.../results`），`.../results_evil/x` 会被误判为读回而豁免溢写。非安全问题。（PathGuard 的 spill 只读放行 path_guard.py:76-79 用 `cache_root in resolved.parents`，正确无此问题。）修复：改用 parents 判断或加分隔符。工作量：小。
+✅ **A6【低·正确性】spill readback 前缀判断可误判**（已修复）
+**原问题**：`is_spill_readback` 用 `abs_path.startswith(abs(cache_dir))` 判断读回，字符串前缀匹配会把兄弟目录 `.../cache_evil/x`（cache_dir=`.../cache`）误判为读回而豁免溢写。
+**修复**：改用路径成分包含判断——`Path(raw).resolve()`，`resolved == cache_root or cache_root in resolved.parents`（与 PathGuard 的 spill 只读放行 path_guard.py:76-79 同一正确模式）；顺带删除不再使用的 `os` import。回归测试 `test_is_spill_readback_sibling_dir_not_misjudged`：`cache_evil/x` 不命中、真 cache 目录仍命中；移除修复时兄弟目录断言失败。
 
 ### B. 真差距
 

@@ -112,6 +112,26 @@ async def test_is_spill_readback(tmp_path: Path):
     assert not cache.is_spill_readback("read_file", {"file_path": 42})
 
 
+async def test_is_spill_readback_sibling_dir_not_misjudged(tmp_path: Path):
+    """A6: a sibling dir sharing the cache_dir name prefix must NOT match.
+    A6：与 cache_dir 同名前缀的兄弟目录不能被误判为读回。
+
+    Old code used str.startswith(abs(cache_dir)); ".../cache_evil/x" starts
+    with ".../cache" as a string, so it was wrongly exempted from spilling.
+    Path-component containment fixes this.
+    旧代码用 str.startswith，".../cache_evil/x" 字符串上以 ".../cache" 开头
+    被误豁免；按路径成分包含判断修复此问题。"""
+    cache_dir = tmp_path / "cache"
+    cache = ToolResultCache(cache_dir, threshold_chars=100)
+
+    sibling = str(tmp_path / "cache_evil" / "x.txt")
+    assert not cache.is_spill_readback("read_file", {"file_path": sibling})
+
+    # the real cache dir still matches (regression guard) 真缓存目录仍命中
+    inside = str(cache_dir / "result_abc.txt")
+    assert cache.is_spill_readback("read_file", {"file_path": inside})
+
+
 async def test_spill_batch_under_budget_unchanged(tmp_path: Path):
     cache = ToolResultCache(tmp_path / "cache", threshold_chars=50_000, aggregate_chars=10_000)
     results = [make_result("a" * 4_000, call_id="c1"), make_result("b" * 4_000, call_id="c2")]

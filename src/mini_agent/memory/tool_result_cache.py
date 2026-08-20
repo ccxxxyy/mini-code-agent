@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -71,8 +70,16 @@ class ToolResultCache:
         raw = arguments.get("file_path", "")
         if not isinstance(raw, str) or not raw:
             return False
-        abs_path = os.path.abspath(raw)
-        return abs_path.startswith(os.path.abspath(str(self._cache_dir)))
+        # Path-component containment, not string prefix: a sibling dir like
+        # ".../results_evil" must NOT match cache_dir ".../results".
+        # 按路径成分判断包含，而非字符串前缀：兄弟目录 ".../results_evil"
+        # 不能匹配 cache_dir ".../results"。
+        try:
+            resolved = Path(raw).resolve()
+            cache_root = Path(self._cache_dir).resolve()
+        except (OSError, ValueError):
+            return False
+        return resolved == cache_root or cache_root in resolved.parents
 
     def maybe_spill(self, result: ToolResult, force: bool = False) -> ToolResult:
         """Return the result unchanged if small; otherwise spill to disk and
