@@ -517,9 +517,10 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 **修复**：`security/permission.py` 三类模式加固——rm 容忍长选项与标志后置（`(?:[^\n]*\s)?(?:-[a-z]*[rf]|--recursive|--force)`）；chmod 容忍前置选项与 0777（`(?:-[a-zA-Z]+\s+)*[0-7]*777`）；新增 `_GIT_PREFIX` 常量吞掉 git 全局选项（-c/-C 带值 + attached 形式），7 个 git 危险子命令统一前缀化。新增 `test_dangerous_command_bypass_variants_flagged`（绕过变体须命中）+ `test_dangerous_command_safe_variants_not_flagged`（安全命令零误报，如 `git -C /x status`/`chmod 644`/`rm -i`/`git checkout -b`）。真实运行验证：`chmod -R 777` 与 `git -C . push` 均触发 `dangerous command detected` 确认框。
 **诚实边界**：正则黑名单本质不可能穷尽（死循环实验已证 LLM 可变形绕过签名），加固只堵已知常见形态，是减速带非围墙——迭代上限 + 命中后人工确认才是真护栏（已在代码注释与 CHANGELOG 注明）。
 
-☐ **A3【中·fail-open 时序】max_tokens 重试导致重复副作用**
-`core/agent_loop.py:423-435`：`_think` 的 max_tokens 恢复循环在 `finish_reason=="length"` 时取消 `_streaming_tasks` 重试，但流式期间已提交并**可能已完成**的写/删工具（:497 create_task）无法回滚——`task.cancel()` 对已完成任务无效。截断重试后 LLM 再次产出同一工具调用并再次执行。
-失败场景：write_file 在流截断前已落盘 → 重试后再写一次；delete_file 则第二次删除（已删→报错噪音）。非破坏性时幂等，带副作用时重复。工作量：中。
+✅ **A3【中·fail-open 时序】max_tokens 重试导致重复副作用**（已修复）
+**原问题**：`_think` 的 max_tokens 恢复循环在 `finish_reason=="length"` 时取消 `_streaming_tasks` 重试，但流式期间已 eager 提交并**可能已完成**的写/删工具无法回滚——`task.cancel()` 对已完成任务是空操作。截断重试后 LLM 再产出同一工具调用并再次执行 → write_file 双写、delete_file 双删。
+**修复**：`agent_loop.py` 流式执行块把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）无条件延迟到 `_act`——它只在 max_tokens 恢复确定最终非截断响应后才执行，从源头消除"eager 已完成但无法回滚"的窗口。回归测试 `test_write_tool_not_double_executed_on_truncation_retry`：截断响应含中途 flush 的 write（内容 A1）+ 重试 write（内容 A2），断言 `execute()` 恰好调用一次 `['A2']`（修复前为 `['A1','A2']` 双执行）。测试用 YieldingMockLLM 在 chunk 间让出事件循环以确定性复现竞态（纯同步 mock 里 eager 任务启动前即被取消、bug 隐身）。
+**残留（未纳入本次，honest boundary）**：bash 的带副作用命令（`echo>file`/`mkdir`/`npm install` 等非危险命令）仍 eager 流式执行，截断重试仍可能双跑；危险 bash 已由 would_ask 延迟。彻底解决需延迟所有 bash（牺牲流式延迟收益），A3 按 roadmap 明列的 write_file/delete_file 收口，bash 残留单列备忘。
 
 ☐ **A4【中·并发】CostTracker 无锁并发累加**
 `core/cost_tracker.py:57-75` `_on_response` 对 `self.usage[model]` 读-改-写；并行子 Agent 共享同一 bus 时 `rec["prompt"] += ...` 非原子。对比 AuditLogger 有 `_write_lock`（audit.py:82）保护哈希链，CostTracker 无等价保护。
@@ -591,6 +592,11 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 **平台缺口（关键）**：唯一真正气密的防护是 OS 沙箱（`security/sandbox/` bwrap+seatbelt，内核级只读 rootfs + 可写白名单，与命令文本无关）——但**只有 Linux/macOS 后端，Windows 无对应实现**。故 Windows 上命令签名是唯一防线，而它对内联解释器无效 = **Windows 上破坏性操作实际无底线防护**。这是本条目最严重的部分。
 候选方案（需设计，均非气密）：① 把内联解释器执行（`python -c`/`-`、`node -e`、`perl -e`、`ruby -e`、`sh -c`、`bash -c` 等）作为一类危险模式加入黑名单——精准命中实测的绕过向量，但仍可"先写 .py 脚本再 `python script.py`"绕过（脚本名不匹配），只抬高门槛；② Windows OS 沙箱后端调研（Job Object / Restricted Token / AppContainer / WSL 内跑）——最本质但工作量大、可行性待验证；③ 与 D2 行为兜底联动（被拒后 agent 停止而非改用解释器）。
 诚实边界：完全防住任意解释器执行在无 OS 沙箱时架构上不可能；即便加内联解释器黑名单也只是减速带。真实定位应写清：**Windows 无沙箱时，权限系统是"防误操作 + human-in-the-loop 提示"，不是"防对抗性绕过"**——需在 config-guide/agent-architecture 的安全说明里诚实注明这一边界，避免用户误以为拒绝=文件安全。工作量：①小 ②大 ③中；文档注明边界=小（应优先做，纠正错误预期）。
+
+☐ **D4【中·时序】带副作用的 bash 命令仍可能在截断重试时双执行（A3 残留）**
+A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` 消除双执行，但 **bash 工具未纳入**：非危险的带副作用 bash（`echo >file`、`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑（危险 bash 已由 would_ask 延迟，不受影响）。
+根因同 A3：eager 已完成的 bash 副作用无法回滚。未随 A3 一起修的原因：bash 是最高频工具且多数只读（ls/cat/grep/git log），无条件延迟会牺牲流式执行的主要延迟收益；而 A3 按 roadmap 明列的 write_file/delete_file 精确收口。
+候选方案：① 只延迟"可能有副作用"的 bash（需命令意图识别，回到不可穷尽问题）；② 截断重试时记录已 eager 完成的 bash 命令签名，重试若出现相同签名则复用结果不重跑（治本但需跨 attempt 状态）；③ 接受残留（截断本身是边缘场景，且多数 bash 幂等）。工作量：中。优先级低于 D2/D3（触发需"截断 + 带副作用 bash + 重试再产出同命令"三重巧合）。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

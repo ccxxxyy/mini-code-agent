@@ -2,6 +2,7 @@
 使用 mock LLM provider 测试 ReAct Agent 循环。
 """
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -405,6 +406,90 @@ async def test_no_retry_on_normal_finish(tool_context):
     conv = Conversation()
     await loop.run(conv)
     assert len(llm.calls) == 1
+
+
+class YieldingMockLLM(MockLLM):
+    """MockLLM that yields control between chunks, mirroring real streaming's
+    network awaits -- required to reproduce the A3 race where an eagerly
+    submitted tool task actually RUNS before truncation is detected.
+    在 chunk 间让出事件循环的 MockLLM，模拟真实流式的网络 await——复现 A3
+    竞态（抢先提交的工具任务在检测到截断前真正跑完）所必需。"""
+
+    async def stream(self, messages, tools=None, **kwargs):
+        script = self._scripts[min(self._call_count, len(self._scripts) - 1)]
+        self._call_count += 1
+        for chunk in script:
+            await asyncio.sleep(0)  # let eagerly-created tool tasks run
+            yield chunk
+
+
+async def test_write_tool_not_double_executed_on_truncation_retry(tool_context):
+    """A3 fail-open timing: a write tool in a truncated response must not run
+    eagerly mid-stream, because its side effect cannot be rolled back on retry
+    (task.cancel() is a no-op on a completed task).
+
+    Attempt 1 truncates (finish_reason='length') but carries a complete
+    write_file that flushes mid-stream (a higher-index tool call opens after
+    it, so the assembler emits the write before the truncation is seen); the
+    retry carries the same write. execute() must be called exactly ONCE
+    (deferred to _act after recovery settles), not twice (eager on attempt 1
+    + _act on retry). Distinct contents per attempt make a double call
+    deterministically observable -- event-counting is defeated by cancel-timing.
+    A3 fail-open 时序：截断响应里的写工具不能在流式期间抢先执行——副作用无法
+    在重试时回滚（task.cancel() 对已完成任务是空操作）。断言 execute() 恰好
+    调用一次（延迟到 _act），而非两次。每次尝试用不同 content 使双执行可
+    确定性观测（事件计数会被 cancel 时序击败，故改数 execute()）。
+    """
+    executed: list[str] = []
+
+    class CountingWriteFileTool(WriteFileTool):
+        async def execute(self, ctx, **kwargs):
+            executed.append(kwargs.get("content"))
+            return await super().execute(ctx, **kwargs)
+
+    target_s = str(tool_context.working_dir / "a3out.txt")
+
+    def _write_delta(cid: str, content: str) -> ToolCallDelta:
+        return ToolCallDelta(
+            index=0,
+            id=cid,
+            name="write_file",
+            arguments_delta=json.dumps({"file_path": target_s, "content": content}),
+        )
+
+    registry = ToolRegistry()
+    registry.register(CountingWriteFileTool())
+    registry.register(ReadFileTool())
+
+    scripts = [
+        # attempt 1: truncated; write (A1) flushes mid-stream when index 1 opens
+        [
+            StreamChunk(tool_call_deltas=[_write_delta("w1", "A1")]),
+            StreamChunk(tool_call_deltas=[ToolCallDelta(index=1, id="r1", name="read_file")]),
+            StreamChunk(finish_reason="length"),
+        ],
+        # retry: same write, distinct content (A2), normal finish
+        [
+            StreamChunk(tool_call_deltas=[_write_delta("w2", "A2")]),
+            StreamChunk(finish_reason="tool_calls"),
+        ],
+        text_response("done"),
+    ]
+
+    loop = AgentLoop(
+        llm=YieldingMockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+    await asyncio.sleep(0)  # let any leaked eager task settle so it would count
+
+    # Exactly one execution -- the retry's (A2), via _act. The truncated
+    # attempt's write (A1) must never have run. 恰好一次执行（重试的 A2）。
+    assert executed == ["A2"], f"expected single execute ['A2'], got {executed}"
 
 
 # --- Plan mode (P49) ---
