@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，973 个测试全部通过。
+> 当前版本 v1.1.0，974 个测试全部通过。
 
 ---
 
@@ -263,7 +263,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 99 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 973 个测试全部通过（约 90 秒，零网络依赖），单元 58 文件 + 集成 4 文件 |
+| 测试 | 974 个测试全部通过（约 90 秒，零网络依赖），单元 58 文件 + 集成 4 文件 |
 | 工具 | 12 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

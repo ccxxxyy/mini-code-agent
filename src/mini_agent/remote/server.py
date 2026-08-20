@@ -11,6 +11,7 @@ streaming text, tool calls, and permission requests.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -74,7 +75,11 @@ class RemoteServer:
         print("Mini-Code-Agent remote mode")
         if self._token:
             print(f"  Browser:   http://{self._host}:{self._port}?token={self._token}")
-            print("  Auth:      token required")
+            print("  Auth:      token required (constant-time comparison)")
+            print("  Warning:   token appears in the URL -- it may be saved in browser")
+            print("             history, server logs, or proxy logs. Use --remote-token")
+            print("             only on trusted networks; for public exposure, add a")
+            print("             reverse proxy with TLS (e.g. nginx + Let's Encrypt).")
         else:
             print(f"  Browser:   http://{self._host}:{self._port}")
         print("  Waiting for browser connection...")
@@ -93,7 +98,11 @@ class RemoteServer:
         import websockets as _ws
         from websockets.http11 import Response
 
-        if request.path == "/":
+        # request.path includes query string (e.g. "/?token=xxx"), so
+        # split on "?" and compare only the path component.
+        # request.path 含查询字符串（如 "/?token=xxx"），只取路径部分比较。
+        raw_path = request.path.split("?", 1)[0]
+        if raw_path == "/":
             return Response(
                 200,
                 "OK",
@@ -105,7 +114,7 @@ class RemoteServer:
                 ),
                 self._html_bytes,
             )
-        if not request.path.startswith("/ws"):
+        if not raw_path.startswith("/ws"):
             return Response(404, "Not Found", _ws.Headers(), b"Not Found")
         return None
 
@@ -138,7 +147,9 @@ class RemoteServer:
             try:
                 raw = await asyncio.wait_for(websocket.recv(), timeout=10)
                 msg = json.loads(raw)
-                if msg.get("type") != "auth" or msg.get("token") != self._token:
+                if msg.get("type") != "auth" or not hmac.compare_digest(
+                    msg.get("token", ""), self._token
+                ):
                     await websocket.send(
                         json.dumps({"type": "error", "message": "Authentication failed"})
                     )

@@ -386,3 +386,15 @@ async def test_replay_history_sends_messages():
     assert user_msg["text"] == "hello"
     asst_msg = next(m for m in sent if m["type"] == "history_assistant")
     assert asst_msg["text"] == "hi there"
+
+
+def test_token_comparison_uses_constant_time():
+    """A5: token comparison must use hmac.compare_digest, not == or !=."""
+    import inspect
+
+    from mini_agent.remote.server import RemoteServer
+
+    source = inspect.getsource(RemoteServer._handler)
+    assert "compare_digest" in source, (
+        "_handler must use hmac.compare_digest for token comparison, not == or !="
+    )
