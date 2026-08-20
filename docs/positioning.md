@@ -32,7 +32,7 @@
 
 ### 支点 3：教学与研究价值
 
-99 个文件、973 个测试、零厂商 SDK 依赖（唯一网络库是 httpx，pydantic 仅用于工具参数 schema），是一个**能跑、能测、能读完**的 Agent 参考实现。适合作为：Agent 原理的教学材料、新机制（压缩策略/调度算法）的实验床、"我真正理解 Agent"的证明。
+99 个文件、974 个测试、零厂商 SDK 依赖（唯一网络库是 httpx，pydantic 仅用于工具参数 schema），是一个**能跑、能测、能读完**的 Agent 参考实现。适合作为：Agent 原理的教学材料、新机制（压缩策略/调度算法）的实验床、"我真正理解 Agent"的证明。
 
 ## 二、"市面上有成熟 Agent，为什么还自己造？"
 
@@ -50,7 +50,7 @@
 
 ### 2.3 它已经不只是玩具
 
-973 个测试、CI 门禁、真实 E2E 验证、七阶段 Spec 开发流程——工程完成度本身就是答卷的一部分。
+974 个测试、CI 门禁、真实 E2E 验证、七阶段 Spec 开发流程——工程完成度本身就是答卷的一部分。
 
 ### 2.4 诚实边界
 
@@ -79,7 +79,7 @@
 
 ### 方向 2：机制透明度演示 ✅ 已完成
 
-> 已实现 `/trace` 命令：实时展示 ReAct 阶段切换、权限判定（含依据）、工具耗时、LLM token 元信息。973 个测试全过，真实 API E2E 验证。
+> 已实现 `/trace` 命令：实时展示 ReAct 阶段切换、权限判定（含依据）、工具耗时、LLM token 元信息。974 个测试全过，真实 API E2E 验证。
 
 CC 是黑盒，本项目每个内部状态都可观测。`/trace` 模式现场演示：
 
@@ -91,7 +91,7 @@ CC 是黑盒，本项目每个内部状态都可观测。`/trace` 模式现场�
 
 ### 方向 3：垂直场景定制（证明"可改造"的价值） ✅ 已完成
 
-> 已实现三个垂直场景：`/explain` 教学模式（TeachRenderer EventBus 订阅者确定性面板 + Skill 辅助）、`/audit` 合规审计模式（AuditLogger EventBus 订阅者写 JSONL）、offline-ollama 内网离线 Skill（零新代码，复用 OpenAI 兼容 API）。973 个测试全过。
+> 已实现三个垂直场景：`/explain` 教学模式（TeachRenderer EventBus 订阅者确定性面板 + Skill 辅助）、`/audit` 合规审计模式（AuditLogger EventBus 订阅者写 JSONL）、offline-ollama 内网离线 Skill（零新代码，复用 OpenAI 兼容 API）。974 个测试全过。
 
 - **内网离线环境**：`skills/offline-ollama/SKILL.md` 提供 Ollama 配置指引 + 推荐模型列表，接本地 Ollama `/v1` 端点全程无外网
 - **教学模式**：`/explain on` 开启 TeachRenderer，每次工具调用前确定性打印教学面板（Why this tool / Args / Params guide），不依赖 LLM 遵从——从 Skill 注入方案演进为 EventBus 硬注入
@@ -126,10 +126,10 @@ A: 不比模型能力，比三样它给不了的：完全本地化（数据主�
 A: 目的就是理解底层。框架把 Agent Loop、工具调度都封装掉了，用框架等于把最有价值的部分外包出去。全项目唯一网络依赖是 httpx，每一行核心逻辑都是自己的。
 
 **Q: 16500 行代码能和商业产品比工程质量吗？**
-A: 规模不比，密度可以：973 个测试零网络依赖约 90 秒跑完、CI 双版本门禁、七阶段 Spec 流程、每个设计决策都有文档记录（tech-notes.md）。小而完备优于大而黑盒。
+A: 规模不比，密度可以：974 个测试零网络依赖约 90 秒跑完、CI 双版本门禁、七阶段 Spec 流程、每个设计决策都有文档记录（tech-notes.md）。小而完备优于大而黑盒。
 
 **Q: 这个项目接下来往哪走？**
-A: P1-P83 共 83 个阶段已完成（973 个测试），涵盖评测/机制实验/多 Agent 编排/会话自动保存/主题切换/工具并行/双 Esc 中断/长记忆自动化/溢出兜底/TOML 配置/接口冻结（v1.0.0）/覆盖率门禁（80%+）/Diff 预览/文件变更汇总/Windows 终端适配/压缩-重读根治/Anthropic 缓存/流式工具执行/@file 内联/权限规则文件/OS 沙箱/Coordinator 模式/Pydantic Schema 全面增强/远程浏览器模式/Mailbox 跨 Agent 通信/插件生态（P83：pip 包 + 本地文件注册工具/命令/技能）。**PyPI 已发布**（`pip install mini-code-agent`），定位开源的"可读 Agent 参考实现"。
+A: P1-P83 共 83 个阶段已完成（974 个测试），涵盖评测/机制实验/多 Agent 编排/会话自动保存/主题切换/工具并行/双 Esc 中断/长记忆自动化/溢出兜底/TOML 配置/接口冻结（v1.0.0）/覆盖率门禁（80%+）/Diff 预览/文件变更汇总/Windows 终端适配/压缩-重读根治/Anthropic 缓存/流式工具执行/@file 内联/权限规则文件/OS 沙箱/Coordinator 模式/Pydantic Schema 全面增强/远程浏览器模式/Mailbox 跨 Agent 通信/插件生态（P83：pip 包 + 本地文件注册工具/命令/技能）。**PyPI 已发布**（`pip install mini-code-agent`），定位开源的"可读 Agent 参考实现"。
 
 ---
 

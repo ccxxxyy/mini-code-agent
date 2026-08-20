@@ -526,8 +526,10 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 **原问题**：`_on_response` 对 `self.usage[model]` 读-改-写非原子，并行子 Agent 共享同一 EventBus 时可能丢失更新（token/成本少计、预算熔断失准）。
 **修复**：`cost_tracker.py` 新增 `self._lock = asyncio.Lock()`，`_on_response` 的整个读-改-写在 `async with self._lock` 内执行（与 AuditLogger 的 `_write_lock` 模式一致）。`end_turn`/`flush_to_ledger` 只在主循环单线程路径调用，不加锁（无并发）。回归测试 `test_concurrent_on_response_no_lost_updates`：200 个事件 `asyncio.gather` 并发发射，断言 prompt/completion/calls 精确等于 200。
 
-☐ **A5【低·安全】remote 模式多项弱点**
-`remote/server.py:141` `msg.get("token") != self._token` 用 `!=` 直接比较（时序侧信道，localhost 影响小）；token 经 URL query 传递（:76）会进浏览器历史/日志；`ws://` 明文；`_ws_send`（:119）向所有 client 广播，多 client 时会话历史互相泄露。（`_process_http` :91-110 仅静态返回 HTML，无路径遍历，已确认安全。）工作量：小-中。
+✅ **A5【低·安全】remote 模式多项弱点**（已修复可修部分）
+**原问题**：4 项弱点——① token 非常量时间比较（时序侧信道）；② token 经 URL query 传递（浏览器历史/日志泄露）；③ ws:// 明文；④ 多 client 广播历史泄露。
+**修复**：① `hmac.compare_digest` 替代 `!=`（constant-time，消除时序侧信道）；② 启动输出加安全提醒（token 在 URL、建议 reverse proxy + TLS），纠正"token = 安全"的错误预期。回归测试 `test_token_comparison_uses_constant_time`（源码检查确认 compare_digest 存在）。
+**有意保留**：③ TLS 需证书 + 架构变更（建议 reverse proxy，非 agent 职责）；④ 多 client 共享会话是设计意图（roadmap 已知限制已注明"无独立会话隔离"）。
 
 ☐ **A6【低·正确性】spill readback 前缀判断可误判**
 `memory/tool_result_cache.py:74-75` 用 `abs_path.startswith(abs(cache_dir))` 判断读回。若存在兄弟目录 `results_evil`（cache_dir=`.../results`），`.../results_evil/x` 会被误判为读回而豁免溢写。非安全问题。（PathGuard 的 spill 只读放行 path_guard.py:76-79 用 `cache_root in resolved.parents`，正确无此问题。）修复：改用 parents 判断或加分隔符。工作量：小。
