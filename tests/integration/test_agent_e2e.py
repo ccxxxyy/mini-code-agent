@@ -48,6 +48,14 @@ def test_application_tools_registered(monkeypatch, tmp_path):
         "wait_message",
         "tool_search",
         "mcp_call",
+        "ask_user",
+        "exit_plan_mode",
+        "task_create",
+        "task_get",
+        "task_list",
+        "task_update",
+        "load_skill",
+        "install_skill",
     }
 
 

@@ -104,7 +104,7 @@
 | PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
 | 插件生态 ✅ | P83 实现：`extensions/plugin_loader.py` 四钩子契约（register/register_tools/commands/skills）+ 双通道发现（`mini_agent.plugins` entry point + `plugin_dirs` 本地文件），`/plugins` 命令展示 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
-| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 12 个） |
+| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 20 个） |
 | 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
 | 对话分叉/回滚 ✅ | P26 实现：/undo 轮次回滚 + /fork 深拷贝分叉（差异化能力——CC 服务端历史做不到） |
 | 操作级撤销 ✅ | P27 实现：每轮文件快照（5 轮保留/30MB 上限/磁盘存储会话结束清空），/undo 新建删掉/修改还原/删除找回 |
@@ -537,8 +537,10 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 ### B. 真差距
 
-☐ **B1 LLM 可自主调用的流程工具集（最大差距）**
-mewcode `mewcode/tools/` 有 mini 完全没有的工具：`ask_user.py`（结构化提问 text/radio/select/checkbox + askuser_dialog）、`exit_plan_mode.py`（LLM 完成计划后主动请求审批 + plan_dialog）、`task_create/get/list/stop/update.py`（任务板暴露给 LLM）、`team_create/team_delete.py`、`enter_worktree/exit_worktree.py`、`load_skill/install_skill.py`。mini 的 12 个内置工具中，plan/worktree/skill/task 都只有斜杠命令入口（用户驱动），LLM 不能自主发起；`/plan` 是手动开关，无"计划完成→审批→自动退出"闭环。工作量：中（每工具 100-200 行）。
+✅ **B1 LLM 可自主调用的流程工具集（核心批次已完成）**
+mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、`exit_plan_mode.py`（计划审批）、`task_create/get/list/stop/update.py`（任务板）、`team_create/team_delete.py`（常驻队友）、`enter_worktree/exit_worktree.py`（工作树）、`load_skill/install_skill.py`（技能）。其中 ask_user/exit_plan_mode/task CRUD/load_skill/install_skill 已在 B1 核心+技能两批次实现（20 个内置工具）；仅 team(依赖常驻队友系统) 和 worktree(使用场景窄) 未做。
+**已实现（核心批次 6 + 技能批次 2 = 8 工具）**：核心批次——`ask_user`（结构化提问 + 终端 Rich Panel UI）、`exit_plan_mode`（计划审批闭环）、`task_create`/`task_get`/`task_list`/`task_update`（任务板 CRUD）；技能批次——`load_skill`（激活已安装技能）、`install_skill`（从路径或 git URL 安装技能，不弹权限）。ToolContext 扩展 4 字段（task_store/agent_loop_ref/ask_user_callback/skill_registry），app.py 装配注入。工具总数 12→20。20 个新测试 + 集成测试工具注册断言更新。真实 LLM 验证 task_create 自主调用成功。
+**后续批次（未纳入本次）**：worktree 工具（enter/exit）、team 工具（create/delete）。
 
 ☐ **B2 read-before-edit 强制（FileStateCache）**
 mewcode `tools/file_state_cache.py`：编辑前必须先读 + mtime_ns 未变两道门，防编辑陈旧/被外部改过的文件。mini 全库无对应机制。小成本高安全收益。工作量：小（~80 行 + 集成）。
@@ -600,6 +602,14 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` 消除双执行，但 **bash 工具未纳入**：非危险的带副作用 bash（`echo >file`、`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑（危险 bash 已由 would_ask 延迟，不受影响）。
 根因同 A3：eager 已完成的 bash 副作用无法回滚。未随 A3 一起修的原因：bash 是最高频工具且多数只读（ls/cat/grep/git log），无条件延迟会牺牲流式执行的主要延迟收益；而 A3 按 roadmap 明列的 write_file/delete_file 精确收口。
 候选方案：① 只延迟"可能有副作用"的 bash（需命令意图识别，回到不可穷尽问题）；② 截断重试时记录已 eager 完成的 bash 命令签名，重试若出现相同签名则复用结果不重跑（治本但需跨 attempt 状态）；③ 接受残留（截断本身是边缘场景，且多数 bash 幂等）。工作量：中。优先级低于 D2/D3（触发需"截断 + 带副作用 bash + 重试再产出同命令"三重巧合）。
+
+☐ **D5【UX·低】on/off 模式命令无参数时行为不一致且不直觉**
+4 个 on/off 模式命令的无参数行为各不相同（`extensions/builtin_commands.py`），且都不是用户最直觉的"显示当前状态"：
+- `/plan`（:1161）：无参数 = **无条件打开**（`sub in ("", "on")`），而非 toggle 也非显示状态。B1 验证时暴露：exit_plan_mode 工具关闭 plan 模式后，用户输 `/plan` 想查状态却又打开了
+- `/trace`（:1059）：无参数 = **toggle**（`not app.trace_renderer.enabled`）
+- `/explain`（:1076）：无参数 = **toggle**（`not tr.enabled`）
+- `/audit`（:1105）：无参数 = **toggle**（`not al.enabled`）
+建议统一为：**无参数 = 只显示当前状态不改变**，`on`/`off` 显式切换。或至少把 `/plan` 的无参数行为从"无条件打开"改为与其他三个一致的 toggle。工作量：小（4 处 else 分支改为显示状态）。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

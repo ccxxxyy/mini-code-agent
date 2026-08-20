@@ -204,7 +204,7 @@ timeout = 120.0
 [tools]
 bash_timeout = 120.0         # bash command timeout (seconds)
 max_file_size = 10000000     # File read cap (bytes)
-enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call"]
+enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill"]
 allowed_paths = []           # Extra allowed paths outside the project (default empty)
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # Paths forbidden to access
 

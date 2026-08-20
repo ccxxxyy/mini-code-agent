@@ -70,7 +70,15 @@ mini-code-agent/
 │       │   │   ├── send_message.py  # Inter-agent messaging (send)
 │       │   │   ├── wait_message.py  # Inter-agent messaging (receive)
 │       │   │   ├── tool_search.py   # Dynamic tool discovery (MCP dispatch)
-│       │   │   └── mcp_call.py      # MCP tool invocation
+│       │   │   ├── mcp_call.py      # MCP tool invocation
+│       │   │   ├── ask_user.py      # Structured question to user (B1)
+│       │   │   ├── exit_plan_mode.py # LLM exits plan mode for review (B1)
+│       │   │   ├── task_create.py    # Create task on board (B1)
+│       │   │   ├── task_get.py       # Get task details (B1)
+│       │   │   ├── task_list.py      # List all tasks (B1)
+│       │   │   ├── task_update.py    # Update task status/description (B1)
+│       │   │   ├── load_skill.py     # Activate installed skill (B1)
+│       │   │   └── install_skill.py  # Install skill from path/URL (B1)
 │       │   ├── mcp/                 # MCP client integration
 │       │   │   ├── __init__.py
 │       │   │   ├── client.py        # MCPManager — manages server connections
@@ -144,7 +152,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 58 unit test files, 975 tests
+│   ├── unit/                        # 58 unit test files, 995 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -479,6 +487,9 @@ class ToolConfig:
         "read_file", "write_file", "edit_file", "delete_file",
         "bash", "glob", "grep", "spawn_agents",
         "send_message", "wait_message", "tool_search", "mcp_call",
+        "ask_user", "exit_plan_mode", "task_create", "task_get",
+        "task_list", "task_update",
+        "load_skill", "install_skill",
     ])
     bash_timeout: float = 120.0
     max_file_size: int = 10_000_000       # 10MB
@@ -2137,7 +2148,7 @@ class ReadFileTool(Tool):
         )
 ```
 
-全部 12 个内置工具（`tools/builtin/__init__.py` 的 `ALL_BUILTIN_TOOLS`）：
+全部 20 个内置工具（`tools/builtin/__init__.py` 的 `ALL_BUILTIN_TOOLS`）：
 
 | Tool | 用途 | 安全检查 |
 |------|------|----------|
@@ -2153,6 +2164,14 @@ class ReadFileTool(Tool):
 | `wait_message` | 等待/接收邮箱消息 | 工具级规则 |
 | `tool_search` | 搜索 MCP 服务器上可用的工具（懒发现） | 工具级规则 |
 | `mcp_call` | 按名调用 MCP 工具（dispatch 模式入口） | 工具级规则 |
+| `ask_user` | 向用户提结构化问题（自由文本或列选项） | 仅主 Agent 可用 |
+| `exit_plan_mode` | LLM 完成计划后主动退出 plan 模式 | plan 模式中可用 |
+| `task_create` | 在持久化任务板上创建任务 | 无限制 |
+| `task_get` | 按 ID/前缀查询任务详情 | 无限制 |
+| `task_list` | 列出任务板上所有任务 | 无限制 |
+| `task_update` | 更新任务状态或描述 | 无限制 |
+| `load_skill` | 激活已安装的技能（注入 prompt） | 无限制 |
+| `install_skill` | 从路径或 git URL 安装技能 | 无限制 |
 
 其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
 
@@ -3070,7 +3089,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 9. `core/agent_loop.py` -- Full ReAct loop
 10. `ui/terminal.py` -- Extend: tool call rendering, spinners, confirmations
 
-注：此阶段的 6 个内置工具最终扩至 12 个（`delete_file`、`spawn_agents`、`send_message`、`wait_message`、`tool_search`、`mcp_call` 在后续阶段加入）。
+注：此阶段的 6 个内置工具最终扩至 20 个（`delete_file`、`spawn_agents`、`send_message`、`wait_message`、`tool_search`、`mcp_call` 在后续阶段加入）。
 
 **交付物**：Agent 能接收如"读取 README 并总结"的任务，自主调用 ReadFile，处理结果并回答。多步工具链正常运行。
 

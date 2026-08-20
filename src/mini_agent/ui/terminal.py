@@ -193,6 +193,40 @@ class Terminal:
             if answer in ("n", "no", ""):
                 return False
 
+    async def ask_structured(self, question: str, choices: list[str] | None = None) -> str:
+        """Structured question for the ask_user tool (B1).
+        ask_user 工具用的结构化提问（B1）。有 choices 时显示编号选项,
+        无 choices 时自由文本输入。"""
+        from prompt_toolkit import PromptSession as _PS
+        from rich.panel import Panel
+
+        lines = [f"[bold]{question}[/bold]"]
+        if choices:
+            for i, c in enumerate(choices, 1):
+                lines.append(f"  {i}. {c}")
+            lines.append("")
+            lines.append("[dim]Enter the number or type your answer[/dim]")
+        p = self.theme.primary
+        self.console.print(Panel("\n".join(lines), border_style=p, title="Question from Agent"))
+
+        def _plain() -> str:
+            try:
+                return input("> ").strip()
+            except EOFError:
+                return ""
+
+        try:
+            tmp = _PS()
+            raw = (await tmp.prompt_async("> ")).strip()
+        except Exception:
+            raw = _plain()
+
+        if choices and raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(choices):
+                return choices[idx]
+        return raw
+
     def start_stream(self) -> None:
         self.console.print()
         self.renderer.start()
