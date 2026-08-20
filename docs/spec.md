@@ -144,7 +144,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 58 unit test files, 971 tests
+│   ├── unit/                        # 58 unit test files, 972 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -747,7 +747,7 @@ class AgentLoop:
 ```
 
 工具结果的追加（原 `_observe`）内联在 `run()` 的迭代体中；`streaming_tool_execution`
-开启时，`IncrementalAssembler` 让不需要弹窗确认的工具（`would_ask()` 预判）在 LLM
+开启时，`IncrementalAssembler` 让读类工具（写工具无条件延迟、需弹窗确认的工具经 `would_ask()`/`would_confirm()` 预判也延迟到 `_act`）在 LLM
 仍在流式输出期间提前提交执行。
 
 ### 4.3 `llm/base.py` -- LLM Provider 抽象层
@@ -1757,7 +1757,7 @@ User types message in terminal
 |    |      LLMProvider.stream(messages, tools) -> chunks     |     |
 |    |        on_stream_delta / on_thinking_delta 回调直达 UI |     |
 |    |        流式工具执行: IncrementalAssembler 组装完成的   |     |
-|    |        调用立即提交执行 (需确认/需询问的延迟到 ACT)    |     |
+|    |        调用立即提交执行 (写工具/需确认/询问延迟 ACT)  |     |
 |    |      assemble_response() -> LLMResponse                |     |
 |    |      EventBus.emit(LLMResponseEvent)                   |     |
 |    |      HookManager.run(POST_LLM)                         |     |
@@ -2350,7 +2350,7 @@ async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
 
 - **为什么两阶段**：权限确认弹窗不可交错，所以预检必须串行；预检通过后的执行才并行。执行已预检过权限，`skip_permission=True` 避免重复检查。
 - **无 `return_exceptions`**：工具异常在 `_run_tool_pipeline` 内部就被捕获并包装为 `is_error=True` 的 ToolResult，gather 不会收到裸异常。
-- **流式提前执行（streaming tool execution）**：开启 `streaming_tool_execution` 时，`_stream_once` 中的 `IncrementalAssembler` 在流式传输期间逐 chunk 组装工具调用，**一组装完成就 `asyncio.create_task` 提交执行**——工具 #1 执行时工具 #2 还在流式传输。三类调用被延迟到 `_act()`：计划模式下的写工具、`PermissionManager.would_ask()` 判定会询问用户的、`HookManager.would_confirm()` 判定会弹确认框的（弹窗不能和流式渲染交错）。`_act()` 对这些已提交的任务直接 `await` 收集结果。
+- **流式提前执行（streaming tool execution）**：开启 `streaming_tool_execution` 时，`_stream_once` 中的 `IncrementalAssembler` 在流式传输期间逐 chunk 组装工具调用，**一组装完成就 `asyncio.create_task` 提交执行**——工具 #1 执行时工具 #2 还在流式传输。以下调用被延迟到 `_act()`：①写工具（`_WRITE_TOOLS`：write_file/edit_file/delete_file）**无条件延迟**——截断响应（`finish_reason="length"`）会触发 max_tokens 重试，但已 eager 完成的副作用无法回滚（`task.cancel()` 对已完成任务是空操作）→ 重试再产出同一调用会双写/双删（A3 修复；同时覆盖计划模式的写工具拒绝）；②`PermissionManager.would_ask()` 判定会询问用户的；③`HookManager.would_confirm()` 判定会弹确认框的（弹窗不能和流式渲染交错）。`_act()` 对这些已提交的任务直接 `await` 收集结果。
 
 ---
 

@@ -486,8 +486,21 @@ class AgentLoop:
                 for tc in assembler.feed(chunk):
                     if not tc.name or not tc.id:
                         continue
-                    if self.plan_mode and tc.name in _WRITE_TOOLS:
-                        continue  # plan mode: deny in _act
+                    if tc.name in _WRITE_TOOLS:
+                        # Never eager-execute write tools mid-stream: a
+                        # truncated response (finish_reason="length") triggers
+                        # a retry, but an already-completed side-effecting task
+                        # cannot be rolled back -- task.cancel() is a no-op on a
+                        # done task -> double write/delete. Defer to _act, which
+                        # runs only after max_tokens recovery settles on a final
+                        # non-truncated response. (Also covers plan-mode denial,
+                        # handled in _act.)
+                        # 写工具绝不在流式期间抢先执行：截断响应会触发重试，
+                        # 但已完成的副作用任务无法回滚（task.cancel() 对已完成
+                        # 任务是空操作）→ 重复写/删。延迟到 _act——它只在
+                        # max_tokens 恢复确定最终非截断响应后才执行。
+                        # （同时覆盖 plan 模式拒绝，由 _act 处理。）
+                        continue
                     if self._permissions is not None and self._permissions.would_ask(
                         tc.name, tc.arguments
                     ):
