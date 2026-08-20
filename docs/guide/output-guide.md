@@ -1,5 +1,7 @@
 # 终端输出来源与配置指南
 
+> English version: [en/output-guide.md](en/output-guide.md)
+
 本文档说明 Mini-Code-Agent 在一轮对话中每一行终端输出的**来源组件**、**触发条件**和**开关方法**。
 
 ---

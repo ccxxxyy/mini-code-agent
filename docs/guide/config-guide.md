@@ -1,5 +1,7 @@
 # 配置文件与上下文文件完全指南
 
+> English version: [en/config-guide.md](en/config-guide.md)
+
 本文档说明 Mini-Code-Agent 会读取的**所有**配置文件和上下文文件：每个文件是干什么的、放在哪、怎么改、不改时的默认行为。
 
 ---
@@ -459,7 +461,7 @@ action = "confirm"
 reason = "push 会影响远程仓库"
 ```
 
-**边界**：配置层做"拒绝"（block）与"强制确认"（confirm）。改写参数（MODIFY）、观察记录需写 Python Hook 或 EventBus 订阅者——见 agent-architecture.md S04。confirm 的裁决弹窗由主 Agent 的 terminal 执行；子 Agent（spawn_agents）不加载 `[[hooks]]` 规则、无确认 UI，代码注册的 CONFIRM hook 在无 UI 时一律安全拒绝。
+**边界**：配置层做"拒绝"（block）与"强制确认"（confirm）。改写参数（MODIFY）、观察记录需写 Python Hook 或 EventBus 订阅者——见 docs/agent-architecture.md S04。confirm 的裁决弹窗由主 Agent 的 terminal 执行；子 Agent（spawn_agents）不加载 `[[hooks]]` 规则、无确认 UI，代码注册的 CONFIRM hook 在无 UI 时一律安全拒绝。
 
 ---
 
@@ -732,4 +734,4 @@ sandbox_network = false       # 可选：允许网络访问
 
 ---
 
-*相关文档：终端输出说明见 output-guide.md，各系统终端打开方法与兼容性见 terminal-guide.md，能力对照见 capabilities.md，架构原理见 agent-architecture.md。*
+*相关文档：终端输出说明见 output-guide.md，各系统终端打开方法与兼容性见 terminal-guide.md，能力对照见 docs/capabilities.md，架构原理见 docs/agent-architecture.md。*

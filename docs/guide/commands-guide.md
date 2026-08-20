@@ -1,6 +1,8 @@
 # 命令参考（Slash Commands Guide）
 
-全部 25 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
+> English version: [en/commands-guide.md](en/commands-guide.md)
+
+全部 26 个可见命令的完整语法、参数与示例。斜杠命令在本地执行、零 token 消耗（`/compact`、`/team` 等会触发 LLM 调用的除外，均已标注）。输入 `/` 弹出按字母排序的下拉补全菜单。
 
 > 各行输出的来源与开关见 output-guide.md；配置项见 config-guide.md。
 

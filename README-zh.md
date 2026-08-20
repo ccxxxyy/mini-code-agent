@@ -180,7 +180,7 @@ uv tool uninstall mini-code-agent
 
 启动后你会看到欢迎界面，直接输入你的问题即可开始对话。输入 `/exit` 或按 `Ctrl+C` 退出。
 
-各系统各终端的打开方法、兼容等级、问题排查见 [docs/terminal-guide.md](docs/terminal-guide.md)。
+各系统各终端的打开方法、兼容等级、问题排查见 [docs/guide/terminal-guide.md](docs/guide/terminal-guide.md)。
 
 ### 6. 远程/浏览器模式
 
@@ -287,14 +287,15 @@ mini-code-agent/
     ├── tech-notes.md           # 核心技术实现原理与方案选型
     ├── roadmap.md              # 后续演进路线图
     ├── positioning.md          # 项目立意与价值定位
-    ├── output-guide.md         # 终端输出来源与配置指南
-    ├── config-guide.md         # 配置文件与上下文文件完全指南
+    ├── guide/                  # 使用指南（命令/配置/输出/终端）
+    │   ├── commands-guide.md   # 全部斜杠命令的完整语法与示例
+    │   ├── config-guide.md     # 配置文件与上下文文件完全指南
+    │   ├── output-guide.md     # 终端输出来源与配置指南
+    │   ├── terminal-guide.md   # 各系统各终端的打开方法与兼容性指南
+    │   └── en/                 # 上述四个指南的纯英文版
     ├── agent-architecture.md   # Agent 架构原理与 S01-S20 实现解析
-    ├── terminal-guide.md       # 各系统各终端的打开方法与兼容性指南
     ├── comparison-mewcode.md   # 与 mewcode-python 的详细对比与增强路线
-    ├── comparison-config-cc.md # 配置系统对比：mini vs Claude Code
-    ├── commands-guide.md       # 全部斜杠命令的完整语法与示例
-    └── todo-code-quality.md    # 代码质量待办与扩展点追踪
+    └── comparison-config-cc.md # 配置系统对比：mini vs Claude Code
 ├── skills/                         # 4 个内置技能包（code_review / init_project / offline-ollama / teach-mode）
 ├── experiments/                    # 10 个机制实验脚本（压缩 A/B、模型混编、死循环诱导、熔断器验证等）
 ```
@@ -830,7 +831,7 @@ uv run python experiments/deadlock_induction.py --all
 
 三类文件，性质不同：**配置文件**（config.toml/.env，给程序读的参数）、**上下文文件**（AGENT.md/CLAUDE.md/instructions.md，给 LLM 读的项目约定）、**数据文件**（memory.json/sessions，程序自动管理）。均分用户级（`~/.mini-agent/`，所有项目共用）和项目级（项目目录内，覆盖或叠加用户级）。
 
-完整清单、优先级链、修改方法见 [docs/config-guide.md](docs/config-guide.md)。
+完整清单、优先级链、修改方法见 [docs/guide/config-guide.md](docs/guide/config-guide.md)。
 
 ## 全部命令一览
 
@@ -865,9 +866,9 @@ uv run python experiments/deadlock_induction.py --all
 | `/deny [remove] <command\|path\|tool> <模式> [--save]` | 运行时添加 DENY 权限规则（`--save` 持久化到 TOML） |
 | `/exit` | 退出 |
 
-全部命令的完整语法、参数与示例见 [docs/commands-guide.md](docs/commands-guide.md)。
+全部命令的完整语法、参数与示例见 [docs/guide/commands-guide.md](docs/guide/commands-guide.md)。
 
-> 终端输出的详细来源和开关说明见 [docs/output-guide.md](docs/output-guide.md)。
+> 终端输出的详细来源和开关说明见 [docs/guide/output-guide.md](docs/guide/output-guide.md)。
 
 ## 发布到 PyPI
 

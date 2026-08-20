@@ -1,5 +1,7 @@
 # 终端使用指南——各系统各终端的打开方法与兼容性
 
+> English version: [en/terminal-guide.md](en/terminal-guide.md)
+
 Mini-Code-Agent 是终端工具，体验因终端而异。本文档说明各系统下有哪些终端、怎么打开、各自的兼容等级和已知问题。
 
 ## 启动方式汇总

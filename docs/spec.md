@@ -155,22 +155,27 @@ mini-code-agent/
 │       ├── test_session_persistence.py
 │       └── test_worktree.py
 │
-├── docs/                            # 15 个专题文档
+├── docs/                            # 18 个文档：14 个专题 + 4 个英文版指南（guide/en/）
+│   ├── guide/                       # 使用指南（面向使用者）
+│   │   ├── commands-guide.md        # 26 个斜杠命令完整语法与示例
+│   │   ├── config-guide.md          # 配置文件与上下文文件完全指南
+│   │   ├── output-guide.md          # 终端输出格式与样式说明
+│   │   ├── terminal-guide.md        # 各系统终端打开方法与兼容性
+│   │   └── en/                      # 纯英文版（与中文版同步维护，头部互指链接）
+│   │       ├── commands-guide.md
+│   │       ├── config-guide.md
+│   │       ├── output-guide.md
+│   │       └── terminal-guide.md
 │   ├── spec.md                      # 完整架构规格说明（本文档，设计基线）
 │   ├── agent-architecture.md        # 五层架构详解与模块交互图
 │   ├── capabilities.md              # 功能全景与验收状态总览
 │   ├── checklist.md                 # 分阶段验收清单（P1-P83 逐项打勾）
-│   ├── commands-guide.md            # 26 个斜杠命令完整语法与示例
 │   ├── comparison-config-cc.md      # 配置系统对比：mini vs Claude Code
 │   ├── comparison-mewcode.md        # 功能对照：mini vs mewcode-python
-│   ├── config-guide.md              # 配置文件与上下文文件完全指南
-│   ├── output-guide.md              # 终端输出格式与样式说明
 │   ├── positioning.md               # 项目定位与技术亮点
-│   ├── roadmap.md                   # 开发路线图与里程碑
+│   ├── roadmap.md                   # 开发路线图与里程碑（含代码质量清单与扩展点跟踪）
 │   ├── tasks.md                     # 开发任务全记录（P1-P83）
-│   ├── tech-notes.md                # 技术笔记（实现细节与决策记录）
-│   ├── terminal-guide.md            # 各系统终端打开方法与兼容性
-│   └── todo-code-quality.md         # 代码质量待做清单与扩展点跟踪
+│   └── tech-notes.md                # 技术笔记（实现细节与决策记录）
 │
 ├── skills/                          # Built-in skill packs (shipped with project)
 │   ├── code_review/
@@ -2423,7 +2428,7 @@ pattern = "rm|sudo|chmod|chown|mkfs|dd"
 message = "This command looks dangerous. Proceed?"
 ```
 
-> **实现注记**：实际落地的配置格式是 `[[hooks]]` 数组表（字段：tool/arg/contains/regex/reason/action），语义与本节设计一致——`action = "block"`（默认）拒绝执行，`action = "confirm"` 弹 y/a/n 确认框。见 config-guide.md "Hook 规则详解"。
+> **实现注记**：实际落地的配置格式是 `[[hooks]]` 数组表（字段：tool/arg/contains/regex/reason/action），语义与本节设计一致——`action = "block"`（默认）拒绝执行，`action = "confirm"` 弹 y/a/n 确认框。见 guide/config-guide.md "Hook 规则详解"。
 
 或通过代码：
 
