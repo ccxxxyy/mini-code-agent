@@ -10,6 +10,7 @@ EventBus 订阅者：从 LLMResponseEvent 按模型累计输入/输出 token
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date
@@ -47,6 +48,7 @@ class CostTracker:
         # each: {"turn": int, "prompt": int, "completion": int, "cost": float|None}
         self.turn_history: list[dict] = []
         self._turn_mark: dict[str, dict[str, int]] = {}  # usage snapshot at turn start
+        self._lock = asyncio.Lock()  # guards self.usage against concurrent SubAgent events
 
     def attach(self, bus) -> None:
         bus.on(LLMResponseEvent, self._on_response)
@@ -58,21 +60,22 @@ class CostTracker:
         if event.tokens_used <= 0:
             return
         model = event.model or UNKNOWN
-        rec = self.usage.setdefault(
-            model,
-            {
-                "prompt": 0,
-                "completion": 0,
-                "calls": 0,
-                "cache_read": 0,
-                "cache_creation": 0,
-            },
-        )
-        rec["prompt"] += event.prompt_tokens
-        rec["completion"] += event.completion_tokens
-        rec["cache_read"] += event.cache_read_input_tokens
-        rec["cache_creation"] += event.cache_creation_input_tokens
-        rec["calls"] += 1
+        async with self._lock:
+            rec = self.usage.setdefault(
+                model,
+                {
+                    "prompt": 0,
+                    "completion": 0,
+                    "calls": 0,
+                    "cache_read": 0,
+                    "cache_creation": 0,
+                },
+            )
+            rec["prompt"] += event.prompt_tokens
+            rec["completion"] += event.completion_tokens
+            rec["cache_read"] += event.cache_read_input_tokens
+            rec["cache_creation"] += event.cache_creation_input_tokens
+            rec["calls"] += 1
 
     # --- pricing 计价 ---
 

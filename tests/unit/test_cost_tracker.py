@@ -383,3 +383,31 @@ async def test_toml_cost_section_merges(tmp_path, monkeypatch):
     config = ConfigLoader.load()
     assert config.cost.budget == 3.5
     assert config.cost.pricing["deepseek-chat"]["input"] == 2.0
+
+
+async def test_concurrent_on_response_no_lost_updates():
+    """A4: parallel SubAgent events must not lose updates due to unlocked
+    read-modify-write. Fire N events concurrently, assert the sum is exact.
+    A4：并行子 Agent 事件不得因无锁读-改-写而丢失更新。并发发射 N 个事件，
+    断言总和精确。"""
+    import asyncio
+
+    tracker = make_tracker(pricing={"m": {"input": 1.0, "output": 1.0}})
+    n = 200
+
+    async def fire(i: int) -> None:
+        await tracker._on_response(
+            LLMResponseEvent(
+                tokens_used=2,
+                prompt_tokens=1,
+                completion_tokens=1,
+                model="m",
+            )
+        )
+
+    await asyncio.gather(*(fire(i) for i in range(n)))
+
+    rec = tracker.usage["m"]
+    assert rec["prompt"] == n, f"expected {n} prompt tokens, got {rec['prompt']}"
+    assert rec["completion"] == n
+    assert rec["calls"] == n
