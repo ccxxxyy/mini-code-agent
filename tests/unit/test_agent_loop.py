@@ -518,3 +518,51 @@ async def test_self_verify_disabled(tool_context):
 
     assert llm._call_count == 2
     assert result == "done"
+
+
+async def test_delete_file_routes_through_path_check(tool_context):
+    """delete_file must go through check_path (write), not the unrestricted else.
+
+    Regression test for A1 fail-open: before the fix, delete_file fell into
+    the else branch of _check_permission and was unconditionally GRANTED —
+    PathGuard's denied_paths / sensitive-file rules never fired.
+    回归测试 A1 fail-open：修复前 delete_file 落入 else 无条件放行，
+    PathGuard 的敏感路径拒绝规则完全不生效。
+    """
+    from mini_agent.security.path_guard import PathGuard
+    from mini_agent.security.permission import PermissionManager
+    from mini_agent.tools.builtin import DeleteFileTool
+
+    sensitive = "~/.ssh/id_rsa"
+    registry = ToolRegistry()
+    registry.register(DeleteFileTool())
+
+    scripts = [
+        tool_call_response("delete_file", {"file_path": sensitive}),
+        text_response("denied"),
+    ]
+
+    config = AgentConfig(self_verify=False)
+    pg = PathGuard(
+        tool_config=config.tools,
+        security_config=config.security,
+        project_dir=tool_context.working_dir,
+    )
+    pm = PermissionManager(config=config.security, path_guard=pg)
+
+    loop = AgentLoop(
+        llm=MockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=config,
+        tool_context=tool_context,
+    )
+    loop._permissions = pm
+
+    conv = Conversation()
+    await loop.run(conv)
+
+    tool_msgs = [m for m in conv.messages if m.tool_result is not None]
+    assert any(m.tool_result.is_error for m in tool_msgs), (
+        "delete_file on ~/.ssh/id_rsa must be DENIED, not silently granted"
+    )

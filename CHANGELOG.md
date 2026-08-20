@@ -4,6 +4,7 @@
 
 ### Fixed 修复
 
+- **A1 fail-open fixed: `delete_file` now routes through PathGuard** — `_check_permission` previously routed only read_file/glob/grep (read) and write_file/edit_file (write); delete_file fell into the unrestricted else branch and was unconditionally GRANTED, bypassing sensitive-path deny, project-boundary checks, and denied_paths. One-line fix: added delete_file to the write routing tuple. Regression test `test_delete_file_routes_through_path_check` verifies ~/.ssh/id_rsa is DENIED. spec.md routing diagram and non-write-step tool stripping lists updated. A1 fail-open 修复：delete_file 此前落入无约束 else 分支被无条件放行，敏感路径拒绝、项目外确认、denied_paths 全部失效。修复：加入 write 路由元组；回归测试验证 ~/.ssh/id_rsa 被拒；spec 路由图与非写步骤剥离列表同步更新。
 - **Dead per-iteration loop fuse revived (found by the spec audit)** — guard 2 ("same tool present in each of the last 15 iterations") could never fire: `AgentState.record_iteration_tools` capped the sliding window at 8 entries while the guard required ≥15. Worse, its unit test passed for the wrong reason (MockLLM repeats its last script entry, so identical args tripped guard 1 instead — a lying test masking dead code). Window cap raised to 15; test rewritten with distinct args per round and now asserts the loop stops exactly at iteration 15. spec 对账审计挖出的死熔断修复：按轮熔断（连续 15 轮同工具）因滑窗上限 8 而永不可达；其测试靠 MockLLM 重复末条脚本误触护栏 1 假通过（撒谎测试掩盖死代码）。窗口上限提至 15，测试改为每轮不同参数并断言恰在第 15 轮熔断。
 
 ### Changed 变更

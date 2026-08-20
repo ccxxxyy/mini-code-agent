@@ -2200,7 +2200,7 @@ Permission check (若已在 _act 阶段预检过则跳过)
     |    (DENY 拦截; ALLOW 整体信任跳过资源检查; 无规则继续路由)
     | 1. 按工具类型路由: bash -> check_command,
     |    read_file/glob/grep -> check_path(read),
-    |    write_file/edit_file -> check_path(write)
+    |    write_file/edit_file/delete_file -> check_path(write)
     | DENIED -> return error ToolResult
     v
 HookManager.run(PRE_TOOL, ctx)
@@ -2739,7 +2739,7 @@ class AgentTeam:
                 member = self._match_member(step.role)
                 allowed_tools = member.allowed_tools if member else None
                 if not step.writes_files:
-                    allowed_tools = [剥离 write_file/edit_file 后的工具名]  # 能力剥夺而非 prompt 自觉
+                    allowed_tools = [剥离 write_file/edit_file/delete_file 后的工具名]  # 能力剥夺而非 prompt 自觉
                 agent_id = await self._manager.spawn(
                     task=角色前缀 + step.description + self._build_dep_context(step, results),
                     isolation=self._config.isolation,
@@ -2752,7 +2752,7 @@ class AgentTeam:
 关键机制：
 
 - **依赖分批**：`PlanStep.depends_on` 声明依赖，依赖全部完成的步骤并行派生，依赖失败的步骤标记失败跳过；`_build_dep_context` 把依赖步骤的产出（截断至 4000 字符）拼进后续步骤的任务描述。
-- **非写步骤强制只读**：`step.writes_files=False` 的步骤被剥夺 `write_file`/`edit_file` 工具——能力移除而非 prompt 劝说。
+- **非写步骤强制只读**：`step.writes_files=False` 的步骤被剥夺 `write_file`/`edit_file`/`delete_file` 工具——能力移除而非 prompt 劝说。
 - **协调者模式**：`TeamConfig.coordinator=True` 时 `Planner` 带 `_COORDINATOR_PREFIX`（纯分派：协调者自己不碰任何文件，全部委派给 Worker），且计划步数上限提升、给 Planner 更深的项目结构扫描。
 - **强弱模型混编**：`ProviderRegistry.create_for_role(config, "planner"/"worker")` 按 `planner_profile` / `worker_profile`（指向命名 LLM 档案，见 §13）为规划和执行分别选模型——强模型规划、弱模型执行。
 
