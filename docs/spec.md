@@ -198,14 +198,15 @@ mini-code-agent/
 
 ```
 +-------------------------------------------------------------------+
-|                    INTERACTION LAYER (ui/)                        |
+|              INTERACTION LAYER (ui/ + remote/)                    |
 |                                                                   |
 |  +----------+ +----------+ +------------+ +-----------------+     |
-|  | Terminal  | | Renderer | |   Input    | |   Slash Cmds    |    |
-|  |  (Rich)  | |(Markdown | |  Handler   | |  + Skills       |     |
-|  |          | | Streaming| |(PromptTk)  | |                 |     |
+|  | Terminal | | Renderer | |   Input    | |  Remote Mode    |     |
+|  |  (Rich)  | |(Markdown | |  Handler   | | (WebSocket srv  |     |
+|  |          | | Streaming| |(PromptTk)  | |  + web_ui)      |     |
 |  +----+-----+ +----+-----+ +-----+------+ +-------+---------+     |
 |       |            |             |                 |              |
+|  Slash Cmds / Skills / plugin_loader -> extensions/               |
 +-------+------------+-------------+-----------------+--------------+
         |      EVENT BUS (events/bus.py)             |
         |  +-------------------------------------+   |
@@ -217,17 +218,21 @@ mini-code-agent/
 |                    v                                              |
 |  +----------------------------------------------------------+     |
 |  |                   Agent Loop (ReAct)                      |    |
-|  |  +----------+  +------------+  +----------------------+   |    |
-|  |  | Planner  |  | SubAgent   |  |   Agent Teams        |   |    |
-|  |  |(Plan Mode|  | Dispatch   |  |  (Coordination)      |   |    |
-|  |  +----------+  +------------+  +----------------------+   |    |
+|  |  +----------+  +------------+  +-------------+  +------+  |    |
+|  |  | Planner  |  | SubAgent   |  | Agent Teams |  | Mail |  |    |
+|  |  |(PlanMode)|  | Dispatch   |  |(Coordinate) |  | box  |  |    |
+|  |  +----------+  +------------+  +-------------+  +------+  |    |
+|  |  +--------------+   (also: task_store / worker /          |    |
+|  |  | Cost Tracker |    spawn_backends / tool_recorder)      |    |
+|  |  +--------------+                                         |    |
 |  +----------+------------------------------------------------+    |
 |             |                                                     |
 |  +----------v------------------------------------------------+    |
 |  |              LLM Provider Abstraction (llm/)              |    |
-|  |   +----------+  +------------+  +------------------+      |    |
-|  |   | OpenAI   |  | Anthropic  |  |  Custom Provider |      |    |
-|  |   +----------+  +------------+  +------------------+      |    |
+|  |  +--------+  +-----------+  +------------------+          |    |
+|  |  | OpenAI |  | Anthropic |  | OpenAI Responses |          |    |
+|  |  +--------+  +-----------+  +------------------+          |    |
+|  |  (ProviderRegistry.register 支持自定义 Provider 注册)     |    |
 |  +------------------------------------------------------------+   |
 |                                                                   |
 +-------------------------------------------------------------------+
@@ -248,10 +253,12 @@ mini-code-agent/
 |  |   Context    | |  Compressor  | |   Persistent Memory  |       |
 |  |   Manager    | |  (auto-trim) | | (project + user)     |       |
 |  +--------------+ +--------------+ +----------------------+       |
-|  +--------------+ +--------------------------------------+        |
-|  | Session Store| |      Memory Extraction               |        |
-|  +--------------+ +--------------------------------------+        |
-|                                                                   |
+|  +--------------+ +--------------------+ +-----------------+      |
+|  | Session Store| | Memory Extraction  | | Tool Result     |      |
+|  |              | | + Recall /         | | Cache (spill)   |      |
+|  |              | |   Consolidation    | |                 |      |
+|  +--------------+ +--------------------+ +-----------------+      |
+|  (also: file_snapshots / project_context / interop)               |
 +-------------------------------------------------------------------+
 |                    SECURITY LAYER (security/)                     |
 |                                                                   |
@@ -259,11 +266,18 @@ mini-code-agent/
 |  | Permission   | |  Path Guard  | |   Worktree Isolation |       |
 |  |  Manager     | |              | |                      |       |
 |  +--------------+ +--------------+ +----------------------+       |
-|  +--------------+ +------------------------------------------+    |
-|  |   Audit      | |   OS Sandbox (bwrap / seatbelt)          |    |
-|  +--------------+ +------------------------------------------+    |
+|  +--------+ +--------------------------------+ +--------------+   |
+|  | Audit  | | OS Sandbox (bwrap / seatbelt)  | |Remote Confirm|   |
+|  +--------+ +--------------------------------+ +--------------+   |
 +-------------------------------------------------------------------+
 ```
+
+补充说明：
+
+- 交互层除终端 UI（`ui/`）外，还包含浏览器远程模式（`remote/`：WebSocket 服务端 `server.py` + 内嵌 Web UI `web_ui.py`）；远程模式下的权限确认由安全层 `remote_confirm.py` 桥接。
+- 斜杠命令、技能与插件加载位于 `extensions/`（`slash_commands.py` / `skills.py` / `plugin_loader.py`，P83 插件机制），不在 `ui/` 中。
+- 引擎层除 Agent Loop 外还有：跨 Agent 邮箱（`core/mailbox.py`）、成本跟踪（`core/cost_tracker.py`），以及后台任务存储 / worker / spawn 后端 / 工具录制（`task_store.py` / `worker.py` / `spawn_backends.py` / `tool_recorder.py`）。
+- 记忆层的工具结果缓存（`memory/tool_result_cache.py`）将超大工具输出溢写到磁盘；记忆召回与固化见 `recall.py` / `consolidation.py`。
 
 数据**自下而上**流转用于安全防御（安全层过滤每个工具调用），**自上而下**传递用户意图（交互层将用户消息送入引擎层），**横向**通过事件总线通信（任意组件可发射事件，任意组件可监听）。
 
@@ -330,10 +344,11 @@ class Conversation:
     system_prompt: str = ""
     messages: list[Message] = field(default_factory=list)
     total_tokens: int = 0                      # Running total
+    # 压缩后由 Compressor 设置；随会话持久化，加载时跳过已归档消息并恢复已读文件状态
+    compact_boundary: dict[str, Any] | None = None
 
     def append(self, message: Message) -> None: ...
     def to_api_messages(self) -> list[dict[str, Any]]: ...
-    def get_messages_by_role(self, role: Role) -> list[Message]: ...
 ```
 
 ### 3.2 Agent 状态 (`core/agent_state.py`)
@@ -351,7 +366,6 @@ class AgentPhase(StrEnum):
     TOOL_CALLING = "tool_calling"    # Executing tool(s)
     OBSERVING = "observing"          # Processing tool results
     RESPONDING = "responding"        # Streaming final answer
-    PLANNING = "planning"            # Plan mode decomposition
     ERROR = "error"                  # Recoverable error state
     TERMINATED = "terminated"        # Agent loop ended
 
@@ -362,21 +376,30 @@ class AgentState:
     phase: AgentPhase = AgentPhase.IDLE
     iteration: int = 0              # Current ReAct loop iteration
     max_iterations: int = 50        # Hard cap (AgentConfig overrides to 80)
+    # 死循环检测：名称+参数签名滑窗（12 条）——同一工具处理不同文件是正常批量
+    recent_tool_names: list[str] = field(default_factory=list)
     last_tool_results: list[ToolResult] = field(default_factory=list)
-    error: Exception | None = None
-    plan: list[PlanStep] | None = None         # Active plan (plan mode)
-    parent_agent_id: str | None = None         # If this is a sub-agent
-    metadata: dict[str, Any] = field(default_factory=dict)
+    # 每轮迭代用到的工具名集合（滑窗 15，与熔断阈值一致）——真死循环是每轮都调同一个工具
+    iteration_tools: list[frozenset[str]] = field(default_factory=list)
+
+    def record_iteration_tools(self, names: set[str]) -> None: ...
+    def record_tool_call(self, name: str, args_key: str = "") -> None: ...
 
     @property
     def is_terminal(self) -> bool:
         return self.phase in (AgentPhase.TERMINATED, AgentPhase.ERROR)
 
-    def transition(self, new_phase: AgentPhase) -> None:
-        """Validates and executes a state transition."""
+    def transition(self, new_phase: AgentPhase) -> AgentPhase:
+        """No validation -- sets the new phase and returns the old one."""
         ...
+```
 
+`record_tool_call()` / `record_iteration_tools()` 供 AgentLoop 做死循环检测：前者记录
+`name(args_key)` 签名（只有完全相同的重复调用才算真死循环），后者记录每轮迭代的工具名集合。
 
+计划模型 `PlanStep` 与 `Plan` 定义在 `core/planner.py`（与 Planner 同文件，见 4.15）：
+
+```python
 @dataclass
 class PlanStep:
     """A single step in a structured plan."""
@@ -387,6 +410,15 @@ class PlanStep:
     result: str = ""
     depends_on: list[int] = field(default_factory=list)
     writes_files: bool = False
+
+
+@dataclass
+class Plan:
+    task: str
+    steps: list[PlanStep] = field(default_factory=list)
+
+    @property
+    def is_complete(self) -> bool: ...   # all steps completed or failed
 ```
 
 ### 3.3 会话 (`models/session.py`)
@@ -400,7 +432,7 @@ from pathlib import Path
 
 @dataclass
 class SessionMetadata:
-    session_id: str                  # UUID
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     created_at: datetime = field(default_factory=datetime.now)
     last_active: datetime = field(default_factory=datetime.now)
     project_dir: Path | None = None
@@ -416,11 +448,10 @@ class Session:
     """A complete agent session that can be persisted and restored."""
     metadata: SessionMetadata = field(default_factory=SessionMetadata)
     conversation: Conversation = field(default_factory=Conversation)
-
-    def serialize(self) -> dict: ...
-    @classmethod
-    def deserialize(cls, data: dict) -> Session: ...
 ```
+
+Session 本身是纯数据容器——序列化/反序列化（JSON 落盘、加载、按 `compact_boundary`
+跳过已归档消息）由 `memory/session_store.py` 的 SessionStore 负责。
 
 ### 3.4 配置 (`models/config.py`)
 
@@ -481,6 +512,14 @@ class MemoryConfig:
     persistent_memory_dir: str = "~/.mini-agent/memory"
     project_memory_file: str = ".mini-agent/memory.json"
     auto_extract: bool = True
+    spill_threshold_chars: int = 50_000   # 超过此字符数的工具结果溢写磁盘（0 = 禁用）
+    aggregate_spill_chars: int = 200_000  # 单轮工具结果累计超此值时按大小降序强制溢写
+    recall_threshold: int = 10            # 记忆超过此数量时用 LLM 选择性召回
+    recall_top_k: int = 5
+    consolidation_threshold: int = 20     # 条目超过此数量时用 LLM 语义合并相关记忆
+    session_cleanup_days: int = 30        # 旧会话启动时自动清理（0 = 禁用）
+    compress_max_failures: int = 3        # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
+    llm_summarize: bool = True            # LLM 语义摘要压缩（False = 抽取式截断）
 
 
 @dataclass
@@ -491,20 +530,64 @@ class SecurityConfig:
         "rm -rf /", "sudo", "curl|sh", "wget|sh"
     ])
     worktree_base_dir: str = ".mini-agent/worktrees"
+    worktree_max_age_days: int = 7        # 过期 worktree 启动时自动清理（0 = 禁用）
+    sandbox: bool = False                 # OS 级沙箱（Linux bwrap / macOS seatbelt）
+    sandbox_auto_allow: bool = False
+    sandbox_network: bool = False
+
+
+@dataclass
+class CostConfig:
+    """成本跟踪：每模型价格与会话预算 (P29)。"""
+    pricing: dict = field(default_factory=dict)  # model -> {"input": 元/1M token, "output": ...}
+    budget: float = 0.0                   # 会话预算，0 不限
+    total_budget: float = 0.0             # 总账预算，0 不限
+    currency: str = "¥"
+
+
+@dataclass
+class ContextConfig:
+    """上下文感知：项目指令文件注入 (P25)。"""
+    instruction_files: list[str] = field(       # 优先级顺序，第一个命中即用
+        default_factory=lambda: ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
+    )
+    user_instructions_file: str = "~/.mini-agent/instructions.md"
+    max_chars: int = 8000
 
 
 @dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
+    # 用于 /model 切换的命名 LLM 档案
+    llm_profiles: dict[str, LLMConfig] = field(default_factory=dict)
+    # 强弱模型混编：Planner 和 SubAgent worker 的 profile 名，空 = 使用主模型
+    planner_profile: str = ""
+    worker_profile: str = ""
     tools: ToolConfig = field(default_factory=ToolConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 80
+    # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）
+    hooks: list = field(default_factory=list)
+    self_verify: bool = False
+    # 流式期间工具调用一组装完成就开始执行
+    streaming_tool_execution: bool = True
     enable_plan_mode: bool = False  # 启动时是否开启 plan 模式（app.py 读取此值赋给 agent_loop.plan_mode）
     skill_dirs: list[str] = field(default_factory=lambda: [
         "./skills", "~/.mini-agent/skills"
     ])
+    # 事件监听插件目录：*.py 文件监听总线全部事件
+    listener_dirs: list[str] = field(
+        default_factory=lambda: ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
+    )
+    # 插件目录 (P83)：*.py 文件注册工具/命令/技能；pip 包走 mini_agent.plugins entry point
+    plugin_dirs: list[str] = field(
+        default_factory=lambda: ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
+    )
+    disabled_plugins: list[str] = field(default_factory=list)  # 按 entry-point 名或文件名禁用
     theme: str = "default"
 ```
 
@@ -526,8 +609,6 @@ class PermissionScope(StrEnum):
     TOOL = "tool"            # Permission for a specific tool
     PATH = "path"            # Permission for a file/directory path
     COMMAND = "command"      # Permission for a bash command pattern
-    MCP = "mcp"              # Permission for an MCP server action
-    NETWORK = "network"      # Permission for network access
 
 
 @dataclass(frozen=True)
@@ -573,13 +654,27 @@ class Application:
     # self.llm_provider: LLMProvider
     # self.tool_registry: ToolRegistry
     # self.permission_manager: PermissionManager
+    # self.hook_manager: HookManager
     # self.context_manager: ContextManager
     # self.session: Session
+    # self.session_store: SessionStore
     # self.agent_loop: AgentLoop
     # self.terminal: Terminal
     # self.mcp_manager: MCPManager
+    # self.worktree_manager: WorktreeManager
+    # self.subagent_manager: SubAgentManager
+    # self.mailbox: Mailbox                    # 跨 Agent 收件箱（主 Agent 注册为 "main"）
+    # self.audit_logger: AuditLogger           # /audit -- 工具调用写 JSONL
+    # self.task_store: TaskStore               # /todo -- 持久化任务系统
+    # self.tool_recorder: ToolRecorder         # /record + /replay
+    # self.cost_tracker: CostTracker           # 按模型计价 token 用量
+    # self.result_cache: ToolResultCache       # 超大工具结果溢写磁盘
+    # self.trace_renderer: TraceRenderer       # /trace 实时内部状态
+    # self.teach_renderer: TeachRenderer       # /explain 工具解释
     # self.skill_registry: SkillRegistry
     # self.slash_commands: SlashCommandRegistry
+    # self.loaded_listeners: list[str]         # 事件监听插件
+    # self.loaded_plugins: list[LoadedPlugin]  # P83 插件生态
 ```
 
 ### 4.2 `core/agent_loop.py` -- ReAct Agent Loop (主循环)
@@ -587,19 +682,36 @@ class Application:
 职责：编排 think-act-observe 循环。接收用户消息，调用 LLM，分发工具调用，收集结果，循环直到 LLM 产生最终回答或达到上限。
 
 ```python
+class IncrementalAssembler:
+    """Detects completed tool calls mid-stream (streaming tool execution).
+    在流式过程中检测已组装完成的工具调用，一确定完成就产出 ToolCall。"""
+
+    def feed(self, chunk: StreamChunk) -> list[ToolCall]: ...
+
+
 class AgentLoop:
     def __init__(
         self,
         llm: LLMProvider,
         tool_registry: ToolRegistry,
-        context_manager: ContextManager,
-        permission_manager: PermissionManager,
         event_bus: EventBus,
         config: AgentConfig,
+        tool_context: ToolContext,
+        permission_manager: PermissionManager | None = None,
+        hook_manager: HookManager | None = None,
+        context_manager: ContextManager | None = None,
     ): ...
 
-    async def run(self, user_message: str) -> AsyncIterator[Event]:
-        """Execute the full ReAct loop for a user message. Yields events."""
+    async def run(self, conversation: Conversation) -> str:
+        """Execute the full ReAct loop. Appends messages to the
+        conversation, returns the final assistant text response.
+        Streaming output goes through on_stream_delta etc. callbacks;
+        events go through the EventBus."""
+        ...
+
+    def _deliver_mail(self, conversation: Conversation) -> None:
+        """Drain the mailbox at the start of each iteration and inject
+        cross-agent messages into the conversation."""
         ...
 
     async def _think(self, conversation: Conversation) -> LLMResponse:
@@ -615,18 +727,28 @@ class AgentLoop:
         Runs hooks and permissions."""
         ...
 
-    async def _observe(self, results: list[ToolResult]) -> None:
-        """Append tool results to conversation, check context limits."""
+    async def _run_tool_pipeline(self, ...) -> ToolResult:
+        """Single tool call pipeline: PRE_TOOL hooks -> permission ->
+        execute -> POST_TOOL hooks -> result spill/snapshot."""
         ...
 
-    async def _should_continue(self) -> bool:
-        """Check iteration limits, token budgets, user cancellation."""
+    async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
+        """Tool-level gate first (check_tool), then resource-level
+        command/path checks."""
+        ...
+
+    def _should_continue(self) -> bool:
+        """Check iteration limits, loop detection, user cancellation."""
         ...
 
     def cancel(self) -> None:
         """Cancel the running loop (user interrupt)."""
         ...
 ```
+
+工具结果的追加（原 `_observe`）内联在 `run()` 的迭代体中；`streaming_tool_execution`
+开启时，`IncrementalAssembler` 让不需要弹窗确认的工具（`would_ask()` 预判）在 LLM
+仍在流式输出期间提前提交执行。
 
 ### 4.3 `llm/base.py` -- LLM Provider 抽象层
 
@@ -635,15 +757,6 @@ class AgentLoop:
 ```python
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
-
-
-@dataclass
-class StreamChunk:
-    """A single chunk from a streaming LLM response."""
-    delta: str = ""                       # Text content delta
-    tool_call_delta: ToolCallDelta | None = None
-    finish_reason: str | None = None      # "stop", "tool_calls", "length"
-    usage: TokenUsage | None = None       # Only on final chunk
 
 
 @dataclass
@@ -660,55 +773,52 @@ class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+
+@dataclass
+class StreamChunk:
+    """A single chunk from a streaming LLM response."""
+    delta: str = ""                       # Text content delta
+    thinking: str = ""                    # Extended thinking delta
+    tool_call_deltas: list[ToolCallDelta] = field(default_factory=list)
+    finish_reason: str | None = None      # "stop", "tool_calls", "length"
+    usage: TokenUsage | None = None       # Only on final chunk
 
 
 @dataclass
 class LLMResponse:
     """Completed LLM response (assembled from stream or non-streaming)."""
     content: str = ""
+    thinking: str = ""                    # Extended thinking content (Claude)
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str = "stop"
     model: str = ""
-    thinking: str = ""                    # Extended thinking content (Claude)
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMProvider(ABC):
     """Abstract base for all LLM providers."""
 
-    def __init__(self, config: LLMConfig): ...
+    async def prepare(self) -> None:
+        """Optional warmup before first use (e.g. context window probing).
+        Default: no-op. 首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
 
     @abstractmethod
     async def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Streaming completion -- yields chunks as they arrive."""
         ...
 
     @abstractmethod
     def count_tokens(self, text: str) -> int:
-        """Count tokens for the given text using this provider's tokenizer."""
+        """Estimate token count for the given text."""
         ...
-
-    @abstractmethod
-    def format_tools(self, tools: list[Tool]) -> list[dict[str, Any]]:
-        """Convert internal Tool objects to this provider's tool format."""
-        ...
-
-    async def prepare(self) -> None:
-        """Optional warmup before first use (e.g. context window probing).
-        Default: no-op. 首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
-
-# Module-level helpers (llm/base.py):
-# assemble_response(chunks) -- assemble StreamChunk list into LLMResponse
-# complete(llm, messages, tools, **kwargs) -- stream + assemble in one call
-# Both are standalone functions, not methods -- works with duck-typed LLM objects.
 
     @property
     @abstractmethod
@@ -716,6 +826,19 @@ class LLMProvider(ABC):
         """Maximum context window size for the configured model."""
         ...
 ```
+
+模块级辅助函数（独立函数而非方法，可用于鸭子类型的 LLM 对象）：
+
+- `assemble_response(chunks: list[StreamChunk]) -> LLMResponse` -- 将 stream chunk
+  列表组装为完整响应（内容、thinking、工具调用增量拼装、usage 取最大值）
+- `complete(llm, messages, tools=None, **kwargs) -> LLMResponse` -- 非流式补全：
+  一次调用完成流式收集和组装
+- `compute_retry_delay(attempt, retry_after=None) -> float` -- 可重试 HTTP 失败
+  （429/500/502/503/529）的退避时长：优先尊重 Retry-After 头，否则指数退避带抖动
+  （1s -> 16s，共 5 次约 31 秒总耐心）
+
+工具 schema 到 API 格式的转换不再是 Provider 方法（原 `format_tools` 已删除）——
+各 Provider 直接消费 `ToolRegistry.get_schemas()` 产出的 JSON Schema。
 
 ### 4.4 `tools/base.py` -- 工具系统
 
@@ -767,8 +890,12 @@ class ToolContext:
     working_dir: Path
     session: Session
     event_bus: EventBus
-    permission_manager: PermissionManager
     config: AgentConfig
+    subagent_manager: SubAgentManager | None = None
+    mcp_manager: Any = None
+    # Cross-agent messaging: shared Mailbox + this agent's identity
+    mailbox: Any = None
+    agent_id: str = "main"
 
 
 class Tool(ABC):
@@ -794,6 +921,10 @@ class Tool(ABC):
         Manual path: basic required/default checks. Raises ValueError."""
         ...
 
+    def error_result(self, call_id: str, message: str) -> ToolResult:
+        """Helper to build an error ToolResult (is_error=True)."""
+        ...
+
 
 class ToolRegistry:
     """Central registry of all available tools."""
@@ -803,7 +934,7 @@ class ToolRegistry:
 
     def register(self, tool: Tool) -> None: ...
     def unregister(self, name: str) -> None: ...
-    def get(self, name: str) -> Tool: ...
+    def get(self, name: str) -> Tool | None: ...
     def list_tools(self) -> list[Tool]: ...
     def get_schemas(self) -> list[dict[str, Any]]: ...
     def clone(self) -> ToolRegistry:
@@ -826,13 +957,17 @@ from typing import Callable, Awaitable
 
 
 class HookStage(StrEnum):
-    PRE_TOOL = "pre_tool"            # Before tool execution
-    POST_TOOL = "post_tool"          # After tool execution
-    PRE_LLM = "pre_llm"             # Before LLM call
-    POST_LLM = "post_llm"           # After LLM response
+    STARTUP = "startup"              # Application startup
+    SHUTDOWN = "shutdown"            # Application shutdown
     SESSION_START = "session_start"
     SESSION_END = "session_end"
     USER_INPUT = "user_input"        # After user submits message
+    TURN_START = "turn_start"        # Before each user turn
+    TURN_END = "turn_end"            # After each user turn
+    PRE_LLM = "pre_llm"             # Before LLM call
+    POST_LLM = "post_llm"           # After LLM response
+    PRE_TOOL = "pre_tool"            # Before tool execution
+    POST_TOOL = "post_tool"          # After tool execution
 
 
 @dataclass
@@ -841,8 +976,6 @@ class HookContext:
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_result: ToolResult | None = None
-    message: Message | None = None
-    session: Session | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -855,8 +988,8 @@ class HookAction(StrEnum):
 
 @dataclass
 class HookResult:
-    action: HookAction
-    modified_context: HookContext | None = None
+    action: HookAction = HookAction.CONTINUE
+    modified_args: dict[str, Any] | None = None
     reason: str = ""
 
 
@@ -878,32 +1011,33 @@ class HookManager:
 
     async def run(self, ctx: HookContext) -> HookResult:
         """Run all hooks for the given stage in priority order.
-        Short-circuits on BLOCK. Returns final result."""
+        Short-circuits on BLOCK and CONFIRM. Returns final result."""
         ...
 ```
 
 ### 4.6 `tools/mcp/client.py` -- MCP 客户端
 
-职责：管理与 MCP 服务器的连接，发现工具，代理工具调用。使用 MCP Python SDK v2 的 `Client` 高级 API。
+职责：管理与 MCP 服务器的连接，发现工具，代理工具调用。零 SDK 依赖——自研 JSON-RPC 传输层（`MCPTransport` / `StdioTransport` / `HTTPTransport`，见 `tools/mcp/transport.py`）。
 
 ```python
 class MCPManager:
     """Manages multiple MCP server connections."""
 
-    def __init__(
-        self, config: MCPConfig, tool_registry: ToolRegistry, event_bus: EventBus
-    ): ...
+    def __init__(self): ...
+        # self._connections: dict[str, MCPServerConnection] = {}
+        # self._dispatch_tools: dict[str, list[dict[str, Any]]] = {}
 
     async def connect_server(
-        self, name: str, server_config: MCPServerConfig
-    ) -> None:
-        """Connect to an MCP server, discover its tools, register them."""
+        self, name: str, config: MCPServerConfig, tool_registry: ToolRegistry
+    ) -> int:
+        """Connect to an MCP server, discover its tools, register them.
+        Returns the number of tools discovered."""
         ...
 
     async def disconnect_server(self, name: str) -> None: ...
     async def disconnect_all(self) -> None: ...
     def list_servers(self) -> list[str]: ...
-    def list_server_tools(self, server_name: str) -> list[ToolSchema]: ...
+    def list_server_tools(self, server_name: str) -> list[dict[str, Any]]: ...
 
     async def call_tool(
         self, server_name: str, tool_name: str, arguments: dict
@@ -920,20 +1054,18 @@ class MCPManager:
 class ContextManager:
     """Tracks and manages the conversation context window."""
 
-    def __init__(
-        self,
-        config: MemoryConfig,
-        llm_provider: LLMProvider,
-        compressor: Compressor,
-        event_bus: EventBus,
-    ): ...
+    def __init__(self, config: MemoryConfig): ...
 
-    def add_message(self, message: Message) -> None:
-        """Add a message and update token counts."""
+    def set_compressor(self, compressor) -> None:
+        """Inject the compressor after init (avoids circular import)."""
         ...
 
-    def get_messages_for_api(self) -> list[dict[str, Any]]:
-        """Return messages that fit within the context window."""
+    def count_message(self, message: Message) -> int:
+        """Count and cache tokens for a message."""
+        ...
+
+    def update_total(self, conversation: Conversation) -> int:
+        """Recount total tokens for the conversation."""
         ...
 
     async def check_and_compress(self, conversation: Conversation) -> bool:
@@ -953,7 +1085,17 @@ class ContextManager:
         ...
 
     @property
+    def total_tokens(self) -> int: ...
+    @property
     def tokens_remaining(self) -> int: ...
+    @property
+    def needs_compression(self) -> bool: ...
+    @property
+    def needs_hard_compression(self) -> bool: ...
+
+    async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
+        """Last-resort guard: force-truncate if conversation exceeds max_tokens."""
+        ...
 ```
 
 ### 4.8 `memory/persistent.py` -- 跨会话记忆
@@ -978,19 +1120,18 @@ class PersistentMemory:
     async def save_user_memory(self, entries: list[MemoryEntry]) -> None: ...
     async def add_user_memory(self, entry: MemoryEntry) -> None: ...
 
-    async def search_memory(
-        self, query: str, scope: str = "all"
+    async def search(
+        self, query: str, project_dir: Path | None = None
     ) -> list[MemoryEntry]: ...
 
 
 @dataclass
 class MemoryEntry:
-    id: str
-    content: str                      # The memorized fact/learning
-    source: str                       # "project" | "user" | "extracted"
-    created_at: datetime = field(default_factory=datetime.now)
+    id: str = ""                      # auto-generated in __post_init__
+    content: str = ""                 # The memorized fact/learning
+    source: str = "user"              # "project" | "user" | "extracted"
+    created_at: str = ""              # ISO string, set in __post_init__
     tags: list[str] = field(default_factory=list)
-    relevance_score: float = 1.0      # For search ranking
 ```
 
 ### 4.9 `security/permission.py` -- 权限管理器
@@ -1024,15 +1165,28 @@ class PermissionManager:
     def save_rule_to_file(path: Path, rule: PermissionRule) -> None:
         """Append a rule to a TOML permission file, creating if needed."""
         ...
-    def load_rules_from_config(self, config: SecurityConfig) -> None: ...
+
+    def load_rule_files(
+        self, user_file: Path | None = None, project_file: Path | None = None,
+    ) -> int:
+        """Load user-defined rules from TOML files ([commands]/[paths]/
+        [tools] sections with allow/deny lists). Returns rule count."""
+        ...
 
     async def check(self, request: PermissionRequest) -> PermissionDecision:
-        """Evaluate a permission request. May emit
-        UserConfirmRequired event."""
+        """Universal entry -- dispatches by scope:
+        COMMAND -> _check_command_request (dangerous-pattern confirmation)
+        PATH    -> _check_path_request (DENY rules -> PathGuard -> generic)
+        TOOL    -> _check_generic (rules -> session grants -> default mode)"""
+        ...
+
+    async def check_tool(self, tool_name: str) -> PermissionDecision | None:
+        """Tool-level gate: explicit TOOL rules and session grants only.
+        None = no match, caller falls through to resource-level checks."""
         ...
 
     async def check_path(
-        self, path: Path, operation: str
+        self, path: Path, operation: str = "read", tool_name: str = ""
     ) -> PermissionDecision:
         """Convenience: check file path access permission."""
         ...
@@ -1041,12 +1195,26 @@ class PermissionManager:
         """Convenience: check bash command permission."""
         ...
 
+    @staticmethod
+    def is_dangerous_command(command: str) -> bool:
+        """Match against DANGEROUS_COMMAND_PATTERNS (regex)."""
+        ...
+
+    def would_ask(self, tool_name: str, arguments: dict) -> bool:
+        """Non-interactive peek: would this call pop a confirm dialog?
+        Used by streaming tool execution -- never prompts, no side effects.
+        非交互预判：这次调用会不会弹确认框？供流式工具执行使用。"""
+        ...
+
     def grant_session_permission(
         self, scope: PermissionScope, pattern: str
     ) -> None:
         """User granted permission for remainder of session."""
         ...
 ```
+
+配置规则（`allowed_commands` / `denied_commands` / `denied_paths`）在 `__init__` 内通过
+私有方法 `_load_rules_from_config()` 加载，外部无需调用。
 
 ### 4.10 `ui/terminal.py` -- TUI 终端应用
 
@@ -1092,37 +1260,56 @@ class Terminal:
 ```python
 @dataclass
 class Skill:
-    """A loadable skill pack: prompt + tools + resources."""
+    """A loadable skill pack: prompt + tools."""
     name: str
-    description: str
-    prompt: str                        # System prompt addition
-    trigger_patterns: list[str]        # When to auto-suggest this skill
-    tools: list[str]                   # Tool names this skill needs
-    resources: dict[str, str]          # Name -> content of resource files
+    description: str = ""
+    prompt: str = ""                   # System prompt addition
+    trigger_patterns: list[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
     source_path: Path | None = None
 
 
 class SkillRegistry:
-    """Discovers, loads, and manages skill packs."""
+    """Discovers, loads, and manages skill packs from SKILL.md files."""
 
-    def __init__(self, skill_dirs: list[Path], event_bus: EventBus): ...
+    def __init__(self, skill_dirs: list[Path] | None = None): ...
 
-    async def load_all(self) -> None:
+    def load_all(self) -> None:
         """Scan skill directories and load all valid skill packs."""
+        ...
+
+    def register(self, skill: Skill) -> None:
+        """Programmatically register a skill (plugin API, P83).
+        Survives load_all()/reload() -- kept in a separate dict merged
+        after each rescan."""
         ...
 
     def get(self, name: str) -> Skill | None: ...
     def list_skills(self) -> list[Skill]: ...
+    def is_active(self, name: str) -> bool: ...
 
-    async def activate(
-        self, name: str, conversation: Conversation
-    ) -> None:
-        """Activate a skill -- inject its prompt and make its tools
-        available."""
+    def activate(self, name: str, conversation: Conversation) -> bool:
+        """Activate a skill -- inject its prompt into the conversation.
+        Returns False for unknown skills."""
         ...
 
-    async def deactivate(self, name: str) -> None: ...
+    def deactivate(self, name: str, conversation: Conversation) -> bool:
+        """Remove the skill's prompt from the conversation."""
+        ...
+
     def match_triggers(self, user_message: str) -> list[Skill]: ...
+
+    def reload(self, conversation: Conversation) -> tuple[int, list[str]]:
+        """Hot-reload: rescan disk, update active skill prompts (P56).
+        Returns (loaded_count, lost_skills)."""
+        ...
+
+    async def install(self, source: str, target_dir: Path) -> str:
+        """Install a skill from a local path or git URL (P55).
+        Returns the skill name."""
+        ...
+
+    def uninstall(self, name: str, target_dir: Path) -> bool: ...
 ```
 
 ### 4.12 `extensions/slash_commands.py` -- 斜杠命令
@@ -1155,10 +1342,10 @@ class SlashCommandRegistry:
 
     def is_slash_command(self, text: str) -> bool: ...
 
-    # Built-in commands registered in __init__ (25 visible + 1 hidden):
+    # Built-in commands (26 visible + 1 hidden):
     # /help, /clear, /status, /model, /compact, /memory, /session,
-    # /plan, /tools, /skill, /allow, /deny, /exit, /undo, /fork,
-    # /trace, /explain, /audit, /theme, /spawn, /team, /todo,
+    # /plan, /tools, /skill, /plugins, /allow, /deny, /exit, /undo,
+    # /fork, /trace, /explain, /audit, /theme, /spawn, /team, /todo,
     # /cost, /record, /replay, /quit (hidden alias for /exit)
 ```
 
@@ -1166,22 +1353,28 @@ class SlashCommandRegistry:
 
 ```python
 class SubAgent:
-    """An independent agent that runs in isolation
+    """An independent agent that runs a single task in isolation
     (possibly in a worktree)."""
 
     def __init__(
         self,
         task: str,
-        parent_agent_id: str,
         llm: LLMProvider,
         tool_registry: ToolRegistry,
         config: AgentConfig,
         event_bus: EventBus,
+        working_dir: Path,
         worktree_path: Path | None = None,
+        allowed_tools: list[str] | None = None,
+        model_name: str = "",
+        agent_type: AgentTypeDefinition | None = None,  # 类型档案：提示词/工具/迭代预算
+        mailbox: Mailbox | None = None,
+        agent_id: str | None = None,
+        peers: list[tuple[str, str, str]] | None = None,  # (id, name, task) 同伴列表
+        name: str = "",
+        permission_manager: PermissionManager | None = None,
     ): ...
 
-    @property
-    def agent_id(self) -> str: ...
     @property
     def status(self) -> AgentPhase: ...
 
@@ -1195,34 +1388,70 @@ class SubAgentResult:
     task: str
     success: bool
     output: str
-    tool_calls_made: int
-    tokens_used: int
+    tool_calls_made: int = 0
+    tokens_used: int = 0
     worktree_path: Path | None = None
     error: str | None = None
+
+
+@dataclass
+class AgentSnapshot:
+    """Point-in-time view of an active sub-agent (progress display)."""
+    agent_id: str
+    task: str
+    phase: str
+    tool_calls: int
+    elapsed_seconds: float
 
 
 class SubAgentManager:
     """Manages spawning, tracking, and collecting results
     from sub-agents."""
 
-    def __init__(self, config: AgentConfig, event_bus: EventBus): ...
+    def __init__(
+        self,
+        llm: LLMProvider,
+        tool_registry: ToolRegistry,
+        config: AgentConfig,
+        event_bus: EventBus,
+        working_dir: Path,
+        worktree_manager=None,
+        model_name: str = "",
+        mailbox: Mailbox | None = None,
+        confirm_callback: ConfirmCallback | None = None,
+    ): ...
 
     async def spawn(
         self,
         task: str,
-        parent_agent_id: str,
         isolation: str = "none",     # "none" | "worktree"
+        allowed_tools: list[str] | None = None,
+        agent_type: str | None = None,
+        agent_id: str | None = None,
+        peers: list[tuple[str, str, str]] | None = None,
+        name: str = "",
     ) -> str:
-        """Spawn a sub-agent. Returns agent_id."""
+        """Spawn a sub-agent running in the background. Returns agent_id."""
         ...
 
     async def spawn_parallel(
         self,
         tasks: list[str],
-        parent_agent_id: str,
         isolation: str = "none",
+        allowed_tools: list[str] | None = None,
+        agent_type: str | None = None,
+        names: list[str] | None = None,
     ) -> list[str]:
-        """Spawn multiple sub-agents in parallel."""
+        """Spawn multiple sub-agents concurrently. Ids are pre-generated
+        so siblings can message each other via the mailbox."""
+        ...
+
+    async def spawn_pane(
+        self, task: str, name: str = "",
+        agent_type: str | None = None, timeout: float = 900.0,
+    ) -> str:
+        """Spawn a sub-agent in a visible terminal pane (separate
+        process, 6.4). Requires tmux / Windows Terminal."""
         ...
 
     async def wait(
@@ -1236,6 +1465,8 @@ class SubAgentManager:
     def cancel(self, agent_id: str) -> None: ...
     def cancel_all(self) -> None: ...
     def list_active(self) -> list[str]: ...
+    def get_status(self, agent_id: str) -> AgentPhase | None: ...
+    def active_snapshots(self) -> list[AgentSnapshot]: ...
 ```
 
 ### 4.14 `core/team.py` -- 多 Agent 团队
@@ -1245,44 +1476,246 @@ class SubAgentManager:
 class TeamMember:
     name: str
     role: str                          # e.g. "frontend", "backend", "tester"
-    system_prompt_addition: str = ""
     allowed_tools: list[str] | None = None
-    worktree_branch: str = ""
 
 
 @dataclass
 class TeamConfig:
     name: str
-    members: list[TeamMember]
-    coordination_strategy: str = "orchestrator"
-    # orchestrator | peer | pipeline
+    members: list[TeamMember] = field(default_factory=list)
+    isolation: str = "none"            # "none" | "worktree"
     coordinator: bool = False  # P45: Planner pure-dispatch mode
 
 
+@dataclass
+class TeamRunReport:
+    """Full record of one team run: the plan and per-step results."""
+    task: str
+    plan: Plan
+    results: list[SubAgentResult] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool: ...     # all steps succeeded
+    def summary(self) -> str: ...      # human-readable per-step report
+
+
 class AgentTeam:
-    """Coordinates multiple agents working on a shared project."""
+    """Orchestrator-strategy team: decompose task, assign to members,
+    collect results."""
 
     def __init__(
         self,
         config: TeamConfig,
-        llm: LLMProvider,
-        tool_registry: ToolRegistry,
+        planner: Planner,
         subagent_manager: SubAgentManager,
-        event_bus: EventBus,
     ): ...
 
-    async def start(self, task: str) -> None:
-        """Start the team on a task. Orchestrator decomposes
-        and assigns."""
+    async def start(
+        self, task: str, timeout: float | None = None
+    ) -> TeamRunReport:
+        """Run the full orchestration: decompose -> assign -> spawn ->
+        collect. Steps run in dependency batches -- steps whose
+        depends_on are all satisfied spawn in parallel; a step whose
+        dependency failed is skipped as failed."""
         ...
 
-    async def coordinate(self) -> None:
-        """Orchestrator loop -- monitor progress, resolve conflicts,
-        merge results."""
+    def stop(self) -> None:
+        """Cancel all active sub-agents."""
+        ...
+```
+
+### 4.15 `core/planner.py` -- 计划模式
+
+职责：通过 LLM 将任务分解为结构化计划（PlanStep/Plan 数据模型见 3.2）。
+
+```python
+class Planner:
+    """Decomposes tasks into structured plans using the LLM."""
+
+    def __init__(
+        self, llm: LLMProvider, max_steps: int = 5, coordinator: bool = False
+    ): ...
+
+    async def decompose(self, task: str, context: str = "") -> Plan:
+        """Ask the LLM to break a task into subtasks (JSON array output,
+        tolerates markdown fences). Sanitizes depends_on (no self/forward
+        refs); if no step is marked writes_files, the last step gets it."""
+        ...
+```
+
+`coordinator=True`（P45）时注入协调者前缀 prompt——Planner 只分解和分派，
+全部文件操作交给 Worker，`max_steps` 提升到至少 8。
+
+### 4.16 `core/mailbox.py` -- 跨 Agent 收件箱
+
+职责：Agent 间消息传递。每个 Agent 一个 JSON 收件箱文件（共享目录 + 文件锁），
+跨进程安全——同进程 SubAgent 和独立窗格 worker 进程都能收发。
+
+```python
+@dataclass
+class MailMessage:
+    sender: str
+    recipient: str
+    content: str
+    timestamp: str = ""
+    type: str = "text"               # text | request | response
+    request_id: str = ""
+    approve: bool | None = None
+    read: bool = False
+
+
+class Mailbox:
+    def __init__(self, base_dir: Path): ...
+
+    def register(self, agent_id: str, name: str = "") -> None: ...
+    def unregister(self, agent_id: str) -> None: ...
+    def resolve(self, recipient: str) -> str | None:  # id 或别名 -> id
+        ...
+    def send(
+        self, sender: str, recipient: str, content: str,
+        type: str = "text", request_id: str = "", approve: bool | None = None,
+    ) -> bool: ...
+    def drain(self, agent_id: str) -> list[MailMessage]: ...
+    def peers(self, exclude: str | None = None) -> list[str]: ...
+    def reset_all(self) -> None: ...    # 新会话清掉上一会话留痕
+```
+
+### 4.17 `core/task_store.py` -- 持久化任务系统
+
+职责：项目级磁盘任务列表（`.mini-agent/tasks.json`），`/todo` 命令与任务工具使用。
+
+```python
+@dataclass
+class TaskRecord:
+    id: str = ""                     # task_ + uuid[:8]，自动生成
+    description: str = ""
+    status: str = "pending"          # pending | in_progress | completed | failed
+    blocked_by: list[str] = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+    tags: list[str] = field(default_factory=list)
+
+
+class TaskStore:
+    def __init__(self, project_dir: Path): ...
+
+    def load(self) -> list[TaskRecord]: ...
+    def save(self, tasks: list[TaskRecord]) -> None: ...
+    def add(self, task: TaskRecord) -> None: ...
+    def get(self, query: str) -> TaskRecord | None:   # id 前缀或描述模糊匹配
+        ...
+    def update(self, query: str, **fields) -> TaskRecord | None: ...
+    def remove(self, query: str) -> bool: ...
+    def clear_done(self) -> int: ...
+    def find_unblocked_by(self, task_id: str) -> list[TaskRecord]: ...
+```
+
+### 4.18 `core/cost_tracker.py` -- 成本跟踪器
+
+职责：订阅 LLMResponseEvent，按模型累计 token 用量并按 `[cost]` 配置计价。
+两个时间范围：会话级（内存）和从始至终（总账文件 `~/.mini-agent/cost_ledger.json`）。
+
+```python
+class CostTracker:
+    def __init__(self, config: CostConfig, ledger_path: Path | None = None): ...
+
+    def attach(self, bus) -> None: ...            # 订阅 LLMResponseEvent
+    def total_cost(self) -> float: ...            # 会话累计成本
+    def budget_status(self) -> tuple[float, str]: ...       # (占比, ok|warn|over)
+    def total_budget_status(self) -> tuple[float, str]: ...
+    def end_turn(self) -> tuple[float | None, dict[str, int]]: ...
+    def summary_lines(self) -> list[str]: ...     # /cost 展示
+    def flush_to_ledger(self) -> None: ...        # 退出时并入总账
+    def reset_ledger(self) -> None: ...           # /cost reset
+```
+
+### 4.19 `extensions/plugin_loader.py` -- 插件生态 (P83)
+
+职责：从两处发现并加载插件——pip 包（`mini_agent.plugins` entry-point 群组）和
+本地插件目录（`plugin_dirs` 下的 `*.py` 文件）。插件模块实现四个可选钩子之一：
+
+- `register(ctx: PluginContext)` -- 完全控制，优先于细粒度钩子
+- `register_tools(registry: ToolRegistry)`
+- `register_commands(registry: SlashCommandRegistry)`
+- `register_skills(registry: SkillRegistry)`
+
+```python
+@dataclass
+class PluginContext:
+    tool_registry: ToolRegistry
+    slash_commands: SlashCommandRegistry
+    skill_registry: SkillRegistry
+    event_bus: EventBus
+    config: AgentConfig
+
+
+@dataclass
+class LoadedPlugin:
+    name: str
+    source: str          # "entry_point" 或插件文件路径
+    # + 各类注册计数
+
+
+def load_plugins(
+    plugin_dirs: list[str | Path],
+    ctx: PluginContext,
+    disabled: list[str] | None = None,   # 按 entry-point 名或文件名去后缀匹配
+) -> list[LoadedPlugin]: ...
+```
+
+### 4.20 `security/remote_confirm.py` -- 跨进程权限确认
+
+职责：窗格 worker 进程（6.4）没有自己的 TUI——权限确认通过文件协议转发给父进程：
+worker 写请求文件并轮询决策文件，父进程侧渲染 y/a/n 弹窗后写回决策。
+
+```python
+class RemoteConfirm:
+    """File-based confirm callback for pane worker processes."""
+
+    def __init__(
+        self, workers_dir: Path, agent_id: str,
+        poll_interval: float = 0.3, timeout: float = 120.0,
+    ): ...
+
+    async def __call__(self, prompt: str) -> bool | str:
+        """Write a permission request file and poll for the parent's
+        decision. Timeout -> deny."""
         ...
 
-    async def stop(self) -> list[SubAgentResult]: ...
-    def status(self) -> dict[str, AgentPhase]: ...
+
+# 父进程侧 helper：
+def read_request(workers_dir: Path, agent_id: str) -> dict | None: ...
+def write_decision(
+    workers_dir: Path, agent_id: str, request_id: str, decision: str
+) -> None: ...
+```
+
+### 4.21 `security/sandbox/` -- OS 级沙箱
+
+职责：将 bash 命令包裹进操作系统沙箱（Linux bwrap / macOS seatbelt；Windows 无实现，
+`create_sandbox()` 返回 None）。由 `SecurityConfig.sandbox` 开关，app.py 注入 bash 工具。
+
+```python
+@dataclass
+class SandboxConfig:
+    allow_write: list[str] = ...     # 可写路径白名单（工作目录、/tmp）
+    deny_write: list[str] = ...      # 显式拒绝（如 ~/.mini-agent）
+    network: bool = False
+
+
+class Sandbox(ABC):
+    @abstractmethod
+    def wrap(self, command: str, config: SandboxConfig) -> str:
+        """Rewrite a shell command to run inside the sandbox."""
+        ...
+
+    @abstractmethod
+    def available(self) -> bool: ...
+
+
+def create_sandbox() -> Sandbox | None:
+    """Pick the platform implementation (bwrap / seatbelt) or None."""
+    ...
 ```
 
 ---
@@ -1301,57 +1734,75 @@ User types message in terminal
 |    SlashCommandRegistry.is_slash_command(text)?                   |
 |    +-- YES -> SlashCommandRegistry.execute() -> render result     |
 |    +-- NO  -> Continue to engine                                  |
-|    SkillRegistry.match_triggers(text) -> auto-activate skills     |
+|    HookManager.run(USER_INPUT) -- BLOCK 可在到达 LLM 前拦截该轮    |
 |    EventBus.emit(UserMessageEvent)                                |
-+------------------------+--------- --------------------------------+
++------------------------+------------------------------------------+
                          |
                          v
 +------------------------------------------------------------------+
-| 2. ENGINE LAYER -- AgentLoop.run(user_message)                    |
+| 2. ENGINE LAYER -- AgentLoop.run(conversation)                    |
 |                                                                   |
-|    +--- ReAct Loop ------------------------------------------+    |
-|    |                                                         |    |
-|    |  2a. THINK: Build messages for API                      |    |
-|    |      ContextManager.get_messages_for_api()              |    |
-|    |      MemoryManager injects relevant memories            |    |
-|    |      HookManager.run(PRE_LLM)                           |    |
-|    |      LLMProvider.stream(messages, tools) -> chunks      |    |
-|    |      EventBus.emit(LLMStreamChunkEvent) per chunk       |    |
-|    |      Terminal.render_stream() <- UI shows live          |    |
-|    |      Assemble full LLMResponse                          |    |
-|    |      HookManager.run(POST_LLM)                          |    |
-|    |                                                         |    |
-|    |  2b. CHECK: Tool calls in response?                     |    |
-|    |      +-- NO  -> Stream is final answer -> break loop    |    |
-|    |      +-- YES -> Continue to ACT                         |    |
-|    |                                                         |    |
-|    |  2c. ACT: Execute tool calls                            |    |
-|    |      For each ToolCall:                                 |    |
-|    |        PermissionManager.check(request)                 |    |
-|    |        +-- DENIED  -> ToolResult(is_error=True)         |    |
-|    |        +-- PENDING -> Terminal.confirm() -> GRANT/DENY  |    |
-|    |        +-- GRANTED -> proceed                           |    |
-|    |        HookManager.run(PRE_TOOL)                        |    |
-|    |        ToolRegistry.get(name).execute(ctx, **args)      |    |
-|    |        HookManager.run(POST_TOOL)                       |    |
-|    |        EventBus.emit(ToolResultEvent)                   |    |
-|    |      Independent tool calls run via asyncio.gather()    |    |
-|    |                                                         |    |
-|    |  2d. OBSERVE: Process results                           |    |
-|    |      Append ToolResult messages to conversation         |    |
-|    |      ContextManager.check_and_compress() if needed      |    |
-|    |      Increment iteration counter                        |    |
-|    |      _should_continue()? -> loop back to THINK          |    |
-|    |                                                         |    |
-|    +---------------------------------------------------------+    |
+|    +--- ReAct Loop (every iteration) -----------------------+     |
+|    |                                                        |     |
+|    |  2a. MAIL: Mailbox.drain(agent_id)                     |     |
+|    |      跨 Agent 消息以 USER 消息形式注入会话             |     |
+|    |                                                        |     |
+|    |  2b. THINK:                                            |     |
+|    |      conversation.to_api_messages()                    |     |
+|    |      plan_mode? -> 隐藏写工具 schema (_WRITE_TOOLS)    |     |
+|    |      EventBus.emit(LLMRequestEvent)                    |     |
+|    |      HookManager.run(PRE_LLM)  <- 记忆注入在此发生     |     |
+|    |      ContextManager.check_and_compress() 每次调用前    |     |
+|    |      ContextManager.ensure_fits() 溢出兜底强制截断     |     |
+|    |      LLMProvider.stream(messages, tools) -> chunks     |     |
+|    |        on_stream_delta / on_thinking_delta 回调直达 UI |     |
+|    |        流式工具执行: IncrementalAssembler 组装完成的   |     |
+|    |        调用立即提交执行 (需确认/需询问的延迟到 ACT)    |     |
+|    |      assemble_response() -> LLMResponse                |     |
+|    |      EventBus.emit(LLMResponseEvent)                   |     |
+|    |      HookManager.run(POST_LLM)                         |     |
+|    |      finish_reason=="length"? -> max_tokens 翻倍重试   |     |
+|    |      (最多 3 次)                                       |     |
+|    |                                                        |     |
+|    |  2c. CHECK: Tool calls in response?                    |     |
+|    |      +-- NO -> self_verify 未触发过? 注入自检提示再来  |     |
+|    |      |         一轮; 否则即为最终回答 -> break loop    |     |
+|    |      +-- YES -> Continue to ACT                        |     |
+|    |                                                        |     |
+|    |  2d. ACT: _act(tool_calls) 两阶段执行                  |     |
+|    |      Phase 1 (串行): 逐个权限预检                      |     |
+|    |        PermissionManager -> GRANTED/DENIED             |     |
+|    |        (PENDING 时弹确认框, 弹窗不可交错所以串行)      |     |
+|    |        plan_mode 下写工具直接 DENIED                   |     |
+|    |        EventBus.emit(PermissionCheckEvent)             |     |
+|    |      Phase 2 (并行): asyncio.gather 执行全部 GRANTED   |     |
+|    |        每个工具: EventBus.emit(ToolCallStartEvent)     |     |
+|    |          HookManager.run(PRE_TOOL) block/confirm/modify|     |
+|    |          Tool.execute(ctx, **args)                     |     |
+|    |          ToolResultCache.maybe_spill() 超大输出溢写    |     |
+|    |          HookManager.run(POST_TOOL)                    |     |
+|    |          EventBus.emit(ToolCallEndEvent)               |     |
+|    |      流式期间已提交的任务在此收集结果                  |     |
+|    |                                                        |     |
+|    |  2e. OBSERVE: Process results                          |     |
+|    |      ToolResultCache.spill_batch() 聚合预算再溢写      |     |
+|    |      Append ToolResult messages to conversation        |     |
+|    |      ContextManager.check_and_compress()               |     |
+|    |      _should_continue()? -> loop back to 2a            |     |
+|    |                                                        |     |
+|    +--------------------------------------------------------+     |
 |                                                                   |
 |    When loop ends:                                                |
-|    ContextManager.add_message(assistant_response)                 |
-|    MemoryExtraction.maybe_extract(conversation)                   |
-|    SessionStore.auto_save(session)                                |
-|    EventBus.emit(TurnCompleteEvent)                               |
+|    EventBus.emit(TurnCompleteEvent) + HookManager.run(TURN_END)   |
 +-------------------------------------------------------------------+
 ```
+
+回合结束后的收尾发生在应用层（`app.py`）而非循环内部：
+
+- **会话保存**：每轮回合结束后 `App` 强制自动保存会话（`_autosave(force=True)`）；斜杠命令后走 30s 节流的自动保存。回合进行中没有定时增量保存。
+- **记忆提取**：`MemoryExtractor.maybe_extract` 注册在 `SESSION_END` hook 上，会话结束时执行一次，而不是每轮回合执行。
+- **技能激活**：技能仅通过 `/skill` 斜杠命令显式激活，没有按用户输入自动触发的机制。
+- **流式渲染**：LLM 输出通过 `on_stream_delta` / `on_thinking_delta` 直连回调送达 UI，不经过事件总线（每 chunk 发事件的开销不值得）。
 
 ---
 
@@ -1360,43 +1811,35 @@ User types message in terminal
 ### 6.1 事件总线 (`events/bus.py`)
 
 ```python
-import asyncio
-from collections import defaultdict
-from typing import Any, Callable, Awaitable, Type
-
-
-EventHandler = Callable[["Event"], Awaitable[None]]  # type: ignore
+EventHandler = Callable[[Any], Awaitable[None]]
 
 
 class EventBus:
-    """Async publish-subscribe event bus. Thread-safe for asyncio."""
+    """Async publish-subscribe event bus for decoupling components."""
 
     def __init__(self) -> None:
-        self._handlers: dict[Type[Event], list[EventHandler]] = defaultdict(list)
+        self._handlers: dict[type, list[EventHandler]] = defaultdict(list)
         self._global_handlers: list[EventHandler] = []
 
-    def on(self, event_type: Type[Event], handler: EventHandler) -> None:
+    def on(self, event_type: type, handler: EventHandler) -> None:
         """Subscribe to a specific event type."""
-        ...
 
     def on_any(self, handler: EventHandler) -> None:
         """Subscribe to ALL events (for logging, debugging)."""
-        ...
 
-    def off(
-        self, event_type: Type[Event], handler: EventHandler
-    ) -> None: ...
+    def off(self, event_type: type, handler: EventHandler) -> None: ...
+
+    def off_any(self, handler: EventHandler) -> None: ...
 
     async def emit(self, event: Event) -> None:
-        """Emit an event to all registered handlers. Non-blocking."""
-        ...
-
-    def emit_sync(self, event: Event) -> None:
-        """Schedule event emission without awaiting (fire-and-forget)."""
-        ...
+        """Dispatch to type handlers + global handlers concurrently."""
 ```
 
+`emit` 通过 `asyncio.gather(..., return_exceptions=True)` **并发**分发给该事件类型的 handler 与全局 handler；单个 handler 抛异常不会打断分发，异常会被捕获并写入日志（坏 handler 不能炸掉 emit）。没有同步版 emit——所有发射点本身都在协程中。
+
 ### 6.2 事件类型 (`models/events.py`)
+
+全部 14 个事件类型如下。注意事件字段刻意保持**扁平的基础类型**（str/int/bool/dict），不引用 LLMResponse、ToolResult 等富对象——事件是给观察者（trace、成本跟踪、监听器插件）消费的快照，不是数据通道。
 
 ```python
 from dataclasses import dataclass, field
@@ -1425,18 +1868,16 @@ class LLMRequestEvent(Event):
     estimated_tokens: int = 0
 
 @dataclass
-class LLMStreamChunkEvent(Event):
-    delta: str = ""
-    tool_call_delta: ToolCallDelta | None = None
-
-@dataclass
 class LLMResponseEvent(Event):
-    response: LLMResponse | None = None
-
-@dataclass
-class LLMErrorEvent(Event):
-    error: str = ""
-    retryable: bool = False
+    content: str = ""            # 截断预览（前 100 字符）
+    has_tool_calls: bool = False
+    tokens_used: int = 0
+    # 输入/输出拆分 + 模型名 + 缓存命中——供成本跟踪 (P29)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    model: str = ""
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 # --- Tool Events ---
 @dataclass
@@ -1449,44 +1890,19 @@ class ToolCallStartEvent(Event):
 class ToolCallEndEvent(Event):
     tool_name: str = ""
     call_id: str = ""
-    result: ToolResult | None = None
+    is_error: bool = False
     duration_ms: float = 0
-
-# --- Agent Events ---
-@dataclass
-class AgentPhaseChangeEvent(Event):
-    old_phase: AgentPhase | None = None
-    new_phase: AgentPhase | None = None
-    iteration: int = 0
-
-@dataclass
-class TurnCompleteEvent(Event):
-    iteration_count: int = 0
-    tools_called: int = 0
-    tokens_used: int = 0
-
-# --- Context Events ---
-@dataclass
-class ContextCompressionEvent(Event):
-    old_token_count: int = 0
-    new_token_count: int = 0
-    messages_compressed: int = 0
-    strategy_used: str = ""
-
-@dataclass
-class ContextOverflowEvent(Event):
-    current_tokens: int = 0
-    max_tokens: int = 0
 
 # --- Permission Events ---
 @dataclass
-class PermissionRequestEvent(Event):
-    request: PermissionRequest | None = None
-
-@dataclass
-class PermissionDecisionEvent(Event):
-    request: PermissionRequest | None = None
-    decision: PermissionDecision | None = None
+class PermissionCheckEvent(Event):
+    """Emitted after each permission decision (for /trace)."""
+    tool_name: str = ""
+    scope: str = ""       # command / path / tool
+    resource: str = ""
+    decision: str = ""    # granted / denied
+    reason: str = ""      # rule / session_grant / mode:xxx / user_confirm / dangerous
+    matched_rule: str = ""  # 匹配的规则模式——供审计追踪
 
 @dataclass
 class PermissionRuleAddedEvent(Event):
@@ -1503,6 +1919,31 @@ class PermissionRuleRemovedEvent(Event):
     pattern: str = ""
     level: str = ""
 
+# --- Agent Events ---
+@dataclass
+class AgentPhaseChangeEvent(Event):
+    old_phase: str = ""
+    new_phase: str = ""
+    iteration: int = 0
+
+@dataclass
+class TurnCompleteEvent(Event):
+    iteration_count: int = 0
+    tools_called: int = 0
+    tokens_used: int = 0
+
+# --- SubAgent Events ---
+@dataclass
+class SubAgentSpawnEvent(Event):
+    agent_id: str = ""
+    task: str = ""
+
+@dataclass
+class SubAgentCompleteEvent(Event):
+    agent_id: str = ""
+    success: bool = True
+    tokens_used: int = 0
+
 # --- Session Events ---
 @dataclass
 class SessionStartEvent(Event):
@@ -1511,65 +1952,61 @@ class SessionStartEvent(Event):
 @dataclass
 class SessionEndEvent(Event):
     session_id: str = ""
-
-# --- SubAgent Events ---
-@dataclass
-class SubAgentSpawnedEvent(Event):
-    agent_id: str = ""
-    task: str = ""
-    parent_id: str = ""
-
-@dataclass
-class SubAgentCompletedEvent(Event):
-    agent_id: str = ""
-    result: SubAgentResult | None = None
-
-# --- MCP Events ---
-@dataclass
-class MCPServerConnectedEvent(Event):
-    server_name: str = ""
-    tools_discovered: int = 0
-
-@dataclass
-class MCPServerDisconnectedEvent(Event):
-    server_name: str = ""
-
-# --- Skill Events ---
-@dataclass
-class SkillActivatedEvent(Event):
-    skill_name: str = ""
-
-@dataclass
-class SkillDeactivatedEvent(Event):
-    skill_name: str = ""
 ```
+
+不存在的事件说明：LLM 流式 chunk 走 UI 直连回调而非事件（见 §5）；LLM 错误在 Provider 内部重试后以异常抛出；上下文压缩、MCP 连接、技能激活等状态变化通过日志与 UI 提示呈现，没有对应事件类型。
 
 ---
 
 ## 7. LLM Provider 抽象层 -- 实现细节
 
-### 7.1 OpenAI Provider（`llm/openai_provider.py`）
+### 7.1 共享基础设施（`llm/base.py` + `llm/token_counter.py`）
+
+抽象基类只要求三个成员，另提供一个默认无操作的预热钩子：
+
+```python
+class LLMProvider(ABC):
+    async def prepare(self) -> None:
+        """Optional warmup before first use (e.g. context window probing).
+        默认无操作——需要预热的 Provider 覆写它。"""
+
+    @abstractmethod
+    async def stream(self, messages, tools=None, **kwargs) -> AsyncIterator[StreamChunk]: ...
+
+    @abstractmethod
+    def count_tokens(self, text: str) -> int: ...
+
+    @property
+    @abstractmethod
+    def context_window(self) -> int: ...
+```
+
+注意接口中**没有** `format_tools`：工具 schema 以 OpenAI function calling 格式在系统内流转，各 Provider 用内部方法 `_convert_tools` 转换为自家 API 格式，不对外暴露。
+
+`base.py` 还提供模块级共享设施：
+
+- **重试基础设施**：`RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 529}`；`MAX_HTTP_RETRIES = 5`（约 31 秒总耐心——限流常是持续配额窗口，实测 3 次快速重试扛不住）；`compute_retry_delay(attempt, retry_after)` 优先尊重服务端 `Retry-After` 头，否则指数退避带抖动（1s → 2s → 4s → 8s → 16s）。各 Provider 仅在**任何 chunk 产出之前**重试，流中断不重试。
+- **`assemble_response(chunks)`**：把 StreamChunk 列表组装为完整 LLMResponse（拼接 content/thinking、按 index 组装工具调用增量、取 usage 最大值）。
+- **`complete(llm, messages, ...)`**：非流式补全便捷函数 = stream + assemble 一次调用（供记忆提取、压缩等非交互场景使用）。
+
+token 计数不属于任何 Provider，而是共享模块 `llm/token_counter.py`：tiktoken 为**可选依赖**，可用时精确计数（cl100k_base）；否则退回 **CJK 感知**估算——CJK 字符按 1 token/字、其余按 4 字符/token（纯 `len//4` 对中文低估约 4 倍，会导致压缩迟迟不触发）。结果带 LRU 缓存，另有 `truncate_to_tokens` 二分截断工具。
+
+### 7.2 OpenAI Provider（`llm/openai_provider.py`）
 
 ```python
 class OpenAIProvider(LLMProvider):
     """OpenAI-compatible provider (GPT, local servers, Azure, etc.)."""
 
     def __init__(self, config: LLMConfig) -> None:
-        # Uses httpx.AsyncClient directly -- no openai SDK dependency
-        # OR uses openai package if installed
+        # httpx.AsyncClient 直连 -- 无 openai SDK 依赖
         ...
 
-    async def stream(
-        self, messages, tools=None, **kwargs
-    ) -> AsyncIterator[StreamChunk]: ...
+    async def stream(self, messages, tools=None, **kwargs) -> AsyncIterator[StreamChunk]:
+        # SSE streaming; 内部 _convert_tools 转 function calling 格式
+        ...
 
     def count_tokens(self, text: str) -> int:
-        # Uses tiktoken for accurate counts
-        ...
-
-    def format_tools(self, tools: list[Tool]) -> list[dict]:
-        # Converts to OpenAI function calling format:
-        # {"type": "function", "function": {"name": ..., "parameters": ...}}
+        # 委托共享的 llm/token_counter.py
         ...
 
     async def prepare(self) -> None:
@@ -1585,59 +2022,62 @@ class OpenAIProvider(LLMProvider):
         ...
 ```
 
-### 7.2 Anthropic Provider（`llm/anthropic_provider.py`）
+### 7.3 Anthropic Provider（`llm/anthropic_provider.py`）
 
 ```python
 class AnthropicProvider(LLMProvider):
-    """Claude API provider with extended thinking support."""
+    """Claude API provider via Messages API with SSE streaming."""
 
     def __init__(self, config: LLMConfig) -> None:
-        # Uses httpx.AsyncClient for Messages API
+        # httpx.AsyncClient 直连 Messages API (anthropic-version: 2023-06-01)
         ...
 
-    async def stream(
-        self, messages, tools=None, **kwargs
-    ) -> AsyncIterator[StreamChunk]:
-        # Handle SSE streaming with thinking blocks
+    async def stream(self, messages, tools=None, **kwargs) -> AsyncIterator[StreamChunk]:
+        # SSE streaming with thinking blocks; 内部 _convert_tools 转 tool_use 格式
         ...
 
     def count_tokens(self, text: str) -> int:
-        # Uses anthropic token counting API or estimation
-        ...
-
-    def format_tools(self, tools: list[Tool]) -> list[dict]:
-        # Converts to Anthropic tool_use format:
-        # {"name": ..., "description": ..., "input_schema": ...}
+        # 委托共享的 llm/token_counter.py（不调用 Anthropic 计数 API）
         ...
 
     @property
     def context_window(self) -> int: ...
 ```
 
-### 7.3 Provider 注册表 (`llm/registry.py`)
+**Prompt Caching**：每次请求打 3 个 `cache_control: {"type": "ephemeral"}` 标记——系统提示词、工具列表的最后一项、最后一条用户消息的内容。Anthropic 缓存到标记为止的所有前缀，后续请求命中缓存后输入 token 成本降约 90%。缓存命中数据经 `LLMResponseEvent` 的 `cache_read_input_tokens` / `cache_creation_input_tokens` 字段进入成本跟踪。
+
+### 7.4 Provider 注册表 (`llm/registry.py`)
 
 ```python
 class ProviderRegistry:
     """Factory for LLM providers."""
 
-    _providers: dict[str, Type[LLMProvider]] = {}
+    _providers: dict[str, type[LLMProvider]] = {}
 
     @classmethod
-    def register(cls, name: str, provider_class: Type[LLMProvider]) -> None: ...
+    def register(cls, name: str, provider_class: type[LLMProvider]) -> None: ...
 
     @classmethod
     def create(cls, config: LLMConfig) -> LLMProvider:
         """Create a provider instance from config."""
-        ...
 
     @classmethod
     def list_providers(cls) -> list[str]: ...
+
+    @classmethod
+    def create_for_role(cls, config: AgentConfig, role: str) -> LLMProvider:
+        """为混编角色（"planner" / "worker"）创建 Provider：查
+        config 的 {role}_profile 指向的 llm_profiles 条目，
+        profile 未配置或不存在时回退主模型 config.llm。"""
 
 
 # Auto-register built-in providers on module import
 ProviderRegistry.register("openai", OpenAIProvider)
 ProviderRegistry.register("anthropic", AnthropicProvider)
+ProviderRegistry.register("openai-responses", OpenAIResponsesProvider)
 ```
+
+第三个内置 Provider `openai-responses`（`llm/openai_responses_provider.py`）对接 OpenAI Responses API（o 系列推理模型），并定义了自己的异常类型：`LLMAuthenticationError`（key 无效）、`LLMRateLimitError`（带 `retry_after`）、`LLMNetworkError`（连接/超时失败）。外部代码可通过 `ProviderRegistry.register` 注册自定义 Provider。
 
 ---
 
@@ -1663,50 +2103,61 @@ class ReadFileTool(Tool):
     params_model = ReadFileParams  # schema auto-generated via _schema_from_model (P46/P47)
 
     async def execute(self, ctx: ToolContext, **kwargs) -> ToolResult:
+        # 权限检查不在工具内部——由 Agent 循环管道的 _check_permission 统一评估
         file_path = Path(kwargs["file_path"])
-        offset = kwargs.get("offset", 0)
-        limit = kwargs.get("limit", 2000)
+        if not file_path.is_absolute():
+            file_path = ctx.working_dir / file_path
+        offset = int(kwargs.get("offset", 0))
+        limit = int(kwargs.get("limit", 2000))
 
-        # Security: check path permissions
-        decision = await ctx.permission_manager.check_path(file_path, "read")
-        if decision == PermissionDecision.DENIED:
-            return ToolResult(
-                call_id="", name="read_file",
-                output=f"Permission denied: {file_path}",
-                is_error=True,
+        if not file_path.is_file():
+            return self.error_result("", f"File not found: {file_path}")
+
+        max_size = ctx.config.tools.max_file_size
+        if file_path.stat().st_size > max_size:
+            return self.error_result(
+                "", f"File too large (> {max_size} bytes): {file_path}"
             )
 
         try:
-            content = file_path.read_text(encoding="utf-8")
-            lines = content.splitlines()
-            selected = lines[offset:offset + limit]
-            numbered = "\n".join(
-                f"{i + offset + 1:>6}\t{line}"
-                for i, line in enumerate(selected)
-            )
-            return ToolResult(
-                call_id="", name="read_file", output=numbered,
-                metadata={"total_lines": len(lines)},
-            )
-        except Exception as e:
-            return ToolResult(
-                call_id="", name="read_file",
-                output=str(e), is_error=True,
-            )
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return self.error_result("", f"Failed to read {file_path}: {e}")
+
+        lines = content.splitlines()
+        selected = lines[offset:offset + limit]
+        numbered = "\n".join(
+            f"{i + offset + 1:>6}\t{line}"
+            for i, line in enumerate(selected)
+        )
+        return ToolResult(
+            call_id="", name="read_file", output=numbered,
+            metadata={"total_lines": len(lines), "shown": len(selected)},
+        )
 ```
 
-All ten built-in tools:
+全部 12 个内置工具（`tools/builtin/__init__.py` 的 `ALL_BUILTIN_TOOLS`）：
 
-| Tool | Key Parameters | Security Check |
-|------|---------------|----------------|
-| `ReadFileTool` | file_path, offset, limit | path_guard read |
-| `WriteFileTool` | file_path, content | path_guard write, confirm overwrite |
-| `EditFileTool` | file_path, old_text, new_text | path_guard write |
-| `BashTool` | command, timeout, working_dir | command allowlist/denylist, confirm dangerous |
-| `GlobTool` | pattern, path | path_guard read |
-| `GrepTool` | pattern, path, include | path_guard read |
+| Tool | 用途 | 安全检查 |
+|------|------|----------|
+| `read_file` | 读取文件内容（带行号、offset/limit 分页） | path_guard read |
+| `write_file` | 创建或覆写文件 | path_guard write |
+| `edit_file` | 精确字符串替换编辑文件 | path_guard write |
+| `delete_file` | 删除文件 | path_guard write |
+| `bash` | 执行 shell 命令 | 命令白/黑名单，危险命令需确认 |
+| `glob` | 按模式匹配查找文件 | path_guard read |
+| `grep` | 按正则搜索文件内容 | path_guard read |
+| `spawn_agents` | 派生并行子 Agent 执行任务 | 工具级规则 |
+| `send_message` | 向其他 Agent 邮箱发送消息 | 工具级规则 |
+| `wait_message` | 等待/接收邮箱消息 | 工具级规则 |
+| `tool_search` | 搜索 MCP 服务器上可用的工具（懒发现） | 工具级规则 |
+| `mcp_call` | 按名调用 MCP 工具（dispatch 模式入口） | 工具级规则 |
+
+其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
 
 ### 8.2 MCP 工具适配器 (`tools/mcp/adapter.py`)
+
+与 dispatch 模式相对的是**直接注册模式**：`MCPToolAdapter` 把 MCP 发现的工具包装为内部 `Tool` 注册进 ToolRegistry，工具名在构造时确定为 `mcp_{server}_{tool}`：
 
 ```python
 class MCPToolAdapter(Tool):
@@ -1715,52 +2166,59 @@ class MCPToolAdapter(Tool):
     def __init__(
         self,
         server_name: str,
-        mcp_tool: MCPToolInfo,
-        mcp_manager: MCPManager,
-    ):
+        tool_info: dict[str, Any],   # MCP 发现返回的原始 dict
+        manager: MCPManager,
+    ) -> None:
         self._server_name = server_name
-        self._mcp_tool = mcp_tool
-        self._mcp_manager = mcp_manager
+        self._tool_info = tool_info
+        self._manager = manager
+        self._name = f"mcp_{server_name}_{tool_info.get('name', 'unknown')}"
 
     @property
     def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name=f"mcp_{self._server_name}_{self._mcp_tool.name}",
-            description=self._mcp_tool.description or "",
-            parameters=self._convert_params(self._mcp_tool.input_schema),
-        )
+        # 从 tool_info["inputSchema"] 的 properties/required
+        # 逐项构造 ToolParameter 列表  
+        ...
 
     async def execute(self, ctx: ToolContext, **kwargs) -> ToolResult:
-        result = await self._mcp_manager.call_tool(
-            self._server_name, self._mcp_tool.name, kwargs
-        )
-        return result
+        original_name = self._tool_info.get("name", "")
+        return await self._manager.call_tool(self._server_name, original_name, kwargs)
 ```
 
 ### 8.3 Hook 链集成
 
-工具执行始终经过 Hook 链：
+Hook 系统（`tools/hooks.py`）定义 11 个生命周期阶段（`HookStage`）：`STARTUP` / `SHUTDOWN` / `SESSION_START` / `SESSION_END` / `USER_INPUT` / `TURN_START` / `TURN_END` / `PRE_LLM` / `POST_LLM` / `PRE_TOOL` / `POST_TOOL`。Hook 返回值动作（`HookAction`）有四种：`CONTINUE` / `BLOCK` / `MODIFY` / `CONFIRM`。`HookManager.run` 按优先级顺序执行，遇 BLOCK 和 CONFIRM 短路返回，MODIFY 更新 `ctx.tool_args` 后继续链上后续 hook。
+
+工具执行始终经过完整安全流水线（`_run_tool_pipeline`）：
 
 ```
 ToolCall arrives
     |
     v
-PermissionManager.check()
+Permission check (若已在 _act 阶段预检过则跳过)
+    | 0. 工具级门: check_tool(name) -- 显式 TOOL 规则直接判定
+    |    (DENY 拦截; ALLOW 整体信任跳过资源检查; 无规则继续路由)
+    | 1. 按工具类型路由: bash -> check_command,
+    |    read_file/glob/grep -> check_path(read),
+    |    write_file/edit_file -> check_path(write)
     | DENIED -> return error ToolResult
-    | PENDING -> Terminal.confirm() -> grant or deny
     v
 HookManager.run(PRE_TOOL, ctx)
-    | BLOCK -> return error ToolResult with hook reason
-    | MODIFY -> update args from modified context
+    | BLOCK   -> return error ToolResult with hook reason
+    | CONFIRM -> confirm_callback 弹 y/a/n 对话框
+    |            (a="always" 本会话同 (工具,原因) 不再问; 拒绝 -> error)
+    | MODIFY  -> update args from modified context
     v
-Tool.execute(ctx, **args)
-    |
+Tool.execute(ctx, **validated_args)
+    |  超大输出经 ToolResultCache.maybe_spill 溢写磁盘
     v
 HookManager.run(POST_TOOL, ctx)
-    | can log, modify result, or trigger side effects
+    | observe-only: 记日志、触发副作用
     v
 Return ToolResult
 ```
+
+PRE_TOOL 阶段的 BLOCK/CONFIRM 除了用 Python 注册 hook 外，还可通过**声明式 `[[hooks]]` TOML 规则**配置（`HookRule`）：按工具名 fnmatch 模式 + 可选参数子串/正则匹配，`action = "block"` 直接阻止，`action = "confirm"` 要求用户确认。CONFIRM 裁决在 agent_loop 中通过 `confirm_callback` 弹窗解决；无 UI 回调时安全默认为拒绝。声明式 confirm 规则还支持非交互预判 `would_confirm()`——流式工具执行用它把会弹窗的调用延迟到 `_act()`（见 §9.3）。
 
 ---
 
@@ -1815,68 +2273,84 @@ Return ToolResult
                            fatal error)
 ```
 
+状态机之外，`run()` 每轮回合还编排了这些机制：
+
+- **邮箱投递**：每次迭代开始先 `_deliver_mail()` 清空本 Agent 收件箱，跨 Agent 消息以 USER 消息形式注入会话（见 §5）。
+- **自检提示（self_verify）**：LLM 首次给出无工具调用的最终回答且迭代数 > 1 时，注入一条自检提示（VERIFY_NUDGE）再跑一轮，给 LLM 一次机会核查未验证的断言；每回合只触发一次，回合结束后从会话历史中清理自检消息。
+- **聚合溢写预算**：跟踪本回合累计工具结果字符数 `turn_result_chars`，每批结果经 `ToolResultCache.spill_batch(results, already_used=...)` 检查——单条阈值管不住"每条都不超、合计撑爆"的场景；溢写文件的读回结果豁免（再溢写会死循环）。
+- **max_tokens 截断恢复（P44）**：响应 `finish_reason == "length"` 时翻倍 max_tokens 重试，最多 3 次，仍截断则保留最后一次结果；重试前取消截断尝试中流式提交的工具任务（参数可能在 JSON 中途被切断）。
+- **计划模式**：`plan_mode` 下从发给 LLM 的工具 schema 中**隐藏**写工具（`_WRITE_TOOLS`），执行阶段再兜底 DENIED。
+- **文件快照**：`write_file` / `edit_file` / `delete_file` 执行前快照文件修改前状态，供 `/undo` 恢复。
+
 ### 9.2 决策逻辑
 
+`_should_continue` 是**同步方法**、不发事件，三重熔断：
+
 ```python
-# Inside AgentLoop
-
-async def _should_continue(self) -> bool:
+# core/agent_loop.py
+def _should_continue(self) -> bool:
     """Decide whether to continue the ReAct loop."""
-    state = self._state
-
-    # Hard stop: max iterations
-    if state.iteration >= state.max_iterations:
-        await self._event_bus.emit(AgentPhaseChangeEvent(
-            new_phase=AgentPhase.TERMINATED,
-            metadata={"reason": "max_iterations_reached"},
-        ))
+    # 熔断 1: 迭代上限
+    if self._state.iteration >= self._state.max_iterations:
         return False
-
-    # Hard stop: user cancelled
     if self._cancelled:
         return False
-
-    # Hard stop: context overflow after compression
-    if self._context_manager.usage_ratio > 0.95:
+    # 熔断 2: 同一 工具+参数 签名连续调用 6 次及以上
+    # （同一工具处理不同文件是正常批量工作，只有参数也相同才算死循环）
+    recent = self._state.recent_tool_names[-6:]
+    if len(recent) >= 6 and len(set(recent)) == 1:
         return False
-
-    # Deduplication guard: detect infinite loops
-    recent_calls = [
-        tc.name for tc in state.last_tool_results[-6:]
-    ]
-    if len(recent_calls) >= 6 and len(set(recent_calls)) == 1:
-        # Same tool called 6+ times in a row -- likely stuck
-        return False
-
+    # 熔断 3: 最近 15 轮迭代每轮都出现同一工具
+    # （iteration_tools 记录每轮迭代用到的工具名集合的滑动窗口——
+    #   真死循环是每轮都调同一个工具；批量任务是一轮内并行调多次）
+    window = self._state.iteration_tools[-15:]
+    if len(window) >= 15:
+        common = frozenset.intersection(*window)
+        if common:
+            return False
     return True
 ```
 
-### 9.3 并行工具执行
+上下文占用不参与终止判定——压缩与 `ensure_fits` 兜底截断（§9.1 / §5）保证上下文不会溢出，无需在此熔断。
 
-当 LLM 在单次响应中返回多个工具调用时，独立的调用将并行执行：
+### 9.3 两阶段并行工具执行 + 流式提前执行
+
+当 LLM 在单次响应中返回多个工具调用时，`_act()` 分两阶段执行：
 
 ```python
 async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-    """Execute tool calls, parallelizing independent calls."""
-    tasks = []
+    """Phase 1: sequential permission pre-check (confirmations must not
+    interleave). Phase 2: all GRANTED tools execute in parallel."""
+    streaming = self._streaming_tasks   # 流式期间已提交的任务
+    self._streaming_tasks = {}
+
+    # --- Phase 1: 串行权限预检（流式已提交的跳过） ---
+    decisions = []
     for tc in tool_calls:
-        tasks.append(self._execute_single_tool(tc))
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    tool_results = []
-    for tc, result in zip(tool_calls, results):
-        if isinstance(result, Exception):
-            tool_results.append(ToolResult(
-                call_id=tc.id, name=tc.name,
-                output=f"Tool execution error: {result}",
-                is_error=True,
-            ))
+        if tc.id in streaming:
+            decisions.append(PermissionDecision.GRANTED)  # 已在执行
+        elif self.plan_mode and tc.name in _WRITE_TOOLS:
+            decisions.append(PermissionDecision.DENIED)   # 计划模式拒绝写
         else:
-            tool_results.append(result)
+            decisions.append(await self._check_permission(tc))
 
-    return tool_results
+    # --- Phase 2: 并行执行 / 收集流式结果 ---
+    async def _run_one(i: int) -> ToolResult:
+        tc = tool_calls[i]
+        if tc.id in streaming:
+            return await streaming[tc.id]          # 收集流式任务结果
+        if decisions[i] == PermissionDecision.DENIED:
+            return ToolResult(..., is_error=True)  # Permission denied
+        return await self._execute_single_tool(tc, skip_permission=True)
+
+    return list(await asyncio.gather(*(_run_one(i) for i in range(n))))
 ```
+
+设计要点：
+
+- **为什么两阶段**：权限确认弹窗不可交错，所以预检必须串行；预检通过后的执行才并行。执行已预检过权限，`skip_permission=True` 避免重复检查。
+- **无 `return_exceptions`**：工具异常在 `_run_tool_pipeline` 内部就被捕获并包装为 `is_error=True` 的 ToolResult，gather 不会收到裸异常。
+- **流式提前执行（streaming tool execution）**：开启 `streaming_tool_execution` 时，`_stream_once` 中的 `IncrementalAssembler` 在流式传输期间逐 chunk 组装工具调用，**一组装完成就 `asyncio.create_task` 提交执行**——工具 #1 执行时工具 #2 还在流式传输。三类调用被延迟到 `_act()`：计划模式下的写工具、`PermissionManager.would_ask()` 判定会询问用户的、`HookManager.would_confirm()` 判定会弹确认框的（弹窗不能和流式渲染交错）。`_act()` 对这些已提交的任务直接 `await` 收集结果。
 
 ---
 
@@ -1900,44 +2374,61 @@ Context Window (e.g. 128K tokens)
 +--------------------------------------------------+
 ```
 
+`ContextManager`（`memory/context.py`）跟踪 token 总量。计数优先使用 **API usage 锚点**：LLM 返回的 `usage` 是截至锚点消息的权威总量（连工具 schema 都包含在内），锚点之后新追加的消息才用本地估算——估算误差不再逐轮累积；压缩重排历史后锚点通过对象身份检查自动失效。
+
+**双阈值 + 熔断器**（`context.py`）：
+
+- 软阈值 `compression_threshold`（默认 0.75）触发常规压缩，受熔断器控制；
+- 熔断器：连续 `compress_max_failures`（默认 3）次压缩无效（token 未下降）后，本会话跳过后续压缩，只警告一次；
+- 硬阈值 `hard_compression_threshold`（默认 0.90）**绕过熔断器**强制压缩，防止上下文彻底爆掉。
+
+压缩目标是单一值：`target = context_window * 0.5`。压缩前捕获最近一条用户消息（防止被摘要吞掉），压缩后重算总量并更新熔断计数。另有 `ensure_fits()` 最终兜底：请求前若仍超窗口，直接 SlidingWindow 强制截断防 API 400。
+
 ### 10.2 压缩策略级联
 
-当 `usage_ratio >= compression_threshold`（默认 0.75）时触发：
+级联为**三级**，第 2 级有两个变体，按 `config.memory.llm_summarize`（默认 `True`）在 `app.py` 装配时二选一：
 
-**第 1 级：精简工具输出** -- 用缩略摘要替换冗长的工具输出（文件内容、命令输出），保留工具调用结构。目标：降至 60%。
+**第 1 级：DropToolResults** -- 把**保留窗口之外**的冗长工具输出截断为 `MAX_TOOL_OUTPUT=200` 字符 + 统计行（"N lines, M chars total, truncated"），保留工具调用结构。刻意不碰尾部：截断模型正在使用的工具结果会让它以为工具坏了，陷入越读越小的重读螺旋（真实终端实测烧掉 36 轮迭代）。
 
-**第 2 级：摘要最旧消息** -- 取最旧的 40% 消息，使用 LLM 生成摘要消息替换原始消息。目标：降至 50%。
+**第 2 级：LLMSummarizeOldest（LLM 变体，默认）或 SummarizeOldest（抽取式变体）** -- 把最旧的一批消息替换为一条 `compressed=True` 的 SYSTEM 摘要消息。LLM 变体失败时自动回退抽取式摘要——压缩链绝不能因网络错误中断。
 
-**第 3 级：滑动窗口** -- 如果仍然超限，仅保留能放入窗口的最近 N 条消息，在前面添加被丢弃内容的摘要。这是兜底方案。
+**第 3 级：SlidingWindow** -- 兜底：只保留能放进预算的最近消息，并带三重防护——孤儿 tool result 丢弃（防 API 400）、任务锚点（绝不丢最近一条用户消息）、摘要锚点（绝不丢头部压缩摘要）。
+
+保留窗口的分界不是按比例，而是 **token 驱动的 `_compute_keep_split`**：从尾部反向累计 token，满足 `MIN_KEEP_MESSAGES=5` 条且累计 ≥ 保留下限（`KEEP_RECENT_TOKENS=10K`）即停，累计超硬顶（`KEEP_MAX_TOKENS=40K`）强制停。下限/硬顶随 target 缩放（`min(10K, target//2)` / `min(40K, target)`）——小窗口下绝对常量会让摘要级数学上永远达不到目标。分界点还会前移避开 tool result（防孤儿导致 API 400）。
 
 ```python
 class Compressor:
-    def __init__(
-        self,
-        llm: LLMProvider,
-        strategies: list[CompressionStrategy] | None = None,
-    ):
-        self._llm = llm
+    """级联运行各压缩策略，直到达到目标。"""
+
+    def __init__(self, strategies: list[CompressionStrategy] | None = None) -> None:
         self._strategies = strategies or [
             DropToolResults(),
-            SummarizeOldest(llm=llm),
+            SummarizeOldest(),   # app.py 默认装配 LLMSummarizeOldest(llm)
             SlidingWindow(),
         ]
 
-    async def compress(
-        self, conversation: Conversation, target_tokens: int
-    ) -> Conversation:
-        current = conversation
+    async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         for strategy in self._strategies:
-            if current.total_tokens <= target_tokens:
+            total = ...  # 每级执行前重算 token 总量
+            if total <= target_tokens:
                 break
-            current = await strategy.compress(
-                current.messages, target_tokens
-            )
-        return current
+            await strategy.compress(conversation, target_tokens)  # 原地修改，无返回值
+            # 每级后记录 compact_boundary（SlidingWindow 可能丢掉摘要，须尽早捕获）
 ```
 
-### 10.3 跨会话记忆存储
+注意与早期设计的差异：`Compressor` 不持有 LLM（LLM 由 `LLMSummarizeOldest` 策略自己持有）；`compress()` **原地修改** `conversation.messages` 并返回 `None`；每级执行前重算 token（而非依赖缓存值）。
+
+**LLM 摘要的结构化 prompt**：要求模型先在 `<analysis>` 块简要梳理，再输出 `<summary>` 块，包含 9 个固定小节（Primary Request and Intent / Key Technical Concepts / Files and Code Sections / Errors and Fixes / Problem Solving / All User Messages / Pending Tasks / Current Work / Optional Next Step）。历史中嵌套的旧压缩摘要被声明为权威历史，必须完整传递。解析容错：`<summary>` 未闭合时抢救部分输出；完全没有标签时剥离 `<analysis>` 草稿，空结果触发抽取式回退。
+
+**超长收缩重试**：摘要请求本身可能超模型窗口（400/413 或错误消息含 "context length" 等关键词判定）。此时进入独立于偶发失败重试（`SUMMARY_RETRIES=2`）的收缩循环：每轮丢弃最旧 20% 的可摘要消息（但绝不丢头部旧压缩摘要——它是更早全部历史的唯一记录）并把字符 cap（初始 `MAX_HISTORY_CHARS=24K`）缩 20%，最多 `MAX_SHRINKS=3` 轮，仍失败则回退抽取式摘要。摘要输出预算 `SUMMARY_MAX_TOKENS=8192`（混合推理模型会先烧几千 token 的 reasoning）。
+
+### 10.3 压缩后恢复注入与溢写缓存
+
+**恢复注入**（`context.py _inject_read_files`）：每次压缩后向摘要消息追加恢复上下文——(1) 用户最近一次请求（防 agent 压缩后忘记任务）；(2) 本会话已读文件路径清单（防重读）；(3) 最近至多 5 个文件的截断内容，总预算 `min(5*5000 token, window//4)` 随窗口缩放。旧恢复块先剥离再追加（防重复膨胀）。压缩边界 `compact_boundary`（摘要 + 已读文件 + 最近请求）随会话持久化，`/session load` 后通过 `adopt_boundary()` 恢复。
+
+**溢写缓存**（`memory/tool_result_cache.py`）：压缩-重读膨胀问题的根治。超大工具结果不进对话，落盘到 `~/.mini-agent/cache/results/`，对话中只留 `PREVIEW_CHARS=2000` 字符预览 + 完整文件路径。两层防护：单条阈值 `spill_threshold_chars=50_000`；聚合预算 `aggregate_spill_chars=200_000`（单条都不超但合计撑爆时按大小降序强制溢写）。LLM 读回溢写文件的调用由 `is_spill_readback()` 识别并豁免（PathGuard 对缓存目录只读自动放行，见 §11.2）。
+
+### 10.4 跨会话记忆存储
 
 **Project memory** (`.mini-agent/memory.json` in project root):
 ```json
@@ -1948,8 +2439,7 @@ class Compressor:
       "content": "This project uses pytest with --tb=short for testing",
       "source": "extracted",
       "created_at": "2026-08-01T10:30:00",
-      "tags": ["testing", "pytest"],
-      "relevance_score": 0.95
+      "tags": ["testing", "pytest"]
     }
   ]
 }
@@ -1964,50 +2454,53 @@ class Compressor:
       "content": "User prefers type hints on all function signatures",
       "source": "user",
       "created_at": "2026-07-15T08:00:00",
-      "tags": ["preferences", "python"],
-      "relevance_score": 1.0
+      "tags": ["preferences", "python"]
     }
   ]
 }
 ```
 
-### 10.4 记忆提取 (`memory/extraction.py`)
+`MemoryEntry` 只有 `id / content / source / created_at / tags` 五个字段（`source` 取 `"project" | "user" | "extracted"`），没有相关性评分——相关性判断交给召回时的 LLM（见 10.5）。
+
+### 10.5 记忆提取、召回与合并
+
+**提取**（`memory/extraction.py`）：
 
 ```python
 class MemoryExtractor:
-    """Automatically extracts learnings from conversations."""
+    """通过 LLM 从对话中提取学习内容并持久化。"""
 
     def __init__(
         self,
-        llm: LLMProvider,
         persistent_memory: PersistentMemory,
-    ): ...
+        llm: Any = None,
+        consolidation_threshold: int = 20,
+    ) -> None: ...
 
     async def maybe_extract(
         self,
         conversation: Conversation,
-        project_dir: Path | None,
+        project_dir: Path | None = None,
     ) -> list[MemoryEntry]:
-        """Analyze conversation for extractable learnings.
-        Called at end of turn when conversation is substantial.
-        Only triggers after 5+ turns or when session ends.
-        Uses LLM with extraction prompt to identify:
-          - Project conventions discovered
-          - User preferences observed
-          - Technical facts about the codebase
-        Deduplicates against existing memories."""
+        """用户消息 >= 5 条才触发（MIN_TURNS_FOR_EXTRACTION）。
+        _extract_candidates: 取最近 20 条消息，用 JSON 输出 prompt 让 LLM
+        提取 {content, category, tags}；只提取用户明确陈述/确认的事实。
+        _deduplicate（同步方法）: 完全匹配 / 子串包含 / 词重叠相似度 >= 0.6
+        三重去重后写入项目级或用户级存储。
+        最后 _maybe_consolidate: 条目数 > 20 时触发合并。
+        任何失败静默降级——提取绝不阻断退出。"""
         ...
-
-    async def _build_extraction_prompt(
-        self, conversation: Conversation
-    ) -> str: ...
-
-    async def _deduplicate(
-        self,
-        new_entries: list[MemoryEntry],
-        existing: list[MemoryEntry],
-    ) -> list[MemoryEntry]: ...
 ```
+
+**召回**（`memory/recall.py`，P52）：记忆条目超过 `recall_threshold`（默认 10）时，不再盲目注入前 N 条，而是用轻量 LLM 调用挑选与当前消息最相关的 top-k（默认 5）条。失败回退头部截断（`FALLBACK_LIMIT=10`）。
+
+**合并**（`memory/consolidation.py`，P53）：词重叠去重只能捕捉表面相似性；条目超过阈值时，LLM 识别语义相关的组并各合并为一条（要求保留全部信息）。无合并或失败返回 `None`，调用方 no-op。
+
+### 10.6 会话持久化
+
+- **`memory/session_store.py`**：会话以 JSON 存于 `~/.mini-agent/sessions/`。元数据含 `closed_cleanly` 标志——启动时发现上次未干净退出的会话即提示崩溃恢复。`cleanup_stale(max_age_days=30)` 清理过期会话，但**保留**崩溃会话（它们可能还没被恢复过）。
+- **`memory/file_snapshots.py`**：操作级 `/undo` 的文件快照。只保留最近 `KEEP_TURNS=5` 轮；单文件超 `MAX_SNAPSHOT_BYTES=30MB` 跳过快照（恢复时提示手动处理）。
+- **`memory/project_context.py`**：启动时按优先级查找项目指令文件（`AGENT.md` → `CLAUDE.md` → `.mini-agent/instructions.md`，可经 `[context]` 配置），连同用户级 `~/.mini-agent/instructions.md` 注入 system prompt（默认 8000 字符截断）。
 
 ---
 
@@ -2015,94 +2508,106 @@ class MemoryExtractor:
 
 ### 11.1 权限评估顺序
 
+`PermissionManager.check()` 是通用入口，按请求的 `scope` 分发到三条管道（`security/permission.py`）：
+
+- **COMMAND** → 命令管道：显式规则/会话授权 → 危险模式确认 → 默认模式；
+- **PATH** → 路径管道：显式 DENY 规则 → PathGuard → 通用管道；
+- **TOOL** → 通用管道：显式规则 → 会话授权 → 默认模式。
+
 ```
 +---------------------------------------------------------------+
-|                    PERMISSION EVALUATION ORDER                 |
+|              GENERIC PIPELINE (per-scope order)                |
 |                                                                |
 |  1. Explicit DENY rules -> immediately blocked                 |
 |  2. Explicit ALLOW rules -> immediately granted                |
-|  3. Session grants (user said "yes" earlier) -> granted        |
+|  3. Session grants (user said "always" earlier) -> granted     |
 |  4. Default mode:                                              |
-|     - "allow" -> granted (development mode, no prompts)        |
-|     - "ask"   -> prompt user (default, safe)                   |
+|     - "allow" -> granted                                       |
+|     - "ask"   -> prompt user (default)                         |
 |     - "deny"  -> blocked (locked-down mode)                    |
 +---------------------------------------------------------------+
 ```
+
+**命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
+
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 19 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。
+
+**路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
+
+**流式预判 `would_ask()`**：非交互、无副作用地回答"这次调用会不会弹确认框"。供流式提前执行（§9.3）使用：不会弹窗的工具在 LLM 响应还在流式输出时就提前提交，会弹窗的延迟到流结束后（弹窗不能与流式渲染交错）。
+
+**规则管理与持久化**：`add_rule() / remove_rule() / list_rules()` 支持运行时增删查（发射 `PermissionRuleAdded/RemovedEvent`）；`save_rule_to_file()` / `load_rule_files()` 读写用户级与项目级 `permissions.toml`，格式为三节两级：
+
+```toml
+[commands]
+allow = ["docker build *"]
+deny  = ["docker rm *"]
+[paths]
+allow = ["D:/shared/*"]
+deny  = ["*/secrets/*"]
+[tools]
+allow = ["glob"]
+deny  = ["delete_file"]
+```
+
+`/allow`、`/deny` 斜杠命令即通过这套 API 落盘。每次判定的依据记录在 `last_decision_reason` / `last_matched_rule`，供 `/trace` 展示。
 
 ### 11.2 路径守卫 (`security/path_guard.py`)
 
 ```python
 class PathGuard:
-    """Restricts file system access to allowed paths."""
+    """将文件系统访问限制在允许的路径内。"""
 
-    def __init__(self, config: SecurityConfig): ...
+    def __init__(
+        self,
+        tool_config: ToolConfig,        # allowed_paths / denied_paths
+        security_config: SecurityConfig,
+        project_dir: Path,
+    ) -> None: ...
 
-    def check(self, path: Path, operation: str) -> PermissionLevel:
-        """Check if a path is allowed for the given operation.
-        operation: 'read' | 'write' | 'execute'
+    def check(self, path: Path, operation: str = "read") -> PermissionLevel:
+        """operation: 'read' | 'write'
+        顺序：拒绝目录 -> 敏感文件 -> 项目目录 -> 溢写缓存(只读) -> 允许路径 -> ask
         """
-        resolved = path.resolve()
+        resolved = path.expanduser().resolve()
 
-        # Always deny: sensitive directories
-        for denied in self._denied_paths:
-            if resolved.is_relative_to(denied):
-                return PermissionLevel.DENY
-
-        # Always allow: project directory and below
-        if (self._project_dir
-                and resolved.is_relative_to(self._project_dir)):
+        for denied in self._denied_paths:          # 1. 拒绝目录 DENY
+            ...
+        if self.is_sensitive_file(resolved):        # 2. 敏感文件 DENY
+            return PermissionLevel.DENY
+        if ...project_dir...:                       # 3. 项目目录 ALLOW
             return PermissionLevel.ALLOW
-
-        # Explicitly allowed paths
-        for allowed in self._allowed_paths:
-            if resolved.is_relative_to(allowed):
-                return PermissionLevel.ALLOW
-
-        # Default: ask
-        return PermissionLevel.ASK
-
-    def is_sensitive_file(self, path: Path) -> bool:
-        """Check if file matches sensitive patterns
-        (.env, credentials, keys)."""
-        sensitive_patterns = [
-            ".env", ".env.*", "*.pem", "*.key", "id_rsa*",
-            "credentials*", "*secret*", "*.p12", "*.pfx",
-        ]
-        ...
+        if operation == "read" and ...cache_root...:  # 4. 溢写缓存只读 ALLOW
+            return PermissionLevel.ALLOW            #    (~/.mini-agent/cache/results)
+        for allowed in self._allowed_paths:         # 5. 配置的允许路径 ALLOW
+            ...
+        return PermissionLevel.ASK                  # 6. 兜底询问
 ```
+
+敏感文件模式 `SENSITIVE_FILE_PATTERNS`：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`id_ed25519*`、`credentials*`、`*secret*`、`*.p12`、`*.pfx`。例外清单 `SENSITIVE_EXCEPTIONS`：`.env.example` / `.env.sample` / `.env.template` 是模板不是秘密，放行。
+
+溢写缓存目录（`~/.mini-agent/cache/results`）只读自动放行是配套设计：超大工具结果落盘后占位文案会引导 LLM 读回，每次读回都弹权限框会废掉溢写机制；写入该目录仍走询问。
 
 ### 11.3 Worktree 工作树隔离 (`security/worktree.py`)
 
 ```python
 class WorktreeManager:
-    """Manages git worktree creation, tracking, and cleanup."""
+    """Git worktree 的创建、跟踪与清理。"""
 
-    def __init__(self, config: SecurityConfig, event_bus: EventBus): ...
+    def __init__(self, repo_dir: Path, base_dir: str = ".mini-agent/worktrees") -> None: ...
 
-    async def create(
-        self,
-        repo_dir: Path,
-        branch_name: str,
-        base_ref: str = "HEAD",
-    ) -> Path:
-        """Create a new worktree. Returns the worktree path.
-        Runs: git worktree add <base>/<branch_name> -b <branch_name>
-        """
+    async def create(self, branch_name: str, base_ref: str = "HEAD") -> Path:
+        """git worktree add <base_dir>/<branch_name> -b <branch_name> <base_ref>
+        创建后把依赖目录 node_modules/.venv/vendor 符号链接进新 worktree
+        （P54，Agent 免重装依赖；Windows 无开发者模式缺符号链接权限时静默跳过）。"""
         ...
 
-    async def remove(
-        self, worktree_path: Path, force: bool = False
-    ) -> None:
-        """Remove a worktree. Checks for uncommitted changes first."""
-        ...
-
-    async def list(self, repo_dir: Path) -> list[WorktreeInfo]: ...
-
-    async def merge_back(
-        self,
-        worktree_path: Path,
-        target_branch: str = "main",
-    ) -> MergeResult: ...
+    async def remove(self, worktree_path: Path, force: bool = False) -> None: ...
+    async def list(self) -> list[WorktreeInfo]: ...
+    async def status(self, worktree_path: Path) -> WorktreeInfo: ...
+    async def has_uncommitted_changes(self, worktree_path: Path) -> bool: ...
+    async def cleanup_stale(self, max_age_days: int) -> list[str]: ...
+    async def merge_back(self, branch_name: str, target_branch: str = "") -> MergeResult: ...
 
 
 @dataclass
@@ -2118,7 +2623,27 @@ class MergeResult:
     success: bool
     conflicts: list[str] = field(default_factory=list)
     merged_branch: str = ""
+    message: str = ""   # git 输出或失败原因
 ```
+
+与早期设计的差异：`repo_dir` 在构造时绑定（方法不再重复传参）；worktree 统一放在仓库内的 `.mini-agent/worktrees/` 下；`merge_back` 按分支名合并并返回带 `message` 的结果。
+
+### 11.4 跨进程权限确认 (`security/remote_confirm.py`)
+
+窗格 Worker（§12.4）跑在独立进程里，没有父进程的确认弹窗。`RemoteConfirm` 用**文件协议**桥接：worker 侧把请求原子写入 `~/.mini-agent/workers/<agent_id>.perm-request.json`，然后轮询父进程写出的 `<agent_id>.perm-decision.json`；父进程侧（`SubAgentManager._collect_pane_result`）轮询到请求后弹自家确认框，把决定（`y`/`n`/`a`=always）写回。超时 120 秒未决则**默认拒绝**（安全兜底）。请求/决定文件均原子写入（临时文件 + rename），超时或取消时清理孤立文件。
+
+### 11.5 审计日志 (`security/audit.py`)
+
+合规审计器订阅 EventBus（工具调用起止、用户消息等），以 JSONL 追加写入。防篡改设计：每条记录携带 `hash = sha256(prev_hash + 规范化记录)` 的**哈希链**，篡改或删除任何一行都会破坏链条；`verify_chain()` 可重放校验（`/audit verify`）。并行工具执行下用锁保护链完整性。
+
+### 11.6 OS 级沙箱 (`security/sandbox/`)
+
+内核级隔离，Windows 上为 no-op：
+
+- **Linux**：bubblewrap（`bwrap`）——用户命名空间隔离、只读 rootfs；
+- **macOS**：Seatbelt（`sandbox-exec`）——SBPL deny-default profile。
+
+`create_sandbox()` 探测可用实现并包装 bash 命令。`SandboxConfig` 声明可写路径（工作目录、`/tmp`）、拒绝写路径（`~/.mini-agent`）和 `sandbox_network` 网络开关。配套配置 `sandbox_auto_allow`：内核已提供隔离时，权限层自动放行命令（含危险命令，见 11.1）。
 
 ---
 
@@ -2133,13 +2658,13 @@ Main Agent (user-facing)
     |
     +---- spawn("fix auth bug in login.py", isolation="worktree")
     |         |
-    |         +-- WorktreeManager.create(repo, "fix-auth-bug")
+    |         +-- WorktreeManager.create("agent-<id>")
     |         +-- New AgentLoop with restricted tools
     |         +-- Runs independently in worktree directory
     |
     +---- spawn("update test_login.py tests", isolation="worktree")
     |         |
-    |         +-- WorktreeManager.create(repo, "update-tests")
+    |         +-- WorktreeManager.create("agent-<id>")
     |         +-- New AgentLoop with restricted tools
     |         +-- Runs independently in worktree directory
     |
@@ -2150,83 +2675,109 @@ Main Agent (user-facing)
     +-- Report to user
 ```
 
-### 12.2 Agent 团队协调
+**Agent 类型系统**（`core/agent_types.py`）：SubAgent 有 4 种差异化类型，各自绑定专用 system prompt、工具集与迭代预算：
+
+| 类型 | 工具集 | max_iterations | 用途 |
+|------|--------|----------------|------|
+| `explore` | 只读（read_file/glob/grep/bash/send_message/wait_message） | 30 | 代码库调研 |
+| `plan` | 只读（同上） | 30 | 产出实现计划 |
+| `worker` | 不限（默认类型） | 50 | 全能力执行 |
+| `verify` | 只读（同上） | 20 | 验证，末尾输出 PASS/FAIL |
+
+未指定类型时回退 `DEFAULT_AGENT_TYPE="worker"` 的提示词/工具，但**保留调用方的迭代预算**（P80）——`config.max_agent_iterations` 用户可配，不能被类型档案静默覆盖。类型工具列表与调用方 `allowed_tools` 取交集。
 
 ```python
-class AgentTeam:
-    """Multi-agent team for large cross-domain projects."""
+# SubAgentManager.spawn（真实签名，无 parent_agent_id）
+async def spawn(
+    self,
+    task: str,
+    isolation: str = "none",              # "none" | "worktree"
+    allowed_tools: list[str] | None = None,
+    agent_type: str | None = None,        # explore | plan | worker | verify
+    agent_id: str | None = None,          # spawn_parallel 预生成 id 用
+    peers: list[tuple[str, str, str]] | None = None,  # (id, name, task)
+    name: str = "",
+) -> str:
+    worktree_path = None
+    if isolation == "worktree":
+        branch = f"agent-{uuid.uuid4().hex[:8]}"
+        worktree_path = await self._worktree_manager.create(branch)
 
-    async def start(self, task: str) -> None:
-        """
-        Coordination strategy: "orchestrator"
-
-        1. Orchestrator (main agent) receives the task
-        2. Orchestrator decomposes task using plan mode
-        3. For each subtask, orchestrator spawns a team member
-           with role-appropriate system prompt and tool set
-        4. Team members work in isolated worktrees
-        5. Orchestrator monitors progress via events
-        6. When members complete, orchestrator reviews and merges
-        7. If conflicts arise, orchestrator resolves or asks user
-        """
-        # Decompose
-        plan = await self._planner.decompose(
-            task, self._config.members
-        )
-
-        # Assign to members
-        for step in plan:
-            member = self._match_member(step)
-            await self._subagent_manager.spawn(
-                task=step.description,
-                parent_agent_id=self._orchestrator_id,
-                isolation="worktree",
-            )
-
-        # Monitor and coordinate
-        await self.coordinate()
+    agent = SubAgent(task=task, ..., worktree_path=worktree_path,
+                     agent_type=get_agent_type(agent_type) if agent_type else None,
+                     mailbox=self.mailbox, agent_id=agent_id, peers=peers, name=name)
+    handle = asyncio.create_task(agent.run())
+    self._active[agent.agent_id] = _ActiveAgent(agent=agent, task_handle=handle, ...)
+    await self._event_bus.emit(SubAgentSpawnEvent(agent_id=agent.agent_id, task=task))
+    return agent.agent_id
 ```
+
+`SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
+
+### 12.2 Agent 团队协调 (`core/team.py`)
+
+```python
+@dataclass
+class TeamConfig:
+    name: str
+    members: list[TeamMember] = field(default_factory=list)  # name/role/allowed_tools
+    isolation: str = "none"      # "none" | "worktree"
+    coordinator: bool = False    # 协调者模式：Planner 只分派，文件操作全归 Worker
+
+
+class AgentTeam:
+    """编排者策略团队：分解任务，分派给成员，收集结果。"""
+
+    async def start(self, task: str, timeout: float | None = None) -> TeamRunReport:
+        # 1. 扫描真实项目结构喂给 Planner（避免套用通用 web 模板）
+        plan = await self._planner.decompose(task, context=...)
+        # 2. 依赖分批循环
+        while not plan.is_complete:
+            batch = [依赖全部就绪的 pending 步骤]   # 无就绪步骤时兜底全跑（防循环依赖死锁）
+            # 依赖失败的步骤直接标记 failed 跳过
+            for step in ready:
+                member = self._match_member(step.role)
+                allowed_tools = member.allowed_tools if member else None
+                if not step.writes_files:
+                    allowed_tools = [剥离 write_file/edit_file 后的工具名]  # 能力剥夺而非 prompt 自觉
+                agent_id = await self._manager.spawn(
+                    task=角色前缀 + step.description + self._build_dep_context(step, results),
+                    isolation=self._config.isolation,
+                    allowed_tools=allowed_tools,
+                )
+            batch_results = await self._manager.wait_all(agent_ids, timeout=timeout)
+        return TeamRunReport(task=task, plan=plan, results=results)
+```
+
+关键机制：
+
+- **依赖分批**：`PlanStep.depends_on` 声明依赖，依赖全部完成的步骤并行派生，依赖失败的步骤标记失败跳过；`_build_dep_context` 把依赖步骤的产出（截断至 4000 字符）拼进后续步骤的任务描述。
+- **非写步骤强制只读**：`step.writes_files=False` 的步骤被剥夺 `write_file`/`edit_file` 工具——能力移除而非 prompt 劝说。
+- **协调者模式**：`TeamConfig.coordinator=True` 时 `Planner` 带 `_COORDINATOR_PREFIX`（纯分派：协调者自己不碰任何文件，全部委派给 Worker），且计划步数上限提升、给 Planner 更深的项目结构扫描。
+- **强弱模型混编**：`ProviderRegistry.create_for_role(config, "planner"/"worker")` 按 `planner_profile` / `worker_profile`（指向命名 LLM 档案，见 §13）为规划和执行分别选模型——强模型规划、弱模型执行。
 
 ### 12.3 Agent 间通信
 
-Agent 之间通过 EventBus 通信。主 Agent 订阅 `SubAgentCompletedEvent` 和 `SubAgentSpawnedEvent`。每个子 Agent 拥有独立的 AgentLoop，但共享同一个 EventBus 实例，因此编排者能实时接收状态更新。
+两条通道各司其职：
 
-```python
-# In SubAgentManager
-async def spawn(self, task, parent_agent_id, isolation="none") -> str:
-    agent_id = uuid.uuid4().hex[:8]
+**EventBus（状态通道）**：所有 Agent 共享同一 EventBus 实例，`SubAgentSpawnEvent` / `SubAgentCompleteEvent` 等状态事件让编排者与 UI 实时感知进度（进度面板用 `active_snapshots()` 轮询快照）。
 
-    # Set up worktree if requested
-    worktree_path = None
-    if isolation == "worktree":
-        worktree_path = await self._worktree_manager.create(
-            self._repo_dir,
-            branch_name=f"agent-{agent_id}",
-        )
+**Mailbox（内容通道，`core/mailbox.py`）**：跨 Agent 的实质消息传递。文件收件箱存于 `.mini-agent/mailboxes/`，读改写循环由 `O_EXCL` 锁文件保护（指数退避 + 抖动 + 陈旧锁接管 + 超时）——同进程与跨进程 Agent 通用。配套 `send_message` / `wait_message` 工具：
 
-    # Create isolated tool registry (copy, not reference)
-    agent_tools = self._tool_registry.clone()
+- 收件人可以是 `'main'`（编排者）、同伴 id/别名、或 `'*'`（广播）；
+- `type='request'` 自动分配 request_id，对方以 `type='response'` 携带该 id 应答（可带 approve=true/false），构成请求/响应语义；
+- `wait_message` 阻塞等待来信——"等待型"任务不再靠 shell sleep 忙等；
+- `spawn_parallel()` **预生成全部 agent_id**，每个 Agent 的 system prompt（MAILBOX_NOTICE）直接列出同伴的 id、别名与任务摘要——兄弟 Agent 无需探测即可互发消息。
 
-    # Create sub-agent with its own loop
-    subagent = SubAgent(
-        task=task,
-        parent_agent_id=parent_agent_id,
-        llm=self._llm_provider,        # Can share the provider
-        tool_registry=agent_tools,
-        config=self._config,
-        event_bus=self._event_bus,      # Shared event bus
-        worktree_path=worktree_path,
-    )
+### 12.4 窗格 Worker（独立进程）
 
-    # Run in background task
-    self._active[agent_id] = asyncio.create_task(subagent.run())
-    await self._event_bus.emit(SubAgentSpawnedEvent(
-        agent_id=agent_id,
-        task=task,
-        parent_id=parent_agent_id,
-    ))
-    return agent_id
-```
+`SubAgentManager.spawn_pane(task, name, agent_type, timeout=900)` 把 SubAgent 跑在**可见终端窗格的独立进程**里（`core/spawn_backends.py`）：当前会话在 tmux 内则 `tmux split-window`，在 Windows Terminal 内则 `wt split-pane`（wt.exe 存在但不在 WT 会话内时降级弹新窗口）。协议文件（spec/result JSON）放在项目外的 `~/.mini-agent/workers/`——曾有 worker 的 LLM 在项目里读到自己的 spec，"好心"提前写了结果桩。
+
+`core/worker.py` 的 `run_worker()` 是无头执行器：读 WorkerSpec、装配独立的 AgentLoop 与工具、跑完后**原子写出**结果 JSON。父进程轮询结果文件（schema + agent_id 双重校验，拒绝早产桩），并经 `RemoteConfirm` 文件协议（§11.4）中转 worker 的权限请求到自家确认框。窗格 worker 与进程内 Agent 共享同一 Mailbox 目录，wait/cancel/list 接口一致（`_PaneWorkerProxy` 顶替占位）。
+
+### 12.5 远程/浏览器模式 (`remote/`)
+
+P57。`remote/server.py` 的 `RemoteServer` 启动 WebSocket 服务器替代终端 UI：包装 `Application` 的 terminal 拦截 UI 调用，以 NDJSON 事件与浏览器双向通信（`GET /` 返回内置 HTML 页面，`/ws` 升级 WebSocket）。共享同一个 `Application` 实例——引擎、工具、权限、记忆全部复用，只换交互层。
 
 ---
 
@@ -2234,65 +2785,70 @@ async def spawn(self, task, parent_agent_id, isolation="none") -> str:
 
 ### 13.1 分层配置
 
+优先级栈共 7 层（低到高依次应用）：
+
 ```
 Priority (highest to lowest):
-+------------------------------------------------+
-|  CLI arguments (--model, --provider, etc.)      |  <- Overrides all
-+------------------------------------------------+
-|  Environment variables (MINI_AGENT_MODEL, etc.) |
-+------------------------------------------------+
-|  .env file (project root, auto-loaded)          |
-+------------------------------------------------+
-|  Project config (.mini-agent/config.toml)       |  <- Per-project
-+------------------------------------------------+
-|  User config (~/.mini-agent/config.toml)        |  <- User defaults
-+------------------------------------------------+
-|  Built-in defaults (config/defaults.py)         |  <- Fallback
-+------------------------------------------------+
++---------------------------------------------------------+
+|  CLI arguments (--model, --provider, etc.)               |  <- Overrides all
++---------------------------------------------------------+
+|  Named LLM profiles (MINI_AGENT_MODELS/PROFILES          |
+|    + MINI_AGENT_PLANNER_PROFILE / _WORKER_PROFILE)       |  <- 强弱模型混编
++---------------------------------------------------------+
+|  Environment variables (MINI_AGENT_MODEL, etc.)          |
++---------------------------------------------------------+
+|  .env file (cwd, injected into os.environ, no overwrite) |
++---------------------------------------------------------+
+|  Project config (.mini-agent/config.toml, from cwd)      |  <- Per-project
++---------------------------------------------------------+
+|  User config (~/.mini-agent/config.toml)                 |  <- User defaults
++---------------------------------------------------------+
+|  Built-in defaults (config/defaults.py)                  |  <- Fallback
++---------------------------------------------------------+
 ```
+
+`.env` 层的语义是**注入 `os.environ` 且不覆盖已有变量**——已导出的环境变量始终赢过 `.env` 文件。命名 LLM 档案层解析 `MINI_AGENT_MODELS`（旧名 `MINI_AGENT_PROFILES`）声明的档案清单及各自的 provider/model/key 变量，`planner_profile` / `worker_profile` 指向其中的档案实现强弱模型混编（§12.2）。
 
 ### 13.2 配置加载器 (`config/loader.py`)
 
 ```python
 class ConfigLoader:
-    """Loads and merges configuration from all layers."""
+    """从所有层级加载并合并配置。"""
 
     @staticmethod
-    def load(
-        cli_args: dict[str, Any] | None = None,
-        project_dir: Path | None = None,
-    ) -> AgentConfig:
-        """Load configuration with full layer merging."""
-        # 1. Start with defaults
-        config = _load_defaults()
+    def load(cli_overrides: dict[str, Any] | None = None) -> AgentConfig:
+        config = get_defaults()
 
-        # 2. Merge user config
-        user_config_path = Path.home() / ".mini-agent" / "config.toml"
-        if user_config_path.exists():
-            config = _merge(config, _load_toml(user_config_path))
+        # 1. 用户级 TOML
+        user_toml = Path.home() / ".mini-agent" / "config.toml"
+        if user_toml.is_file():
+            ConfigLoader._merge(config, ConfigLoader._load_toml(user_toml))
 
-        # 3. Merge project config
-        if project_dir:
-            project_config_path = (
-                project_dir / ".mini-agent" / "config.toml"
-            )
-            if project_config_path.exists():
-                config = _merge(config, _load_toml(project_config_path))
+        # 2. 项目级 TOML（从 Path.cwd() 取，无 project_dir 参数）
+        project_toml = Path.cwd() / ".mini-agent" / "config.toml"
+        if project_toml.is_file():
+            ConfigLoader._merge(config, ConfigLoader._load_toml(project_toml))
 
-        # 4. Merge environment variables
-        config = _merge_env(config)
+        # 3. .env 注入 os.environ（不覆盖已有变量）
+        ConfigLoader._load_dotenv()
 
-        # 5. Merge CLI arguments (highest priority)
-        if cli_args:
-            config = _merge_cli(config, cli_args)
+        # 4. 环境变量
+        config = ConfigLoader._apply_env(config)
 
+        # 5. 命名 LLM 档案（MINI_AGENT_MODELS / MINI_AGENT_PROFILES）
+        ConfigLoader._load_profiles(config)
+
+        # 6. 强弱模型混编
+        config.planner_profile = os.environ.get("MINI_AGENT_PLANNER_PROFILE", "").strip()
+        config.worker_profile = os.environ.get("MINI_AGENT_WORKER_PROFILE", "").strip()
+
+        # 7. CLI 覆盖（最高优先级）
+        if cli_overrides:
+            config = ConfigLoader._apply_cli(config, cli_overrides)
         return config
-
-    @staticmethod
-    def _merge(base: AgentConfig, overlay: dict) -> AgentConfig:
-        """Deep-merge overlay dict onto base config dataclass."""
-        ...
 ```
+
+内部方法分工：`_merge` 深合并 TOML 字典到 dataclass（其中 `[mcp.servers.*]` 由 `_merge_mcp` 特判——每个服务器名映射到一个 `MCPServerConfig`）；`_load_dotenv` 解析 cwd 下的 `.env`；`_apply_env` / `_apply_cli` 应用环境变量与 CLI 覆盖；`_load_profiles` 装载命名档案。
 
 ### 13.3 配置文件格式 (TOML)
 
@@ -2368,33 +2924,30 @@ You are a code reviewer. Follow these steps:
 [full prompt content follows]
 ```
 
-**加载**：`SkillRegistry.load_all()` 扫描配置的技能目录，解析每个 `SKILL.md`，提取 front-matter 和正文，创建 `Skill` 对象。
+**加载**：`SkillRegistry.load_all()` 扫描配置的技能目录，解析每个 `SKILL.md`，提取 front-matter 和正文，创建 `Skill` 对象。除文件加载外，`SkillRegistry.register(skill)` 提供程序化注册路径——插件的 `register_skills` 钩子（14.5）用它注入技能。另有 `install()/uninstall()` 支持从远端源安装技能包，`reload()` 热重载。
 
-**激活**：当用户输入触发词或 `/skill code-review` 时，技能的 prompt 被追加到 system prompt 中。其所需工具会被验证可用。附加的资源文件被加载到上下文中。
+**激活**：仅通过 `/skill activate <name>` 手动激活——技能的 prompt 被追加到 system prompt，`/skill deactivate` 精确移除。`match_triggers()` 触发词匹配虽有实现但无调用方（未接线）；激活不做工具可用性校验、不加载资源文件。
 
 **停用**：技能的 prompt 从 system prompt 中移除，资源释放。
 
 ### 14.2 斜杠命令如何接入
 
-内置命令在 `SlashCommandRegistry.__init__()` 中注册。用户自定义命令可通过配置文件添加：
+内置命令由 `extensions/builtin_commands.py` 的 `register_builtin_commands(app)` 集中注册——共 26 个可见命令（help/clear/status/model/compact/memory/session/tools/skill/plugins/trace/explain/audit/theme/plan/spawn/team/todo/cost/record/replay/undo/fork/allow/deny/exit），外加隐藏别名 `/quit`（等价 `/exit`）。
 
-```toml
-# .mini-agent/config.toml
-[slash_commands.deploy]
-description = "Deploy to staging"
-handler = "bash"
-command = "git push origin main && ./deploy.sh staging"
-confirm = true
-```
-
-或通过代码注册：
+用户自定义命令通过**插件**的 `register_commands` 钩子注册（14.5）：
 
 ```python
-registry.register(SlashCommand(
-    name="deploy",
-    description="Deploy to staging",
-    handler=deploy_handler,
-))
+# ~/.mini-agent/plugins/deploy.py
+from mini_agent.extensions.slash_commands import SlashCommand
+
+def register_commands(registry):
+    async def deploy_handler(args: str) -> str:
+        ...
+    registry.register(SlashCommand(
+        name="deploy",
+        description="Deploy to staging",
+        handler=deploy_handler,
+    ))
 ```
 
 ### 14.3 MCP 服务器如何接入
@@ -2412,23 +2965,23 @@ async def _connect_mcp_servers(self):
         #   with "mcp_<server>_" prefix
 ```
 
-MCP Python SDK v2 提供了一个高级 `Client` 类，同时处理 stdio 和 HTTP 传输。`MCPManager` 对其进行封装，为每个配置的服务器维护一个 `Client` 实例。
+MCP 连接不依赖任何 SDK：自研 JSON-RPC 传输层（`MCPTransport` 抽象 + `StdioTransport` / `HTTPTransport` 实现）同时处理 stdio 和 HTTP 传输。`MCPManager` 为每个配置的服务器维护一个 `MCPServerConnection` 实例。
 
 ### 14.4 Hook 如何接入
 
-Hook 可通过代码注册或配置文件声明：
+Hook 可通过配置文件声明或代码注册。配置格式是 `[[hooks]]` 数组表（`tools/hooks.py` 的 `parse_hook_rules` 解析、`register_hook_rules` 注册为 PRE_TOOL hook）：
 
 ```toml
-# Config-based hook
-[hooks.pre_tool.dangerous_command_guard]
-stage = "pre_tool"
-tool = "bash"
-action = "confirm"
-pattern = "rm|sudo|chmod|chown|mkfs|dd"
-message = "This command looks dangerous. Proceed?"
+# .mini-agent/config.toml
+[[hooks]]
+tool = "bash"                      # fnmatch 模式匹配工具名（默认 "*"）
+arg = "command"                    # 可选：只检查此参数（省略则检查全部参数值）
+regex = "rm -rf|sudo|> /dev/"      # 触发正则（也可用 contains 子串匹配）
+reason = "This command looks dangerous."
+action = "confirm"                 # "block"（默认）拒绝执行；"confirm" 弹 y/a/n 确认框
 ```
 
-> **实现注记**：实际落地的配置格式是 `[[hooks]]` 数组表（字段：tool/arg/contains/regex/reason/action），语义与本节设计一致——`action = "block"`（默认）拒绝执行，`action = "confirm"` 弹 y/a/n 确认框。见 guide/config-guide.md "Hook 规则详解"。
+字段共 6 个：`tool` / `arg` / `contains` / `regex` / `reason` / `action`。`action = "block"` 直接拒绝并把 `reason` 回给 LLM；`action = "confirm"` 复用与权限系统相同的 y/a/n 确认弹窗。
 
 或通过代码：
 
@@ -2445,6 +2998,31 @@ async def dangerous_cmd_hook(ctx: HookContext) -> HookResult:
 
 hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 ```
+
+### 14.5 插件生态 (P83)
+
+`extensions/plugin_loader.py` 提供双通道插件发现：
+
+1. **pip 包**：经 `mini_agent.plugins` entry-point 群组声明——
+
+   ```toml
+   # 插件包的 pyproject.toml
+   [project.entry-points."mini_agent.plugins"]
+   my_plugin = "my_plugin.hooks"
+   ```
+
+2. **本地文件**：放进 `plugin_dirs`（配置项）目录的普通 `.py` 文件——免打包，即放即用。
+
+插件模块实现**四钩子契约**中的任意组合：
+
+- `register(ctx: PluginContext)`：全控钩子，可触达工具/命令/技能注册表——存在时**优先**，其余三个钩子被忽略；
+- `register_tools(registry: ToolRegistry)`
+- `register_commands(registry: SlashCommandRegistry)`
+- `register_skills(registry: SkillRegistry)`
+
+安装插件即 opt-in；`disabled_plugins`（按 entry-point 名或文件名去后缀匹配）是关闭开关。导入错误与钩子异常被隔离并警告——坏插件不能拖垮启动。插件注册的工具**绕过 `enabled_tools` 白名单**（用户显式安装即授权）。
+
+同目录下的 `extensions/event_listeners.py` 是更早的轻量监听器插件（P56 前身，仍可用）：`.py` 文件实现 `register(bus)`（全控订阅）或 `on_event(event)`（同步/异步皆可，订阅全部事件）即被加载，异常同样隔离。
 
 ---
 
@@ -2490,6 +3068,8 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 8. `core/agent_state.py` -- AgentState, AgentPhase
 9. `core/agent_loop.py` -- Full ReAct loop
 10. `ui/terminal.py` -- Extend: tool call rendering, spinners, confirmations
+
+注：此阶段的 6 个内置工具最终扩至 12 个（`delete_file`、`spawn_agents`、`send_message`、`wait_message`、`tool_search`、`mcp_call` 在后续阶段加入）。
 
 **交付物**：Agent 能接收如"读取 README 并总结"的任务，自主调用 ReadFile，处理结果并回答。多步工具链正常运行。
 
@@ -2548,10 +3128,10 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 5. `tools/mcp/adapter.py` -- MCPToolAdapter
 6. `extensions/event_listeners.py` -- Event listener plugin loader
 6b. `extensions/plugin_loader.py` -- Plugin ecosystem: entry-point + dir discovery, register hooks
-7. Built-in skill packs (code_review, init_project)
+7. Built-in skill packs -- 4 个（code_review、init_project、offline-ollama、teach-mode）
 8. `llm/anthropic_provider.py` -- Second LLM provider (Claude)
 
-**交付物**：用户可挂载 MCP 服务器并使用其工具。技能包根据触发词自动激活。所有斜杠命令可用。OpenAI 和 Anthropic 两种后端均可工作。
+**交付物**：用户可挂载 MCP 服务器并使用其工具。技能包经 `/skill` 命令手动激活。所有斜杠命令可用。OpenAI 和 Anthropic 两种后端均可工作。
 
 **依赖**：第 1-4 阶段完成。
 
@@ -2564,10 +3144,14 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 构建顺序：
 1. `security/worktree.py` -- WorktreeManager
 2. `core/subagent.py` -- SubAgent, SubAgentManager
-3. `core/planner.py` -- Plan mode (structured task decomposition)
-4. `core/team.py` -- AgentTeam, TeamConfig
-5. UI for monitoring multiple agents
-6. Worktree merge and conflict resolution
+3. `core/agent_types.py` -- 差异化 Agent 类型（explore/plan/worker/verify）
+4. `core/planner.py` -- Plan mode (structured task decomposition)
+5. `core/team.py` -- AgentTeam, TeamConfig
+6. `core/mailbox.py` -- 跨 Agent 收件箱（send_message/wait_message）
+7. `core/spawn_backends.py` + `core/worker.py` -- 窗格 Worker（tmux / Windows Terminal 独立进程）
+8. `remote/` -- WebSocket 远程/浏览器模式
+9. UI for monitoring multiple agents
+10. Worktree merge and conflict resolution
 
 **交付物**：Agent 能在 worktree 中派生子 Agent，并行执行任务，收集和合并结果。Agent 团队能协调完成大型项目。
 
@@ -2596,7 +3180,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 
 **1. 工具采用组合优于继承。** 所有工具仅需实现 `Tool` ABC 的两个成员（`schema` 属性和 `execute` 方法），没有深层类继承。MCP 工具通过 `MCPToolAdapter` 适配为相同接口。这使工具注册表保持简洁：一个名称到 `Tool` 的扁平字典。
 
-**2. EventBus 作为集成骨架。** 各层不直接相互调用（避免循环依赖），而是通过 EventBus 让任意组件发射事件、任意组件订阅。UI 订阅 `LLMStreamChunkEvent` 实现实时渲染；记忆系统订阅 `TurnCompleteEvent` 触发记忆提取；安全层订阅 `ToolCallStartEvent` 进行审计日志。实现全面解耦。
+**2. EventBus 作为集成骨架。** 各层不直接相互调用（避免循环依赖），而是通过 EventBus 让任意组件发射事件、任意组件订阅。TraceRenderer 订阅 8 种事件实现 `/trace` 实时观测；AuditLogger 订阅 `ToolCallStartEvent`/`ToolCallEndEvent` 写审计日志；CostTracker 订阅 `LLMResponseEvent` 计费。流式渲染是唯一例外——走 `on_stream_delta` 直连回调（低延迟路径），不经过总线。实现全面解耦。
 
 **3. 全异步到底。** 所有 I/O 操作（LLM 调用、工具执行、MCP 调用、文件 I/O）均为异步。这使得通过 `asyncio.gather()` 并行执行工具成为可能，并在长时间操作期间保持 UI 响应。prompt_toolkit 的异步支持（`run_async()`）可自然集成。
 
@@ -2606,7 +3190,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 
 **6. 安全不是可选项。** 权限系统在每次工具调用执行前进行评估。路径守卫默认阻止访问敏感目录。Hook 链允许在每个生命周期点拦截操作。这些都内嵌在 Agent Loop 核心中，而非事后补丁。
 
-**7. 三种扩展机制各司其职。** 斜杠命令用于用户快捷操作（命令式）；技能包用于领域特定的 Agent 行为（增强 Agent）；MCP 服务器用于外部工具集成（扩展工具库）。三者互不重叠、互不竞争。
+**7. 五种扩展机制各司其职。** 斜杠命令用于用户快捷操作（命令式）；技能包用于领域特定的 Agent 行为（增强 Agent）；MCP 服务器用于外部工具集成（扩展工具库）；事件监听器用于旁路观察（订阅事件流，不介入执行）；插件生态（P83）用于打包分发前三者的组合（entry-point / 本地目录双通道发现）。五者互不重叠、互不竞争。
 
 **8. 压缩优先于截断。** 当上下文变长时，系统先尝试智能压缩（摘要、精简工具输出），再兜底截断。这保持了简单滑动窗口会破坏的推理连贯性。
 
