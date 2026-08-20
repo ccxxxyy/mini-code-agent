@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-975%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-995%20passed-brightgreen)]()
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -23,7 +23,7 @@
 
 ## Features
 
-🔧 **12 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call
+🔧 **20 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call, ask_user, exit_plan_mode, task CRUD, load/install_skill
 
 🤖 **Multi-Agent** — `/spawn` parallel agents, `/spawn --pane` visible terminal-pane workers (tmux / Windows Terminal, separate processes), `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message)
 
@@ -203,7 +203,7 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 mini-code-agent/
 ├── src/mini_agent/
 │   ├── core/        # Agent loop, state, sub-agents, teams, planner, mailbox, pane worker, cost tracker, task store, tool recorder, agent types, spawn backends
-│   ├── tools/       # 12 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/dispatch) + hook system
+│   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/dispatch) + hook system
 │   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
 │   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/seatbelt), worktree isolation, remote confirm (cross-process)
 │   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher
@@ -213,7 +213,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 975 tests, 80%+ coverage
+├── tests/           # 995 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -234,7 +234,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 975 tests
+uv run pytest tests/           # 995 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

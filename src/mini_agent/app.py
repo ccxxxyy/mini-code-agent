@@ -298,6 +298,16 @@ class Application:
         tool_context.mailbox = self.mailbox
         self.agent_loop.mailbox = self.mailbox
 
+        # B1 process tools: expose plan-mode control + ask_user callback
+        # B1 流程工具：暴露计划模式控制 + 结构化提问回调
+        import types as _types
+
+        tool_context.agent_loop_ref = _types.SimpleNamespace(
+            get_plan_mode=lambda: self.agent_loop.plan_mode,
+            set_plan_mode=lambda v: setattr(self.agent_loop, "plan_mode", v),
+        )
+        tool_context.ask_user_callback = self.terminal.ask_structured
+
         # Trace renderer: /trace shows agent internals in real time
         # Trace 渲染器：/trace 实时展示 Agent 内部状态
         self.trace_renderer = TraceRenderer(self.terminal.console, theme=active_theme)
@@ -324,6 +334,7 @@ class Application:
         from mini_agent.core.task_store import TaskStore
 
         self.task_store = TaskStore(working_dir)
+        self._tool_context.task_store = self.task_store
         self.audit_logger.attach(self.event_bus)
 
         # Tool recorder: /record captures tool calls, /replay re-runs them
@@ -347,6 +358,7 @@ class Application:
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
         self.skill_registry.load_all()
+        self._tool_context.skill_registry = self.skill_registry
 
         # Event listener plugins: external code observing all bus events
         # 事件监听插件：外部代码监听总线全部事件（统计/调试）

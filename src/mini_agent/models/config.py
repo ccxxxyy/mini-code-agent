@@ -33,6 +33,14 @@ class ToolConfig:
             "wait_message",
             "tool_search",
             "mcp_call",
+            "ask_user",
+            "exit_plan_mode",
+            "task_create",
+            "task_get",
+            "task_list",
+            "task_update",
+            "load_skill",
+            "install_skill",
         ]
     )
     bash_timeout: float = 120.0
