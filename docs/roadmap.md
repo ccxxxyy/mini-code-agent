@@ -512,14 +512,10 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 **原问题**：`_check_permission` 的路由只覆盖 read_file/glob/grep（read）和 write_file/edit_file（write），delete_file 落入 else 分支无条件 GRANTED。与 `would_ask` 含 delete_file 自相矛盾——流式阶段以为会弹窗而延迟，实际直接放行。
 **修复**：`agent_loop.py:816` 把 delete_file 加入 write 路由 `("write_file", "edit_file", "delete_file")`，与写/编辑工具走同一 `check_path(write)` 管道。回归测试 `test_delete_file_routes_through_path_check`：LLM 调 `delete_file("~/.ssh/id_rsa")` → PathGuard 拒绝 → tool_result.is_error。spec.md 权限路由图与非写步骤剥离列表同步更新。
 
-☐ **A2【高·危险命令正则可绕过】ask 模式下静默执行**
-`security/permission.py:33-53` 的 19 条正则 + `_check_command_request`（:374-403）：非危险命令在 ask/allow 模式一律自动放行（:403），任何绕过正则的破坏性命令都不弹窗。已确认绕过：
-- `rm --recursive --force foo`：`\brm\s+(-[a-z]*[rf][a-z]*\s+)`（:34）要求 `-` 后紧跟 `[rf]`，长选项 `--recursive` 不匹配
-- `git -C /repo push`：`\bgit\s+push\b`（:40）要求 git 后紧跟 push，插入 `-C path` 绕过；`git -C x commit/reset` 同理
-- `chmod -R 777 /`：`\bchmod\s+777\b`（:46）要求 chmod 后紧跟 777，加 `-R` 绕过
-- `rm foo -rf`（标志后置）同样不匹配
-（`bash -c "rm -rf /"`、`;`/`&&` 链、反引号因正则扫描整串仍会命中，非漏洞。）
-测试盲区：test_permissions.py 无这些变体用例。工作量：小（正则加固 + 变体测试）。
+✅ **A2【高·危险命令正则可绕过】ask 模式下静默执行**（已修复）
+**原问题**：非危险命令在 ask/allow 模式自动放行，任何绕过正则的破坏性命令都不弹窗。确认绕过：`rm --recursive --force foo`/`rm foo -rf`（长选项/标志后置）、`git -C /repo push`（全局选项插在 git 与子命令间）、`chmod -R 777 /`（加 -R）。
+**修复**：`security/permission.py` 三类模式加固——rm 容忍长选项与标志后置（`(?:[^\n]*\s)?(?:-[a-z]*[rf]|--recursive|--force)`）；chmod 容忍前置选项与 0777（`(?:-[a-zA-Z]+\s+)*[0-7]*777`）；新增 `_GIT_PREFIX` 常量吞掉 git 全局选项（-c/-C 带值 + attached 形式），7 个 git 危险子命令统一前缀化。新增 `test_dangerous_command_bypass_variants_flagged`（绕过变体须命中）+ `test_dangerous_command_safe_variants_not_flagged`（安全命令零误报，如 `git -C /x status`/`chmod 644`/`rm -i`/`git checkout -b`）。真实运行验证：`chmod -R 777` 与 `git -C . push` 均触发 `dangerous command detected` 确认框。
+**诚实边界**：正则黑名单本质不可能穷尽（死循环实验已证 LLM 可变形绕过签名），加固只堵已知常见形态，是减速带非围墙——迭代上限 + 命中后人工确认才是真护栏（已在代码注释与 CHANGELOG 注明）。
 
 ☐ **A3【中·fail-open 时序】max_tokens 重试导致重复副作用**
 `core/agent_loop.py:423-435`：`_think` 的 max_tokens 恢复循环在 `finish_reason=="length"` 时取消 `_streaming_tasks` 重试，但流式期间已提交并**可能已完成**的写/删工具（:497 create_task）无法回滚——`task.cancel()` 对已完成任务无效。截断重试后 LLM 再次产出同一工具调用并再次执行。
@@ -572,7 +568,29 @@ comparison doc 7.2 称 mewcode hook 有 command/prompt/http/agent 四种动作�
 ☐ **C3 团队文件数过时**
 doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15 文件 2069 行；mini 多 Agent 相关约 7 文件（mailbox/team/spawn_backends/worker/subagent/task_store/agent_types）。
 
-### 有意不做（论证仍成立，不列为待办，仅备忘）
+### D. 后续工作中自查发现的缺陷
+
+☐ **D1【UI·中】思考流（reasoning_content）渲染碎行**
+`ui/terminal.py:203-206` 的 `feed_thinking` 用 `console.print(delta, end="", style="dim italic", highlight=False)` 逐 token 输出模型思考流。Rich 的 `console.print` 不跨调用记录光标列位，每个小片段（如 `.txt`/`).`/`32).`）当独立渲染单元按 `console.width` 各自换行——短碎片落在宽度边界附近时片段间被插入换行，正文前出现一长串断续碎行。
+触发条件：仅推理模型吐 `reasoning_content` 时经 `on_thinking_delta → feed_thinking` 触发（普通模型无思考流，故时有时无，非稳定复现）。主回答流走 `StreamRenderer`（Live+Markdown 缓冲，renderer.py）不受影响。
+修复方案（首选 `soft_wrap=True`）：给该 print 加 `soft_wrap=True`。这不是绕过而是对准病灶——它直接关闭 Rich 的内部词折行与裁剪，"每个片段各自按宽度折行"的机制被移除，折行交给终端并保持真实光标列位；同时保留 Rich 的 dim italic 样式/主题/Windows ANSI 使能。一行修复、低风险、无功能牺牲。
+备选（非必需，更重且不更彻底）：① 仿主流做 thinking 缓冲按行 flush——解决同一症状却引入缓冲状态与额外 bug 面，仅当需要对思考流做 Markdown/Live 渲染才值得；② 裸写 `console.file.write` + 手动 ANSI——完全脱离 Rich 但丢样式整合、需自理 legacy Windows ANSI，跨平台更脆，是退步。
+诚实边界：soft_wrap 后超宽思考文本由终端硬折行（不按词），但思考流是 dim 辅助信息，可读性足够。工作量：小（一行 + 真实推理模型运行验证碎行消失）。验证要点：改完必须对着会吐 `reasoning_content` 的模型真实跑一轮肉眼确认碎行消失（reasoning 里本就有的 \n 是真内容、不归此修复管）。
+
+☐ **D2【行为·高】危险命令被拒后 agent 自主找绕过路径，而非停下求助**
+现象（A2 真实验证时实测）：用户让删 `/tmp/a2test`，agent 连续被拒 4 条危险命令（`rm --recursive --force`→`rmdir /S /Q`→`cmd /c rmdir`→`del /Q && rmdir`，正则全部正确命中并弹窗、用户全拒），但 agent 没有停下，而是继续自主换方式,第 12 轮用 `python -c "shutil.rmtree(...)"`（不匹配任何危险正则）**GRANTED 并真的删除了目录**——共 13 轮、烧 97k tokens。
+根因：拒绝一条命令的语义是"这条不行"，agent 据此重构等价命令重试；黑名单只认命令签名，语义等价的未列命令（python shutil / os.remove / 移动到临时目录等）畅通无阻。这是 A2「诚实边界」（黑名单不可穷尽）在行为层的放大——**绕过之所以得逞，本质是"被拒后继续找路"的行为，而非正则不够全**。比 A2 正则加固更本质。
+候选方案（需设计，未定）：① 连续 N 次危险命令被拒后，agent 停止本目标并回问用户（把"反复被拒"当作强信号）；② 把用户的 DENY 记为会话级软意图（"用户不想删这个目标"），后续语义相近操作预警或直接挡；③ 工具层面：破坏性操作（rm/rmdir/del/shutil.rmtree/移动删除等）归一化为"删除意图"识别，而非逐命令签名——但这又回到不可穷尽问题，治标。
+诚实边界：完全防住语义绕过在架构上不可能（同 A2）；本条目目标是"降低被拒后无意义绕过的概率 + 及早把决定权交回用户"，不是"堵死所有绕过"。工作量：中（行为策略设计 + agent_loop 集成 + 真实验证）。
+
+☐ **D3【安全·高】内联解释器执行绕过命令黑名单 + Windows 无 OS 沙箱底线**
+现象（A2 真实验证时两次实测）：
+- 删目录场景：4 条危险命令（rm/rmdir/del 各形态）全被 A2 正则正确拦下并被用户拒绝后，agent 用 `python -c "import shutil; shutil.rmtree(...)"` → GRANTED（mode:ask）→ 目录真被删。
+- 删文件场景：`delete_file` 工具走 PathGuard 弹"write access outside project directory"被用户拒绝后（A1 修复正确工作），agent 用 `python -c "import os; os.remove(...)"` → GRANTED → 文件真被删。
+根因（执行层，区别于 D2 行为层）：**bash 工具能运行任意解释器**，`python -c "..."`/`node -e`/`perl -e`/`ruby -e`/`sh -c "..."` 引号内是任意代码，命令签名正则**看不进去**。用户拒的是某个具体动作（delete_file 工具、rm 命令），agent 换成"运行一段恰好完成同样效果的解释器代码"，签名匹配彻底失效。这是 A2「黑名单不可穷尽」在**执行层**的体现——与 D2（行为层：被拒后继续找路）互补，两者叠加才构成完整绕过链。
+**平台缺口（关键）**：唯一真正气密的防护是 OS 沙箱（`security/sandbox/` bwrap+seatbelt，内核级只读 rootfs + 可写白名单，与命令文本无关）——但**只有 Linux/macOS 后端，Windows 无对应实现**。故 Windows 上命令签名是唯一防线，而它对内联解释器无效 = **Windows 上破坏性操作实际无底线防护**。这是本条目最严重的部分。
+候选方案（需设计，均非气密）：① 把内联解释器执行（`python -c`/`-`、`node -e`、`perl -e`、`ruby -e`、`sh -c`、`bash -c` 等）作为一类危险模式加入黑名单——精准命中实测的绕过向量，但仍可"先写 .py 脚本再 `python script.py`"绕过（脚本名不匹配），只抬高门槛；② Windows OS 沙箱后端调研（Job Object / Restricted Token / AppContainer / WSL 内跑）——最本质但工作量大、可行性待验证；③ 与 D2 行为兜底联动（被拒后 agent 停止而非改用解释器）。
+诚实边界：完全防住任意解释器执行在无 OS 沙箱时架构上不可能；即便加内联解释器黑名单也只是减速带。真实定位应写清：**Windows 无沙箱时，权限系统是"防误操作 + human-in-the-loop 提示"，不是"防对抗性绕过"**——需在 config-guide/agent-architecture 的安全说明里诚实注明这一边界，避免用户误以为拒绝=文件安全。工作量：①小 ②大 ③中；文档注明边界=小（应优先做，纠正错误预期）。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

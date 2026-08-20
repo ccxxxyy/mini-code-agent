@@ -144,7 +144,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 58 unit test files, 969 tests
+│   ├── unit/                        # 58 unit test files, 971 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2530,7 +2530,7 @@ class MemoryExtractor:
 
 **命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 19 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 19 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 

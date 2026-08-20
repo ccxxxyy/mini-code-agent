@@ -189,6 +189,47 @@ async def test_curl_pipe_sh_flagged(path_guard):
     assert not PermissionManager.is_dangerous_command("curl https://x.com/api")
 
 
+def test_dangerous_command_bypass_variants_flagged():
+    """A2 hardening: option-shape variants that once evaded the regexes.
+    A2 加固：曾绕过正则的选项变形，现在必须命中。"""
+    d = PermissionManager.is_dangerous_command
+    # rm: long options + flags after the path
+    assert d("rm --recursive --force foo")
+    assert d("rm foo -rf")
+    assert d("rm -r foo")
+    assert d("rm -f foo")
+    assert d("rm -Rf foo")
+    assert d("rm --force x")
+    # git: global options inserted before the subcommand (-C path, -c k=v, attached)
+    assert d("git -C /repo push")
+    assert d("git -c user.name=x commit -m y")
+    assert d("git -C/repo push")  # attached form
+    assert d("git -C /x reset --hard")
+    assert d("git --git-dir=/x restore f")
+    assert d("git -C /x clean -fd")
+    assert d("git -C /x checkout main")
+    # chmod: leading option flags + 0777 form
+    assert d("chmod -R 777 /")
+    assert d("chmod 0777 x")
+
+
+def test_dangerous_command_safe_variants_not_flagged():
+    """A2 hardening must not create false positives on safe commands.
+    A2 加固不得对安全命令误报。"""
+    d = PermissionManager.is_dangerous_command
+    assert not d("git -C /repo status")
+    assert not d("git -C /x diff")
+    assert not d("git -C /x checkout -b feat")  # new branch is safe even with global opts
+    assert not d("chmod 644 file.py")
+    assert not d("chmod 755 x")
+    assert not d("chmod +x script.sh")
+    assert not d("rm -i file.txt")  # interactive, no r/f
+    assert not d("rm -v file.txt")  # verbose, no r/f
+    assert not d("npm run reset-db")  # not a git reset
+    assert not d("echo pushback")  # not a git push
+    assert not d("git stashed_helper.sh")  # 'stash' not on a word boundary
+
+
 async def test_denied_command_from_config(path_guard):
     pm = make_pm(path_guard, denied_commands=["docker *"])
     assert await pm.check_command("docker rm container") == PermissionDecision.DENIED
