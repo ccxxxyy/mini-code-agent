@@ -28,23 +28,48 @@ from mini_agent.security.path_guard import PathGuard
 if TYPE_CHECKING:
     from mini_agent.events.bus import EventBus
 
-# Patterns that flag a command as dangerous (confirm before running)
-# 用于标记危险命令的模式（执行前需要确认）
+# Git global-option prefix: tolerates options inserted between `git` and the
+# subcommand (e.g. `git -C /repo push`, `git -c user.name=x commit`). The
+# value-taking flags (-c/-C) are listed first so alternation consumes their
+# argument; `--?\S+\s+` then absorbs standalone flags and attached forms
+# (-C/repo). Order matters -- see tests for bypass corpus.
+# Git 全局选项前缀：容忍 git 与子命令之间插入的选项（如 git -C /repo push）。
+# 带独立值的 -c/-C 列在前以便 alternation 吞掉其参数；--?\S+\s+ 兜底单标志
+# 与 attached 形式（-C/repo）。顺序重要——绕过语料见测试。
+_GIT_PREFIX = r"git\s+(?:-c\s+\S+\s+|-C\s+\S+\s+|--?\S+\s+)*"
+
+# Patterns that flag a command as dangerous (confirm before running).
+# NOTE: a regex blacklist can never be exhaustive -- a determined LLM can
+# always reshape a command to evade signature matching (proven by this
+# project's deadlock experiment). These patterns block the common, obvious
+# forms; they are a speed bump, not a wall. The iteration limit and
+# human-in-the-loop confirm on matched commands are the real safeguards.
+# 用于标记危险命令的模式（执行前需要确认）。
+# 注意：正则黑名单本质不可能穷尽——LLM 总能变形绕过签名（本项目死循环实验
+# 已证）。这些模式只堵常见明显形态，是减速带而非围墙；迭代上限与命中后的
+# 人工确认才是真正的护栏。
 DANGEROUS_COMMAND_PATTERNS = [
-    r"\brm\s+(-[a-z]*[rf][a-z]*\s+)",  # rm -rf / rm -r / rm -f 匹配 rm 的强制/递归删除
+    # rm with recursive/force flag anywhere (short -rf/-r/-f/-Rf, long
+    # --recursive/--force, flags before OR after the path)
+    # rm 带递归/强制标志（短 -rf/-r/-f、长 --recursive/--force、标志在路径前后均可）
+    r"\brm\s+(?:[^\n]*\s)?(?:-[a-z]*[rf]|--recursive\b|--force\b)",
     r"\bsudo\b",
-    r"\bchmod\s+777\b",
+    # chmod 777/0777, tolerating leading option flags (chmod -R 777)
+    # chmod 777/0777，容忍前置选项（chmod -R 777）
+    r"\bchmod\s+(?:-[a-zA-Z]+\s+)*[0-7]*777\b",
     r"\bmkfs\b",
     r"\bdd\s+if=",
     r">\s*/dev/sd",
-    r"\bgit\s+push\b",  # any push touches the remote 任何 push 都影响远程
-    r"\bgit\s+commit\b",  # commits must be user-initiated 提交必须由用户主动发起
-    r"\bgit\s+reset\b",
-    r"\bgit\s+stash\b",  # can silently shelve user's in-progress work 会静默搁置用户未完成的工作
-    r"\bgit\s+rebase\b",
-    r"\bgit\s+checkout\s+(?!-b\b)",  # switching/restoring can discard changes 切换/还原可能丢弃改动
-    r"\bgit\s+restore\b",
-    r"\bgit\s+clean\b",
+    r"\b" + _GIT_PREFIX + r"push\b",  # any push touches the remote 任何 push 都影响远程
+    r"\b" + _GIT_PREFIX + r"commit\b",  # commits must be user-initiated 提交须用户主动
+    r"\b" + _GIT_PREFIX + r"reset\b",
+    r"\b" + _GIT_PREFIX + r"stash\b",  # can silently shelve in-progress work 静默搁置未完成工作
+    r"\b" + _GIT_PREFIX + r"rebase\b",
+    # switching/restoring can discard changes; -b (new branch) is safe
+    # 切换/还原可能丢弃改动；-b（新建分支）安全
+    r"\b" + _GIT_PREFIX + r"checkout\s+(?!-b\b)",
+    r"\b" + _GIT_PREFIX + r"restore\b",
+    r"\b" + _GIT_PREFIX + r"clean\b",
     r"\bdel\s+/[sq]",  # Windows del /s /q Windows 的递归/静默删除
     r"\brmdir\s+/s",  # Windows rmdir /s Windows 的递归删除目录
     r"\bformat\s+[a-z]:",  # Windows format Windows 的格式化磁盘
