@@ -504,4 +504,83 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 ---
 
+## 九、最新审计
+
+### A. 缺陷/漏洞
+
+☐ **A1【严重·fail-open】`delete_file` 完全绕过 PathGuard**
+`core/agent_loop.py:787-829` 的 `_check_permission` 只把 read_file/glob/grep 路由到 read 检查、write_file/edit_file 路由到 write 检查，**delete_file 落入 else 分支（:827-829 `unrestricted_tool`）无条件 GRANTED**。工具接受任意 file_path（相对路径解析到 working_dir，delete_file.py:31-33）。自相矛盾：`security/permission.py:452` 的 `would_ask` 包含 delete_file → 流式阶段（agent_loop.py:491-494）以为会弹窗而延迟到 `_act`，但 `_act`→`_check_permission` 实际无条件放行。
+失败场景：LLM 调 `delete_file("~/.ssh/id_rsa")` 或任意项目外路径，PathGuard 的敏感文件/denied_paths（config.py:41 默认拒绝 ~/.ssh）**完全不生效**，无提示直接删除。写/读受保护、删除不受，是最危险的不一致。
+测试盲区：`tests/unit/test_permissions.py:495,521` 只测显式 TOOL 规则 deny delete_file，从未测"无规则时 delete_file 对项目外路径是否走 check_path"。
+修复：把 delete_file 加入 write 路由分支（与 write_file/edit_file 同）+ 补测试。工作量：小（一行路由 + 测试）。
+
+☐ **A2【高·危险命令正则可绕过】ask 模式下静默执行**
+`security/permission.py:33-53` 的 19 条正则 + `_check_command_request`（:374-403）：非危险命令在 ask/allow 模式一律自动放行（:403），任何绕过正则的破坏性命令都不弹窗。已确认绕过：
+- `rm --recursive --force foo`：`\brm\s+(-[a-z]*[rf][a-z]*\s+)`（:34）要求 `-` 后紧跟 `[rf]`，长选项 `--recursive` 不匹配
+- `git -C /repo push`：`\bgit\s+push\b`（:40）要求 git 后紧跟 push，插入 `-C path` 绕过；`git -C x commit/reset` 同理
+- `chmod -R 777 /`：`\bchmod\s+777\b`（:46）要求 chmod 后紧跟 777，加 `-R` 绕过
+- `rm foo -rf`（标志后置）同样不匹配
+（`bash -c "rm -rf /"`、`;`/`&&` 链、反引号因正则扫描整串仍会命中，非漏洞。）
+测试盲区：test_permissions.py 无这些变体用例。工作量：小（正则加固 + 变体测试）。
+
+☐ **A3【中·fail-open 时序】max_tokens 重试导致重复副作用**
+`core/agent_loop.py:423-435`：`_think` 的 max_tokens 恢复循环在 `finish_reason=="length"` 时取消 `_streaming_tasks` 重试，但流式期间已提交并**可能已完成**的写/删工具（:497 create_task）无法回滚——`task.cancel()` 对已完成任务无效。截断重试后 LLM 再次产出同一工具调用并再次执行。
+失败场景：write_file 在流截断前已落盘 → 重试后再写一次；delete_file 则第二次删除（已删→报错噪音）。非破坏性时幂等，带副作用时重复。工作量：中。
+
+☐ **A4【中·并发】CostTracker 无锁并发累加**
+`core/cost_tracker.py:57-75` `_on_response` 对 `self.usage[model]` 读-改-写；并行子 Agent 共享同一 bus 时 `rec["prompt"] += ...` 非原子。对比 AuditLogger 有 `_write_lock`（audit.py:82）保护哈希链，CostTracker 无等价保护。
+失败场景：多子 Agent 并行回包，token/成本少计，预算熔断失准。属统计正确性，非安全。工作量：小（加锁）。
+
+☐ **A5【低·安全】remote 模式多项弱点**
+`remote/server.py:141` `msg.get("token") != self._token` 用 `!=` 直接比较（时序侧信道，localhost 影响小）；token 经 URL query 传递（:76）会进浏览器历史/日志；`ws://` 明文；`_ws_send`（:119）向所有 client 广播，多 client 时会话历史互相泄露。（`_process_http` :91-110 仅静态返回 HTML，无路径遍历，已确认安全。）工作量：小-中。
+
+☐ **A6【低·正确性】spill readback 前缀判断可误判**
+`memory/tool_result_cache.py:74-75` 用 `abs_path.startswith(abs(cache_dir))` 判断读回。若存在兄弟目录 `results_evil`（cache_dir=`.../results`），`.../results_evil/x` 会被误判为读回而豁免溢写。非安全问题。（PathGuard 的 spill 只读放行 path_guard.py:76-79 用 `cache_root in resolved.parents`，正确无此问题。）修复：改用 parents 判断或加分隔符。工作量：小。
+
+### B. 真差距
+
+☐ **B1 LLM 可自主调用的流程工具集（最大差距）**
+mewcode `mewcode/tools/` 有 mini 完全没有的工具：`ask_user.py`（结构化提问 text/radio/select/checkbox + askuser_dialog）、`exit_plan_mode.py`（LLM 完成计划后主动请求审批 + plan_dialog）、`task_create/get/list/stop/update.py`（任务板暴露给 LLM）、`team_create/team_delete.py`、`enter_worktree/exit_worktree.py`、`load_skill/install_skill.py`。mini 的 12 个内置工具中，plan/worktree/skill/task 都只有斜杠命令入口（用户驱动），LLM 不能自主发起；`/plan` 是手动开关，无"计划完成→审批→自动退出"闭环。工作量：中（每工具 100-200 行）。
+
+☐ **B2 read-before-edit 强制（FileStateCache）**
+mewcode `tools/file_state_cache.py`：编辑前必须先读 + mtime_ns 未变两道门，防编辑陈旧/被外部改过的文件。mini 全库无对应机制。小成本高安全收益。工作量：小（~80 行 + 集成）。
+
+☐ **B3 自定义 Agent 类型（.md 声明式定义）**
+mewcode `agents/loader.py + parser.py` 从 `.mewcode/agents/*.md` 和 `~/.mewcode/agents/` 加载用户自定义 agent（内置 4 种也是 .md）。mini `core/agent_types.py` 是 4 种硬编码 frozen dataclass，无用户扩展路径。工作量：小-中（~200 行）。
+
+☐ **B4 后台子代理 + 完成通知**
+mewcode `agents/task_manager.py`（BackgroundTask 异步跑 + ProgressInfo）+ `agents/notification.py`（完成后注入通知）+ `agents/fork.py`（fork 当前对话上下文的 worker）。mini 的 spawn_agents 阻塞等待（comparison doc 6.2 自认的限制至今成立）。工作量：中。
+
+☐ **B5 权限模式矩阵**
+mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。
+
+☐ **B6 指令文件 @-include**
+mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5）。mini `memory/project_context.py` 只读单文件、8000 字符截断，无引用语法。工作量：小。
+
+☐ **B7 远程模式 SessionStore 接入**
+mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。
+
+☐ **B8 恢复附件含 skill 调用记录（微小差距）**
+mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。工作量：小。
+
+### C. 文档过时
+
+☐ **C1 远程认证 mini 反超但文档未反映**
+`--remote-token`（server.py 8 处）让 mini 有 token 认证，mewcode `remote.py` grep 无任何 TLS/token/auth。但 comparison doc 及 roadmap 已知限制仍把"无 TLS"列为劣势——应改为"mini 有 token 认证但无 TLS 加密；mewcode 两者皆无"。
+
+☐ **C2 hook 动作类型"四种"失实**
+comparison doc 7.2 称 mewcode hook 有 command/prompt/http/agent 四种动作。核实 `hooks/executors.py`：**agent executor 是 stub（"not yet implemented"）**，实际三种可用。应改为"三种可用 + agent 未实现"。同时 mini 的"EventBus listener_dirs 覆盖观察类"论证**半成立**：能力可达但需写 Python，mewcode 是零代码 YAML 配置 + 条件表达式引擎（`conditions.py`，==/!=/=~/~= + and/or）——若要补齐零代码声明式 hook 是一个可选方向。
+
+☐ **C3 团队文件数过时**
+doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15 文件 2069 行；mini 多 Agent 相关约 7 文件（mailbox/team/spawn_backends/worker/subagent/task_store/agent_types）。
+
+### 有意不做（论证仍成立，不列为待办，仅备忘）
+
+- **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
+- **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距
+- **多客户端会话隔离**：mewcode 同样单 agent 广播（remote.py:91）无隔离——非差距
+- **常驻队友 transcript 恢复**：mewcode `teams/transcript.py` 独有；mini 一次性 worker 适配论证基本成立，若走向常驻队友需重评估
+
+---
+
 *本文档随版本迭代更新。完成一项后请把该项移入 tasks.md 对应阶段并打勾。*

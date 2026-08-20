@@ -187,14 +187,22 @@ async def test_different_files_not_killed(tool_context):
 
 
 async def test_same_tool_15_iterations_guard(tool_context):
-    """Same tool every iteration for 15+ rounds triggers the guard."""
+    """Same tool every iteration (DIFFERENT args) for 15 rounds triggers guard 2.
+
+    Args differ each round so guard 1 (same tool+args x6) cannot fire --
+    this isolates the per-iteration fuse. Scripts exceed 15 so MockLLM never
+    repeats its last entry (repeating identical args would trigger guard 1
+    instead and mask guard 2, which is exactly the bug this test once had).
+    参数每轮不同，隔离验证按轮熔断（护栏 2）；脚本多于 15 条，避免 MockLLM
+    重复末条相同参数误触护栏 1 掩盖护栏 2——正是本测试曾经的缺陷。
+    """
     files = []
-    for i in range(20):
+    for i in range(25):
         f = tool_context.working_dir / f"g{i}.txt"
         f.write_text(f"data{i}", encoding="utf-8")
         files.append(f)
 
-    config = AgentConfig(self_verify=False, max_agent_iterations=30)
+    config = AgentConfig(self_verify=False, max_agent_iterations=50)
     registry = ToolRegistry()
     registry.register(ReadFileTool())
 
@@ -210,6 +218,10 @@ async def test_same_tool_15_iterations_guard(tool_context):
     await loop.run(conv)
 
     assert loop.stopped_early
+    # Guard 2 fires exactly when the window fills at 15 iterations --
+    # well before max_iterations (50) and guard 1 (args differ every round)
+    # 护栏 2 恰在窗口满 15 轮时触发——远早于迭代上限，且护栏 1 不可能触发
+    assert loop._state.iteration == 15
 
 
 async def test_batch_parallel_reads_not_killed(tool_context):
