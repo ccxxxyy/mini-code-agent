@@ -813,7 +813,7 @@ class AgentLoop:
             else:
                 decision = PermissionDecision.GRANTED
                 self._permissions.last_decision_reason = "no_path_arg"
-        elif tc.name in ("write_file", "edit_file"):
+        elif tc.name in ("write_file", "edit_file", "delete_file"):
             path_arg = tc.arguments.get("file_path")
             if path_arg:
                 scope = "path"

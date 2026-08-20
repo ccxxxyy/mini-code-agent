@@ -508,11 +508,9 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 ### A. 缺陷/漏洞
 
-☐ **A1【严重·fail-open】`delete_file` 完全绕过 PathGuard**
-`core/agent_loop.py:787-829` 的 `_check_permission` 只把 read_file/glob/grep 路由到 read 检查、write_file/edit_file 路由到 write 检查，**delete_file 落入 else 分支（:827-829 `unrestricted_tool`）无条件 GRANTED**。工具接受任意 file_path（相对路径解析到 working_dir，delete_file.py:31-33）。自相矛盾：`security/permission.py:452` 的 `would_ask` 包含 delete_file → 流式阶段（agent_loop.py:491-494）以为会弹窗而延迟到 `_act`，但 `_act`→`_check_permission` 实际无条件放行。
-失败场景：LLM 调 `delete_file("~/.ssh/id_rsa")` 或任意项目外路径，PathGuard 的敏感文件/denied_paths（config.py:41 默认拒绝 ~/.ssh）**完全不生效**，无提示直接删除。写/读受保护、删除不受，是最危险的不一致。
-测试盲区：`tests/unit/test_permissions.py:495,521` 只测显式 TOOL 规则 deny delete_file，从未测"无规则时 delete_file 对项目外路径是否走 check_path"。
-修复：把 delete_file 加入 write 路由分支（与 write_file/edit_file 同）+ 补测试。工作量：小（一行路由 + 测试）。
+✅ **A1【严重·fail-open】`delete_file` 完全绕过 PathGuard**（已修复）
+**原问题**：`_check_permission` 的路由只覆盖 read_file/glob/grep（read）和 write_file/edit_file（write），delete_file 落入 else 分支无条件 GRANTED。与 `would_ask` 含 delete_file 自相矛盾——流式阶段以为会弹窗而延迟，实际直接放行。
+**修复**：`agent_loop.py:816` 把 delete_file 加入 write 路由 `("write_file", "edit_file", "delete_file")`，与写/编辑工具走同一 `check_path(write)` 管道。回归测试 `test_delete_file_routes_through_path_check`：LLM 调 `delete_file("~/.ssh/id_rsa")` → PathGuard 拒绝 → tool_result.is_error。spec.md 权限路由图与非写步骤剥离列表同步更新。
 
 ☐ **A2【高·危险命令正则可绕过】ask 模式下静默执行**
 `security/permission.py:33-53` 的 19 条正则 + `_check_command_request`（:374-403）：非危险命令在 ask/allow 模式一律自动放行（:403），任何绕过正则的破坏性命令都不弹窗。已确认绕过：
