@@ -522,9 +522,9 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 **修复**：`agent_loop.py` 流式执行块把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）无条件延迟到 `_act`——它只在 max_tokens 恢复确定最终非截断响应后才执行，从源头消除"eager 已完成但无法回滚"的窗口。回归测试 `test_write_tool_not_double_executed_on_truncation_retry`：截断响应含中途 flush 的 write（内容 A1）+ 重试 write（内容 A2），断言 `execute()` 恰好调用一次 `['A2']`（修复前为 `['A1','A2']` 双执行）。测试用 YieldingMockLLM 在 chunk 间让出事件循环以确定性复现竞态（纯同步 mock 里 eager 任务启动前即被取消、bug 隐身）。
 **残留（未纳入本次，honest boundary）**：bash 的带副作用命令（`echo>file`/`mkdir`/`npm install` 等非危险命令）仍 eager 流式执行，截断重试仍可能双跑；危险 bash 已由 would_ask 延迟。彻底解决需延迟所有 bash（牺牲流式延迟收益），A3 按 roadmap 明列的 write_file/delete_file 收口，bash 残留单列备忘。
 
-☐ **A4【中·并发】CostTracker 无锁并发累加**
-`core/cost_tracker.py:57-75` `_on_response` 对 `self.usage[model]` 读-改-写；并行子 Agent 共享同一 bus 时 `rec["prompt"] += ...` 非原子。对比 AuditLogger 有 `_write_lock`（audit.py:82）保护哈希链，CostTracker 无等价保护。
-失败场景：多子 Agent 并行回包，token/成本少计，预算熔断失准。属统计正确性，非安全。工作量：小（加锁）。
+✅ **A4【中·并发】CostTracker 无锁并发累加**（已修复）
+**原问题**：`_on_response` 对 `self.usage[model]` 读-改-写非原子，并行子 Agent 共享同一 EventBus 时可能丢失更新（token/成本少计、预算熔断失准）。
+**修复**：`cost_tracker.py` 新增 `self._lock = asyncio.Lock()`，`_on_response` 的整个读-改-写在 `async with self._lock` 内执行（与 AuditLogger 的 `_write_lock` 模式一致）。`end_turn`/`flush_to_ledger` 只在主循环单线程路径调用，不加锁（无并发）。回归测试 `test_concurrent_on_response_no_lost_updates`：200 个事件 `asyncio.gather` 并发发射，断言 prompt/completion/calls 精确等于 200。
 
 ☐ **A5【低·安全】remote 模式多项弱点**
 `remote/server.py:141` `msg.get("token") != self._token` 用 `!=` 直接比较（时序侧信道，localhost 影响小）；token 经 URL query 传递（:76）会进浏览器历史/日志；`ws://` 明文；`_ws_send`（:119）向所有 client 广播，多 client 时会话历史互相泄露。（`_process_http` :91-110 仅静态返回 HTML，无路径遍历，已确认安全。）工作量：小-中。

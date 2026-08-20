@@ -144,7 +144,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 58 unit test files, 972 tests
+│   ├── unit/                        # 58 unit test files, 973 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -1614,6 +1614,7 @@ class TaskStore:
 
 职责：订阅 LLMResponseEvent，按模型累计 token 用量并按 `[cost]` 配置计价。
 两个时间范围：会话级（内存）和从始至终（总账文件 `~/.mini-agent/cost_ledger.json`）。
+`_on_response` 在 `asyncio.Lock` 内执行读-改-写（并行子 Agent 共享 EventBus 可并发发射）。
 
 ```python
 class CostTracker:
