@@ -98,7 +98,7 @@ while True:
 
 **核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、或只做旁路操作（记日志）。
 
-**本项目实现**：`tools/hooks.py` HookManager 支持 11 个 HookStage（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 config-guide.md。
+**本项目实现**：`tools/hooks.py` HookManager 支持 11 个 HookStage（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 guide/config-guide.md。
 
 **判断标准**：框架是否提供工具执行前后的扩展点？能不能在不改源码的情况下加审计/拦截？
 

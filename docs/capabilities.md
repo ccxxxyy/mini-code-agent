@@ -254,7 +254,7 @@
 | tasks.md | `docs/tasks.md` — P1-P83 全部任务清单，逐项打勾并附验证依据 |
 | checklist.md | `docs/checklist.md` — 每阶段验收检查清单，全部核查通过 |
 | CLAUDE.md | 项目根目录 — 常用命令/架构要点/代码规范的项目指令 |
-| 附加文档 | 15 个专题文档：tech-notes（技术原理）、roadmap（演进路线）、agent-architecture（架构解析）、config-guide（配置指南）、commands-guide（命令参考）、comparison-mewcode（mewcode 对比）、comparison-config-cc（CC 配置对比）、output-guide / terminal-guide / positioning / todo-code-quality 等，及本文档 |
+| 附加文档 | 18 个文档（14 个专题 + 4 个英文版指南）：tech-notes（技术原理）、roadmap（演进路线，含代码质量清单）、agent-architecture（架构解析）、guide/（config/commands/output/terminal 四指南，另有 guide/en/ 纯英文版 ×4）、comparison-mewcode（mewcode 对比）、comparison-config-cc（CC 配置对比）、positioning 等，及本文档 |
 
 ---
 
@@ -286,7 +286,7 @@
 | MCP HTTP Transport | HTTPTransport 远程 MCP 服务器连接 + app 启动自动发现（P31）——P5 预留的 MCP 架构终于接通，支持 headers 认证 |
 | 持久化任务系统 | `/todo` 命令 + TaskStore 磁盘持久 + blockedBy 依赖追踪（P32）+ 歧义前缀检测 + 最短唯一前缀显示（P74）——S12 补全，S01-S20 覆盖 19/20 |
 | PyPI 发布 | `pip install mini-code-agent` 一行安装（P33）——元数据补全 + MIT LICENSE + tag 触发自动发布 workflow |
-| Windows 终端适配 | UTF-8 加固/流式防重影/按键防吞/无控制台兜底/emoji 降级（P34）——CMD/PowerShell/Windows Terminal 全兼容；P34.3 补修 bash GBK 解码、git 命令确认闸门、Git Bash（mintty）降级运行与代理字符清洗，各终端指南见 terminal-guide.md |
+| Windows 终端适配 | UTF-8 加固/流式防重影/按键防吞/无控制台兜底/emoji 降级（P34）——CMD/PowerShell/Windows Terminal 全兼容；P34.3 补修 bash GBK 解码、git 命令确认闸门、Git Bash（mintty）降级运行与代理字符清洗，各终端指南见 guide/terminal-guide.md |
 | 注释 | 全部英文注释附中文翻译（约 336 条） |
 
 ## 早期简化项（全部已升级）

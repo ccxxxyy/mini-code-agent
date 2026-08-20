@@ -1552,7 +1552,7 @@ Git Bash 的 mintty 不是 Windows 控制台——它把 stdin 包装成管道�
 
 **② 孤立代理字符崩溃**：用户名/路径含中文（GBK）时，mintty 管道经 surrogateescape 解码产生 `\udc81` 这类孤立代理字符，混进 system prompt 的 working_dir——httpx 的 UTF-8 JSON 编码直接抛 `surrogates not allowed`，请求发不出去。修复双层：cli.py 入口把 stdin 也 reconfigure 为 UTF-8 + replace（源头减量）；openai_provider 发请求前 `_sanitize_surrogates` 递归清洗整个消息树（出口兜底，任何来源的代理字符都替换成 `?`）。教训同 34.2——**出口兜底比堵住所有入口更可靠**，代理字符可能来自 stdin、环境变量、文件读取任何一路。
 
-> 各系统各终端的打开方法、兼容等级、排查表见 [terminal-guide.md](terminal-guide.md)。
+> 各系统各终端的打开方法、兼容等级、排查表见 [terminal-guide.md](guide/terminal-guide.md)。
 
 # 第三十五部分：死循环诱导实验
 
@@ -2010,7 +2010,7 @@ P57 是大功能（WebSocket 服务器 + 嵌入式浏览器 UI + 11 项增强）
 
 - 架构与协议设计：[comparison-mewcode.md §5.2](comparison-mewcode.md)（NDJSON 协议 12 种事件 + 3 种客户端消息、浏览器 UI 功能清单、安全与容错、测试覆盖）
 - 已知限制与后续改进：[roadmap.md "已知限制"](roadmap.md)（无 TLS、服务器重启丢会话、共享会话）
-- P82 断连排队增强：[todo-code-quality.md 扩展点 #8](todo-code-quality.md)（PermissionDecision.PENDING 跨连接持久化）
+- P82 断连排队增强：[roadmap.md 第八节 扩展点 #8](roadmap.md)（PermissionDecision.PENDING 跨连接持久化）
 
 # 第五十八部分：Mailbox 跨 Agent 通信（P58）
 

@@ -93,7 +93,7 @@ mini          # start the agent
 mini --help   # see all options
 ```
 
-See [docs/terminal-guide.md](docs/terminal-guide.md) for how to open each terminal per OS and their compatibility levels.
+See [docs/guide/en/terminal-guide.md](docs/guide/en/terminal-guide.md) for how to open each terminal per OS and their compatibility levels.
 
 ### Remote / Browser Mode
 
@@ -171,7 +171,7 @@ mini --remote --remote-token "my-secret"
 | `/clear` | Clear conversation |
 | `/exit` | Exit |
 
-Full syntax, flags and examples for every command: [docs/commands-guide.md](docs/commands-guide.md)
+Full syntax, flags and examples for every command: [docs/guide/en/commands-guide.md](docs/guide/en/commands-guide.md)
 
 ## Configuration
 
@@ -195,7 +195,7 @@ transport = "http"
 headers = { Authorization = "Bearer ghp_..." }
 ```
 
-See [config.toml.example](config.toml.example) for all options. Full guide: [docs/config-guide.md](docs/config-guide.md).
+See [config.toml.example](config.toml.example) for all options. Full guide: [docs/guide/en/config-guide.md](docs/guide/en/config-guide.md).
 
 ## Architecture
 
@@ -217,7 +217,7 @@ mini-code-agent/
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
-└── docs/            # 15 documentation files (incl. agent-architecture.md, comparison-mewcode.md)
+└── docs/            # 18 documentation files: 14 topic docs + 4 English guide translations (guide/en/)
 ```
 
 **Design philosophy**: Five layers (UI → Engine → Tools → Memory → Security) + remote/extensions/llm/config/models, decoupled via EventBus. All I/O is async. Zero vendor SDK — just httpx.

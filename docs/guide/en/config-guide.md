@@ -1,0 +1,737 @@
+# Complete Guide to Configuration Files and Context Files
+
+> 中文版 (Chinese version): [../config-guide.md](../config-guide.md)
+
+This document explains **all** configuration files and context files that Mini-Code-Agent reads: what each file does, where it lives, how to modify it, and the default behavior when you don't.
+
+---
+
+## 1. Overview: Three Kinds of Files
+
+The files read by the program fall into three categories, **fundamentally different in nature**:
+
+| Category | Consumed by | Content | Examples |
+|---|---|---|---|
+| **Configuration files** | The program | Behavior parameters (model/timeout/theme) | `config.toml`, `.env` |
+| **Context files** | The LLM | Natural-language instructions (project conventions/personal preferences) | `CLAUDE.md`, `instructions.md` |
+| **Data files** | Read/written automatically by the program | Memory/sessions/audit (users normally don't edit them by hand) | `memory.json`, `sessions/` |
+
+How to tell them apart: **changing a configuration file affects how the program runs; changing a context file affects how the LLM answers**.
+
+---
+
+## 2. Full File Inventory
+
+### Configuration files (program behavior)
+
+| File | Level | Priority | Description |
+|---|---|---|---|
+| `~/.mini-agent/config.toml` | User-level | Low | Default settings shared by all projects |
+| `<project>/.mini-agent/config.toml` | Project-level | Medium | Specific to this project, overrides user-level |
+| `<project>/.env` | Project-level | Higher | Sensitive values like API keys (gitignored, never committed) |
+| Environment variables (`MINI_AGENT_*` / `OPENAI_*`) | Session-level | High | Temporary overrides |
+| CLI arguments (`--model` etc.) | Single launch | Highest | One-off overrides |
+
+There is also a **permission rules file** `permissions.toml` (user-level `~/.mini-agent/` + project-level `<project>/.mini-agent/`, both levels stack), which is independent of config.toml (it cannot be merged due to the `[tools]` section name conflict) — see the "Permission Rules File" section below for details.
+
+The project root provides three template files to copy from: `config.toml.example`, `permissions.toml.example`, `.env.example`.
+
+**Full precedence chain** (right overrides left):
+
+```
+Built-in defaults → user config.toml → project config.toml → .env → environment variables → CLI arguments
+```
+
+### Context files (LLM instructions)
+
+| File | Level | Description |
+|---|---|---|
+| `<project>/AGENT.md` | Project-level | Project conventions, priority #1 (widely used community standard) |
+| `<project>/CLAUDE.md` | Project-level | Project conventions, priority #2 (Claude Code ecosystem compatibility) |
+| `<project>/.mini-agent/instructions.md` | Project-level | Project conventions, priority #3 (specific to this tool) |
+| `~/.mini-agent/instructions.md` | User-level | Global personal instructions (e.g. "answer in Chinese"), which **coexist** with project instructions (both are injected) |
+
+**The three project-level files are "pick one of three"**: search stops at the first non-empty file found by priority; no merging.
+**User-level and project-level "coexist"**: both are injected into the system prompt.
+
+### Data files (managed automatically)
+
+| File | Level | Description |
+|---|---|---|
+| `~/.mini-agent/.theme` | User-level | Theme preference written by the `/theme` command |
+| `~/.mini-agent/memory/user_memory.json` | User-level | Cross-project memory (auto extraction on SESSION_END + `/memory add`) |
+| `<project>/.mini-agent/memory.json` | Project-level | Project memory |
+| `~/.mini-agent/sessions/` | User-level | Session persistence (auto-save/crash recovery); properly closed sessions older than `session_cleanup_days` days are cleaned up automatically at startup |
+| `~/.mini-agent/audit.jsonl` | User-level | Audit log (after `/audit on` is enabled) |
+| `~/.mini-agent/recordings/` | User-level | Tool-chain recordings (saved by `/record`, read by `/replay`) |
+| `~/.mini-agent/cost_ledger.json` | User-level | Cumulative cost ledger (written automatically each turn; `/cost reset` zeroes it after confirmation and resets the start date — deleting the file is equivalent) |
+| `<project>/.mini-agent/tasks.json` | Project-level | Persistent task list (managed via `/todo`, retained across sessions; hand-editing the JSON also works) |
+| `<project>/.mini-agent/undo_snapshots/` | Project-level | Undo file snapshots (**temporary** — cleared automatically when the session ends) |
+| `~/.mini-agent/input_history` | User-level | Cross-session input history (↑ key browses history, written automatically) |
+
+### Component Lifecycle at a Glance
+
+Different data lives for different durations. Understanding lifecycles avoids the confusion of "why did it disappear / why is it still here":
+
+| Data | Lifecycle | After a crash |
+|---|---|---|
+| Conversation history | Within the session (force-persisted every turn) | Recoverable (prompt at startup) |
+| Undo file snapshots | Within the session, and only the last 5 turns are kept | Lost (undo is a within-session operation by design) |
+| Steps of an **in-progress** recording (not stopped) | In memory — within the session | **Lost**, must re-record |
+| **Saved** recording files | Permanent on disk | Unaffected |
+| Template variable values (`/replay x k=v`) | **Single replay** — discarded after use, never persisted nor added to the session | — |
+| Memory / theme / configuration | Permanent on disk | Unaffected |
+
+Key point: **recording files are stateless static templates** — `{{variable}}` placeholders always remain verbatim in the file; substitution during replay happens only in memory (at the instant the tool call is constructed). So switching sessions, crash recovery, or replaying the same recording from multiple terminal windows simultaneously all behave identically and never interfere with each other.
+
+### Cross-Component Interaction Points
+
+Three interactions worth knowing about (all benign by design, but slightly subtle in behavior):
+
+1. **Replay × undo snapshots**: files modified by `/replay` do enter the current session's undo snapshots — `/undo` can revert a replay's file changes. But a replay does not consume a conversation turn; if you have another conversation turn after the replay and then `/undo`, it reverts that conversation turn, and the replay's changes are not included.
+2. **Replay × LLM awareness**: replay results do not enter the conversation history — the LLM does not know what files `/replay` changed. Asking it to work on related files afterwards may proceed from stale knowledge; remind it to re-read the files when necessary (same applies after `/undo`).
+3. **Recording × replay anti-nesting**: if `/replay` is executed while a recording is in progress, the replayed calls are **not** recorded (suspended protection) — the recording contains only operations the LLM actually executed.
+
+---
+
+## 3. Quick Start: Using mini-agent in Any Directory
+
+By default, the API key only takes effect in a project directory that has a `.env` file. To launch `mini` in **any directory**, do **any one** of the following:
+
+### Method 1: Set System Environment Variables (recommended — set once, works forever)
+
+**Windows (PowerShell)**:
+
+```powershell
+# Set the API key (required)
+[System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key", "User")
+
+# If using a third-party API (DeepSeek, Zhipu, SiliconFlow, etc.), also set the base URL
+[System.Environment]::SetEnvironmentVariable("OPENAI_BASE_URL", "https://your-api-host/v1", "User")
+
+# Optional: set the default model
+[System.Environment]::SetEnvironmentVariable("MINI_AGENT_MODEL", "deepseek-chat", "User")
+```
+
+**Restart the terminal** after setting for changes to take effect. From then on, running `mini` in any directory will start normally.
+
+**macOS / Linux**:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+echo 'export OPENAI_API_KEY="sk-your-key"' >> ~/.bashrc
+echo 'export OPENAI_BASE_URL="https://your-api-host/v1"' >> ~/.bashrc
+echo 'export MINI_AGENT_MODEL="deepseek-chat"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Method 2: User-Level Configuration File (shared across projects, never committed to git)
+
+Create `~/.mini-agent/config.toml`:
+
+```bash
+# Windows
+mkdir "%USERPROFILE%\.mini-agent"
+# macOS / Linux
+mkdir -p ~/.mini-agent
+```
+
+Write the content:
+
+```toml
+[llm]
+api_key = "sk-your-key"
+base_url = "https://your-api-host/v1"
+model = "deepseek-chat"
+```
+
+### Method 3: Project-Level .env File (current project only)
+
+Create a `.env` file in the target project's root directory:
+
+```bash
+OPENAI_API_KEY=sk-your-key
+OPENAI_BASE_URL=https://your-api-host/v1
+MINI_AGENT_MODEL=deepseek-chat
+```
+
+> **Precedence reminder**: CLI arguments > environment variables > .env > project config.toml > user config.toml > defaults. Higher priority overrides lower priority.
+
+### Verifying the Configuration
+
+Run in the target directory:
+
+```bash
+mini --version    # Confirm installation succeeded
+mini              # Launch the Agent
+```
+
+If you still get the "API key not configured" error, check:
+1. Whether the terminal has been restarted (environment variables require a terminal restart to take effect)
+2. Whether the environment variable name is spelled correctly (`OPENAI_API_KEY`, not `OPENAI_KEY`)
+3. Whether a higher-priority configuration is overriding it (e.g. an empty value set in `.env`)
+
+---
+
+## 4. config.toml Usage Guide
+
+### Creating It
+
+The project root has a template `config.toml.example`; copy it and uncomment as needed:
+
+```bash
+# User-level (recommended for personal preferences)
+copy config.toml.example "%USERPROFILE%\.mini-agent\config.toml"    # Windows
+cp config.toml.example ~/.mini-agent/config.toml                     # macOS/Linux
+
+# Project-level (recommended for team conventions, can be committed to git)
+mkdir .mini-agent && copy config.toml.example .mini-agent\config.toml
+```
+
+### All Configurable Sections
+
+```toml
+[llm]
+provider = "openai"          # "openai" (Chat Completions) | "openai-responses" (Responses API, o1/o3/o4-mini) | "anthropic"
+model = "deepseek-chat"      # Model name (default "gpt-4o")
+api_key = "sk-..."           # API key (recommended to put in .env instead of here)
+base_url = "https://api.deepseek.com/v1"  # API endpoint (default None, uses the Provider's built-in endpoint)
+temperature = 0.0
+max_tokens = 4096            # Per-response cap; on truncation, automatically doubles and retries up to 3 times (P44) — this value is the retry starting point
+timeout = 120.0
+# extra = {}                 # Extra parameters passed through to the API (e.g. top_p, stop, etc.)
+
+[tools]
+bash_timeout = 120.0         # bash command timeout (seconds)
+max_file_size = 10000000     # File read cap (bytes)
+enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call"]
+allowed_paths = []           # Extra allowed paths outside the project (default empty)
+denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # Paths forbidden to access
+
+[memory]
+context_window = 128000      # Context window token count (used to trigger compression; overflow fallback separately uses the real window value the Provider auto-detects from the API, P42)
+compression_threshold = 0.75 # Soft threshold (compress at 75%, governed by the circuit breaker)
+hard_compression_threshold = 0.90 # Hard threshold (force compression at 90%, bypassing the circuit breaker)
+auto_extract = true          # Automatically extract memory at session end
+spill_threshold_chars = 50000 # Tool results exceeding this many characters are spilled to disk keeping only a preview (0 = disabled) — prevents large files from blowing up the context
+aggregate_spill_chars = 200000 # Per-turn cumulative tool-result character budget: when exceeded, force spill in descending size order (0 = disabled) — prevents "each one under the limit, but their total blows up"
+session_cleanup_days = 30    # Old sessions older than this many days are cleaned up automatically at startup (0 = disabled) — sessions that did not close properly are kept for crash recovery
+compress_max_failures = 3    # Compression circuit breaker: skip after N consecutive ineffective compressions (0 = disabled) — prevents infinite loops when the already-read-files list gets too long
+llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
+recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)
+recall_top_k = 5             # Maximum number of entries the LLM picks during selective recall
+consolidation_threshold = 20 # Automatically run LLM semantic consolidation when memory count exceeds this (0 = disabled)
+# persistent_memory_dir = "~/.mini-agent/memory"     # User-level memory directory
+# project_memory_file = ".mini-agent/memory.json"    # Project-level memory file
+
+[security]
+permission_mode = "ask"      # "allow" (allow everything) | "ask" (prompt) | "deny" (deny everything)
+allowed_commands = ["git *", "uv *"]   # Confirmation-free command whitelist (default empty); a match is allowed through (including dangerous commands)
+denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional deny list (default values); a match is rejected
+# Note: denied_commands is glob exact-match rejection. There are also 19 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
+# used for confirmation dialogs (rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
+# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh) — these are not configurable, but can be
+# allowed via allowed_commands or made confirmation-free via sandbox_auto_allow.
+worktree_base_dir = ".mini-agent/worktrees"  # Git worktree isolation directory
+worktree_max_age_days = 7    # Clean worktrees older than this many days are cleaned up automatically at startup (0 = disabled)
+sandbox = false              # OS-level sandbox (Linux bwrap / macOS seatbelt), true to enable
+sandbox_auto_allow = false   # Dangerous commands skip confirmation under the sandbox (deny rules still block)
+sandbox_network = false      # Allow network access inside the sandbox
+
+[context]                    # Context awareness (P25)
+instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
+                             # Project instruction file names and priority (list order = priority, first hit is used)
+user_instructions_file = "~/.mini-agent/instructions.md"   # User-level global instructions path
+max_chars = 8000             # Per-file truncation length (characters)
+
+[cost]                       # Cost dashboard (P29)
+budget = 5.0                 # Session budget cap (yuan), 0 = unlimited (default 0)
+total_budget = 50.0          # Cumulative ledger budget cap (yuan), 0 = unlimited (default 0)
+currency = "¥"
+[cost.pricing.deepseek-chat] # Per-model pricing (yuan per million tokens)
+input = 2.0
+output = 8.0
+# cache_read = 0.5            # Optional: cache read price (billed at input price if unset)
+# cache_creation = 3.0        # Optional: cache creation price (billed at input price if unset)
+
+# Top-level configuration (belongs to no section; note it must be written before all [sections] and [[hooks]] to count as top-level)
+max_agent_iterations = 80    # Maximum ReAct loop iterations (shared by the main loop and SubAgents without an explicit type;
+                             # when /spawn --type explicitly selects a type, the type profile's budget is adopted, see P80)
+theme = "default"            # "default" | "dark" | "light"
+streaming_tool_execution = true  # During streaming, start executing a tool call as soon as it is fully assembled (false waits for the stream to end)
+enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on toggles at runtime)
+# self_verify = false        # Experimental: LLM automatically verifies tool results
+# planner_profile = ""       # LLM Profile name used by the /team Planner (empty = use the main model)
+# worker_profile = ""        # LLM Profile name used by SubAgent workers (empty = use the main model)
+skill_dirs = ["./skills", "~/.mini-agent/skills"]
+                             # Skill pack directories: each subdirectory contains a SKILL.md (YAML front matter + prompt body)
+listener_dirs = ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
+                             # Event listener plugin directories: every *.py file in the directory is a plugin,
+                             # defining register(bus) (subscribe to specific events) or on_event(event) (auto-subscribe to all events;
+                             # sync/async both work). Plugin exceptions are isolated and logged, never affecting the main flow. Used for stats/debugging,
+                             # e.g. dumping all events to a JSONL file. Files starting with an underscore are skipped.
+plugin_dirs = ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
+                             # Plugin directories: every *.py file in the directory is a plugin (names starting with `_` are skipped),
+                             # which may define register(ctx) (full-control hook — if defined, it takes priority and only it runs) or
+                             # the dedicated hooks register_tools(registry) / register_commands(registry) /
+                             # register_skills(registry) to register tools/slash commands/skills.
+                             # pip package plugins do not use this directory; instead declare an entry point inside the package:
+                             #   [project.entry-points."mini_agent.plugins"]
+                             #   my_plugin = "my_pkg.plugin"
+                             # Load order: entry points first, directories second; on name collision the directory file yields and a warning is emitted.
+                             # Exceptions are isolated at three layers (import/hook/runtime); a bad plugin never affects the main flow.
+                             # Plugin tools are not constrained by the [tools].enabled_tools whitelist (installing is opting in).
+                             # See examples/plugins/word_count_plugin.py for a sample plugin; /plugins lists loaded plugins.
+# disabled_plugins = ["some_plugin"]
+                             # Disable plugins: matched by entry-point name or file name (without the .py suffix)
+
+# Declarative Hook rules — on match, reject the tool execution (default) or show a confirmation dialog; reason is returned to the LLM
+# Multiple [[hooks]] entries can be written; invalid entries are skipped with a warning and never block startup
+[[hooks]]
+tool = "write_file"          # Tool name fnmatch pattern ("bash", "write_*", default "*" for all)
+arg = "file_path"            # Optional: only check this parameter (by default all parameter values are checked)
+contains = "docs/spec"       # Optional: trigger only when the parameter value contains this substring (by default applies to all calls of that tool)
+reason = "docs/spec.md is read-only by project policy"   # Rejection reason; the LLM receives it and adjusts its strategy
+
+[[hooks]]
+tool = "bash"
+contains = "curl"
+reason = "External downloads are forbidden by project policy"
+
+[[hooks]]
+tool = "bash"
+regex = 'rm\s+-rf'           # Optional: re.search regex (when given together with contains, both must match; invalid regexes are skipped with a warning)
+reason = "Destructive deletion is forbidden by project policy"
+
+[[hooks]]
+tool = "bash"
+contains = "git push"
+action = "confirm"           # Optional: "block" (default) rejects directly; "confirm" shows a y/a/n confirmation dialog
+reason = "push affects the remote repository"
+
+# MCP servers
+[mcp.servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+transport = "stdio"                  # "stdio" (subprocess) | "http" (remote) | "sse"
+loading = "eager"                    # "eager" (default, register everything) | "dispatch" (on-demand search + call)
+
+# [mcp.servers.remote-api]
+# url = "http://localhost:8080/mcp"
+# transport = "http"
+# headers = { Authorization = "Bearer your-token-here" }   # Optional auth headers
+# loading = "dispatch"               # Lazy loading recommended when there are many tools
+```
+
+### Multi-Model Profiles (Environment Variable Configuration)
+
+Preconfigure multiple sets of model parameters and switch at runtime with a single `/model` command. All defined via environment variables:
+
+```bash
+# Define two Profiles: fast and strong
+MINI_AGENT_MODELS=fast,strong
+
+# fast Profile parameters
+MODEL_FAST_MODEL=deepseek-chat
+MODEL_FAST_API_KEY=sk-fast-key
+MODEL_FAST_BASE_URL=https://api.deepseek.com/v1
+
+# strong Profile parameters (Provider can be switched)
+MODEL_STRONG_MODEL=claude-sonnet-4-20250514
+MODEL_STRONG_PROVIDER=anthropic
+MODEL_STRONG_API_KEY=sk-ant-strong-key
+```
+
+At runtime:
+```
+/model           # List all available Profiles
+/model fast      # Switch to fast (DeepSeek)
+/model strong    # Switch to strong (Claude)
+```
+
+**Mixing strong and fast models** — Planner uses the strong model for planning, Worker uses the fast model for execution:
+```bash
+MINI_AGENT_PLANNER_PROFILE=strong    # /team's Planner uses the strong Profile
+MINI_AGENT_WORKER_PROFILE=fast       # SubAgent workers use the fast Profile
+```
+
+### When Changes Take Effect
+
+After editing config.toml, **restart `mini` for changes to take effect** (read once at startup, no hot reload).
+
+### Cost Budget Details ([cost] section)
+
+Two budgets work independently, both checked **at the end of every conversation turn**:
+
+| Config key | Scope | How to reset |
+|---|---|---|
+| `budget` | This session (mini startup → /exit or closing the window) | Reset automatically on restart |
+| `total_budget` | Cumulative ledger (from first use until now, across sessions and projects) | Reset manually via `/cost reset` |
+
+**Warning thresholds** (same for both budgets, hard-coded, not configurable):
+
+| Usage ratio | Behavior |
+|---|---|
+| < 80% | Silent, no prompts of any kind |
+| ≥ 80% | Yellow warning line: `Session budget warning: ¥4.12 / ¥5.00 (82%)` |
+| ≥ 100% | Red warning line: `⚠ Cumulative total budget exceeded: ¥51.30 / ¥50.00` |
+
+Warnings only, no blocking — the LLM keeps working after the overage; whether to stop is your call. If both budgets cross the line at the same time, each emits its own warning.
+
+**How to change budgets**: edit the `[cost]` section of `~/.mini-agent/config.toml` (if the file does not exist, copy it from `config.toml.example` first), change the `budget` / `total_budget` values, and restart `mini`. Setting to 0 or deleting the line = unlimited.
+
+**Note**: budgets are computed on monetary amounts, so **you must configure `[cost.pricing.<model-name>]` prices first** — with no prices, cost is always 0 and budgets will never trigger.
+
+### Hook Rule Details ([[hooks]] section)
+
+**What it does**: without writing a single line of Python, declare via configuration "which tool calls should be rejected or require confirmation". With `action = "block"` (default), a match means the call is **not executed**; the LLM receives `Blocked by hook: <reason>` and adjusts its strategy (switches approach or informs the user) instead of blindly retrying. With `action = "confirm"`, a match pops a y/a/n confirmation dialog for you to decide — y allows once, a stops asking for the same rule within this session, n rejects (the LLM receives `Denied by user: <reason>`).
+
+**Where to write it**: user-level `~/.mini-agent/config.toml` (effective across projects) or project-level `.mini-agent/config.toml` (this project only).
+**Layer semantics (careful)**: when the project level defines `[[hooks]]`, it **wholesale replaces** the user-level rule list (no merging) — to have both take effect, copy the user-level rules into the project level.
+
+**All fields**:
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `tool` | No | `"*"` | Tool name fnmatch pattern: `"bash"` exact, `"write_*"` prefix family, `"*"` all tools |
+| `arg` | No | Empty | Only check this parameter's value (e.g. `"file_path"`); by default **all** parameter values are checked |
+| `contains` | No | Empty | Trigger only when the parameter value contains this substring |
+| `regex` | No | Empty | Trigger only when the parameter value matches this regex via `re.search`; invalid regexes are **skipped with a warning**, never blocking startup |
+| `reason` | Recommended | Auto-generated | Rejection/confirmation reason, returned verbatim to the LLM (also shown in the confirm dialog) — spelling out "why + what to do instead" works best |
+| `action` | No | `"block"` | `"block"` rejects directly; `"confirm"` shows a y/a/n confirmation dialog (a = stop asking for the same rule within this session); other values are skipped with a warning |
+| `event` | No | `"pre_tool"` | Currently only `pre_tool` is supported; other values are skipped with a warning |
+| `reject` | No | `true` | Currently only `true` is supported; `false` is skipped with a warning |
+
+**Matching semantics**:
+- Neither `contains` nor `regex` written = **all calls** of that tool trigger (block equals disabling the tool, but with an explanation)
+- Both `contains` and `regex` written = triggers only when **both match** (AND)
+- Multiple `[[hooks]]` rules = any single match triggers (OR); block and confirm rules can be mixed
+- Matching compares parameter values after `str()`, so numeric/boolean parameters also match
+
+**TOML syntax caveats**:
+1. `[[hooks]]` must be written **after** all top-level keys (`max_agent_iterations`, `theme`, etc.) — a top-level key appearing after `[[hooks]]` gets absorbed into that rule entry and corrupts parsing
+2. Use **single quotes** for the `regex` value (TOML literal string): `regex = 'rm\s+-rf'` — inside double quotes `\s` is an illegal escape and raises an error
+
+**Verifying it works**: seeing `Loaded N hook rule(s) from config` at startup means it loaded; have the Agent trip a rule — a block rule shows the error `Blocked by hook: <your reason>`, a confirm rule pops the confirmation dialog (after rejection the LLM receives `Denied by user: <your reason>`).
+
+**Common recipes**:
+
+```toml
+# Directory read-only lock
+[[hooks]]
+tool = "write_file"
+arg = "file_path"
+contains = "docs/spec"
+reason = "docs/spec.md is read-only by project policy; contact the maintainer to modify it"
+
+# Forbid external downloads
+[[hooks]]
+tool = "bash"
+contains = "curl"
+reason = "External downloads are forbidden by project policy"
+
+# Block destructive deletion (regex guards against variants without false-positives like echo 'rm-rf')
+[[hooks]]
+tool = "bash"
+regex = 'rm\s+-rf'
+reason = "Destructive deletion is forbidden by project policy"
+
+# Forbid pushing straight to the main branch (AND: it is a push AND carries --force or targets main)
+[[hooks]]
+tool = "bash"
+contains = "git push"
+regex = '--force|main'
+reason = "Force-push / direct push to main is forbidden; go through a PR"
+
+# Disable a tool entirely (with an explanation, so the LLM changes course instead of retrying)
+[[hooks]]
+tool = "delete_file"
+reason = "This project forbids the Agent from deleting files; ask the user to delete them manually"
+
+# Anti-leak across all tools (tool omitted = *, checks every parameter of every tool)
+[[hooks]]
+contains = "internal.corp.com"
+reason = "Intranet addresses are not allowed to appear in tool calls"
+
+# Sensitive operations require human confirmation (not disabled, but asks you every time; press a to stop asking this session)
+[[hooks]]
+tool = "bash"
+contains = "git push"
+action = "confirm"
+reason = "push affects the remote repository"
+```
+
+**Boundaries**: the configuration layer handles "reject" (block) and "force confirm" (confirm). Rewriting parameters (MODIFY) or observing/recording requires writing a Python Hook or an EventBus subscriber — see docs/agent-architecture.md S04. The confirm decision dialog is executed by the main Agent's terminal; SubAgents (spawn_agents) do not load `[[hooks]]` rules and have no confirmation UI — code-registered CONFIRM hooks always safely reject when there is no UI.
+
+---
+
+## 5. Context File Usage Guide
+
+### Project Instructions (AGENT.md / CLAUDE.md / .mini-agent/instructions.md)
+
+**What they do**: write your project conventions there and the LLM knows them from startup, so you never have to explain them in every conversation.
+
+**What to write**: build/test commands, directory layout conventions, code style, architectural highlights. Example:
+
+```markdown
+# My Project
+
+## Common Commands
+- Test: uv run pytest tests/
+- Lint: uv run ruff check src/
+
+## Conventions
+- Full type annotations, line-length 100
+- Tests go in tests/unit/ and tests/integration/
+```
+
+**Default lookup logic** (without changing configuration):
+
+```
+Search the project root in order: AGENT.md → CLAUDE.md → .mini-agent/instructions.md
+First non-empty file found → injected into the system prompt → startup shows "context: loaded <filename>"
+None of the three exist → silently skipped (no prompt at all)
+Over 8000 characters → truncated and annotated "(truncated)"
+```
+
+**Changing file names/priority**: edit the `instruction_files` list in the `[context]` section of config.toml:
+
+```toml
+[context]
+instruction_files = ["MY_RULES.md"]        # Only recognize this one file
+# Or reorder to prioritize CLAUDE.md:
+# instruction_files = ["CLAUDE.md", "AGENT.md"]
+```
+
+**When it takes effect**: read once at startup. After editing an instruction file's content, restart `mini`.
+
+### User-Level Global Instructions (~/.mini-agent/instructions.md)
+
+**What it does**: personal preferences across all projects — injected no matter which directory `mini` is launched in.
+
+**What to write**: language preference, answering style, and other instructions unrelated to any specific project. Example:
+
+```markdown
+- Always answer in Chinese
+- Keep answers concise; don't repeat my question
+```
+
+**Relationship with project instructions**: they **coexist** — both are injected (user-level first, project-level after), not either-or.
+
+**Changing the path**: `user_instructions_file` in the `[context]` section of config.toml:
+
+```toml
+[context]
+user_instructions_file = "~/my-notes/ai-rules.md"
+```
+
+---
+
+## 6. FAQ
+
+**Q: config.toml and CLAUDE.md are both "project-level" — what's the difference?**
+A: config.toml holds parameters read by the **program** (changes affect program behavior, e.g. timeout/theme); CLAUDE.md is natural language read by the **LLM** (changes affect the LLM's answers, program behavior unchanged).
+
+**Q: What happens if a project has both AGENT.md and CLAUDE.md?**
+A: Only AGENT.md is read (higher priority wins); CLAUDE.md is ignored. Not merging is deliberate — it avoids the LLM being torn when the two files conflict.
+
+**Q: Why did the LLM not react after I edited CLAUDE.md?**
+A: Instruction files are read once at startup; restart `mini` after editing.
+
+**Q: Where should the API key go?**
+A: The `.env` file (already gitignored) or environment variables. Do **not** put it in config.toml — a project-level config.toml could get committed to git and leak.
+
+**Q: How do I confirm instruction injection succeeded?**
+A: At startup, look for the `context: loaded <filename>` line; or ask the LLM a question only answerable from the instruction file (e.g. the project's test command) — if it answers correctly without calling any tool, injection succeeded.
+
+**Q: Memory (memory.json) and instruction files (instructions.md) both get injected — what's the difference?**
+A: Instruction files are static conventions **you hand-write**, injected at startup; memory is dynamic accumulation **auto-extracted by the LLM** (also addable manually via `/memory add`), injected before every LLM call. The former suits stable rules; the latter suits preferences discovered mid-session.
+
+---
+
+## 7. Automatic Memory Extraction in Detail
+
+The memory system is **fully automatic** — no switch to flip, enabled by default.
+
+### Workflow
+
+```
+During conversation you state a preference/convention ("I like concise comments", "this project uses uv", etc.)
+  ↓ Exit via /exit or closing the window
+SESSION_END hook → LLM analyzes the last 20 messages → extract → dedupe → save to disk
+  ↓ Next launch of mini (any time, even after rebooting the machine)
+PRE_LLM hook → memory read automatically → injected into system prompt → the LLM "knows" from turn one
+```
+
+### What Gets Extracted (the LLM's filtering rules)
+
+| Category | Extracted | Not extracted |
+|---|---|---|
+| **preference** | "I like concise code comments" | "Hello" (greetings) |
+| **convention** | "This project uses uv to manage dependencies" | "Help me look at this bug" (task details) |
+| **fact** | "Python version requirement is 3.11+" | "OK thanks" (filler words) |
+| — | — | Suggestions the LLM itself made (only what the **user** said is extracted) |
+
+### Filtering Conditions (three layers)
+
+**Layer 1: threshold** — fewer than 5 user messages in this session → extraction is not triggered (too short to be worthwhile).
+
+**Layer 2: deduplication** — new extractions are compared against existing memory; hitting any one condition discards them:
+- Exactly identical (case-insensitive)
+- Existing memory contains the new extraction (substring)
+- Over 60% word overlap (prevents "same thing reworded" — e.g. "always use type hints on functions" and "use type hints on all functions always" are the same thing)
+
+**Layer 3: LLM prompt rules** — the LLM is told to extract only what the user explicitly said, skip transient content, keep each entry self-contained and readable, 1-2 sentences, and return empty when nothing is worth remembering.
+
+### Storage and Lifetime
+
+| Item | Description |
+|---|---|
+| Storage locations | `~/.mini-agent/memory/user_memory.json` (cross-project) + `<project>/.mini-agent/memory.json` (project-level) |
+| Lifetime | **Permanent** — the file stays on disk until deleted |
+| Injection | Automatically injected into the system prompt before every LLM call (≤10 entries: all injected; >10 entries: the LLM picks the 5 most relevant) |
+| Manual add | `/memory add I like such-and-such` (takes effect immediately, no need to wait for exit) |
+| View | `/memory` |
+| Delete | `/memory delete <ID or keyword>` (the ID can be copied from the `/memory` list, or match by content keyword) |
+
+### Disabling / Debugging
+
+If auto extraction quality is poor (a weak model's misunderstanding producing garbage memory), turn it off in config.toml:
+
+```toml
+[memory]
+auto_extract = false   # After disabling, use /memory add to add manually instead
+```
+
+For debugging, run `/memory` before `/exit` to see what was extracted last time; if unsatisfied, hand-edit the JSON file to remove entries.
+
+### Differences from CLAUDE.md (Context Awareness)
+
+| | CLAUDE.md / AGENT.md | Memory (memory.json) |
+|---|---|---|
+| Source | Hand-written by you | Auto-extracted by the LLM + `/memory add` |
+| Nature of content | Stable project rules | Dynamically accumulated preferences |
+| Injection timing | Once at startup | Before every LLM call |
+| Scope | This project | Cross-project (user-level) or this project (project-level) |
+| How to modify | Edit the md file | Automatic / `/memory add` / edit the JSON |
+
+**The two coexist and complement each other** — CLAUDE.md holds stable rules like "this project uses uv, tests go in tests/"; memory records personal preferences like "the user likes concise comments".
+
+---
+
+## 8. Permission Rules File (permissions.toml)
+
+Customize which commands/paths/tools are allowed through without confirmation and which are unconditionally rejected — without touching code.
+
+**Location** (two levels, both effective simultaneously):
+
+| File | Scope |
+|---|---|
+| `~/.mini-agent/permissions.toml` | User-level — all projects |
+| `<project>/.mini-agent/permissions.toml` | Project-level — current project only |
+
+**Format** (see `permissions.toml.example` in the project root for a full example):
+
+```toml
+[commands]
+allow = ["git push origin dev", "docker build *"]   # Allowed without confirmation (dangerous commands too)
+deny = ["docker rm *"]                               # Unconditionally rejected
+
+[paths]
+allow = ["D:/shared/workspace/*"]    # Allow paths outside the project (outside-project paths require confirmation by default)
+deny = ["*secrets*", "*.key"]        # Deny access (blocked even for paths inside the project)
+
+[tools]
+allow = ["glob"]           # Trust the tool wholesale (skips command/path-level checks, use with caution)
+deny = ["delete_file"]     # Block the entire tool outright
+```
+
+**Precedence**: `deny rules > allow rules > built-in defaults` (dangerous-command confirmation / sensitive-path rejection / inside-project allowance). deny wins above all — even a path inside the project gets blocked.
+
+**Built-in path protection** (PathGuard, no configuration needed, fixed in code):
+
+Evaluation order (first match decides):
+1. `denied_paths` (`~/.ssh`/`~/.aws`/`~/.gnupg`, configurable in config.toml) → hard reject
+2. Sensitive filename patterns (`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`, 10 kinds in total) → hard reject (blocked even inside the project); `.env.example`/`.env.sample`/`.env.template` are exempt
+3. Inside the project directory → auto allow
+4. Paths in `allowed_paths` (configurable in config.toml) → auto allow
+5. None of the above matches → ask the user (when `permission_mode = "ask"`)
+
+**Tool-level rules (P79)**: the `[tools]` section matches by tool name (glob supported) and is evaluated **before** command/path checks — `deny` blocks the entire tool outright; `allow` trusts the tool wholesale, skipping subsequent resource checks (`allow = ["bash"]` means even dangerous commands are no longer confirmed — use with caution); tools with no matching rule go through command/path checks as usual.
+
+**Matching syntax**: glob style. `git *` matches `git status` but not `github`; `*secrets*` matches any path containing secrets.
+
+**Verifying it works**: after `/trace on`, trigger a relevant operation; the trace line shows `rule:<pattern>` as the decision basis.
+
+**When changes take effect**: restart mini (loaded once at startup). Or use the `/allow` `/deny` commands at runtime to add rules live — rules with the `--save` flag are written to the project-level permissions.toml and load automatically next startup.
+
+**Runtime management** (P78/P79):
+```
+/allow command "docker *"          # Allow all docker commands for this session
+/deny path "*/secrets/*"           # Deny secrets paths for this session
+/deny tool delete_file             # Block the delete_file tool for this session
+/allow command "npm *" --save      # Allow and persist to .mini-agent/permissions.toml
+/deny                              # List all current DENY rules
+```
+
+---
+
+## 9. OS-Level Sandbox (sandbox)
+
+Kernel-level isolation of the execution environment for bash commands — even a command that passes permission checks can only operate within a restricted scope.
+
+**Supported platforms**:
+
+| Platform | Backend | Installation |
+|---|---|---|
+| Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` or `yum install bubblewrap` |
+| macOS | Seatbelt (sandbox-exec) | Bundled with the system (`/usr/bin/sandbox-exec`) |
+| Windows | Unsupported | Keeps the existing regex interception + permissions.toml rules |
+
+**Enabling**:
+
+```toml
+# config.toml
+[security]
+sandbox = true               # Turn on the sandbox
+sandbox_auto_allow = false    # Optional: dangerous commands skip confirmation under the sandbox
+sandbox_network = false       # Optional: allow network access
+```
+
+**File permissions inside the sandbox** (fixed in code, not user-configurable):
+
+| Path | Permission |
+|---|---|
+| Working directory (project directory) | Read-write |
+| `/tmp` | Read-write |
+| `~/.mini-agent` | Read-only (prevents commands from tampering with the configuration) |
+| The rest of the entire filesystem | Read-only |
+
+**How sandbox_auto_allow works with permissions.toml**:
+
+```
+Command arrives
+  ↓
+① permissions.toml deny rule? → reject (the sandbox can't save it either)
+  ↓
+② permissions.toml allow rule / session grant? → allow
+  ↓
+③ Dangerous command?
+     sandbox_auto_allow=true → allow (kernel as the backstop)
+     sandbox_auto_allow=false → confirmation dialog
+  ↓
+④ Execution: sandbox present → kernel-isolated execution (read-only rootfs)
+       no sandbox → executed as-is
+```
+
+- **permissions.toml** governs "whether this command should be executed"
+- **sandbox** governs "which files it can touch during execution"
+- **deny rules trump everything**, nothing bypasses them — sandbox_auto_allow does not affect them
+
+**Verifying it works**: after `/trace on`, execute a command; the trace line shows `sandbox_auto_allow` as the decision basis (when confirmation is skipped under the sandbox).
+
+**Windows**: `sandbox = true` with no bwrap/sandbox-exec available → silently falls back; functionality is unaffected, no error raised.
+
+---
+
+*Related docs: terminal output explained in output-guide.md, how to open terminals per OS and compatibility in terminal-guide.md, capability matrix in docs/capabilities.md, architecture internals in docs/agent-architecture.md.*

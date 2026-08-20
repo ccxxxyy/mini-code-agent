@@ -80,7 +80,7 @@
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
 
-# 声明式 Hook 规则（详见 docs/config-guide.md "Hook 规则详解"）
+# 声明式 Hook 规则（详见 docs/guide/config-guide.md "Hook 规则详解"）
 # 命中的工具调用被拒绝执行（默认）或弹窗确认，reason 回给 LLM。可写多条 [[hooks]]。
 # 注意：[[hooks]] 必须写在所有顶级键之后；regex 用单引号（literal string）
 # [[hooks]]

@@ -104,12 +104,12 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 文档数量 | **15 个专题文档** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
+| 文档数量 | **14 个专题文档 + 4 个英文版指南（guide/en/）** + README 双语 | MEWCODE.md（项目说明）+ 配置示例 |
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
 | 技术笔记 | tech-notes.md（78 个专题，设计决策记录） | 无 |
-| 配置指南 | config-guide.md（全配置文件说明） | config.yaml.example |
-| 命令参考 | commands-guide.md（25 个命令完整语法/参数/示例） | 无 |
-| 终端指南 | terminal-guide.md（各系统各终端） | 无 |
+| 配置指南 | guide/config-guide.md（全配置文件说明） | config.yaml.example |
+| 命令参考 | guide/commands-guide.md（26 个命令完整语法/参数/示例） | 无 |
+| 终端指南 | guide/terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/（10 个实验脚本 + 数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
 | 开发历史 | tasks.md（P1-P83 完整记录） | 无 |
