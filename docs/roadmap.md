@@ -550,8 +550,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：4 种 agent 类型硬编码在 `core/agent_types.py`，用户无法定义新类型或覆盖内置类型。
 **实现**：新增 `core/agent_type_loader.py`（`parse_agent_md` + `load_agent_types`）：从 `~/.mini-agent/agents/` 和 `./.mini-agent/agents/` 扫描 `*.md` 文件，YAML frontmatter（`name`/`description`/`allowed_tools`/`max_iterations`）+ body 作为 system_prompt 模板（支持 `{working_dir}/{platform}/{shell}/{iteration_budget}` 占位符）。`agent_types.py` 新增 `register_agent_type()` setter；`AgentConfig` 新增 `agent_dirs` 字段；app.py 启动时调用 loader。优先级：项目 > 用户 > 内置（同名覆盖）。`spawn_agents` 工具 schema 动态列举所有已注册类型。12 个新测试。内置 4 种保持硬编码（安装后无 .md 也可用）。
 
-☐ **B3.1 /spawn + /trace 提示符被淹没**
-`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端，和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。需在 `ui/terminal.py` 层协调：子 agent trace 输出后重绘提示符行，或在提示符前加可视分隔。工作量：小。
+✅ **B3.1 /spawn + /trace 提示符被淹没**（已完成）
+**问题**：`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端（共享 EventBus → 共享 Rich Console），和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。
+**修复**：`PromptSession` 创建时加 `patch_stdout=True`（prompt_toolkit 内置机制）。prompt 活跃期间所有 stdout 写入自动打印到 prompt 上方，prompt 行自动重绘。一行改动。
 
 ☐ **B4 后台子代理 + 完成通知**
 mewcode `agents/task_manager.py`（BackgroundTask 异步跑 + ProgressInfo）+ `agents/notification.py`（完成后注入通知）+ `agents/fork.py`（fork 当前对话上下文的 worker）。mini 的 spawn_agents 阻塞等待（comparison doc 6.2 自认的限制至今成立）。工作量：中。

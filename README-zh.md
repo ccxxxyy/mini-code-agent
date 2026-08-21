@@ -4,6 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Tests](https://img.shields.io/badge/tests-1022%20passed-brightgreen)
+[![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
 
@@ -832,6 +833,97 @@ uv run python experiments/deadlock_induction.py --all
 三类文件，性质不同：**配置文件**（config.toml/.env，给程序读的参数）、**上下文文件**（AGENT.md/CLAUDE.md/instructions.md，给 LLM 读的项目约定）、**数据文件**（memory.json/sessions，程序自动管理）。均分用户级（`~/.mini-agent/`，所有项目共用）和项目级（项目目录内，覆盖或叠加用户级）。
 
 完整清单、优先级链、修改方法见 [docs/guide/config-guide.md](docs/guide/config-guide.md)。
+
+## 扩展与自定义
+
+五种扩展机制，无需修改项目源码：
+
+### 自定义 Agent 类型
+
+在 `.mini-agent/agents/`（项目级）或 `~/.mini-agent/agents/`（用户级）放 `.md` 文件即可定义新类型：
+
+```markdown
+---
+name: reviewer
+description: 代码审查专家
+allowed_tools:
+  - read_file
+  - glob
+  - grep
+  - bash
+max_iterations: 25
+---
+你是代码审查 agent。工作目录: {working_dir} ...
+```
+
+使用：`/spawn --type reviewer 审查 src/main.py`。LLM 自主选择时也能看到自定义类型。优先级：项目 > 用户 > 内置 4 种。完整格式见 [配置指南](docs/guide/config-guide.md#自定义-agent-类型)。
+
+### 自定义工具（插件）
+
+在 `.mini-agent/plugins/` 下放一个 `.py` 文件，启动时自动加载：
+
+```python
+# .mini-agent/plugins/word_count.py
+from mini_agent.tools.base import Tool, ToolContext, ToolSchema, ToolParameter
+from mini_agent.models.message import ToolResult
+
+class WordCountTool(Tool):
+    _name = "word_count"
+    _description = "统计文本字数"
+
+    @property
+    def schema(self):
+        return ToolSchema(name=self._name, description=self._description,
+                          parameters=[ToolParameter(name="text", type="string",
+                                                    description="要统计的文本")])
+
+    async def execute(self, ctx: ToolContext, **kwargs):
+        return ToolResult(call_id="", name="word_count",
+                          output=f"字数: {len(kwargs['text'].split())}")
+
+def register_tools(registry):
+    registry.register(WordCountTool())
+```
+
+也支持 pip 包通过 `mini_agent.plugins` entry point 注册。示例见 `examples/plugins/`。`/plugins` 命令查看已加载插件。
+
+### MCP 外部工具
+
+通过配置接入任何 [MCP](https://modelcontextprotocol.io/) 兼容的工具服务器，无需写代码：
+
+```toml
+# .mini-agent/config.toml
+[mcp.servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+transport = "stdio"          # "stdio" | "http" | "sse"
+loading = "dispatch"         # "eager"（全部注册）| "dispatch"（按需搜索+调用）
+```
+
+### 技能包（Skills）
+
+Skill 是自然语言指令包（SKILL.md），触发后注入 system prompt 引导 LLM 行为：
+
+```
+skills/daily-check/SKILL.md          # 项目级
+~/.mini-agent/skills/*/SKILL.md      # 用户级
+```
+
+管理命令：`/skill list`、`/skill activate <名称>`、`/skill install <路径或git URL>`。项目自带 4 个示例技能。写法详见[上方技能包章节](#附怎么写一个-skill上表做法-3的完整步骤)。
+
+### Hook 规则
+
+在 config.toml 中声明 `[[hooks]]` 规则，拦截或确认工具调用，无需写代码：
+
+```toml
+[[hooks]]
+tool = "write_file"
+contains = "spec.md"
+action = "block"             # "block"（默认，直接拒绝）| "confirm"（弹 y/a/n 确认框）
+reason = "spec.md 是项目策略只读文件"
+```
+
+支持 11 个 hook 阶段。完整选项见 [config.toml.example](config.toml.example)。
 
 ## 全部命令一览
 

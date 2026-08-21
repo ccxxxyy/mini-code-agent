@@ -4,6 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1022%20passed-brightgreen)]()
+[![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
 
@@ -52,6 +53,97 @@
 🌳 **Worktree Isolation** — `/spawn --isolated` runs agents in separate git worktrees (parallel file changes don't conflict)
 
 📄 **Context-Aware** — auto-reads `CLAUDE.md` / `AGENT.md` project instructions at startup; `@file` inline references with Tab completion
+
+## Extensibility
+
+Five extension points let you customize without modifying the source:
+
+### Custom Agent Types
+
+Place `.md` files in `.mini-agent/agents/` (project) or `~/.mini-agent/agents/` (user) to define new agent types for `/spawn --type <name>`:
+
+```markdown
+---
+name: reviewer
+description: Code review specialist
+allowed_tools:
+  - read_file
+  - glob
+  - grep
+  - bash
+max_iterations: 25
+---
+You are a code review agent. Working directory: {working_dir} ...
+```
+
+Priority: project > user > builtin. The LLM's `spawn_agents` tool auto-lists custom types. Full format: [docs/guide/en/config-guide.md](docs/guide/en/config-guide.md#custom-agent-types).
+
+### Custom Tools (Plugins)
+
+Drop a `.py` file in `.mini-agent/plugins/` — it registers tools/commands/skills at startup:
+
+```python
+# .mini-agent/plugins/word_count.py
+from mini_agent.tools.base import Tool, ToolContext, ToolSchema, ToolParameter
+from mini_agent.models.message import ToolResult
+
+class WordCountTool(Tool):
+    _name = "word_count"
+    _description = "Count words in text"
+
+    @property
+    def schema(self):
+        return ToolSchema(name=self._name, description=self._description,
+                          parameters=[ToolParameter(name="text", type="string",
+                                                    description="Text to count")])
+
+    async def execute(self, ctx: ToolContext, **kwargs):
+        return ToolResult(call_id="", name="word_count",
+                          output=f"Words: {len(kwargs['text'].split())}")
+
+def register_tools(registry):
+    registry.register(WordCountTool())
+```
+
+Also supports pip packages via `mini_agent.plugins` entry points. See `examples/plugins/` for working samples.
+
+### MCP External Tools
+
+Connect any [MCP](https://modelcontextprotocol.io/)-compatible tool server via config — no code needed:
+
+```toml
+# .mini-agent/config.toml
+[mcp.servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+transport = "stdio"          # "stdio" | "http" | "sse"
+loading = "dispatch"         # "eager" (register all) | "dispatch" (lazy search + call)
+```
+
+### Skills
+
+Skills are natural-language instruction packs (SKILL.md) that inject into the system prompt when triggered:
+
+```
+skills/daily-check/SKILL.md     # project-level
+~/.mini-agent/skills/*/SKILL.md # user-level
+```
+
+Manage with `/skill list`, `/skill activate <name>`, `/skill install <path-or-git-url>`. 4 built-in skill packs included. See [the Chinese README's skill section](README-zh.md#附怎么写一个-skill上表做法-3的完整步骤) for a full writing guide.
+
+### Hooks
+
+Declarative `[[hooks]]` rules in config.toml block or confirm tool calls — no code needed:
+
+```toml
+[[hooks]]
+tool = "write_file"
+contains = "spec.md"
+action = "block"             # "block" (default) | "confirm" (y/a/n prompt)
+reason = "spec.md is read-only by project policy"
+```
+
+11 hook stages available. See [config.toml.example](config.toml.example) for all options.
 
 ## Quick Start
 
@@ -119,11 +211,11 @@ The agent works on whatever directory you run the command from — just like ter
 **Running from any directory** (if installed globally):
 
 ```bash
-# Global install (once)
+# Global install (once) — run from the mini-code-agent repo directory
 cd /path/to/mini-code-agent
 uv tool install . --extra remote
 
-# Then use anywhere
+# Then use anywhere (no need to be in the repo)
 cd ~/my-project
 mini-agent --remote
 # Browser: http://localhost:8765
