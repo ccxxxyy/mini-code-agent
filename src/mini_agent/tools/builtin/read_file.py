@@ -50,6 +50,10 @@ class ReadFileTool(Tool):
         except OSError as e:
             return self.error_result("", f"Failed to read {file_path}: {e}")
 
+        # Record for read-before-edit enforcement 记录以支持编辑前必读
+        if ctx.file_state is not None:
+            ctx.file_state.record(file_path)
+
         lines = content.splitlines()
         selected = lines[offset : offset + limit]
         numbered = "\n".join(f"{i + offset + 1:>6}\t{line}" for i, line in enumerate(selected))

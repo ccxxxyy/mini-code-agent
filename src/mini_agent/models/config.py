@@ -47,6 +47,9 @@ class ToolConfig:
     max_file_size: int = 10_000_000
     allowed_paths: list[str] = field(default_factory=list)
     denied_paths: list[str] = field(default_factory=lambda: ["~/.ssh", "~/.aws", "~/.gnupg"])
+    # Read-before-edit gate : set False to allow editing files without reading first
+    # 编辑前必读门：设为 False 可关闭（编辑前无需先读）
+    enforce_read_before_edit: bool = True
 
 
 @dataclass

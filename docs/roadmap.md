@@ -542,8 +542,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **已实现（核心批次 6 + 技能批次 2 = 8 工具）**：核心批次——`ask_user`（结构化提问 + 终端 Rich Panel UI）、`exit_plan_mode`（计划审批闭环）、`task_create`/`task_get`/`task_list`/`task_update`（任务板 CRUD）；技能批次——`load_skill`（激活已安装技能）、`install_skill`（从路径或 git URL 安装技能，不弹权限）。ToolContext 扩展 4 字段（task_store/agent_loop_ref/ask_user_callback/skill_registry），app.py 装配注入。工具总数 12→20。20 个新测试 + 集成测试工具注册断言更新。真实 LLM 验证 task_create 自主调用成功。
 **后续批次（未纳入本次）**：worktree 工具（enter/exit）、team 工具（create/delete）。
 
-☐ **B2 read-before-edit 强制（FileStateCache）**
-mewcode `tools/file_state_cache.py`：编辑前必须先读 + mtime_ns 未变两道门，防编辑陈旧/被外部改过的文件。mini 全库无对应机制。小成本高安全收益。工作量：小（~80 行 + 集成）。
+✅ **B2 read-before-edit 强制（FileStateCache）**（已完成）
+**问题**：edit/write 可基于陈旧内容盲目修改——从未读过、或读后被外部改过的文件。
+**实现**：新增 `tools/file_state_cache.py` `FileStateCache`（会话级 {绝对路径: mtime_ns} 缓存，两道门：① 必须读过 ② 读后 mtime 未变）。read_file 成功后 `record`；edit_file 编辑前 `check`、写后 `update`；write_file 仅对**已存在文件**要求先读（新建豁免），写后 `update`；delete_file 不纳入（删除无需先读内容）。ToolContext 加 `file_state` 字段，主 Agent 与每个 SubAgent 各持独立缓存。`file_state=None` 时门禁失效（向后兼容）。10 个新测试。真实 LLM 验证：直接 edit 被拦 → LLM 自主改为先 read 再 edit。**可配置**：`[tools] enforce_read_before_edit`（默认 true）控制主 Agent 与所有 SubAgent 的装配，false 关闭门禁；+5 个接线测试。
 
 ☐ **B3 自定义 Agent 类型（.md 声明式定义）**
 mewcode `agents/loader.py + parser.py` 从 `.mewcode/agents/*.md` 和 `~/.mewcode/agents/` 加载用户自定义 agent（内置 4 种也是 .md）。mini `core/agent_types.py` 是 4 种硬编码 frozen dataclass，无用户扩展路径。工作量：小-中（~200 行）。

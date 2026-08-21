@@ -2782,3 +2782,30 @@ P74（event_listeners 零代码监听插件）已经把文件式插件加载的�
 - 968 passed, 1 skipped，覆盖率门禁通过，ruff clean
 - 真实运行验证（examples/plugins/word_count_plugin.py 复制进 ./.mini-agent/plugins）：启动横幅 "Loaded 1 plugin(s)"、`/plugins` 表格、`/greet` 输出、`/skill list` 见 haiku-mode、真实 LLM 成功调用 word_count 工具（words=9 chars=43 lines=1）、`disabled_plugins` 置顶级后插件确实不加载
 - 验证中的教训：TOML 顶级键必须写在所有 `[section]` 之前——追加到文件末尾会落进最后一个 section 而静默失效，config.toml.example 的示例块因此放在"顶级配置"注释区
+
+# 84. read-before-edit 门禁与强制问题修复
+
+## 84.1 动机
+
+edit_file/write_file 原本对文件内容零认知要求：LLM 可以凭想象的 old_text 编辑从未读过的文件，或基于早前读到的旧内容覆盖掉用户/外部进程刚做的修改。mewcode 的 `file_state_cache.py` 已验证此门禁的价值，列为 B2 增强项。
+
+## 84.2 方案：FileStateCache 两道门
+
+`tools/file_state_cache.py`：会话级 `{绝对路径: mtime_ns}` 缓存。read_file 成功后 `record`；edit_file 与覆盖**已存在**文件的 write_file 执行前 `check` 两道门——① 路径在缓存中（读过）② `mtime_ns` 未变（读后未被外部改）——任一不满足即拒绝，报错文案可行动（"Read it first" / "Read it again"），LLM 收到后通常自主先读再重试。成功编辑/写入后 `update` 刷新，连续编辑免重读。新建 write 与 delete_file 豁免（无内容可破坏/不依赖内容）。缓存挂 `ToolContext.file_state`，为 None 时门禁失效。
+
+## 84.3 强制问题与修复
+
+B2 首版在 app.py/subagent.py **无条件** `FileStateCache()`——门禁强制开启、用户无法关闭；同时 config 里加的 `enforce_read_before_edit: bool = False` 从未被任何代码读取（死配置），且语义与实际行为相反（声明默认关、实际永远开）。#200 修复：字段默认改 `True`，两处装配点改条件创建（`false` → `file_state=None` 门禁整体关闭），主 Agent 与所有 SubAgent 同步受控。
+
+## 84.4 设计权衡
+
+- **默认 true 而非沿用死配置的 false**：B2 的防护价值已真实 LLM 验证（直接 edit 被拦 → LLM 自主改为先读再编辑），默认关闭等于默认放弃防护——"修复强制"给的是关闭出口，不是撤防
+- **bash 旁路不堵**：sed 等命令改文件不经过此门。门禁定位是"文件工具的认知一致性检查"，命令风险由权限系统（DANGEROUS_COMMAND_PATTERNS / [[hooks]] 规则）另行管控
+- **主/子 Agent 独立缓存**：SubAgent 各持实例——子 Agent 的上下文里本来就没有主 Agent 读到的内容，共享缓存反而会放行"子 Agent 没见过内容却能编辑"
+- **mtime_ns 而非内容哈希**：零读取成本；误报（touch 未改内容）的代价只是一次重读，漏报（同纳秒改内容）概率可忽略
+
+## 84.5 验证
+
+- 15 个测试：10 门禁行为（未读拦/读后放行/外部改动拦/编辑后免重读/新建豁免/覆盖须先读/None 失效）+ 5 配置接线（默认值 / app 装配开关 / SubAgent 装配开关，关闭路径实测 edit 免读成功）；全量 1010 passed + 1 skipped
+- TOML 加载端到端实测：`[tools] enforce_read_before_edit = false` 经 ConfigLoader 后字段确为 False（`_merge` 的 hasattr 动态映射天然支持新字段，无需改 loader）
+- 真实终端验证：真实 LLM 会话中直接 edit 被拦、报错文案返回后 LLM 自主调整策略（先读或改用 bash——后者即"bash 旁路"设计边界的实证）

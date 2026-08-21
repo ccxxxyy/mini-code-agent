@@ -167,11 +167,14 @@ class Application:
             if tool.schema.name in config.tools.enabled_tools:
                 self.tool_registry.register(tool)
 
+        from mini_agent.tools.file_state_cache import FileStateCache
+
         tool_context = ToolContext(
             working_dir=working_dir,
             session=self.session,
             event_bus=self.event_bus,
             config=config,
+            file_state=FileStateCache() if config.tools.enforce_read_before_edit else None,
         )
         self._tool_context = tool_context
 

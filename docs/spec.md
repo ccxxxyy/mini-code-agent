@@ -57,7 +57,8 @@ mini-code-agent/
 │       ├── tools/                   # === TOOL LAYER ===
 │       │   ├── __init__.py
 │       │   ├── base.py              # Tool ABC, ToolRegistry, ToolContext
-│       │   ├── builtin/             # 12 core tools
+│       │   ├── file_state_cache.py    # Read-before-edit enforcement (B2)
+│       │   ├── builtin/             # 20 core tools
 │       │   │   ├── __init__.py
 │       │   │   ├── read_file.py     # ReadFile tool
 │       │   │   ├── write_file.py    # WriteFile tool
@@ -152,11 +153,11 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 58 unit test files, 995 tests
+│   ├── unit/                        # 60 unit test files, 1010 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
-│   │   ├── ...                      # (57 files total)
+│   │   ├── ...                      # (60 files total)
 │   └── integration/                 # 4 integration test files
 │       ├── test_mcp_client.py
 │       ├── test_agent_e2e.py
@@ -2174,6 +2175,8 @@ class ReadFileTool(Tool):
 | `install_skill` | 从路径或 git URL 安装技能 | 无限制 |
 
 其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
+
+**Read-before-edit 强制（`tools/file_state_cache.py`）**：`FileStateCache` 记录每个被 `read_file` 读过的文件的 `mtime_ns`。`edit_file`（及覆盖已存在文件的 `write_file`）执行前过两道门——① 文件必须读过、② 读后 `mtime_ns` 未变——否则拒绝，防止基于陈旧内容或对未读文件的盲目修改。新建文件的 `write_file` 与 `delete_file` 豁免。缓存在 `ToolContext.file_state`，主 Agent 与每个 SubAgent 各持独立实例；成功编辑/写入后刷新条目，后续编辑无需重读。可通过 `[tools] enforce_read_before_edit = false` 关闭（默认 true，关闭时 `file_state=None` 门禁失效）。`ask_user`/`exit_plan_mode`/`task_*`/`load_skill`/`install_skill` 为 B1 流程工具（LLM 自主调用任务板/技能/计划审批/结构化提问）。
 
 ### 8.2 MCP 工具适配器 (`tools/mcp/adapter.py`)
 
