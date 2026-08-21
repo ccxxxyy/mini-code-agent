@@ -556,11 +556,27 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 
 ✅ **B4 后台子代理 + 完成通知**（已完成）
 **问题**：LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（spawn_agents.py `wait_all`），期间不能做其他工作——comparison 6.2 自认的限制。
-**实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话——复用现有跨 Agent 消息通道，零新增注入机制。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。诚实边界：主 Agent 完全空闲（等用户输入）时通知滞留到下一次用户输入才进对话（终端提示先行）；fork 对话上下文的 worker（mewcode agents/fork.py）未纳入本批。
+**实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话——复用现有跨 Agent 消息通道，零新增注入机制。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。诚实边界：主 Agent 完全空闲（等用户输入）时通知滞留到下一次用户输入才进对话（终端提示先行）；fork 对话上下文的 worker 后续由 B4.1 实现（摘要式）。
 
-☐ **B4.1 摘要式上下文 fork（fork-with-summary worker）**
+✅ **B4.1 摘要式上下文 fork（fork-with-summary worker）**（已完成）
 **问题**：SubAgent 空白上下文（刻意设计：便宜/可并行/可预测），但"和主 agent 讨论半天需求后派 worker 按讨论去做"的场景下，task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承解决，但全量太贵（并行 N 个 = N 倍历史 token）且有"fork 后主对话继续变化"的一致性问题。
-**方案方向**：摘要式 fork——复用 P67 的 LLM 结构化摘要能力，把主对话压缩摘要注入子 agent 的 system prompt。摘要即冻结快照（回避一致性问题），成本可控（摘要 ≪ 全量历史）。`spawn_agents` 加 `inherit_context: bool` 参数或 `/spawn --fork`。与用户层 `/fork`（会话分叉）形成互补：探索分叉 vs 委托执行。工作量：中。
+**实现**：摘要式 fork——`memory/compressor.py` 新增公开函数 `summarize_conversation(llm, messages)`（复用 P67 的 `_extractive_digest` + `LLMSummarizeOldest._summarize` 9 节结构化摘要，LLM 失败回退提取式 digest——fork 绝不因摘要失败而失败）。摘要即冻结快照（回避一致性问题），成本 ≈ 一次摘要调用（≪ 全量历史 × N）。两个入口：`spawn_agents` 工具的 `inherit_context: bool` 参数（LLM 自主）+ `/spawn --fork`（用户命令）；摘要经 `SubAgentManager.build_context_summary()`（worker LLM）生成，`spawn/spawn_parallel/spawn_background` 透传 `context_summary`，注入子 agent system prompt 的 `[Inherited context ...]` 段。6 个新测试。诚实边界：`spawn_pane`（跨进程 WorkerSpec 协议）与 `/team` 未纳入。
+
+☐ **B3.2 权限确认弹窗输入行被并发输出淹没**
+**问题**（B4.1 终端验证中实测暴露）：工具并行执行时，一个工具触发权限确认弹窗（`allow? [y/a/n] > ` 等待输入），另一个并行工具完成时的 trace 行直接打进确认输入行——用户看不到输入位置。B3.1 的 `patch_stdout` 只包裹了主输入框（`get_user_input` 的 `prompt_async`），`terminal.confirm()` 的输入路径未覆盖。
+**方向**：confirm() 的输入读取同样用 `patch_stdout` 包裹；或弹窗期间暂停 trace/流式输出（`_confirm_lock` 已防多弹窗交错，但不防其他输出打断）。工作量：小。
+
+☐ **B7 模糊确认不算授权（system prompt 守则）**
+**问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
+**方向**：SYSTEM_PROMPT 增加守则："当用户明确表示只讨论/不要动手时，该约束持续有效，直到用户明确说'开始动手/执行'类指令；模糊确认（对/嗯/好）只确认理解，不解除约束——不确定时先问'现在可以动手了吗'"。可配合测试：对话式约束遵从的 E2E 用例。工作量：小。
+
+☐ **B4.2 fork 摘要生成阻塞且不可观测**
+**问题**（B4.1 终端验证中实测暴露）：`inherit_context=true` 时摘要生成（一次完整 LLM 调用）阻塞在 `spawn_agents.execute` 内部——实测对话稍长时耗时 46-54 秒，期间终端零输出、用户以为卡住。两个具体伤害：① `background=true + inherit_context=true` 组合下"立即返回"承诺打折（实测 spawn_agents done 53938ms，虽然仍未等子 agent，但工具调用本身被摘要阻塞）；② 摘要调用走 `complete()` 直调不经 AgentLoop，不发任何 trace 事件——`/trace on` 也看不到，可观测性为零。
+**方向**：① 至少先加可观测性：摘要生成前终端提示 `Generating context summary...`（或发一个事件供 trace 订阅）；② 进阶：background 模式下把摘要生成也放进后台任务（spawn 前置一个 summary future，SubAgent 构造延迟到摘要就绪），让 spawn_agents 真正立即返回。工作量：小（①）/ 中（②）。
+
+☐ **B7.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则）**
+**问题**（B4.1 终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 已有"文件不存在要如实报告"守则，但没有"任务引用了你不知道的讨论/上下文时如实说明"的守则。
+**方向**：agent_types.py 各类型 prompt 加一条："If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed."（fork 场景注入的 `[Inherited context]` 段天然满足"有知识"，不受影响）。工作量：小。
 
 ☐ **B5 权限模式矩阵**
 mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。

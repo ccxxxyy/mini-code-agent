@@ -408,3 +408,117 @@ async def test_spawn_agents_tool_background_mode(tmp_path):
     # Returned before completion (agent still active) 返回时 agent 仍在运行
     assert len(mgr.list_active()) == 1
     await asyncio.sleep(0.5)  # drain 等完成
+
+
+# --- B4.1: fork-style context inheritance 摘要式上下文继承 ---
+
+
+async def test_summarize_conversation_llm_success(tmp_path):
+    """LLM summary is returned when the call succeeds. LLM 成功时返回其摘要。"""
+    from mini_agent.memory.compressor import summarize_conversation
+    from mini_agent.models.message import Message, Role
+
+    llm = MockLLM([text_response("<summary>We discussed renaming X to Y.</summary>")])
+    msgs = [
+        Message(role=Role.USER, content="let's rename X to Y"),
+        Message(role=Role.ASSISTANT, content="agreed, X becomes Y"),
+    ]
+    summary = await summarize_conversation(llm, msgs)
+    assert "renaming X to Y" in summary
+
+
+async def test_summarize_conversation_falls_back_on_llm_error(tmp_path):
+    """A failing LLM falls back to the extractive digest. LLM 失败回退 digest。"""
+    from mini_agent.memory.compressor import summarize_conversation
+    from mini_agent.models.message import Message, Role
+
+    class BoomLLM(MockLLM):
+        async def stream(self, messages, tools=None, **kwargs):
+            raise RuntimeError("api down")
+            yield  # pragma: no cover
+
+    msgs = [Message(role=Role.USER, content="rename X to Y please")]
+    summary = await summarize_conversation(BoomLLM([]), msgs)
+    assert "rename X to Y" in summary  # digest contains the original text
+
+
+async def test_subagent_context_summary_injected(tmp_path):
+    """context_summary lands in the sub-agent's system prompt.
+    context_summary 注入子 agent 的 system prompt。"""
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    agent = SubAgent(
+        task="do the thing we discussed",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+        context_summary="We agreed to rename X to Y.",
+    )
+    sp = agent._conversation.system_prompt
+    assert "[Inherited context" in sp
+    assert "rename X to Y" in sp
+
+
+async def test_subagent_no_summary_no_marker(tmp_path):
+    """Default (empty summary) leaves the system prompt unchanged.
+    默认空摘要不注入标记（行为不变）。"""
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    agent = SubAgent(
+        task="plain task",
+        llm=MockLLM([text_response("ok")]),
+        tool_registry=registry,
+        config=AgentConfig(),
+        event_bus=EventBus(),
+        working_dir=tmp_path,
+    )
+    assert "[Inherited context" not in agent._conversation.system_prompt
+
+
+async def test_spawn_background_passes_context_summary(tmp_path):
+    """context_summary flows through spawn_background to the sub-agent.
+    context_summary 经 spawn_background 透传到子 agent。"""
+    mgr = make_manager([text_response("done")], tmp_path)
+    mgr.mailbox.register("main")
+    ids = await mgr.spawn_background(
+        ["continue the discussed work"], context_summary="Discussion: use plan B."
+    )
+    entry = mgr._active[ids[0]]
+    assert "use plan B" in entry.agent._conversation.system_prompt
+    await asyncio.sleep(0.3)
+
+
+async def test_spawn_agents_tool_inherit_context(tmp_path):
+    """inherit_context=true summarizes the main conversation and injects it.
+    inherit_context=true 摘要主对话并注入。"""
+    from mini_agent.models.message import Message, Role
+    from mini_agent.models.session import Session
+    from mini_agent.tools.base import ToolContext
+    from mini_agent.tools.builtin.spawn_agents import SpawnAgentsTool
+
+    # Script: first call = summary generation, second = sub-agent reply
+    # 脚本：第一次调用是摘要生成，第二次是子 agent 回复
+    mgr = make_manager(
+        [
+            text_response("<summary>Parent discussed plan Z.</summary>"),
+            text_response("executed per plan Z"),
+        ],
+        tmp_path,
+    )
+    mgr.mailbox.register("main")
+    session = Session()
+    session.conversation.append(Message(role=Role.USER, content="let's go with plan Z"))
+    ctx = ToolContext(
+        working_dir=tmp_path,
+        session=session,
+        event_bus=EventBus(),
+        config=AgentConfig(),
+        subagent_manager=mgr,
+    )
+    result = await SpawnAgentsTool().execute(
+        ctx, tasks=["do what we discussed"], inherit_context=True
+    )
+    assert not result.is_error
+    assert "1/1 succeeded" in result.output

@@ -100,6 +100,7 @@ class SubAgent:
         peers: list[tuple[str, str, str]] | None = None,
         name: str = "",
         permission_manager: PermissionManager | None = None,
+        context_summary: str = "",
     ) -> None:
         self.agent_id = agent_id or uuid.uuid4().hex[:8]
         self.name = name
@@ -191,6 +192,13 @@ class SubAgent:
                 peers_line = f" Peer agents running alongside you: {peer_bits}."
             self_label = f"'{name}' (id '{self.agent_id}')" if name else f"'{self.agent_id}'"
             system_prompt += MAILBOX_NOTICE.format(self_label=self_label, peers_line=peers_line)
+        # Fork-style context inheritance: frozen summary of the parent
+        # conversation 摘要式上下文继承：父对话的冻结摘要
+        if context_summary:
+            system_prompt += (
+                "\n\n[Inherited context -- summary of the parent conversation "
+                "so far. Use it to understand references in your task:]\n" + context_summary
+            )
         self._conversation = Conversation(system_prompt=system_prompt)
         self._conversation.append(Message(role=Role.USER, content=task))
 
@@ -324,6 +332,7 @@ class SubAgentManager:
         agent_id: str | None = None,
         peers: list[tuple[str, str, str]] | None = None,
         name: str = "",
+        context_summary: str = "",
     ) -> str:
         """Spawn a sub-agent running in the background. Returns agent_id.
         派生一个后台运行的 SubAgent，返回 agent_id。
@@ -351,6 +360,7 @@ class SubAgentManager:
             agent_id=agent_id,
             peers=peers,
             name=name,
+            context_summary=context_summary,
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(
@@ -366,6 +376,7 @@ class SubAgentManager:
         allowed_tools: list[str] | None = None,
         agent_type: str | None = None,
         names: list[str] | None = None,
+        context_summary: str = "",
     ) -> list[str]:
         """Spawn multiple sub-agents concurrently. Returns agent_ids.
         并发派生多个 SubAgent，返回 agent_id 列表。
@@ -393,6 +404,7 @@ class SubAgentManager:
                     for pid, pname, pt in zip(ids, effective_names, tasks)
                     if pid != agent_id
                 ],
+                context_summary=context_summary,
             )
         return ids
 
@@ -607,12 +619,20 @@ class SubAgentManager:
     # 后台完成通知的输出截断上限
     NOTIFY_MAX_CHARS = 4000
 
+    async def build_context_summary(self, messages: list[Message]) -> str:
+        """Summarize a conversation for fork-style context inheritance.
+        为摘要式上下文继承生成父对话摘要（LLM 失败时回退提取式 digest）。"""
+        from mini_agent.memory.compressor import summarize_conversation
+
+        return await summarize_conversation(self._llm, messages)
+
     async def spawn_background(
         self,
         tasks: list[str],
         isolation: str = "none",
         agent_type: str | None = None,
         names: list[str] | None = None,
+        context_summary: str = "",
     ) -> list[str]:
         """Spawn sub-agents that notify 'main' via mailbox on completion (B4).
         Returns immediately with agent ids; each completion delivers a mailbox
@@ -621,7 +641,11 @@ class SubAgentManager:
         主 Agent 下一轮迭代自动收到。
         """
         ids = await self.spawn_parallel(
-            tasks, isolation=isolation, agent_type=agent_type, names=names
+            tasks,
+            isolation=isolation,
+            agent_type=agent_type,
+            names=names,
+            context_summary=context_summary,
         )
         for agent_id in ids:
             self._background_ids.add(agent_id)

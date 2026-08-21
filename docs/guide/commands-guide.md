@@ -82,6 +82,7 @@
 /spawn -p <task1> | <task2>       # 并行派发多个（| 分隔）
 /spawn --isolated <task>          # 在独立 git worktree 中运行（文件隔离）
 /spawn --type <t> <task>          # 指定类型：explore/plan/worker(默认)/verify
+/spawn --fork <task>              # 继承当前对话摘要（任务引用了之前讨论时用）
 /spawn --pane <task>              # 在可见终端窗格运行（独立进程，实时观看）
 /spawn --wait <task>              # 派发+进度面板+结果一条命令完成
 /spawn --pane --wait <task>       # 组合：弹窗格 + 阻塞等结果

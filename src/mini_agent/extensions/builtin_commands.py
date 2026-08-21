@@ -1195,6 +1195,8 @@ def _make_spawn(app: Application) -> HandlerFn:
                 "in one command (combines with --pane)\n"
                 "  `/spawn --type <name> <task>` — use agent type "
                 "(explore/plan/worker/verify)\n"
+                "  `/spawn --fork <task>` — inherit a summary of the current "
+                "conversation (for tasks that refer to the discussion)\n"
                 "  `/spawn list` — show active agents\n"
                 "  `/spawn wait [id]` — wait for result\n"
                 "  `/spawn cancel [id]` — cancel agent(s)"
@@ -1264,6 +1266,12 @@ def _make_spawn(app: Application) -> HandlerFn:
             task_text = task_text[: type_match.start()] + task_text[type_match.end() :]
             task_text = task_text.strip()
 
+        # Fork-style context inheritance 摘要式上下文继承
+        context_summary = ""
+        if "--fork" in task_text:
+            task_text = task_text.replace("--fork", "").strip()
+            context_summary = await mgr.build_context_summary(app.session.conversation.messages)
+
         try:
             if pane:
                 if not task_text:
@@ -1286,7 +1294,10 @@ def _make_spawn(app: Application) -> HandlerFn:
                 from mini_agent.ui.board import SubAgentBoard
 
                 agent_id = await mgr.spawn(
-                    task_text, isolation=isolation, agent_type=agent_type_name
+                    task_text,
+                    isolation=isolation,
+                    agent_type=agent_type_name,
+                    context_summary=context_summary,
                 )
                 board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
                 result = await board.run_while(mgr.wait(agent_id, timeout=900))
@@ -1297,7 +1308,10 @@ def _make_spawn(app: Application) -> HandlerFn:
                 if not tasks:
                     return "No tasks provided. Use: `/spawn -p task1 | task2`"
                 ids = await mgr.spawn_parallel(
-                    tasks, isolation=isolation, agent_type=agent_type_name
+                    tasks,
+                    isolation=isolation,
+                    agent_type=agent_type_name,
+                    context_summary=context_summary,
                 )
                 lines = [f"Spawned {len(ids)} SubAgents:"]
                 for aid, task in zip(ids, tasks):
@@ -1307,12 +1321,19 @@ def _make_spawn(app: Application) -> HandlerFn:
 
             if not task_text:
                 return "No task provided."
-            agent_id = await mgr.spawn(task_text, isolation=isolation, agent_type=agent_type_name)
+            agent_id = await mgr.spawn(
+                task_text,
+                isolation=isolation,
+                agent_type=agent_type_name,
+                context_summary=context_summary,
+            )
             type_info = f"  Type: {agent_type_name}\n" if agent_type_name else ""
+            fork_info = "  Context: inherited (fork)\n" if context_summary else ""
             return (
                 f"SubAgent spawned: `{agent_id}`\n"
                 f"  Task: {task_text[:80]}\n"
                 f"{type_info}"
+                f"{fork_info}"
                 f"  Isolation: {isolation}\n"
                 "Use `/spawn wait {id}` or `/spawn wait` to collect result."
             )

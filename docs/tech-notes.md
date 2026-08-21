@@ -2856,7 +2856,7 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 ## 86.4 诚实边界
 
 - 主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话——终端提示（app.py 订阅者）先行让用户知情，但 LLM 要到下轮才"知道"。轮内多任务场景（LLM 派发后继续干活）通知实时生效
-- mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——SubAgent 的空白上下文设计与 fork 语义冲突，需单独设计
+- mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——后续由 §87（B4.1 摘要式 fork）实现
 - notifier 的 3600s 超时后 agent 被 cancel 并通知 FAILED——比无限等待更可预测
 
 ## 86.5 验证
@@ -2865,3 +2865,41 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 - 全量测试通过，ruff clean
 - 真实终端验证（4 场景全过）：① 后台派发 24ms 返回（对照阻塞模式 7125ms），LLM 并行完成 README 12 章节总结，通知轮内送达；② 空闲滞留——LLM"已派发"结束 turn 后终端提示先行、通知不丢、输入"结果"两字即送达并注入第一轮迭代；③ 默认阻塞行为原样；④ 任务内容失败（文件不存在）由 agent 如实报告、通知仍为 completed（FAILED 语义只对应 agent 本身取消/超时/崩溃）
 - **验证中的设计红利发现**：LLM 两次自主调用 `wait_message` 主动等待后台通知而非被动等 `_deliver_mail` 注入——因通知走 mailbox 通道，天然兼容三种消费方式（wait_message 阻塞等 / 迭代注入 / 下轮注入），零额外代码。LLM 还两次交叉验证后台结果（抓到子 agent 107 vs 实际 109 的统计误差并修正）——后台结果作为消息注入而非工具返回值，LLM 对其保持了应有的怀疑态度
+
+# 87. 摘要式上下文 fork
+
+## 87.1 动机
+
+SubAgent 空白上下文是刻意设计（便宜/可并行/可预测），但暴露真实痛点：和主 agent 讨论半天需求后说"派个 agent 按我们讨论的去做"——task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承对话解决，两个代价：并行 N 个 agent = N 倍历史 token；fork 后主对话继续变化，子 agent 的认知从哪一刻冻结说不清。
+
+## 87.2 方案：摘要即冻结快照
+
+`compressor.py` 新增公开函数 `summarize_conversation(llm, messages)`：`_extractive_digest`（消息→历史字符串，取最近 24K 字符）→ `LLMSummarizeOldest._summarize`（P67 的 9 节结构化摘要）→ 异常时回退 digest 本身。两个入口共用：`spawn_agents` 工具 `inherit_context=true`（LLM 判断任务引用了当前讨论时自主开启）+ `/spawn --fork`（用户命令）。摘要经 `SubAgentManager.build_context_summary()` 生成一次，`context_summary` 参数透传 spawn/spawn_parallel/spawn_background 三层，注入子 agent system prompt 的 `[Inherited context ...]` 段（MAILBOX_NOTICE 之后）。
+
+## 87.3 设计权衡
+
+- **摘要而非全量**：成本 = 一次摘要调用 + 摘要长度 × N 个 agent（≪ 全量历史 × N）；摘要是冻结快照——fork 后主对话变化不影响子 agent 认知，一致性问题天然消解
+- **失败回退 digest 而非报错**：fork 的语义是"带上下文派发"，摘要失败时降级为提取式摘录仍远好于空白上下文；绝不让派发本身失败
+- **worker LLM 生成摘要**（manager 的 `self._llm`）：摘要的消费者就是 worker，用同一模型生成认知一致；也避免 ToolContext 加 llm 字段的接线
+- **每次 spawn 调用摘要一次而非每 agent 一次**：同批 agent 共享同一快照，语义一致且省 N-1 次调用
+- **复用 P67 而非新写摘要 prompt**：9 节结构（Primary Request/Key Concepts/Files/Errors/...）本就是为"让后续 LLM 接续工作"设计的——fork 场景与压缩恢复场景的需求同构
+
+## 87.4 诚实边界
+
+- `spawn_pane` 不支持——独立进程走 WorkerSpec 文件协议，传摘要需扩展跨进程协议，本批不做
+- `/team` 不纳入——Planner 生成的子任务自带完整描述，fork 需求弱
+- 摘要质量依赖 LLM——弱 worker 模型可能摘不全关键细节；回退的 digest 只有每条消息前 300 字符
+
+## 87.5 验证
+
+- 6 个新测试：summarize_conversation 成功/失败回退、SubAgent 注入/默认不注入、spawn_background 透传、spawn_agents 工具 inherit_context 端到端（MockLLM 脚本序列：第一项摘要输出、第二项子 agent 回复）
+- 全量测试通过，ruff clean
+- 真实终端验证（干净会话，4 场景全过）：① `/spawn --fork` 子 agent **Tools:0 且 5/5 讨论细节全中**（120→300/example 同步/中英文档/不动 llm timeout/跑测试查断言），连"当前仅讨论未修改文件"的状态都继承了；② 对照组（无 --fork）同任务 Tools:0 但 **0/5 细节、自信编造了完全不同的方案**（含虚构文件名）——空白上下文的幻觉风险实证，比"承认不知道"更糟（→ B7.1）；③ LLM 自主开 `inherit_context=True`，报告 300 秒正确；④ `background=true + inherit_context=true` 组合生效，通知报告"llm 的 timeout"正确
+
+## 87.6 验证中暴露的问题（全部如实记录）
+
+- **摘要生成阻塞且不可观测（→ B4.2）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）
+- **空白上下文幻觉编造（→ B7.1）**：见上 ②
+- **首轮验证被测 LLM 擅自动手（→ B7）**：用户说"先不要动手只讨论"，agent 盘点后主动问"确认 A/B 后动手"，用户下一句以"对"开头的补充讨论被解读为授权，未经明确指令改了 6 处文件（后经指令还原，git diff + grep + 测试三重核查确认恢复彻底）
+- **验证方案自身的两处判定错误（方法论教训）**：① 预设"trace 可见摘要 LLM 调用"——实际不可见（正是 B4.2 的可观测性缺口）；② 预设"background 组合毫秒级返回"——inherit_context 时不成立。教训：判定标准应先在代码层核实事件/输出的真实路径，而非从设计意图推断
+- **对话污染判断失误（流程教训）**：首轮验证 agent 改文件又还原后，曾判断"讨论细节还在可继续 fork 测试"——错误：对话历史含"修改成功"记录，摘要会把污染传给子 agent 使判定失真。正确做法（已执行）：重启干净会话重测
