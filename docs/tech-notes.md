@@ -2806,6 +2806,29 @@ B2 首版在 app.py/subagent.py **无条件** `FileStateCache()`——门禁强�
 
 ## 84.5 验证
 
-- 15 个测试：10 门禁行为（未读拦/读后放行/外部改动拦/编辑后免重读/新建豁免/覆盖须先读/None 失效）+ 5 配置接线（默认值 / app 装配开关 / SubAgent 装配开关，关闭路径实测 edit 免读成功）；全量 1010 passed + 1 skipped
+- 15 个测试：10 门禁行为（未读拦/读后放行/外部改动拦/编辑后免重读/新建豁免/覆盖须先读/None 失效）+ 5 配置接线（默认值 / app 装配开关 / SubAgent 装配开关，关闭路径实测 edit 免读成功）；全量 1022 passed + 1 skipped
 - TOML 加载端到端实测：`[tools] enforce_read_before_edit = false` 经 ConfigLoader 后字段确为 False（`_merge` 的 hasattr 动态映射天然支持新字段，无需改 loader）
 - 真实终端验证：真实 LLM 会话中直接 edit 被拦、报错文案返回后 LLM 自主调整策略（先读或改用 bash——后者即"bash 旁路"设计边界的实证）
+
+# 85. 自定义 Agent 类型：.md 声明式定义（B3）
+
+## 85.1 动机
+
+P48 实现了 4 种硬编码 agent 类型（explore/plan/worker/verify），但用户无法定义新类型。实际需求：reviewer（代码审查专用 prompt + 只读工具）、translator（翻译专用）、特定业务领域的定制 agent。mewcode 已支持从 `.md` 文件声明式定义。
+
+## 85.2 方案：frontmatter + body
+
+`core/agent_type_loader.py`：`parse_agent_md` 从单个 `.md` 文件解析出 `AgentTypeDefinition`（YAML frontmatter 提供 name/description/allowed_tools/max_iterations，body 作为 system_prompt 模板）；`load_agent_types` 扫描双目录（用户级 `~/.mini-agent/agents/` 先、项目级 `./.mini-agent/agents/` 后，后者覆盖前者）。`agent_types.py` 新增 `register_agent_type()` setter 写入 `AGENT_TYPES` 字典，消费侧（`get_agent_type`/`SubAgent`/`spawn_agents` 工具）零改动。app.py 启动时在 skill 加载之后调用。
+
+## 85.3 设计权衡
+
+- **内置不改 .md**：4 种内置保持硬编码，pip install 后无 .md 文件也可用；用户通过同名 .md 覆盖内置——灵活但不强制
+- **无 PyYAML 依赖**：复用 `skills.py._parse_skill_file` 的 regex+逐行扫描模式，与项目"零厂商 SDK 依赖"一致
+- **占位符白名单验证**：body 中的 `{xxx}` 在 parse 时试 format，含未知占位符则拒绝（`str.format` 只做命名替换不执行代码，无注入风险）
+- **spawn_agents schema 动态化**：`agent_type` 字段 description 从 `AGENT_TYPES` 实时生成——自定义类型自动出现在 LLM 的工具提示中
+
+## 85.4 验证
+
+- 12 个新测试：parse 7（完整/最小/缺 name/非法 name/无 frontmatter/空 body/未知占位符）+ load 5（注册/项目覆盖用户/覆盖内置/跳过无效/不存在目录）
+- autouse fixture 保存/恢复 AGENT_TYPES 防测试交叉污染
+- 全量 1022 passed + 1 skipped，ruff clean

@@ -68,6 +68,9 @@
 # 禁用插件：按 entry-point 名或文件名（去 .py 后缀）匹配
 # disabled_plugins = ["some_plugin"]
 
+# 自定义 Agent 类型（B3）：*.md 文件声明 agent 类型（YAML frontmatter + body 作为 system prompt）
+# agent_dirs = ["~/.mini-agent/agents", "./.mini-agent/agents"]
+
 # MCP 服务器配置（启动时自动连接，工具注册为 mcp_<服务器名>_<工具名>）
 # stdio 传输（子进程）
 # [mcp.servers.github]

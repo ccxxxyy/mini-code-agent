@@ -363,6 +363,14 @@ class Application:
         self.skill_registry.load_all()
         self._tool_context.skill_registry = self.skill_registry
 
+        # Custom agent types (B3): load *.md definitions from agent_dirs
+        # 自定义 Agent 类型：从 agent_dirs 加载 *.md 定义
+        from mini_agent.core.agent_type_loader import load_agent_types
+
+        n_agent_types = load_agent_types(config.agent_dirs)
+        if n_agent_types:
+            self.terminal.show_info(f"Loaded {n_agent_types} custom agent type(s)")
+
         # Event listener plugins: external code observing all bus events
         # 事件监听插件：外部代码监听总线全部事件（统计/调试）
         from mini_agent.extensions.event_listeners import load_event_listeners

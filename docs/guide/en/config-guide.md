@@ -324,6 +324,89 @@ loading = "eager"                    # "eager" (default, register everything) | 
 # loading = "dispatch"               # Lazy loading recommended when there are many tools
 ```
 
+### Custom Agent Types
+
+Place `.md` files in `.mini-agent/agents/` (project-level) or `~/.mini-agent/agents/` (user-level) to define custom agent types for `/spawn --type <name>` and the `spawn_agents` tool. **One `.md` file = one type**; create multiple files for multiple types.
+
+**Full example** (`.mini-agent/agents/reviewer.md`):
+
+```markdown
+---
+name: reviewer
+description: Code review specialist
+allowed_tools:
+  - read_file
+  - glob
+  - grep
+  - bash
+max_iterations: 25
+---
+You are a code review agent. Read code and report issues.
+Working directory: {working_dir}
+Platform: {platform}
+Shell: {shell}
+Budget: {iteration_budget} rounds.
+```
+
+**Frontmatter fields**:
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `name` | Yes | — | Type identifier, used in `/spawn --type <name>`. Only lowercase letters, digits, underscores, hyphens (`[a-z0-9_-]+`) |
+| `description` | No | `""` | One-line description shown in the `spawn_agents` tool schema for the LLM to choose from |
+| `allowed_tools` | No | All tools | Whitelist of tools this agent type can use. **Omit to allow all 20 built-in tools.** One per line, format `  - tool_name` |
+| `max_iterations` | No | `30` | Max iteration rounds (think-act loop cap); agent is force-stopped when exceeded |
+
+**Values for `allowed_tools`** (pick from the 20 built-in tools in `[tools] enabled_tools`):
+
+| Tool name | Purpose | Read-only |
+|---|---|---|
+| `read_file` | Read file contents | Yes |
+| `glob` | Search filenames by pattern | Yes |
+| `grep` | Search file contents by regex | Yes |
+| `bash` | Execute shell commands | Depends |
+| `write_file` | Create/overwrite files | No |
+| `edit_file` | Exact text replacement in files | No |
+| `delete_file` | Delete files | No |
+| `spawn_agents` | Spawn sub-agents (unavailable inside sub-agents) | — |
+| `send_message` | Send message to another agent | — |
+| `wait_message` | Wait for a message from another agent | — |
+| `tool_search` | Search MCP tools | Yes |
+| `mcp_call` | Call an MCP tool | Depends |
+| `ask_user` | Ask the user a question | — |
+| `exit_plan_mode` | Exit plan mode | — |
+| `task_create` / `task_get` / `task_list` / `task_update` | Task board CRUD | — |
+| `load_skill` / `install_skill` | Load/install skills | — |
+
+**Typical combinations**: read-only review agents use `[read_file, glob, grep, bash]`; full-capability workers omit the field entirely (omit = all tools).
+
+**Body (everything after the `---` delimiter)** is the system prompt template sent to the agent. It supports 4 placeholders, auto-replaced at runtime:
+
+| Placeholder | Replaced with | Example |
+|---|---|---|
+| `{working_dir}` | Agent's working directory (absolute path) | `D:\Projects\my-app` |
+| `{platform}` | OS platform | `win32` / `linux` / `darwin` |
+| `{shell}` | Current shell type | `cmd` / `bash` / `zsh` |
+| `{iteration_budget}` | The `max_iterations` value | `25` |
+
+Do not use `{xxx}` placeholders other than these 4 — the file will be rejected on load. To include literal braces (e.g. in JSON examples), escape them as `{{` `}}`.
+
+**Usage**:
+
+```bash
+/spawn --type reviewer review src/main.py      # specify on the command line
+```
+
+Or let the LLM choose autonomously (the `spawn_agents` tool's `agent_type` field automatically lists all registered types including custom ones).
+
+**Priority**: project > user > builtin (explore/plan/worker/verify). Same name overrides. Loaded at startup; when custom types are found, the terminal shows `Loaded N custom agent type(s)`.
+
+**Directory config** (usually no need to change — defaults cover common scenarios):
+
+```toml
+agent_dirs = ["~/.mini-agent/agents", "./.mini-agent/agents"]
+```
+
 ### Read-Before-Edit Gate
 
 `[tools] enforce_read_before_edit` (default `true`) controls a file-safety gate: `edit_file` and `write_file` overwriting an **existing** file only proceed when — ① the file was read via `read_file` earlier in this session, and ② it has not been changed externally since that read (mtime comparison). Purpose: prevent the LLM from blindly modifying files based on imagined or stale content. Creating new files with write and `delete_file` are exempt.

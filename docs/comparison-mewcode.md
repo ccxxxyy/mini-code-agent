@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **1010 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **1022 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -559,11 +559,12 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
 - **主 Agent 在 spawn_agents 期间阻塞**（仍成立），发给 'main' 的消息要等 wait_all 返回后的下一轮才被消费——真正实时的只有 Worker↔Worker 这条边。
 
-### 6.3 Agent 类型定义 ✅ 已实现（P48）
+### 6.3 Agent 类型定义 ✅ 已实现（P48 + B3 自定义）
 
 | | mini | mewcode |
 |---|---|---|
-| Agent 类型 | **4 种内置**：explore（只读搜索）、plan（规划）、worker（全能，默认）、verify（PASS/FAIL 验证）(P48) | **4 种内置**：Explore、Plan、general-purpose、Verification |
+| Agent 类型 | **4 种内置** + **用户自定义 .md**：explore / plan / worker / verify（P48）+ `.mini-agent/agents/*.md` 声明式扩展（B3） | **4 种内置**（.md 声明）：Explore、Plan、general-purpose、Verification |
+| 用户扩展 | ✅ 项目级 + 用户级双目录，同名覆盖内置 | ✅ 项目级 + 用户级双目录 |
 
 **已完成**（P48）：
 - `core/agent_types.py` — `AgentTypeDefinition` frozen dataclass，4 种内置类型

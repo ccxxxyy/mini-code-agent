@@ -7,8 +7,19 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from mini_agent.core.agent_types import AGENT_TYPES
 from mini_agent.models.message import ToolResult
 from mini_agent.tools.base import Tool, ToolContext
+
+
+def _agent_type_description() -> str:
+    """Build agent_type field description from the live AGENT_TYPES registry.
+    从当前注册表动态生成 agent_type 字段描述。"""
+    parts = []
+    for t in sorted(AGENT_TYPES.values(), key=lambda d: d.name):
+        desc = t.description or t.name
+        parts.append(f"'{t.name}' ({desc})")
+    return "Agent type: " + ", ".join(parts)
 
 
 class SpawnAgentsParams(BaseModel):
@@ -51,6 +62,14 @@ class SpawnAgentsTool(Tool):
         "told each other's agent ids and can exchange messages mid-task."
     )
     params_model = SpawnAgentsParams
+
+    @property
+    def schema(self):
+        base = super().schema
+        props = base.raw_parameters and base.raw_parameters.get("properties", {})
+        if props and "agent_type" in props:
+            props["agent_type"]["description"] = _agent_type_description()
+        return base
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
         mgr = ctx.subagent_manager

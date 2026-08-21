@@ -546,8 +546,12 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：edit/write 可基于陈旧内容盲目修改——从未读过、或读后被外部改过的文件。
 **实现**：新增 `tools/file_state_cache.py` `FileStateCache`（会话级 {绝对路径: mtime_ns} 缓存，两道门：① 必须读过 ② 读后 mtime 未变）。read_file 成功后 `record`；edit_file 编辑前 `check`、写后 `update`；write_file 仅对**已存在文件**要求先读（新建豁免），写后 `update`；delete_file 不纳入（删除无需先读内容）。ToolContext 加 `file_state` 字段，主 Agent 与每个 SubAgent 各持独立缓存。`file_state=None` 时门禁失效（向后兼容）。10 个新测试。真实 LLM 验证：直接 edit 被拦 → LLM 自主改为先 read 再 edit。**可配置**：`[tools] enforce_read_before_edit`（默认 true）控制主 Agent 与所有 SubAgent 的装配，false 关闭门禁；+5 个接线测试。
 
-☐ **B3 自定义 Agent 类型（.md 声明式定义）**
-mewcode `agents/loader.py + parser.py` 从 `.mewcode/agents/*.md` 和 `~/.mewcode/agents/` 加载用户自定义 agent（内置 4 种也是 .md）。mini `core/agent_types.py` 是 4 种硬编码 frozen dataclass，无用户扩展路径。工作量：小-中（~200 行）。
+✅ **B3 自定义 Agent 类型（.md 声明式定义）**（已完成）
+**问题**：4 种 agent 类型硬编码在 `core/agent_types.py`，用户无法定义新类型或覆盖内置类型。
+**实现**：新增 `core/agent_type_loader.py`（`parse_agent_md` + `load_agent_types`）：从 `~/.mini-agent/agents/` 和 `./.mini-agent/agents/` 扫描 `*.md` 文件，YAML frontmatter（`name`/`description`/`allowed_tools`/`max_iterations`）+ body 作为 system_prompt 模板（支持 `{working_dir}/{platform}/{shell}/{iteration_budget}` 占位符）。`agent_types.py` 新增 `register_agent_type()` setter；`AgentConfig` 新增 `agent_dirs` 字段；app.py 启动时调用 loader。优先级：项目 > 用户 > 内置（同名覆盖）。`spawn_agents` 工具 schema 动态列举所有已注册类型。12 个新测试。内置 4 种保持硬编码（安装后无 .md 也可用）。
+
+☐ **B3.1 /spawn + /trace 提示符被淹没**
+`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端，和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。需在 `ui/terminal.py` 层协调：子 agent trace 输出后重绘提示符行，或在提示符前加可视分隔。工作量：小。
 
 ☐ **B4 后台子代理 + 完成通知**
 mewcode `agents/task_manager.py`（BackgroundTask 异步跑 + ProgressInfo）+ `agents/notification.py`（完成后注入通知）+ `agents/fork.py`（fork 当前对话上下文的 worker）。mini 的 spawn_agents 阻塞等待（comparison doc 6.2 自认的限制至今成立）。工作量：中。
