@@ -111,7 +111,10 @@ class Terminal:
 
             return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
         self._ensure_prompt_session()
-        return await self._prompt_session.prompt_async()
+        from prompt_toolkit.patch_stdout import patch_stdout
+
+        with patch_stdout(raw=True):
+            return await self._prompt_session.prompt_async()
 
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
