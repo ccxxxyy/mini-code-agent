@@ -36,11 +36,25 @@ class WriteFileTool(Tool):
 
         existed = file_path.exists()
 
+        # Read-before-edit gate : overwriting an existing file requires
+        # having read it first (creating a new file is exempt -- nothing to
+        # clobber). Prevents blind overwrite of unread/externally-changed files.
+        # 编辑前必读门：覆盖已存在文件须先读过（新建豁免——无内容可覆盖）；
+        # 防止盲目覆盖未读或被外部改动的文件。
+        if existed and ctx.file_state is not None:
+            ok, err = ctx.file_state.check(file_path)
+            if not ok:
+                return self.error_result("", err)
+
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
         except OSError as e:
             return self.error_result("", f"Failed to write {file_path}: {e}")
+
+        # Refresh cache after write 写入后刷新缓存
+        if ctx.file_state is not None:
+            ctx.file_state.update(file_path)
 
         action = "Overwrote" if existed else "Created"
         line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)

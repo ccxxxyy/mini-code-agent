@@ -207,6 +207,7 @@ max_file_size = 10000000     # File read cap (bytes)
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill"]
 allowed_paths = []           # Extra allowed paths outside the project (default empty)
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # Paths forbidden to access
+enforce_read_before_edit = true  # Read-before-edit gate : edit/overwrite-write requires a prior read with no external change since; false disables
 
 [memory]
 context_window = 128000      # Context window token count (used to trigger compression; overflow fallback separately uses the real window value the Provider auto-detects from the API, P42)
@@ -322,6 +323,24 @@ loading = "eager"                    # "eager" (default, register everything) | 
 # headers = { Authorization = "Bearer your-token-here" }   # Optional auth headers
 # loading = "dispatch"               # Lazy loading recommended when there are many tools
 ```
+
+### Read-Before-Edit Gate
+
+`[tools] enforce_read_before_edit` (default `true`) controls a file-safety gate: `edit_file` and `write_file` overwriting an **existing** file only proceed when — ① the file was read via `read_file` earlier in this session, and ② it has not been changed externally since that read (mtime comparison). Purpose: prevent the LLM from blindly modifying files based on imagined or stale content. Creating new files with write and `delete_file` are exempt.
+
+Error messages returned when blocked (the LLM normally self-corrects by reading first — no manual intervention needed):
+
+- `File has not been read yet. Read it first before editing (read-before-edit safety).` — the file was never read
+- `File has been modified since it was last read. Read it again before editing (content may be stale).` — changed externally after the read (you edited it, a git operation touched it, etc.)
+
+To disable (project-level `.mini-agent/config.toml` or user-level `~/.mini-agent/config.toml`, restart to apply):
+
+```toml
+[tools]
+enforce_read_before_edit = false
+```
+
+Note: the gate only governs the `edit_file`/`write_file` tools — `sed` and similar commands inside bash bypass it (command risk is handled by the permission system); the main agent and each sub-agent keep independent read records. Design rationale: `docs/tech-notes.md` §84.
 
 ### Multi-Model Profiles (Environment Variable Configuration)
 

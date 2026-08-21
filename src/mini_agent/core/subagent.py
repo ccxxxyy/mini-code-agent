@@ -132,6 +132,8 @@ class SubAgent:
                 if tool.schema.name not in keep:
                     registry.unregister(tool.schema.name)
 
+        from mini_agent.tools.file_state_cache import FileStateCache
+
         tool_context = ToolContext(
             working_dir=effective_dir,
             session=Session(),
@@ -139,6 +141,9 @@ class SubAgent:
             config=effective_config,
             mailbox=mailbox,
             agent_id=self.agent_id,
+            file_state=(
+                FileStateCache() if effective_config.tools.enforce_read_before_edit else None
+            ),
         )
 
         self._loop = AgentLoop(

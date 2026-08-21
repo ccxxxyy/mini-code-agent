@@ -97,6 +97,7 @@ class ToolContext:
     agent_loop_ref: Any = None  # SimpleNamespace(get_plan_mode, set_plan_mode)
     ask_user_callback: Any = None  # async (question, choices) -> str
     skill_registry: Any = None  # extensions/skills.py SkillRegistry
+    file_state: Any = None  # tools/file_state_cache.py FileStateCache (read-before-edit)
 
 
 def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:

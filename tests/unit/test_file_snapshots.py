@@ -163,6 +163,10 @@ async def test_undo_restores_edited_file(app, tmp_path):
     target = tmp_path / "e.txt"
     target.write_text("original", encoding="utf-8")
 
+    # Satisfy read-before-edit gate : mark the file as read
+    # 满足编辑前必读门：标记文件已读
+    app._tool_context.file_state.record(target)
+
     fake_turn(app, "edit e.txt")
     await app.agent_loop._act(
         [

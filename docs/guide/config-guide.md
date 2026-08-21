@@ -207,6 +207,7 @@ max_file_size = 10000000     # 文件读取上限（字节）
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill"]
 allowed_paths = []           # 额外放行的项目外路径（默认空）
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
+enforce_read_before_edit = true  # 编辑前必读门：edit/覆盖 write 前必须先 read 且读后未被外部改动；false 关闭
 
 [memory]
 context_window = 128000      # 上下文窗口 token 数（压缩触发用；溢出兜底另用 Provider 从 API 自动探测的真实窗口值，P42）
@@ -322,6 +323,24 @@ loading = "eager"                    # "eager"（默认，全部注册）| "disp
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
 # loading = "dispatch"               # 大量工具时推荐延迟加载
 ```
+
+### 编辑前必读门（read-before-edit）
+
+`[tools] enforce_read_before_edit`（默认 `true`）控制一道文件安全门：`edit_file` 和覆盖**已存在**文件的 `write_file` 必须满足两个条件才放行——① 本会话内先用 `read_file` 读过该文件；② 读后文件未被外部改动（mtime 比对）。目的：防止 LLM 基于想象或过期的内容盲改文件。新建文件的 write 和 delete_file 不受限。
+
+被拦时工具返回的报错（LLM 看到后通常会自动先读再重试，无需人工干预）：
+
+- `File has not been read yet. Read it first before editing (read-before-edit safety).` —— 该文件从未被读过
+- `File has been modified since it was last read. Read it again before editing (content may be stale).` —— 读后被外部改过（你在编辑器里改了、git 操作改了等）
+
+关闭方式（写入项目级 `.mini-agent/config.toml` 或用户级 `~/.mini-agent/config.toml`，重启生效）：
+
+```toml
+[tools]
+enforce_read_before_edit = false
+```
+
+注意：门禁只约束 `edit_file`/`write_file` 两个文件工具，bash 里的 `sed` 等命令不经过此门（命令风险由权限系统管控）；主 Agent 与每个 SubAgent 各持独立的已读记录。设计缘由见 `docs/tech-notes.md` §84。
 
 ### 多模型 Profile（环境变量配置）
 

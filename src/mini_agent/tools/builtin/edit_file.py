@@ -46,6 +46,14 @@ class EditFileTool(Tool):
         if not file_path.is_file():
             return self.error_result("", f"File not found: {file_path}")
 
+        # Read-before-edit gate : must have read the file and it must not
+        # have changed since -- prevents edits based on stale content.
+        # 编辑前必读门：必须读过且读后未被改动，防止基于陈旧内容编辑。
+        if ctx.file_state is not None:
+            ok, err = ctx.file_state.check(file_path)
+            if not ok:
+                return self.error_result("", err)
+
         if old_text == new_text:
             return self.error_result("", "old_text and new_text are identical")
 
@@ -75,6 +83,11 @@ class EditFileTool(Tool):
             file_path.write_text(new_content, encoding="utf-8")
         except OSError as e:
             return self.error_result("", f"Failed to write {file_path}: {e}")
+
+        # Refresh cache so a follow-up edit sees the new mtime
+        # 刷新缓存，后续编辑看到新 mtime
+        if ctx.file_state is not None:
+            ctx.file_state.update(file_path)
 
         old_lines = [line + "\n" for line in content.splitlines()]
         new_lines = [line + "\n" for line in new_content.splitlines()]
