@@ -324,6 +324,89 @@ loading = "eager"                    # "eager"（默认，全部注册）| "disp
 # loading = "dispatch"               # 大量工具时推荐延迟加载
 ```
 
+### 自定义 Agent 类型
+
+在 `.mini-agent/agents/`（项目级）或 `~/.mini-agent/agents/`（用户级）放 `.md` 文件即可定义新的 agent 类型，用于 `/spawn --type <name>` 和 `spawn_agents` 工具。**一个 .md 文件定义一个类型**，想要多个类型就创建多个文件。
+
+**完整示例**（`.mini-agent/agents/reviewer.md`）：
+
+```markdown
+---
+name: reviewer
+description: Code review specialist
+allowed_tools:
+  - read_file
+  - glob
+  - grep
+  - bash
+max_iterations: 25
+---
+You are a code review agent. Read code and report issues.
+Working directory: {working_dir}
+Platform: {platform}
+Shell: {shell}
+Budget: {iteration_budget} rounds.
+```
+
+**frontmatter 字段说明**：
+
+| 字段 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `name` | ✅ 是 | — | 类型标识符，用于 `/spawn --type <name>`。只允许小写字母、数字、下划线、连字符（`[a-z0-9_-]+`） |
+| `description` | 否 | `""` | 一行描述，出现在 `spawn_agents` 工具的 schema 中供 LLM 参考选择 |
+| `allowed_tools` | 否 | 全部工具 | 该类型 agent 可使用的工具白名单。**省略则可用全部 20 个内置工具**。每行一个，格式 `  - 工具名` |
+| `max_iterations` | 否 | `30` | agent 的最大迭代轮数（think→act 循环上限），超过后强制停止 |
+
+**`allowed_tools` 可填的工具名**（从 `[tools] enabled_tools` 的 20 个内置工具中选）：
+
+| 工具名 | 用途 | 只读 |
+|---|---|---|
+| `read_file` | 读文件内容 | ✅ |
+| `glob` | 按模式搜索文件名 | ✅ |
+| `grep` | 按正则搜索文件内容 | ✅ |
+| `bash` | 执行 shell 命令 | 取决于命令 |
+| `write_file` | 创建/覆盖文件 | ❌ |
+| `edit_file` | 精确替换文件中的文本 | ❌ |
+| `delete_file` | 删除文件 | ❌ |
+| `spawn_agents` | 派生子 agent（子 agent 中不可用） | — |
+| `send_message` | 向其他 agent 发消息 | — |
+| `wait_message` | 等待其他 agent 的消息 | — |
+| `tool_search` | 搜索 MCP 工具 | ✅ |
+| `mcp_call` | 调用 MCP 工具 | 取决于工具 |
+| `ask_user` | 向用户提问 | — |
+| `exit_plan_mode` | 退出计划模式 | — |
+| `task_create` / `task_get` / `task_list` / `task_update` | 任务板 CRUD | — |
+| `load_skill` / `install_skill` | 加载/安装技能 | — |
+
+**典型组合**：只读审查类 agent 填 `[read_file, glob, grep, bash]`；全能 worker 不写此字段（省略 = 全部可用）。
+
+**body（`---` 分隔线之后的部分）** 是发给 agent 的 system prompt 模板。支持 4 个占位符，运行时自动替换：
+
+| 占位符 | 替换为 | 示例值 |
+|---|---|---|
+| `{working_dir}` | agent 的工作目录绝对路径 | `D:\Projects\my-app` |
+| `{platform}` | 操作系统平台 | `win32` / `linux` / `darwin` |
+| `{shell}` | 当前 shell 类型 | `cmd` / `bash` / `zsh` |
+| `{iteration_budget}` | max_iterations 的值 | `25` |
+
+不要使用这 4 个以外的 `{xxx}` 占位符，否则文件会被拒绝加载。普通花括号写法（如 JSON 示例）请用 `{{` `}}` 转义。
+
+**使用方式**：
+
+```bash
+/spawn --type reviewer 审查 src/main.py        # 命令行指定
+```
+
+或让 LLM 自主选择（`spawn_agents` 工具的 `agent_type` 字段会自动列出所有已注册类型含自定义的）。
+
+**优先级**：项目级 > 用户级 > 内置 4 种（explore/plan/worker/verify）。同名时后者覆盖前者。启动时加载，有自定义类型时终端提示 `Loaded N custom agent type(s)`。
+
+**配置目录**（一般不需要改，默认值已覆盖常见场景）：
+
+```toml
+agent_dirs = ["~/.mini-agent/agents", "./.mini-agent/agents"]
+```
+
 ### 编辑前必读门（read-before-edit）
 
 `[tools] enforce_read_before_edit`（默认 `true`）控制一道文件安全门：`edit_file` 和覆盖**已存在**文件的 `write_file` 必须满足两个条件才放行——① 本会话内先用 `read_file` 读过该文件；② 读后文件未被外部改动（mtime 比对）。目的：防止 LLM 基于想象或过期的内容盲改文件。新建文件的 write 和 delete_file 不受限。

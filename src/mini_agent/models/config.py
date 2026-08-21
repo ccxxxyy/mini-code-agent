@@ -188,4 +188,9 @@ class AgentConfig:
     )
     # Plugins to skip, by entry-point name or file stem 按 entry-point 名或文件名禁用插件
     disabled_plugins: list[str] = field(default_factory=list)
+    # Custom agent type dirs: *.md files declaring agent types (B3)
+    # 自定义 Agent 类型目录：*.md 文件声明 agent 类型
+    agent_dirs: list[str] = field(
+        default_factory=lambda: ["~/.mini-agent/agents", "./.mini-agent/agents"]
+    )
     theme: str = "default"

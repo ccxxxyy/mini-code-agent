@@ -135,3 +135,9 @@ def get_agent_type(name: str) -> AgentTypeDefinition:
         valid = ", ".join(sorted(AGENT_TYPES))
         raise ValueError(f"Unknown agent type '{name}'. Valid types: {valid}")
     return AGENT_TYPES[name]
+
+
+def register_agent_type(definition: AgentTypeDefinition) -> None:
+    """Register a custom agent type. Overwrites any existing type with the same name.
+    注册自定义 Agent 类型。同名时覆盖已有类型。"""
+    AGENT_TYPES[definition.name] = definition

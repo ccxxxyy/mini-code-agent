@@ -31,6 +31,7 @@ mini-code-agent/
 │       │   ├── mailbox.py           # Cross-agent file-based mailbox (inter-process)
 │       │   ├── planner.py           # Plan mode — structured task decomposition
 │       │   ├── spawn_backends.py    # Pane spawn backends (tmux / Windows Terminal)
+│       │   ├── agent_type_loader.py  # Custom agent types from .md files (B3)
 │       │   ├── subagent.py          # SubAgent spawning and lifecycle
 │       │   ├── task_store.py        # Persistent task store (/todo)
 │       │   ├── team.py              # Agent Teams — multi-agent coordination
@@ -153,11 +154,11 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 60 unit test files, 1010 tests
+│   ├── unit/                        # 61 unit test files, 1022 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
-│   │   ├── ...                      # (60 files total)
+│   │   ├── ...                      # (61 files total)
 │   └── integration/                 # 4 integration test files
 │       ├── test_mcp_client.py
 │       ├── test_agent_e2e.py
@@ -2177,6 +2178,8 @@ class ReadFileTool(Tool):
 其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
 
 **Read-before-edit 强制（`tools/file_state_cache.py`）**：`FileStateCache` 记录每个被 `read_file` 读过的文件的 `mtime_ns`。`edit_file`（及覆盖已存在文件的 `write_file`）执行前过两道门——① 文件必须读过、② 读后 `mtime_ns` 未变——否则拒绝，防止基于陈旧内容或对未读文件的盲目修改。新建文件的 `write_file` 与 `delete_file` 豁免。缓存在 `ToolContext.file_state`，主 Agent 与每个 SubAgent 各持独立实例；成功编辑/写入后刷新条目，后续编辑无需重读。可通过 `[tools] enforce_read_before_edit = false` 关闭（默认 true，关闭时 `file_state=None` 门禁失效）。`ask_user`/`exit_plan_mode`/`task_*`/`load_skill`/`install_skill` 为 B1 流程工具（LLM 自主调用任务板/技能/计划审批/结构化提问）。
+
+**自定义 Agent 类型（B3，`core/agent_type_loader.py`）**：用户可在 `~/.mini-agent/agents/` 或 `./.mini-agent/agents/` 放 `.md` 文件声明自定义 agent 类型。文件格式：YAML frontmatter（`name`/`description`/`allowed_tools`/`max_iterations`）+ body 作为 system_prompt 模板（支持 `{working_dir}/{platform}/{shell}/{iteration_budget}` 四个占位符）。app.py 启动时 `load_agent_types(config.agent_dirs)` 扫描并注册到 `AGENT_TYPES` 字典，消费侧（`get_agent_type`/`SubAgent`/`spawn_agents` 工具）零改动。优先级：项目 > 用户 > 内置（同名覆盖）。`spawn_agents` 工具 schema 的 `agent_type` 描述动态列举所有已注册类型。
 
 ### 8.2 MCP 工具适配器 (`tools/mcp/adapter.py`)
 
