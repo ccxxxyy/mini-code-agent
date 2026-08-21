@@ -301,6 +301,21 @@ class Application:
         tool_context.mailbox = self.mailbox
         self.agent_loop.mailbox = self.mailbox
 
+        # Background agent completion notice : terminal hint when a
+        # background-spawned agent finishes (result itself arrives via mailbox)
+        # 后台 agent 完成提示：终端提醒（结果本身经 mailbox 注入下一轮对话）
+        from mini_agent.models.events import SubAgentCompleteEvent
+
+        async def _on_background_complete(event: SubAgentCompleteEvent) -> None:
+            if event.background:
+                status = "finished" if event.success else "FAILED"
+                self.terminal.show_info(
+                    f"Background agent {event.agent_id} {status} — "
+                    "result will be delivered to the conversation next turn"
+                )
+
+        self.event_bus.on(SubAgentCompleteEvent, _on_background_complete)
+
         # B1 process tools: expose plan-mode control + ask_user callback
         # B1 流程工具：暴露计划模式控制 + 结构化提问回调
         import types as _types

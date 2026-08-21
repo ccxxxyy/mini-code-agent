@@ -132,6 +132,9 @@ class SubAgentCompleteEvent(Event):
     agent_id: str = ""
     success: bool = True
     tokens_used: int = 0
+    # True when spawned via spawn_background -- completion is delivered
+    # to 'main' as a mailbox notification 后台派生的完成经 mailbox 通知 main
+    background: bool = False
 
 
 # --- Session Events ---

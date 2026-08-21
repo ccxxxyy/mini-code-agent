@@ -154,7 +154,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 61 unit test files, 1022 tests
+│   ├── unit/                        # 61 unit test files, 1027 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2739,6 +2739,8 @@ async def spawn(
 ```
 
 `SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
+
+**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示。默认 `background=false` 保持阻塞语义（需要全部结果再继续的场景）。
 
 ### 12.2 Agent 团队协调 (`core/team.py`)
 
