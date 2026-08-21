@@ -52,6 +52,15 @@ class SpawnAgentsParams(BaseModel):
             "when it completes -- continue with other work meanwhile."
         ),
     )
+    inherit_context: bool = Field(
+        default=False,
+        description=(
+            "Inherit conversation context: each sub-agent's system prompt "
+            "includes an LLM-generated summary of the discussion so far. Use "
+            "when the task refers to things discussed earlier (e.g. 'implement "
+            "what we discussed'). Costs one extra LLM call to summarize."
+        ),
+    )
 
 
 class SpawnAgentsTool(Tool):
@@ -69,7 +78,9 @@ class SpawnAgentsTool(Tool):
         "run sequentially and cannot communicate. Sub-agents spawned together "
         "are told each other's agent ids and can exchange messages mid-task. "
         "Set background=true to return immediately instead: each agent's "
-        "result arrives later as a '[Background agent ...]' message."
+        "result arrives later as a '[Background agent ...]' message. "
+        "Set inherit_context=true when the task refers to the current "
+        "discussion -- sub-agents then receive a summary of it."
     )
     params_model = SpawnAgentsParams
 
@@ -104,12 +115,23 @@ class SpawnAgentsTool(Tool):
         isolation = "worktree" if kwargs.get("isolated") else "none"
         agent_type = kwargs.get("agent_type")
 
+        # Fork-style context inheritance: summarize the parent
+        # conversation once, inject into every spawned agent's system prompt
+        # 摘要式上下文继承：父对话摘要一次，注入每个子 agent 的 system prompt
+        context_summary = ""
+        if kwargs.get("inherit_context") and ctx.session is not None:
+            context_summary = await mgr.build_context_summary(ctx.session.conversation.messages)
+
         # Background mode : fire-and-forget, results arrive as mailbox
         # messages on completion 后台模式：立即返回，完成后经 mailbox 通知
         if kwargs.get("background"):
             try:
                 ids = await mgr.spawn_background(
-                    tasks, isolation=isolation, agent_type=agent_type, names=names
+                    tasks,
+                    isolation=isolation,
+                    agent_type=agent_type,
+                    names=names,
+                    context_summary=context_summary,
                 )
             except ValueError as e:
                 return self.error_result("", str(e))
@@ -126,7 +148,11 @@ class SpawnAgentsTool(Tool):
 
         try:
             ids = await mgr.spawn_parallel(
-                tasks, isolation=isolation, agent_type=agent_type, names=names
+                tasks,
+                isolation=isolation,
+                agent_type=agent_type,
+                names=names,
+                context_summary=context_summary,
             )
         except ValueError as e:
             return self.error_result("", str(e))

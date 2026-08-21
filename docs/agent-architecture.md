@@ -126,7 +126,7 @@ while True:
 
 **为什么需要**：子代理有自己**独立的对话历史**（fresh messages[]），互不干扰。父代理只收取结果摘要，上下文保持干净。没有子代理，做 10 件独立的事就要 10 倍的上下文。
 
-**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。4 种 Agent 类型档案（explore/plan/worker/verify，P48），未指定类型回退 `DEFAULT_AGENT_TYPE`（worker）档案且保留配置的迭代预算（P80）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。`/spawn --pane` 可在独立终端窗格中运行子代理（tmux split-window / Windows Terminal split-pane / wt-window 降级），worker 通过文件协议跨进程中转权限确认（P82 RemoteConfirm）。
+**本项目实现**：`core/subagent.py` SubAgent（独立 Conversation + ToolRegistry 克隆 + 递归防护）。`/spawn` 手动派生、spawn_agents 工具让 LLM 自主派生（S17）。4 种 Agent 类型档案（explore/plan/worker/verify，P48），未指定类型回退 `DEFAULT_AGENT_TYPE`（worker）档案且保留配置的迭代预算（P80）。P58 起子代理不再是"派出去等结果"：`core/mailbox.py` 文件式收件箱 + send_message/wait_message 工具，兄弟代理与主代理运行中互发消息（AgentLoop 每轮 THINK 前 drain 收件箱注入对话）。`/spawn --pane` 可在独立终端窗格中运行子代理（tmux split-window / Windows Terminal split-pane / wt-window 降级），worker 通过文件协议跨进程中转权限确认（P82 RemoteConfirm）。**摘要式上下文 fork（B4.1）**：独立上下文有一个受控例外——`inherit_context=true` / `/spawn --fork` 时子代理的 system prompt 注入父对话的 LLM 摘要（冻结快照，非全量历史），"按我们讨论的去做"类任务无需在 task 里复述讨论；上下文隔离的收益（便宜/并行/可预测）保留，只是起点认知可选继承。
 
 **判断标准**：子代理是否有独立的上下文？父子之间是否只传递结果而非完整历史？
 

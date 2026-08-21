@@ -574,3 +574,21 @@ class Compressor:
                         "timestamp": datetime.now().isoformat(),
                     }
                     break
+
+
+async def summarize_conversation(llm: LLMProvider, messages: list[Message]) -> str:
+    """One-shot summary of a conversation for context inheritance.
+    Used by fork-style sub-agent spawning: the summary is injected into the
+    sub-agent's system prompt as a frozen snapshot of the parent discussion.
+    Falls back to the extractive digest if the LLM call fails -- a fork must
+    never fail because summarization failed.
+    对话的一次性摘要，供摘要式 fork 使用（注入子 Agent system prompt 的冻结
+    快照）。LLM 失败时回退提取式 digest——fork 绝不因摘要失败而失败。
+    """
+    digest = _extractive_digest(messages)
+    # Keep the most recent discussion when clipping 截断时保留最近的讨论
+    clipped = digest[-LLMSummarizeOldest.MAX_HISTORY_CHARS :]
+    try:
+        return await LLMSummarizeOldest(llm)._summarize(clipped)
+    except Exception:
+        return clipped

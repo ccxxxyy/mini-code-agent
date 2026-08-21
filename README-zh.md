@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-1027%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1033%20passed-brightgreen)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
@@ -279,7 +279,7 @@ mini-code-agent/
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 1027 个测试（61 单元 + 4 集成），80%+ 覆盖率
+├── tests/                      # 1033 个测试（61 单元 + 4 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -386,7 +386,7 @@ mini-code-agent/
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 - [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，1027 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，1033 个测试全绿。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -406,6 +406,7 @@ mini-code-agent/
 /spawn -p 分析src结构 | 分析测试覆盖   # 用 | 分隔并行派生多个
 /spawn --isolated 重构这个模块        # 在独立 Git worktree 中执行（改动隔离）
 /spawn --type explore 分析项目结构    # 指定类型：explore/plan/worker(默认)/verify
+/spawn --fork 按我们讨论的去实现      # 继承当前对话摘要（子 agent 知道之前聊了什么）
 /spawn --pane 执行部署检查            # 在可见终端窗格运行（独立进程，实时观看）
 /spawn --wait 跑一遍测试              # 派发+进度面板+结果一条命令完成
 /spawn list                          # 查看活跃 agent 及其阶段
@@ -417,6 +418,8 @@ mini-code-agent/
 注意：`/spawn` 派生后立即返回（不阻塞输入框），结果要用 `/spawn wait` 收集。
 
 LLM 自主调用 `spawn_agents` 工具时也支持后台模式（B4）：`background=true` 立即返回 agent id，LLM 继续做其他工作，每个子 agent 完成时其结果以消息形式自动注入对话（终端同步提示完成）。默认仍为阻塞模式。
+
+摘要式上下文 fork：任务引用了当前讨论时（如"按我们讨论的去做"），用 `/spawn --fork` 或让 LLM 开 `inherit_context=true`——子 agent 的 system prompt 会注入父对话的 LLM 摘要（冻结快照），出生即知道之前聊了什么。可与 background 组合。
 
 ### /team —— LLM 规划的团队编排
 

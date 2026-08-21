@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1027%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1033%20passed-brightgreen)]()
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
@@ -26,7 +26,7 @@
 
 🔧 **20 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call, ask_user, exit_plan_mode, task CRUD, load/install_skill
 
-🤖 **Multi-Agent** — `/spawn` parallel agents, `/spawn --pane` visible terminal-pane workers (tmux / Windows Terminal, separate processes), `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message); the LLM can also spawn agents in **background mode** (`spawn_agents background=true`) — it keeps working and receives each result as a message on completion
+🤖 **Multi-Agent** — `/spawn` parallel agents, `/spawn --pane` visible terminal-pane workers (tmux / Windows Terminal, separate processes), `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message); the LLM can also spawn agents in **background mode** (`spawn_agents background=true`) — it keeps working and receives each result as a message on completion; **fork mode** (`inherit_context=true` / `/spawn --fork`) injects a summary of the current conversation into sub-agents so "implement what we discussed" just works
 
 💰 **Cost Dashboard** — per-model input/output pricing, session + all-time ledger, budget warnings at 80%/100%
 
@@ -305,7 +305,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1027 tests, 80%+ coverage
+├── tests/           # 1033 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -326,7 +326,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1027 tests
+uv run pytest tests/           # 1033 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

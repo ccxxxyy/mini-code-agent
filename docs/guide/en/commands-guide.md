@@ -82,6 +82,7 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 /spawn -p <task1> | <task2>       # Dispatch multiple in parallel (separated by |)
 /spawn --isolated <task>          # Run in a separate git worktree (file isolation)
 /spawn --type <t> <task>          # Specify type: explore/plan/worker(default)/verify
+/spawn --fork <task>              # Inherit a summary of the current conversation (for tasks referring to the discussion)
 /spawn --pane <task>              # Run in a visible terminal pane (separate process, watch live)
 /spawn --wait <task>              # Dispatch + progress panel + result in one command
 /spawn --pane --wait <task>       # Combined: open a pane + block for the result
