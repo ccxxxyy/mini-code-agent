@@ -44,6 +44,14 @@ class SpawnAgentsParams(BaseModel):
             "'worker' (full tools, default), 'verify' (read-only, PASS/FAIL judgment)"
         ),
     )
+    background: bool = Field(
+        default=False,
+        description=(
+            "Run in background: returns immediately with agent ids instead of "
+            "blocking. Each agent's result is delivered to you as a message "
+            "when it completes -- continue with other work meanwhile."
+        ),
+    )
 
 
 class SpawnAgentsTool(Tool):
@@ -55,11 +63,13 @@ class SpawnAgentsTool(Tool):
         "Spawn independent sub-agents to execute tasks in parallel. "
         "Each sub-agent has its own tools and conversation context. "
         "Returns a combined report of all sub-agent results. "
-        "IMPORTANT: this call BLOCKS until all sub-agents finish, so tasks that "
-        "must run concurrently (e.g. agents that message each other via "
-        "send_message) MUST be passed in ONE call -- separate calls run "
-        "sequentially and cannot communicate. Sub-agents spawned together are "
-        "told each other's agent ids and can exchange messages mid-task."
+        "IMPORTANT: by default this call BLOCKS until all sub-agents finish, "
+        "so tasks that must run concurrently (e.g. agents that message each "
+        "other via send_message) MUST be passed in ONE call -- separate calls "
+        "run sequentially and cannot communicate. Sub-agents spawned together "
+        "are told each other's agent ids and can exchange messages mid-task. "
+        "Set background=true to return immediately instead: each agent's "
+        "result arrives later as a '[Background agent ...]' message."
     )
     params_model = SpawnAgentsParams
 
@@ -93,6 +103,26 @@ class SpawnAgentsTool(Tool):
 
         isolation = "worktree" if kwargs.get("isolated") else "none"
         agent_type = kwargs.get("agent_type")
+
+        # Background mode : fire-and-forget, results arrive as mailbox
+        # messages on completion 后台模式：立即返回，完成后经 mailbox 通知
+        if kwargs.get("background"):
+            try:
+                ids = await mgr.spawn_background(
+                    tasks, isolation=isolation, agent_type=agent_type, names=names
+                )
+            except ValueError as e:
+                return self.error_result("", str(e))
+            id_list = ", ".join(ids)
+            return ToolResult(
+                call_id="",
+                name="spawn_agents",
+                output=(
+                    f"Spawned {len(ids)} background agent(s): {id_list}. "
+                    "You will receive a '[Background agent ...]' message from "
+                    "each one when it completes -- continue with other work."
+                ),
+            )
 
         try:
             ids = await mgr.spawn_parallel(

@@ -302,6 +302,12 @@ class SubAgentManager:
         self._model_name = model_name
         self._confirm_callback = confirm_callback
         self._active: dict[str, _ActiveAgent] = {}
+        # Agents spawned in background mode: completion notifies 'main'
+        # 后台模式派生的 agent：完成时经 mailbox 通知 'main'
+        self._background_ids: set[str] = set()
+        # Keep notifier task references so they aren't garbage-collected
+        # 保存通知任务引用，防止被垃圾回收
+        self._notify_tasks: set[asyncio.Task] = set()
         if mailbox is None:
             mailbox = Mailbox(working_dir / ".mini-agent" / "mailboxes")
             # Fresh session owns the default mailbox: wipe last session's
@@ -582,6 +588,7 @@ class SubAgentManager:
                 agent_id=result.agent_id,
                 success=result.success,
                 tokens_used=result.tokens_used,
+                background=agent_id in self._background_ids,
             )
         )
         return result
@@ -595,6 +602,53 @@ class SubAgentManager:
         ids = agent_ids if agent_ids is not None else list(self._active.keys())
         results = await asyncio.gather(*(self.wait(aid, timeout=timeout) for aid in ids))
         return list(results)
+
+    # Truncation cap for background completion notifications (B4)
+    # 后台完成通知的输出截断上限
+    NOTIFY_MAX_CHARS = 4000
+
+    async def spawn_background(
+        self,
+        tasks: list[str],
+        isolation: str = "none",
+        agent_type: str | None = None,
+        names: list[str] | None = None,
+    ) -> list[str]:
+        """Spawn sub-agents that notify 'main' via mailbox on completion (B4).
+        Returns immediately with agent ids; each completion delivers a mailbox
+        message that the main agent picks up on its next iteration.
+        后台派生：立即返回 agent id，每个 agent 完成时经 mailbox 通知 'main'，
+        主 Agent 下一轮迭代自动收到。
+        """
+        ids = await self.spawn_parallel(
+            tasks, isolation=isolation, agent_type=agent_type, names=names
+        )
+        for agent_id in ids:
+            self._background_ids.add(agent_id)
+            task = asyncio.create_task(self._notify_on_complete(agent_id))
+            self._notify_tasks.add(task)
+            task.add_done_callback(self._notify_tasks.discard)
+        return ids
+
+    async def _notify_on_complete(self, agent_id: str) -> None:
+        """Wait for one background agent and deliver its result to 'main'.
+        等待单个后台 agent 完成并把结果投递给 'main'。"""
+        result = await self.wait(agent_id, timeout=3600)
+        if result.success:
+            status = "completed successfully"
+        else:
+            status = f"FAILED: {result.error or 'unknown error'}"
+        output = result.output[: self.NOTIFY_MAX_CHARS]
+        if len(result.output) > self.NOTIFY_MAX_CHARS:
+            output += "\n... (truncated)"
+        self.mailbox.send(
+            sender=agent_id,
+            recipient="main",
+            content=(
+                f"[Background agent '{agent_id}' {status}]\nTask: {result.task}\nResult:\n{output}"
+            ),
+        )
+        self._background_ids.discard(agent_id)
 
     def cancel(self, agent_id: str) -> None:
         entry = self._active.get(agent_id)

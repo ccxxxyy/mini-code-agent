@@ -2832,3 +2832,36 @@ P48 实现了 4 种硬编码 agent 类型（explore/plan/worker/verify），但�
 - 12 个新测试：parse 7（完整/最小/缺 name/非法 name/无 frontmatter/空 body/未知占位符）+ load 5（注册/项目覆盖用户/覆盖内置/跳过无效/不存在目录）
 - autouse fixture 保存/恢复 AGENT_TYPES 防测试交叉污染
 - 全量 1022 passed + 1 skipped，ruff clean
+
+# 86. 后台子代理与完成通知（B4）
+
+## 86.1 动机
+
+LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids, timeout=300)`）——派发一个 5 分钟的分析任务后，LLM 只能干等，不能先做别的。comparison 6.2 自认此限制："主 Agent 在 spawn_agents 期间阻塞，真正实时的只有 Worker↔Worker 这条边"。mewcode 用 task_manager.py（BackgroundTask）+ notification.py（完成后注入通知）解决。
+
+## 86.2 方案：复用 mailbox 通道，零新增注入机制
+
+关键洞察：**通知注入通道现成**。`agent_loop.run()` 的 while 循环每轮迭代 THINK 前调用 `_deliver_mail`——drain 主 agent 收件箱并以 USER 消息注入对话。子 agent 完成通知只需是一封发给 'main' 的普通 mailbox 消息。
+
+实现：`spawn_agents` 工具加 `background: bool = False` 参数；true 时走 `SubAgentManager.spawn_background()`——`spawn_parallel` 后为每个 agent 起 notifier 协程 `_notify_on_complete`（引用存 `_notify_tasks` 防 GC），协程内 `await self.wait(agent_id, 3600)` 拿到结果后 `mailbox.send(sender=agent_id, recipient="main", content="[Background agent 'x' completed successfully]\nTask: ...\nResult: ...")`。主 Agent 下一轮迭代自动收到。
+
+## 86.3 设计权衡
+
+- **复用 mailbox 而非新通知机制**：mewcode 的 notification.py 是独立通知系统；mini 的 mailbox 已具备"注入下一轮对话"的全部语义（`_deliver_mail` + `[Message from agent 'x']` 前缀），新机制只会重复。通知就是一封信
+- **notifier 内部调用 `wait()` 而非挂 done_callback**：wait 已封装超时/取消/`_active` 清理/`SubAgentCompleteEvent` 发射的全部语义，done_callback（同步）反而要重复这些
+- **结果截断 4000 字符**：通知注入对话消耗上下文，超长输出（如整文件内容）会撑爆；4000 足够容纳典型报告，超出提示 truncated
+- **默认仍阻塞**：需要全部结果才能继续的场景（如并行分析后汇总）阻塞语义更简单；background 是 opt-in
+- **事件加 `background` 字段而非新事件**：app.py 的终端提示订阅者需要区分"后台完成"（提示用户）和"前台 wait 完成"（结果已在显示，提示重复）——`wait()` 发事件时查 `_background_ids` 即可，无需第二个事件类型
+
+## 86.4 诚实边界
+
+- 主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话——终端提示（app.py 订阅者）先行让用户知情，但 LLM 要到下轮才"知道"。轮内多任务场景（LLM 派发后继续干活）通知实时生效
+- mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——SubAgent 的空白上下文设计与 fork 语义冲突，需单独设计
+- notifier 的 3600s 超时后 agent 被 cancel 并通知 FAILED——比无限等待更可预测
+
+## 86.5 验证
+
+- 5 个新测试：立即返回（返回时 agent 仍 active）/ 完成通知内容与 sender / 取消后 FAILED 通知 / 事件 background 字段两态 / spawn_agents 工具 background 路径
+- 全量测试通过，ruff clean
+- 真实终端验证（4 场景全过）：① 后台派发 24ms 返回（对照阻塞模式 7125ms），LLM 并行完成 README 12 章节总结，通知轮内送达；② 空闲滞留——LLM"已派发"结束 turn 后终端提示先行、通知不丢、输入"结果"两字即送达并注入第一轮迭代；③ 默认阻塞行为原样；④ 任务内容失败（文件不存在）由 agent 如实报告、通知仍为 completed（FAILED 语义只对应 agent 本身取消/超时/崩溃）
+- **验证中的设计红利发现**：LLM 两次自主调用 `wait_message` 主动等待后台通知而非被动等 `_deliver_mail` 注入——因通知走 mailbox 通道，天然兼容三种消费方式（wait_message 阻塞等 / 迭代注入 / 下轮注入），零额外代码。LLM 还两次交叉验证后台结果（抓到子 agent 107 vs 实际 109 的统计误差并修正）——后台结果作为消息注入而非工具返回值，LLM 对其保持了应有的怀疑态度

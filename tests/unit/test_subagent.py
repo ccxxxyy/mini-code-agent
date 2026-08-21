@@ -313,3 +313,98 @@ async def test_typed_subagent_still_overrides_iterations(tmp_path):
         agent_type=get_agent_type("worker"),
     )
     assert agent._loop._config.max_agent_iterations == 50
+
+
+# --- B4: background spawn + completion notification 后台派生 + 完成通知 ---
+
+
+async def test_spawn_background_returns_immediately(tmp_path):
+    """spawn_background returns ids without waiting for completion.
+    spawn_background 立即返回 id，不等完成。"""
+    mgr = make_manager([text_response("slow work")], tmp_path, delay=0.2)
+    mgr.mailbox.register("main")
+    ids = await mgr.spawn_background(["a slow task"])
+    assert len(ids) == 1
+    # Agent still running right after return 返回时 agent 仍在运行
+    assert ids[0] in mgr.list_active()
+    await asyncio.sleep(0.4)  # let it finish 等它完成
+
+
+async def test_background_completion_notifies_main(tmp_path):
+    """On completion, 'main' receives a mailbox message with the result.
+    完成后 main 收件箱收到含结果的通知。"""
+    mgr = make_manager([text_response("the answer is 42")], tmp_path)
+    mgr.mailbox.register("main")
+    ids = await mgr.spawn_background(["compute the answer"])
+    await asyncio.sleep(0.3)  # notifier runs after completion 等通知任务跑完
+
+    mails = mgr.mailbox.drain("main")
+    assert len(mails) == 1
+    assert f"[Background agent '{ids[0]}' completed successfully]" in mails[0].content
+    assert "the answer is 42" in mails[0].content
+    assert mails[0].sender == ids[0]
+
+
+async def test_background_failure_notifies_failed(tmp_path):
+    """A cancelled background agent delivers a FAILED notification.
+    被取消的后台 agent 投递 FAILED 通知。"""
+    mgr = make_manager([text_response("never finishes")], tmp_path, delay=5.0)
+    mgr.mailbox.register("main")
+    ids = await mgr.spawn_background(["doomed task"])
+    await asyncio.sleep(0.05)
+    mgr.cancel(ids[0])
+    await asyncio.sleep(0.3)
+
+    mails = mgr.mailbox.drain("main")
+    assert len(mails) == 1
+    assert "FAILED" in mails[0].content
+
+
+async def test_background_event_flag(tmp_path):
+    """SubAgentCompleteEvent.background is True for background spawns,
+    False for normal spawn+wait. 后台派生事件 background=True，普通为 False。"""
+    from mini_agent.models.events import SubAgentCompleteEvent
+
+    events: list[SubAgentCompleteEvent] = []
+
+    async def _collect(event: SubAgentCompleteEvent) -> None:
+        events.append(event)
+
+    mgr = make_manager([text_response("ok")], tmp_path)
+    mgr.mailbox.register("main")
+    mgr._event_bus.on(SubAgentCompleteEvent, _collect)
+
+    await mgr.spawn_background(["bg task"])
+    await asyncio.sleep(0.3)
+    assert len(events) == 1
+    assert events[0].background is True
+
+    agent_id = await mgr.spawn("fg task")
+    await mgr.wait(agent_id)
+    assert len(events) == 2
+    assert events[1].background is False
+
+
+async def test_spawn_agents_tool_background_mode(tmp_path):
+    """The spawn_agents tool with background=true returns immediately.
+    spawn_agents 工具 background=true 时立即返回。"""
+    from mini_agent.events.bus import EventBus as _Bus
+    from mini_agent.models.session import Session
+    from mini_agent.tools.base import ToolContext
+    from mini_agent.tools.builtin.spawn_agents import SpawnAgentsTool
+
+    mgr = make_manager([text_response("bg result")], tmp_path, delay=0.2)
+    mgr.mailbox.register("main")
+    ctx = ToolContext(
+        working_dir=tmp_path,
+        session=Session(),
+        event_bus=_Bus(),
+        config=AgentConfig(),
+        subagent_manager=mgr,
+    )
+    result = await SpawnAgentsTool().execute(ctx, tasks=["bg work"], background=True)
+    assert not result.is_error
+    assert "background agent(s)" in result.output
+    # Returned before completion (agent still active) 返回时 agent 仍在运行
+    assert len(mgr.list_active()) == 1
+    await asyncio.sleep(0.5)  # drain 等完成

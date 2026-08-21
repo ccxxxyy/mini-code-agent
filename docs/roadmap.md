@@ -554,8 +554,13 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端（共享 EventBus → 共享 Rich Console），和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。
 **修复**：`PromptSession` 创建时加 `patch_stdout=True`（prompt_toolkit 内置机制）。prompt 活跃期间所有 stdout 写入自动打印到 prompt 上方，prompt 行自动重绘。一行改动。
 
-☐ **B4 后台子代理 + 完成通知**
-mewcode `agents/task_manager.py`（BackgroundTask 异步跑 + ProgressInfo）+ `agents/notification.py`（完成后注入通知）+ `agents/fork.py`（fork 当前对话上下文的 worker）。mini 的 spawn_agents 阻塞等待（comparison doc 6.2 自认的限制至今成立）。工作量：中。
+✅ **B4 后台子代理 + 完成通知**（已完成）
+**问题**：LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（spawn_agents.py `wait_all`），期间不能做其他工作——comparison 6.2 自认的限制。
+**实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话——复用现有跨 Agent 消息通道，零新增注入机制。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。诚实边界：主 Agent 完全空闲（等用户输入）时通知滞留到下一次用户输入才进对话（终端提示先行）；fork 对话上下文的 worker（mewcode agents/fork.py）未纳入本批。
+
+☐ **B4.1 摘要式上下文 fork（fork-with-summary worker）**
+**问题**：SubAgent 空白上下文（刻意设计：便宜/可并行/可预测），但"和主 agent 讨论半天需求后派 worker 按讨论去做"的场景下，task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承解决，但全量太贵（并行 N 个 = N 倍历史 token）且有"fork 后主对话继续变化"的一致性问题。
+**方案方向**：摘要式 fork——复用 P67 的 LLM 结构化摘要能力，把主对话压缩摘要注入子 agent 的 system prompt。摘要即冻结快照（回避一致性问题），成本可控（摘要 ≪ 全量历史）。`spawn_agents` 加 `inherit_context: bool` 参数或 `/spawn --fork`。与用户层 `/fork`（会话分叉）形成互补：探索分叉 vs 委托执行。工作量：中。
 
 ☐ **B5 权限模式矩阵**
 mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。

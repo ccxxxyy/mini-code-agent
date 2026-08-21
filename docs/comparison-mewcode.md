@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **1022 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **1027 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -557,7 +557,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 - ~~无锁设计只在单进程内成立~~ **✅ 已解除（6.4 前置）**：Mailbox 现已具备完整跨进程能力——O_EXCL 文件锁（指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时）+ temp/os.replace 原子写 + 磁盘注册表 `_registry.json`。实测 4 进程并发写零丢失。实现细节见 6.4
 - ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
-- **主 Agent 在 spawn_agents 期间阻塞**（仍成立），发给 'main' 的消息要等 wait_all 返回后的下一轮才被消费——真正实时的只有 Worker↔Worker 这条边。
+- ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除（B4）**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，主 Agent 下一轮迭代自动注入。默认仍为阻塞模式（需要全部结果再继续的场景）。残留边界：主 Agent 完全空闲时通知滞留到下一用户输入（终端提示先行）。
 
 ### 6.3 Agent 类型定义 ✅ 已实现（P48 + B3 自定义）
 

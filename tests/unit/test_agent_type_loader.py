@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from mini_agent.core.agent_type_loader import load_agent_types, parse_agent_md
-from mini_agent.core.agent_types import AGENT_TYPES, AgentTypeDefinition, get_agent_type
+from mini_agent.core.agent_types import AGENT_TYPES, get_agent_type
 
 pytestmark = pytest.mark.asyncio
 
@@ -120,9 +118,7 @@ def test_project_overrides_user(tmp_path):
     proj_dir = tmp_path / "project"
     user_dir.mkdir()
     proj_dir.mkdir()
-    (user_dir / "custom.md").write_text(
-        "---\nname: custom\n---\nuser version\n", encoding="utf-8"
-    )
+    (user_dir / "custom.md").write_text("---\nname: custom\n---\nuser version\n", encoding="utf-8")
     (proj_dir / "custom.md").write_text(
         "---\nname: custom\n---\nproject version\n", encoding="utf-8"
     )
