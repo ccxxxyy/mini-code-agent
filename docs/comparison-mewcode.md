@@ -256,7 +256,7 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 沙箱隔离 | ✅ **Linux bubblewrap + macOS Seatbelt**（只读 rootfs + 可写白名单 + 可选禁网）+ sandbox_auto_allow（沙箱下危险命令免确认，deny 规则仍拦）；Windows 无内核沙箱退回正则 | ✅ Linux bubblewrap + macOS Seatbelt 内核级隔离 |
+| 沙箱隔离 | ✅ **Linux bubblewrap + macOS Seatbelt + Windows attrib**（Linux/macOS 只读 rootfs + 可写白名单 + 可选禁网；Windows attrib +R 只读属性保护敏感路径，弱于内核级）+ sandbox_auto_allow（沙箱下危险命令免确认，deny 规则仍拦） | ✅ Linux bubblewrap + macOS Seatbelt 内核级隔离 |
 
 **原差距**：最大安全差距——正则匹配可被绕过。P41 已实现双平台内核沙箱。
 
@@ -265,7 +265,7 @@
 2. `bwrap_sandbox.py`（Linux）：用 `subprocess` 执行 `bwrap --ro-bind / / --bind {working_dir} {working_dir} --dev /dev --proc /proc -- {command}`——子进程看到只读根文件系统，只有工作目录可写
 3. `seatbelt_sandbox.py`（macOS）：生成 SBPL profile 文件，用 `sandbox-exec -f profile.sb {command}`
 4. `bash.py` 工具执行命令时，检查 `config.security.sandbox` 配置，如果启用则通过沙箱执行
-5. Windows 无内核沙箱——保持现有正则拦截（Windows 的 Job Objects/AppContainers 复杂度过高）
+5. Windows attrib sandbox（D3 新增）：PowerShell try/finally 包裹 `attrib +R /S /D` 设置只读属性，保护敏感路径（~/.ssh/~/.aws/~/.gnupg/~/.mini-agent）；弱于 bwrap/seatbelt（无法令全文件系统只读），但比零防护强
 
 代码改动：新增 2 个文件 ~100 行/个 + `bash.py` ~10 行集成。配置：`[security] sandbox = true`。
 

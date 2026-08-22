@@ -104,7 +104,7 @@
 
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
-- 危险命令确认：19 条正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
+- 危险命令确认：26 条正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - fail-safe：无 UI 时默认拒绝
@@ -231,7 +231,7 @@
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；19 条危险命令正则；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；26 条危险命令正则（含 D3 内联解释器拦截）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件） |
 | 上下文压缩 | 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow），双阈值（75% 软 + 90% 硬绕过熔断器），token 驱动保留窗口，聚合溢写，/compact 手动 |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |

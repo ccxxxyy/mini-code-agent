@@ -213,6 +213,81 @@ def test_dangerous_command_bypass_variants_flagged():
     assert d("chmod 0777 x")
 
 
+def test_inline_interpreter_flagged():
+    """D3: inline interpreter execution must be flagged as dangerous.
+    D3：内联解释器执行必须被标记为危险。"""
+    d = PermissionManager.is_dangerous_command
+    # python -c / python3 -c / python - (stdin)
+    assert d('python -c "import shutil; shutil.rmtree(\'/tmp/x\')"')
+    assert d("python3 -c 'import os; os.remove(\"/tmp/f\")'")
+    assert d("python -c 'code'")
+    assert d("echo code | python -")
+    # node -e / -p
+    assert d('node -e "require(\'fs\').rmSync(\'/tmp/x\', {recursive:true})"')
+    assert d("node -p 'process.env'")
+    # perl / ruby -e
+    assert d("perl -e 'unlink(\"/tmp/f\")'")
+    assert d("ruby -e 'FileUtils.rm_rf(\"/tmp/x\")'")
+    # sh -c / bash -c (nested shell wrapping arbitrary commands)
+    assert d('sh -c "rm -rf /tmp/x"')
+    assert d('bash -c "rm -rf /tmp/x"')
+    # powershell / pwsh
+    assert d('powershell -Command "Remove-Item /tmp/x -Recurse"')
+    assert d('pwsh -c "Remove-Item /tmp/x"')
+
+
+def test_written_script_execution_flagged(tmp_path):
+    """D3: executing a script the agent wrote this session must be flagged."""
+    config = SecurityConfig(permission_mode="ask")
+    guard = PathGuard(
+        tool_config=ToolConfig(), security_config=config, project_dir=tmp_path
+    )
+    pm = PermissionManager(config=config, path_guard=guard)
+
+    script = tmp_path / "exploit.py"
+    script.write_text("import os; os.remove('/tmp/x')")
+    pm.record_written_file(str(script))
+
+    # Interpreter prefix forms
+    assert pm.is_executing_written_script(f"python {script}")
+    assert pm.is_executing_written_script(f"python3 {script}")
+    assert pm.is_executing_written_script(f"node {script}")
+    # Direct execution: cmd /c with full path
+    assert pm.is_executing_written_script(f"cmd /c {script}")
+    # ./name resolves relative to CWD; only works when CWD matches the script dir
+    # Must NOT flag unrelated scripts or inline code
+    assert not pm.is_executing_written_script("python manage.py")
+    assert not pm.is_executing_written_script("python -c 'code'")
+
+
+def test_written_script_unwritten_file_not_flagged(tmp_path):
+    """Scripts NOT written by the agent this session must not be flagged."""
+    config = SecurityConfig(permission_mode="ask")
+    guard = PathGuard(
+        tool_config=ToolConfig(), security_config=config, project_dir=tmp_path
+    )
+    pm = PermissionManager(config=config, path_guard=guard)
+
+    script = tmp_path / "legit.py"
+    script.write_text("print('hello')")
+    assert not pm.is_executing_written_script(f"python {script}")
+
+
+def test_inline_interpreter_safe_variants_not_flagged():
+    """D3: normal interpreter usage (running scripts) must NOT be flagged.
+    D3：正常解释器用法（运行脚本文件）不得误报。"""
+    d = PermissionManager.is_dangerous_command
+    assert not d("python manage.py runserver")
+    assert not d("python script.py")
+    assert not d("python3 -m pytest tests/")
+    assert not d("node index.js")
+    assert not d("node server.js")
+    assert not d("perl script.pl")
+    assert not d("ruby app.rb")
+    assert not d("bash script.sh")
+    assert not d("sh install.sh")
+
+
 def test_dangerous_command_safe_variants_not_flagged():
     """A2 hardening must not create false positives on safe commands.
     A2 加固不得对安全命令误报。"""

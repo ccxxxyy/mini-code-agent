@@ -616,14 +616,65 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 候选方案（需设计，未定）：① 连续 N 次危险命令被拒后，agent 停止本目标并回问用户（把"反复被拒"当作强信号）；② 把用户的 DENY 记为会话级软意图（"用户不想删这个目标"），后续语义相近操作预警或直接挡；③ 工具层面：破坏性操作（rm/rmdir/del/shutil.rmtree/移动删除等）归一化为"删除意图"识别，而非逐命令签名——但这又回到不可穷尽问题，治标。
 诚实边界：完全防住语义绕过在架构上不可能（同 A2）；本条目目标是"降低被拒后无意义绕过的概率 + 及早把决定权交回用户"，不是"堵死所有绕过"。工作量：中（行为策略设计 + agent_loop 集成 + 真实验证）。
 
-☐ **D3【安全·高】内联解释器执行绕过命令黑名单 + Windows 无 OS 沙箱底线**
+☑ **D3【安全·高】内联解释器执行绕过命令黑名单 + Windows 无 OS 沙箱底线**
 现象（A2 真实验证时两次实测）：
 - 删目录场景：4 条危险命令（rm/rmdir/del 各形态）全被 A2 正则正确拦下并被用户拒绝后，agent 用 `python -c "import shutil; shutil.rmtree(...)"` → GRANTED（mode:ask）→ 目录真被删。
 - 删文件场景：`delete_file` 工具走 PathGuard 弹"write access outside project directory"被用户拒绝后（A1 修复正确工作），agent 用 `python -c "import os; os.remove(...)"` → GRANTED → 文件真被删。
 根因（执行层，区别于 D2 行为层）：**bash 工具能运行任意解释器**，`python -c "..."`/`node -e`/`perl -e`/`ruby -e`/`sh -c "..."` 引号内是任意代码，命令签名正则**看不进去**。用户拒的是某个具体动作（delete_file 工具、rm 命令），agent 换成"运行一段恰好完成同样效果的解释器代码"，签名匹配彻底失效。这是 A2「黑名单不可穷尽」在**执行层**的体现——与 D2（行为层：被拒后继续找路）互补，两者叠加才构成完整绕过链。
 **平台缺口（关键）**：唯一真正气密的防护是 OS 沙箱（`security/sandbox/` bwrap+seatbelt，内核级只读 rootfs + 可写白名单，与命令文本无关）——但**只有 Linux/macOS 后端，Windows 无对应实现**。故 Windows 上命令签名是唯一防线，而它对内联解释器无效 = **Windows 上破坏性操作实际无底线防护**。这是本条目最严重的部分。
-候选方案（需设计，均非气密）：① 把内联解释器执行（`python -c`/`-`、`node -e`、`perl -e`、`ruby -e`、`sh -c`、`bash -c` 等）作为一类危险模式加入黑名单——精准命中实测的绕过向量，但仍可"先写 .py 脚本再 `python script.py`"绕过（脚本名不匹配），只抬高门槛；② Windows OS 沙箱后端调研（Job Object / Restricted Token / AppContainer / WSL 内跑）——最本质但工作量大、可行性待验证；③ 与 D2 行为兜底联动（被拒后 agent 停止而非改用解释器）。
-诚实边界：完全防住任意解释器执行在无 OS 沙箱时架构上不可能；即便加内联解释器黑名单也只是减速带。真实定位应写清：**Windows 无沙箱时，权限系统是"防误操作 + human-in-the-loop 提示"，不是"防对抗性绕过"**——需在 config-guide/agent-architecture 的安全说明里诚实注明这一边界，避免用户误以为拒绝=文件安全。工作量：①小 ②大 ③中；文档注明边界=小（应优先做，纠正错误预期）。
+**✅ 已修复**：
+- **① 内联解释器黑名单**：`DANGEROUS_COMMAND_PATTERNS` 新增 7 条模式（`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell`/`pwsh`），19→26 条，命中即弹确认。
+- **② Windows 沙箱**：新增 `sandbox/windows.py` WindowsSandbox（`attrib +R /S /D` + PowerShell try/finally + `netsh advfirewall` 禁网），`create_sandbox()` Windows 不再返回 None。扫描用户主目录下所有子目录设只读（排除 allow_write），接近 bwrap 覆盖。
+- **③ 安全边界文档**：config-guide 中英文版分平台标注（Linux/macOS 内核级 vs Windows 路径级 vs 无沙箱），三平台适用。
+- **④ 写后执行检测**：`record_written_file()` 追踪本会话写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认（堵住"先写 .py 再执行"绕过）。`would_ask()` 同步更新防流式抢跑。
+- **⑤ sandbox 默认开启**：`SecurityConfig.sandbox` 默认值 `False` → `True`，三平台默认有沙箱保护。
+- **⑥ `/tmp` 跨平台修正**：`app.py` 的 `allow_write` 从硬编码 `/tmp` 改为 `tempfile.gettempdir()`。
+- **⑦ Windows 双模式沙箱**：管理员运行时用 Low Integrity 进程（内核级，`_low_integrity.py` helper 通过 ctypes 降低 token 完整性），等同 bwrap/seatbelt；非管理员时退回 attrib（可绕过，启动时明确警告用户）。
+- **⑧ Linux unshare 后备**：`create_sandbox()` 在 Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（util-linux 预装），不再需要用户手动装 bwrap。
+- **⑨ 启动警告**：sandbox=true 但后端不可用/降级时，启动提示明确告知用户沙箱未生效或为弱模式，不再静默跳过。
+- **⑩ deny_write Low Integrity 修复**：`_wrap_low_integrity` 现在对 deny_write 路径显式设回 Medium 完整性，防止 allow_write 目录内的 deny 子路径被一并降级。
+- **测试**：全量 1052 passed（含 97 权限+沙箱测试），ruff clean。
+
+**D3 已知遗留（31 项，全部列出）**：
+
+代码层（15 项）：
+1. **Windows 非管理员 attrib 可绕过**：`os.chmod`/`attrib -R` 一行即可清除只读属性。OS 限制，非管理员下无解。
+2. **`./script.py` 路径解析用 Python CWD 不是 bash 的 working_dir**：写后执行检测对相对路径命令可能漏检。需要把 working_dir 传入 `is_executing_written_script`。
+3. **`_ps_escape` 不处理 PowerShell 特殊字符**：反引号 `` ` ``、`$`、管道符 `|` 等未转义，复杂命令可能出错。
+4. **`would_ask` 里 `Path.resolve()` 做了文件系统 I/O**：流式预判应快速无 I/O，当前实现可能影响流式延迟。
+5. **helper `--` 参数解析**：`args.index("--")` 取第一个 `--`，分析后逻辑正确，但没有测试覆盖含 `--` 的命令。
+6. **子 Agent 不共享 `_session_written_files`**：每个 SubAgent 有独立 PermissionManager（且当前子 Agent 无 PermissionManager），主 Agent 写的文件子 Agent 检测不到。架构层面问题。
+7. **attrib 模式扫描主目录子目录多时性能**：`attrib +R /S /D` 对每个子目录递归，node_modules 等大目录可能耗时几秒到几十秒。未测过。
+8. **Windows 主目录外路径不覆盖**：`C:\Windows`/`C:\Program Files`/其他驱动器不在主目录下，attrib 模式不保护。对系统目录加 `attrib +R` 可能导致系统进程写日志/临时文件失败，所以没做。Low Integrity 模式下这些路径默认 Medium，子进程也写不了，但 attrib 模式下无保护。
+9. **`self.working_dir` 加了但从没被赋值**：给 PermissionManager 加了 `self.working_dir = None`，但 app.py 和 agent_loop.py 没有把实际工作目录赋进去。所以 working_dir 永远是 None，#2 的修复等于没做。
+10. **`python - < file` 不被正则捕获**：`python[23]?\s+-(c\b|$)` 的 `$` 只匹配字符串末尾，`python - < malicious.py` 的 `-` 后面有空格和 `<`，不匹配。LLM 可以写恶意脚本然后 `python - < script.py` 绕过。
+11. **`python -m` 可以运行 agent 写的模块**：`python -m my_module`，如果 agent 先写了 `my_module.py`，不在正则里。
+12. **sandbox=true 默认值导致 Windows 上每条 bash 命令都经过 PowerShell**：`echo hello` 也被包进 PowerShell try/finally，增加延迟。没测过性能影响。
+13. **attrib 模式 `_collect_deny_paths` 扫描 `Path.home().iterdir()` 包含 AppData**：AppData 下有运行中程序的数据，attrib +R 可能导致其他程序在沙箱执行期间写文件失败。
+14. **`_low_integrity.py` helper 不处理 GBK 编码**：中文 Windows 上 subprocess 输出可能是 GBK，BashTool 有 `_decode_console_bytes` 处理但 helper 的 subprocess 没有。
+15. **CHANGELOG 测试数量不一致**：先写 "2+8" 后改 "4+10"，实际数字变了多次没核实。
+
+验证层（10 项）：
+16. **管理员下 `icacls /setintegritylevel` 未验证**：Low Integrity 模式依赖管理员权限执行 `icacls /setintegritylevel L` 降低允许写入路径的完整性标签。非管理员下实测返回拒绝访问，但从未在管理员下验证能成功。
+17. **unshare 需要 unprivileged user namespaces**：`unshare --map-root-user` 需要内核启用 `kernel.unprivileged_userns_clone=1`，部分 Linux 发行版（如旧版 Debian）默认关着，命令会报 `Operation not permitted`。
+18. **namespace 里 `mount -o remount,ro /` 取决于内核版本**：部分内核版本或安全策略（如 AppArmor/SELinux 限制）下可能不生效。
+19. **unshare/bwrap 没在真实 Linux 上测过**：在 Windows 上编写，测试只验证命令字符串格式，没验证实际隔离效果。
+20. **macOS seatbelt 没在真实 macOS 上测过**：同上，只验证字符串格式。
+21. **netsh 防火墙规则未验证且需要管理员**：测试只检查命令字符串包含 `netsh`，没实际验证规则能否生效，非管理员下静默失败。
+22. **整个 D3 没做真实 LLM 运行验证**：没有启动 agent 让 LLM 真的尝试 `python -c` 绕过并验证弹确认框。
+23. **deny_write 的 Low Integrity 修复未验证**：代码已改但没在管理员下实测 deny_write 路径确实保持 Medium 而子进程无法写入。
+24. **`record_written_file` 没有集成测试**：agent_loop 里的调用没验证过在完整 agent 流程中真的会触发写后执行检测。
+25. **四个沙箱后端行为不一致**：bwrap/seatbelt/unshare/windows 各有不同的失败模式和边界情况，没有统一的集成测试验证它们提供相同的安全保证。
+
+文档层（4 项）：
+26. **文档未同步最新改动**：unshare 后备、dual-mode、启动警告、deny_write 修复、sandbox 默认值改 true——CHANGELOG/tech-notes/config-guide/spec 均未更新。
+27. **spec.md 目录树未更新**：新增 `windows.py`、`_low_integrity.py`、`unshare.py` 三个文件。
+28. **README 测试数/源码文件数未更新**。
+29. **comparison-config-cc.md 未检查**：可能有新配置字段需要加。
+
+不属于 D3（2 项）：
+30. **D2 行为层（被拒后不停）**：连续被拒 N 次后 agent 应停止而非继续找新路径。是 D3 的互补项，不在 D3 范围内。
+31. **全量测试已通过**：1052 passed, 1 skipped——此项已解决。
 
 ☐ **D4【中·时序】带副作用的 bash 命令仍可能在截断重试时双执行（A3 残留）**
 A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` 消除双执行，但 **bash 工具未纳入**：非危险的带副作用 bash（`echo >file`、`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑（危险 bash 已由 would_ask 延迟，不受影响）。

@@ -1,12 +1,12 @@
 """OS-level command sandboxing -- kernel isolation for bash tool execution.
 OS 级命令沙箱——bash 工具执行的内核隔离。
 
-Linux: bubblewrap (bwrap) -- user-namespace isolation, read-only rootfs
+Linux: bubblewrap (bwrap) or unshare fallback -- user-namespace isolation, read-only rootfs
 macOS: Seatbelt (sandbox-exec) -- SBPL deny-default profile
-Windows: no kernel sandbox available, falls back to regex pattern matching
-Linux：bubblewrap——用户命名空间隔离，只读根文件系统
+Windows: Low Integrity (admin, kernel-enforced) or attrib +R (non-admin, bypassable)
+Linux：bubblewrap 或 unshare 后备——用户命名空间隔离，只读根文件系统
 macOS：Seatbelt——SBPL 默认拒绝策略
-Windows：无内核沙箱，退回正则模式匹配"""
+Windows：Low Integrity（管理员，内核级）或 attrib +R（非管理员，可绕过）"""
 
 from __future__ import annotations
 
@@ -53,9 +53,18 @@ def create_sandbox() -> Sandbox | None:
     if system == "Linux":
         from mini_agent.security.sandbox.bwrap import BwrapSandbox
 
-        return BwrapSandbox()
+        bwrap = BwrapSandbox()
+        if bwrap.available():
+            return bwrap
+        from mini_agent.security.sandbox.unshare import UnshareSandbox
+
+        return UnshareSandbox()
     if system == "Darwin":
         from mini_agent.security.sandbox.seatbelt import SeatbeltSandbox
 
         return SeatbeltSandbox()
+    if system == "Windows":
+        from mini_agent.security.sandbox.windows import WindowsSandbox
+
+        return WindowsSandbox()
     return None

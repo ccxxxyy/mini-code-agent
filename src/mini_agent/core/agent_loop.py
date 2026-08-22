@@ -726,6 +726,10 @@ class AgentLoop:
                 is_error=raw.is_error,
                 metadata=raw.metadata,
             )
+            if self._permissions and tc.name in ("write_file", "edit_file") and not result.is_error:
+                path = args.get("file_path")
+                if path:
+                    self._permissions.record_written_file(path)
             # Record file content BEFORE spill -- spill replaces output
             # with a placeholder, but recovery needs the real content
             # 在溢写前记录文件内容——溢写会替换为占位符，恢复需要真实内容

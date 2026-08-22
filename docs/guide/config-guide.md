@@ -229,13 +229,14 @@ consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并�
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）
 allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单（默认空），命中即放行（含危险命令）
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝列表（默认值），命中即拒绝
-# 注意：denied_commands 是 glob 精确匹配拒绝。另有 19 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
+# 注意：denied_commands 是 glob 精确匹配拒绝。另有 26 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
 # 用于弹窗确认（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
-# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh）——这些不可配，但可通过
+# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
+# sh -c/bash -c/powershell -Command/pwsh -c）——这些不可配，但可通过
 # allowed_commands 放行或 sandbox_auto_allow 免确认。
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
 worktree_max_age_days = 7    # 超过此天数的干净 worktree 启动时自动清理（0 = 禁用）
-sandbox = false              # OS 级沙箱（Linux bwrap / macOS seatbelt），true 启用
+sandbox = true               # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows attrib），默认开启
 sandbox_auto_allow = false   # 沙箱下危险命令免确认（deny 规则仍拦）
 sandbox_network = false      # 允许沙箱内网络访问
 
@@ -788,7 +789,7 @@ deny = ["delete_file"]     # 直接拦截整个工具
 |---|---|---|
 | Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` 或 `yum install bubblewrap` |
 | macOS | Seatbelt (sandbox-exec) | 系统自带（`/usr/bin/sandbox-exec`） |
-| Windows | 不支持 | 保持现有正则拦截 + permissions.toml 规则 |
+| Windows | attrib +R 只读属性 | 系统自带（PowerShell + attrib）；弱于 bwrap/seatbelt，见下方安全边界 |
 
 **启用**：
 
@@ -802,12 +803,23 @@ sandbox_network = false       # 可选：允许网络访问
 
 **沙箱内的文件权限**（代码固定，非用户配置）：
 
+**Linux/macOS（bwrap/seatbelt）**——进程级隔离，整个文件系统只读：
+
 | 路径 | 权限 |
 |---|---|
 | 工作目录（项目目录） | 可读可写 |
-| `/tmp` | 可读可写 |
+| 系统临时目录（`/tmp`） | 可读可写 |
 | `~/.mini-agent` | 只读（防命令篡改配置） |
 | 其余整个文件系统 | 只读 |
+
+**Windows（attrib）**——文件属性级保护，只保护具体路径：
+
+| 路径 | 权限 |
+|---|---|
+| 工作目录（项目目录） | 可读可写 |
+| 系统临时目录 | 可读可写 |
+| `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` + deny_write 配置 | 只读（`attrib +R`，命令结束后恢复） |
+| 其余文件系统 | **仍可写**（这是 Windows 沙箱与 bwrap/seatbelt 的核心差异） |
 
 **sandbox_auto_allow 与 permissions.toml 的配合**：
 
@@ -818,11 +830,11 @@ sandbox_network = false       # 可选：允许网络访问
   ↓
 ② permissions.toml allow 规则 / session grant？→ 放行
   ↓
-③ 危险命令？
-     sandbox_auto_allow=true → 放行（内核兜底）
+③ 危险命令（26 条正则，含内联解释器）？
+     sandbox_auto_allow=true → 放行（沙箱兜底）
      sandbox_auto_allow=false → 弹窗确认
   ↓
-④ 执行：有沙箱 → 内核隔离执行（只读 rootfs）
+④ 执行：有沙箱 → 隔离执行（Linux/macOS 只读 rootfs；Windows 只读敏感路径）
        无沙箱 → 原样执行
 ```
 
@@ -832,7 +844,15 @@ sandbox_network = false       # 可选：允许网络访问
 
 **验证是否生效**：`/trace on` 后执行命令，trace 行会显示 `sandbox_auto_allow` 作为判定依据（沙箱下免确认时）。
 
-**Windows**：`sandbox = true` 但无 bwrap/sandbox-exec → 静默退回，功能不受影响、无报错。
+> **⚠ 安全边界（三个平台都适用）**
+>
+> **`sandbox=false` 时**（已改为默认开启）：三个平台都只有正则 + 确认框防护。LLM 被拒 `rm -rf` 后可改用 `python -c "shutil.rmtree(...)"` 绕过（D3 已把常见内联解释器加入危险模式弹确认；写 `.py` 文件再执行会被写后执行检测拦截弹确认）。
+>
+> **`sandbox=true` 时**：
+> - **Linux/macOS**：bwrap/seatbelt 提供内核级只读文件系统。即使 LLM 绕过正则，也写不了受保护路径。这是最强防护。
+> - **Windows**：attrib 沙箱保护 `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` 等敏感路径不被篡改，但**未保护的路径仍可写**。比 Linux/macOS 弱，比无沙箱强。
+>
+> **结论**：拒绝一条命令 ≠ 该操作不可能完成。沙箱收窄了可写范围，正则 + 确认框防常见误操作，但在无沙箱或 Windows 沙箱下无法完全防 LLM 刻意绕过。
 
 ---
 
