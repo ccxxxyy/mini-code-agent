@@ -190,9 +190,8 @@ async def test_windows_admin_wrap_uses_helper(tmp_path):
     assert "setintegritylevel" in script
 
 
-async def test_windows_nonadmin_wrap_uses_attrib(tmp_path):
-    import base64
-
+async def test_windows_nonadmin_wrap_passthrough(tmp_path):
+    """Non-admin attrib mode: wrap returns command as-is (attrib set at session level)."""
     deny_dir = tmp_path / "protected"
     deny_dir.mkdir()
     with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
@@ -203,12 +202,7 @@ async def test_windows_nonadmin_wrap_uses_attrib(tmp_path):
             network=True,
         )
         wrapped = sb.wrap("echo hello", cfg)
-    assert "EncodedCommand" in wrapped
-    encoded_part = wrapped.split("EncodedCommand ")[-1]
-    script = base64.b64decode(encoded_part).decode("utf-16-le")
-    assert "attrib" in script
-    assert "+R" in script
-    assert "_low_integrity" not in script
+    assert wrapped == "echo hello"
 
 
 async def test_windows_nonadmin_no_deny_no_net_passthrough():
@@ -247,6 +241,34 @@ async def test_windows_available_on_linux():
                 assert not WindowsSandbox().available()
 
 
+async def test_ps_escape_special_chars():
+    """_ps_escape must handle backticks, $, and double quotes."""
+    from mini_agent.security.sandbox.windows import _ps_escape
+
+    assert _ps_escape('echo "hi"') == '"echo `"hi`""'
+    assert _ps_escape("echo $HOME") == '"echo `$HOME"'
+    assert _ps_escape("echo `done`") == '"echo ``done``"'
+    assert _ps_escape('a"$b`c') == '"a`"`$b``c"'
+
+
+async def test_low_integrity_helper_parses_double_dash():
+    """Helper must handle commands containing -- correctly."""
+    from mini_agent.security.sandbox._low_integrity import main
+
+    import sys
+    from unittest.mock import patch as mpatch
+
+    # "-- echo -- hello" → command should be "echo -- hello"
+    with mpatch.object(sys, "argv", ["helper", "--", "echo", "--", "hello"]):
+        with mpatch.object(
+            sys.modules["mini_agent.security.sandbox._low_integrity"],
+            "lower_integrity",
+            side_effect=OSError("skip in test"),
+        ):
+            result = main()
+    assert result == 1  # lower_integrity fails, returns 1
+
+
 async def test_windows_collect_deny_paths_excludes_allowed(tmp_path):
     from mini_agent.security.sandbox.windows import _collect_deny_paths
 
@@ -257,19 +279,19 @@ async def test_windows_collect_deny_paths_excludes_allowed(tmp_path):
     assert str(deny_dir.resolve()) not in paths
 
 
-async def test_windows_collect_deny_paths_includes_existing(tmp_path):
+async def test_windows_collect_deny_paths_ignores_config_deny_write(tmp_path):
+    """Attrib mode skips config.deny_write (agent needs to write those dirs)."""
     from mini_agent.security.sandbox.windows import _collect_deny_paths
 
     deny_dir = tmp_path / "secrets"
     deny_dir.mkdir()
     cfg = SandboxConfig(allow_write=[str(tmp_path / "work")], deny_write=[str(deny_dir)])
     paths = _collect_deny_paths(cfg)
-    assert str(deny_dir.resolve()) in paths
+    assert str(deny_dir.resolve()) not in paths
 
 
-async def test_windows_wrap_network_deny(tmp_path):
-    import base64
-
+async def test_windows_nonadmin_wrap_is_passthrough_even_with_net_deny(tmp_path):
+    """Non-admin attrib mode: wrap always returns as-is (session-level setup)."""
     deny_dir = tmp_path / "protected"
     deny_dir.mkdir()
     with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
@@ -280,10 +302,7 @@ async def test_windows_wrap_network_deny(tmp_path):
             network=False,
         )
         wrapped = sb.wrap("echo hello", cfg)
-    encoded_part = wrapped.split("EncodedCommand ")[-1]
-    script = base64.b64decode(encoded_part).decode("utf-16-le")
-    assert "netsh advfirewall" in script
-    assert "MiniAgentSandboxDenyNet" in script
+    assert wrapped == "echo hello"
 
 
 # --- BashTool integration ---

@@ -82,7 +82,7 @@
 | PyPI 发布 | ✅ `pip install mini-code-agent` | ❌ 未发布 |
 | CI/CD | GitHub Actions（Lint + Test + Build） | 无 |
 | 发布方式 | **Trusted Publisher**（tag 触发，零 secret） | — |
-| 测试 | **1033 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
+| 测试 | **1055 测试，80%+ 覆盖率，fail_under=80** | 27 个测试文件，覆盖率未知 |
 
 **差距**：此维度 mini **明显更强**——已发布 PyPI、有 CI/CD、测试数量是 mewcode 的 15 倍以上、有覆盖率门禁。
 
@@ -256,7 +256,7 @@
 
 | | mini | mewcode |
 |---|---|---|
-| 沙箱隔离 | ✅ **Linux bubblewrap + macOS Seatbelt + Windows attrib**（Linux/macOS 只读 rootfs + 可写白名单 + 可选禁网；Windows attrib +R 只读属性保护敏感路径，弱于内核级）+ sandbox_auto_allow（沙箱下危险命令免确认，deny 规则仍拦） | ✅ Linux bubblewrap + macOS Seatbelt 内核级隔离 |
+| 沙箱隔离 | ✅ **Linux bubblewrap（unshare 后备） + macOS Seatbelt + Windows 双模式（管理员 Low Integrity 内核级 / 非管理员仅警告（attrib 已禁用，会阻断 agent 自身文件写入））**（Linux/macOS 只读 rootfs + 可写白名单 + 可选禁网；Windows 管理员 Low Integrity 等同 bwrap/seatbelt；非管理员仅显示警告，不做文件保护）+ sandbox_auto_allow（沙箱下危险命令免确认，deny 规则仍拦）+ sandbox 默认开启 | ✅ Linux bubblewrap + macOS Seatbelt 内核级隔离 |
 
 **原差距**：最大安全差距——正则匹配可被绕过。P41 已实现双平台内核沙箱。
 
@@ -265,7 +265,8 @@
 2. `bwrap_sandbox.py`（Linux）：用 `subprocess` 执行 `bwrap --ro-bind / / --bind {working_dir} {working_dir} --dev /dev --proc /proc -- {command}`——子进程看到只读根文件系统，只有工作目录可写
 3. `seatbelt_sandbox.py`（macOS）：生成 SBPL profile 文件，用 `sandbox-exec -f profile.sb {command}`
 4. `bash.py` 工具执行命令时，检查 `config.security.sandbox` 配置，如果启用则通过沙箱执行
-5. Windows attrib sandbox（D3 新增）：PowerShell try/finally 包裹 `attrib +R /S /D` 设置只读属性，保护敏感路径（~/.ssh/~/.aws/~/.gnupg/~/.mini-agent）；弱于 bwrap/seatbelt（无法令全文件系统只读），但比零防护强
+5. Windows 双模式沙箱：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员模式仅显示警告，不做文件保护（attrib 会阻断 agent 自身写入已禁用）
+6. Linux unshare 后备：bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（util-linux 预装）
 
 代码改动：新增 2 个文件 ~100 行/个 + `bash.py` ~10 行集成。配置：`[security] sandbox = true`。
 

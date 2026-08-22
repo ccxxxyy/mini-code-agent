@@ -191,7 +191,9 @@ class Application:
             confirm_callback=self.terminal.confirm,
             event_bus=self.event_bus,
         )
-        # User-defined permission rules 用户自定义权限规则文件
+        self.permission_manager.working_dir = working_dir
+        pm = self.permission_manager
+        pm.shared_written_files = pm._session_written_files
         self.permission_manager.load_rule_files(
             user_file=Path.home() / ".mini-agent" / "permissions.toml",
             project_file=working_dir / ".mini-agent" / "permissions.toml",
@@ -219,8 +221,11 @@ class Application:
                     bash_tool.sandbox_config = sb_config
                 if config.security.sandbox_auto_allow:
                     self.permission_manager.sandbox_auto_allow = True
+                if hasattr(os_sandbox, "activate"):
+                    os_sandbox.activate(sb_config)
+                    self._sandbox_to_deactivate = os_sandbox
                 if hasattr(os_sandbox, "startup_warning"):
-                    self.sandbox_warning = os_sandbox.startup_warning()
+                    self.sandbox_warning = os_sandbox.startup_warning(sb_config)
             else:
                 system = platform.system()
                 if system == "Linux":
@@ -698,6 +703,8 @@ class Application:
             except Exception:
                 logger.warning("hook fire failed: session-end", exc_info=True)
                 pass
+            if hasattr(self, "_sandbox_to_deactivate"):
+                self._sandbox_to_deactivate.deactivate()
             self.session.metadata.closed_cleanly = True
             await self._autosave(force=True)
             if self.agent_loop.snapshot_store:
