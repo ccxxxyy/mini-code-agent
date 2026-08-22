@@ -113,7 +113,10 @@ mini-code-agent/
 │       │   └── sandbox/             # OS-level sandbox backends
 │       │       ├── __init__.py
 │       │       ├── bwrap.py         # Linux bubblewrap backend
-│       │       └── seatbelt.py      # macOS sandbox-exec backend
+│       │       ├── seatbelt.py      # macOS sandbox-exec backend
+│       │       ├── unshare.py       # Linux unshare fallback (when bwrap unavailable)
+│       │       ├── windows.py       # Windows sandbox (admin: Low Integrity / non-admin: warning only)
+│       │       └── _low_integrity.py # Windows Low Integrity process helper (ctypes)
 │       │
 │       ├── ui/                      # === INTERACTION LAYER ===
 │       │   ├── __init__.py
@@ -154,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 61 unit test files, 1033 tests
+│   ├── unit/                        # 61 unit test files, 1055 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -276,9 +279,9 @@ mini-code-agent/
 |  | Permission   | |  Path Guard  | |   Worktree Isolation |       |
 |  |  Manager     | |              | |                      |       |
 |  +--------------+ +--------------+ +----------------------+       |
-|  +--------+ +--------------------------------+ +--------------+   |
-|  | Audit  | | OS Sandbox (bwrap / seatbelt)  | |Remote Confirm|   |
-|  +--------+ +--------------------------------+ +--------------+   |
+|  +--------+ +----------------------------------------------+ +----+|
+|  | Audit  | | OS Sandbox (bwrap/unshare/seatbelt/windows) | |Rmte||
+|  +--------+ +----------------------------------------------+ +----+|
 +-------------------------------------------------------------------+
 ```
 
@@ -544,7 +547,7 @@ class SecurityConfig:
     ])
     worktree_base_dir: str = ".mini-agent/worktrees"
     worktree_max_age_days: int = 7        # 过期 worktree 启动时自动清理（0 = 禁用）
-    sandbox: bool = False                 # OS 级沙箱（Linux bwrap / macOS seatbelt）
+    sandbox: bool = True                  # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity / 非管理员仅警告），默认开启
     sandbox_auto_allow: bool = False
     sandbox_network: bool = False
 
@@ -1706,7 +1709,10 @@ def write_decision(
 
 ### 4.21 `security/sandbox/` -- OS 级沙箱
 
-职责：将 bash 命令包裹进操作系统沙箱（Linux bwrap / macOS seatbelt / Windows attrib）。由 `SecurityConfig.sandbox` 开关，app.py 注入 bash 工具。Windows 后端弱于 bwrap/seatbelt：只对特定路径设置只读属性而非令全文件系统只读。
+职责：将 bash 命令包裹进操作系统沙箱。由 `SecurityConfig.sandbox` 开关（默认开启），app.py 注入 bash 工具。
+- **Linux**：bwrap（首选），不可用时自动降级 unshare（`unshare --mount --map-root-user`，util-linux 预装）。
+- **macOS**：seatbelt（`sandbox-exec`）。
+- **Windows 双模式**：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员仅显示警告，不做文件保护（attrib 已禁用，会阻断 agent 自身文件写入）。
 
 ```python
 @dataclass
@@ -1727,7 +1733,7 @@ class Sandbox(ABC):
 
 
 def create_sandbox() -> Sandbox | None:
-    """Pick the platform implementation (bwrap / seatbelt) or None."""
+    """Pick the platform implementation (bwrap / unshare / seatbelt / windows) or None."""
     ...
 ```
 
@@ -2555,7 +2561,7 @@ class MemoryExtractor:
 
 **命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 26 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。D3 新增**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。D3 还新增**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台（bwrap/seatbelt/attrib）均提供 OS 级保护。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 26 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。D3 新增**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。D3 还新增**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员仅警告，attrib 已禁用）。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 
@@ -2663,12 +2669,13 @@ class MergeResult:
 
 ### 11.6 OS 级沙箱 (`security/sandbox/`)
 
-内核级隔离，Windows 上为 no-op：
+三平台全覆盖，默认开启（`SecurityConfig.sandbox = True`）：
 
-- **Linux**：bubblewrap（`bwrap`）——用户命名空间隔离、只读 rootfs；
+- **Linux**：bubblewrap（`bwrap`，首选）——用户命名空间隔离、只读 rootfs；不可用时自动降级 `unshare --mount --map-root-user`（`unshare.py`，util-linux 预装）。
 - **macOS**：Seatbelt（`sandbox-exec`）——SBPL deny-default profile。
+- **Windows 双模式**（`windows.py`）：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员仅显示警告，不做文件保护（attrib 已禁用，会阻断 agent 自身文件写入）。
 
-`create_sandbox()` 探测可用实现并包装 bash 命令。`SandboxConfig` 声明可写路径（工作目录、`/tmp`）、拒绝写路径（`~/.mini-agent`）和 `sandbox_network` 网络开关。配套配置 `sandbox_auto_allow`：内核已提供隔离时，权限层自动放行命令（含危险命令，见 11.1）。
+`create_sandbox()` 探测可用实现并包装 bash 命令。`SandboxConfig` 声明可写路径（工作目录、`tempfile.gettempdir()`）和 `sandbox_network` 网络开关。启动时若后端不可用或降级，显示警告告知用户。配套配置 `sandbox_auto_allow`：沙箱已提供隔离时，权限层自动放行命令（含危险命令，见 11.1）。
 
 ---
 

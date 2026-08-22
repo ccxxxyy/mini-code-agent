@@ -78,7 +78,7 @@ DANGEROUS_COMMAND_PATTERNS = [
     # Inline interpreter execution -- arbitrary code inside quotes bypasses
     # command-signature matching (D3: proven by real A2 bypass twice).
     # 内联解释器——引号内任意代码绕过命令签名匹配（D3：A2 实测两次绕过证实）。
-    r"\bpython[23]?\s+-(c\b|$)",  # python -c "..." / python -（stdin 模式）
+    r"\bpython[23]?\s+-(c\b|(\s|<|$))",  # python -c "..." / python - / python - < file
     r"\bnode\s+-(e|p)\b",  # node -e "..." / node --eval / node -p
     r"\bperl\s+-e\b",  # perl -e '...'
     r"\bruby\s+-e\b",  # ruby -e '...'
@@ -97,6 +97,7 @@ _SCRIPT_EXEC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^\.[\\/](?P<path>\S+)", re.IGNORECASE),
     re.compile(r"\bcmd\s+/c\s+(?P<path>\S+)", re.IGNORECASE),
 ]
+_PYTHON_M_RE = re.compile(r"\bpython[23]?\s+-m\s+(?P<module>\S+)", re.IGNORECASE)
 
 # Callback to ask the user for confirmation.
 # Returns True (allow once), False (deny), or "always" (allow for session).
@@ -130,6 +131,7 @@ class PermissionManager:
         self._rules: list[PermissionRule] = []
         self._session_grants: set[tuple[PermissionScope, str]] = set()
         self._session_written_files: set[str] = set()
+        self.shared_written_files: set[str] | None = None
         self.working_dir: Path | None = None
         # OS sandbox auto-allows normal commands (kernel provides isolation)
         # OS 沙箱自动放行普通命令（内核提供隔离）
@@ -487,13 +489,19 @@ class PermissionManager:
     def record_written_file(self, path: str) -> None:
         """Track a file written by the agent this session.
         记录本会话 agent 写过的文件。"""
-        self._session_written_files.add(str(Path(path).resolve()))
+        resolved = str(Path(path).resolve())
+        self._session_written_files.add(resolved)
+        if self.shared_written_files is not None:
+            self.shared_written_files.add(resolved)
 
     def is_executing_written_script(self, command: str, working_dir: Path | None = None) -> bool:
         """Check if a command runs a script the agent wrote this session.
         检测命令是否在执行本会话 agent 写过的脚本文件。
         working_dir: bash 工具的工作目录，用于解析相对路径。"""
-        if not self._session_written_files:
+        all_written = self._session_written_files
+        if self.shared_written_files:
+            all_written = all_written | self.shared_written_files
+        if not all_written:
             return False
         cmd = command.strip()
         for pattern in _SCRIPT_EXEC_PATTERNS:
@@ -504,10 +512,20 @@ class PermissionManager:
                     p = Path(script_path)
                     if not p.is_absolute() and working_dir:
                         p = working_dir / p
-                    if str(p.resolve()) in self._session_written_files:
+                    # resolve() on 3.11+ does not stat for non-existent paths
+                    if str(p.resolve()) in all_written:
                         return True
                 except (ValueError, OSError):
                     continue
+        m_mod = _PYTHON_M_RE.search(cmd)
+        if m_mod and working_dir:
+            mod_name = m_mod.group("module").strip()
+            mod_path = working_dir / f"{mod_name.replace('.', '/')}.py"
+            try:
+                if str(mod_path.resolve()) in all_written:
+                    return True
+            except (ValueError, OSError):
+                pass
         return False
 
     # --- Non-interactive peek: "would this call pop a confirm dialog?"

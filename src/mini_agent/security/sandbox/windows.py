@@ -27,7 +27,6 @@ from pathlib import Path
 from mini_agent.security.sandbox import Sandbox, SandboxConfig, resolve_path
 
 _HELPER = Path(__file__).parent / "_low_integrity.py"
-_FIREWALL_RULE_NAME = "MiniAgentSandboxDenyNet"
 
 
 def is_admin() -> bool:
@@ -78,10 +77,6 @@ class WindowsSandbox(Sandbox):
                 f'    cmd /c \'icacls "{p}" /setintegritylevel "(OI)(CI)M" /T /C /Q\' >$null 2>&1'
             )
 
-        if not config.network:
-            setup.append(_firewall_add())
-            cleanup.append(_firewall_del())
-
         python = sys.executable
         helper = str(_HELPER)
         escaped = _ps_escape(command)
@@ -93,41 +88,28 @@ class WindowsSandbox(Sandbox):
         )
 
     def _wrap_attrib(self, command: str, config: SandboxConfig) -> str:
-        """Non-admin mode: attrib +R on sensitive paths.
-        非管理员模式：敏感路径 attrib +R。"""
-        deny_paths = _collect_deny_paths(config)
-        needs_net = not config.network
-        if not deny_paths and not needs_net:
-            return command
+        """Non-admin mode: commands run directly (attrib set at session level).
+        非管理员模式：命令直接执行（attrib 在会话级别设置）。"""
+        return command
 
-        setup: list[str] = []
-        cleanup: list[str] = []
+    def activate(self, config: SandboxConfig) -> None:
+        """No-op. Attrib mode disabled — bypassable and causes agent's own
+        file writes to fail. Only Low Integrity (admin) provides real protection.
+        空操作。attrib 模式已禁用——可绕过且会阻断 agent 自身文件写入。
+        只有 Low Integrity（管理员）提供真正保护。"""
 
-        for p in deny_paths:
-            setup.append(f'    attrib +R /S /D "{p}\\*" >$null 2>&1')
-            setup.append(f'    attrib +R "{p}" >$null 2>&1')
-            cleanup.append(f'    attrib -R /S /D "{p}\\*" >$null 2>&1')
-            cleanup.append(f'    attrib -R "{p}" >$null 2>&1')
+    def deactivate(self) -> None:
+        """No-op. 空操作。"""
 
-        if needs_net:
-            setup.append(_firewall_add())
-            cleanup.append(_firewall_del())
-
-        return _build_ps_script(
-            setup,
-            cleanup,
-            f"    cmd /c {_ps_escape(command)}",
-        )
-
-    def startup_warning(self) -> str | None:
-        """Return a warning if running without admin. None if admin.
-        非管理员时返回警告。管理员时返回 None。"""
-        if self._admin:
-            return None
-        return (
-            "[sandbox] Running without admin -- sandbox uses attrib (bypassable). "
-            "Run as administrator for kernel-level Low Integrity protection."
-        )
+    def startup_warning(self, config: SandboxConfig | None = None) -> str | None:
+        """Return warnings about sandbox limitations.
+        返回沙箱限制的警告。"""
+        if not self._admin:
+            return (
+                "[sandbox] Running without admin -- sandbox uses attrib (bypassable). "
+                "Run as administrator for kernel-level Low Integrity protection."
+            )
+        return None
 
 
 def _build_ps_script(setup: list[str], cleanup: list[str], run_line: str) -> str:
@@ -156,20 +138,10 @@ def _powershell_exe() -> str | None:
 
 
 def _ps_escape(command: str) -> str:
-    return '"' + command.replace('"', '`"') + '"'
-
-
-def _firewall_add() -> str:
-    return (
-        f"    netsh advfirewall firewall add rule"
-        f' name="{_FIREWALL_RULE_NAME}"'
-        f" dir=out action=block program=$env:ComSpec"
-        f" enable=yes >$null 2>&1"
-    )
-
-
-def _firewall_del() -> str:
-    return f'    netsh advfirewall firewall delete rule name="{_FIREWALL_RULE_NAME}" >$null 2>&1'
+    """Escape a command for embedding in a PowerShell double-quoted string.
+    转义命令以嵌入 PowerShell 双引号字符串。"""
+    escaped = command.replace("`", "``").replace('"', '`"').replace("$", "`$")
+    return f'"{escaped}"'
 
 
 def _collect_existing_paths(paths: list[str]) -> list[str]:
@@ -181,24 +153,24 @@ def _collect_existing_paths(paths: list[str]) -> list[str]:
     return out
 
 
+_SENSITIVE_HOME_DIRS = [".ssh", ".aws", ".gnupg", ".config", ".kube"]
+
+
 def _collect_deny_paths(config: SandboxConfig) -> list[str]:
-    """Attrib mode: collect paths to protect (home subdirs minus allow_write).
-    Attrib 模式：收集需保护的路径（主目录子目录减去 allow_write）。"""
+    """Attrib mode: collect paths to protect (sensitive home dirs ONLY).
+    Attrib 模式：只保护已知敏感主目录（不含 deny_write 配置）。
+    deny_write paths (like ~/.mini-agent) are skipped in attrib mode because
+    attrib is system-wide and would block the agent's own writes to those dirs.
+    deny_write 路径（如 ~/.mini-agent）在 attrib 模式下跳过，因为 attrib
+    是系统级的，会阻断 agent 自己对这些目录的写入。"""
     allow_resolved = {Path(resolve_path(p)).resolve() for p in config.allow_write}
     deny_set: set[str] = set()
 
-    for p in config.deny_write:
-        rp = Path(resolve_path(p)).resolve()
-        if not _is_under(rp, allow_resolved) and rp.exists():
-            deny_set.add(str(rp))
-
     home = Path.home().resolve()
-    try:
-        for child in home.iterdir():
-            if child.is_dir() and not _is_under(child, allow_resolved):
-                deny_set.add(str(child))
-    except PermissionError:
-        pass
+    for name in _SENSITIVE_HOME_DIRS:
+        sd = home / name
+        if sd.exists() and not _is_under(sd, allow_resolved):
+            deny_set.add(str(sd))
 
     return sorted(deny_set)
 

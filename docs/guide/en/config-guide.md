@@ -236,7 +236,7 @@ denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional d
 # allowed via allowed_commands or made confirmation-free via sandbox_auto_allow.
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree isolation directory
 worktree_max_age_days = 7    # Clean worktrees older than this many days are cleaned up automatically at startup (0 = disabled)
-sandbox = true               # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows attrib), on by default
+sandbox = true               # OS-level sandbox (Linux bwrap/unshare / macOS seatbelt / Windows dual-mode), on by default
 sandbox_auto_allow = false   # Dangerous commands skip confirmation under the sandbox (deny rules still block)
 sandbox_network = false      # Allow network access inside the sandbox
 
@@ -787,9 +787,9 @@ Kernel-level isolation of the execution environment for bash commands — even a
 
 | Platform | Backend | Installation |
 |---|---|---|
-| Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` or `yum install bubblewrap` |
+| Linux | bubblewrap (bwrap), auto-fallback to unshare if unavailable | bwrap: `sudo apt install bubblewrap` or `yum install bubblewrap`; unshare: pre-installed (util-linux) |
 | macOS | Seatbelt (sandbox-exec) | Bundled with the system (`/usr/bin/sandbox-exec`) |
-| Windows | attrib +R read-only attribute | Built-in (PowerShell + attrib); weaker than bwrap/seatbelt, see security boundary below |
+| Windows | Dual-mode: admin Low Integrity process (kernel-level) / non-admin warning only (no file protection) | Built-in (ctypes); see file permissions table below |
 
 **Enabling**:
 
@@ -808,18 +808,25 @@ sandbox_network = false       # Optional: allow network access
 | Path | Permission |
 |---|---|
 | Working directory (project directory) | Read-write |
-| System temp directory (`/tmp`) | Read-write |
+| System temp directory (`tempfile.gettempdir()`, cross-platform) | Read-write |
 | `~/.mini-agent` | Read-only (prevents commands from tampering with configuration) |
 | The rest of the entire filesystem | Read-only |
 
-**Windows (attrib)** — file-attribute-level protection, specific paths only:
+On Linux, when bwrap is unavailable, the sandbox automatically falls back to `unshare --mount --map-root-user` (pre-installed via util-linux), providing similar mount-namespace isolation.
+
+**Windows admin mode (Low Integrity process)** — kernel-level isolation, equivalent to bwrap/seatbelt:
 
 | Path | Permission |
 |---|---|
 | Working directory (project directory) | Read-write |
 | System temp directory | Read-write |
-| `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` + deny_write config | Read-only (`attrib +R`, restored after command) |
-| The rest of the filesystem | **Still writable** (this is the core difference from bwrap/seatbelt) |
+| The rest of the filesystem | **Kernel-enforced non-writable** (Low Integrity token cannot write Medium/High integrity objects) |
+
+Uses ctypes to lower the subprocess token integrity (`_low_integrity.py` helper), providing kernel-level protection equivalent to bwrap/seatbelt.
+
+**Windows non-admin mode (warning only, no file protection)** — attrib has been disabled (it blocks the agent's own file writes):
+
+Non-admin mode shows a startup warning only. No file protection is applied. Only admin Low Integrity mode provides real sandbox isolation.
 
 **How sandbox_auto_allow works with permissions.toml**:
 
@@ -834,7 +841,7 @@ Command arrives
      sandbox_auto_allow=true → allow (sandbox as backstop)
      sandbox_auto_allow=false → confirmation dialog
   ↓
-④ Execution: sandbox present → isolated execution (Linux/macOS: read-only rootfs; Windows: read-only sensitive paths)
+④ Execution: sandbox present → isolated execution (Linux/macOS: read-only rootfs; Windows admin: Low Integrity kernel-level isolation)
        no sandbox → executed as-is
 ```
 
@@ -846,13 +853,15 @@ Command arrives
 
 > **⚠ Security Boundary (applies to all three platforms)**
 >
-> **When `sandbox=false`** (now off by default — sandbox is on): all three platforms have only regex + confirmation dialogs as protection. If the LLM is denied `rm -rf`, it can switch to `python -c "shutil.rmtree(...)"` to bypass (D3 added common inline interpreters to the dangerous patterns; writing a `.py` file and running it is caught by the write-then-execute detection).
+> **When `sandbox=false`** (now off by default -- sandbox is on): all three platforms have only regex + confirmation dialogs as protection. If the LLM is denied `rm -rf`, it can switch to `python -c "shutil.rmtree(...)"` to bypass (D3 added common inline interpreters to the dangerous patterns; writing a `.py` file and running it is caught by the write-then-execute detection).
 >
 > **When `sandbox=true`**:
-> - **Linux/macOS**: bwrap/seatbelt provide kernel-level read-only filesystem. Even if the LLM bypasses regex, it cannot write to protected paths. This is the strongest protection.
-> - **Windows**: attrib sandbox protects `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` and other sensitive paths from tampering, but **unprotected paths are still writable**. Weaker than Linux/macOS, stronger than no sandbox.
+> - **Linux**: bwrap (or unshare fallback) provides kernel-level read-only filesystem. Even if the LLM bypasses regex, it cannot write to protected paths. This is the strongest protection.
+> - **macOS**: seatbelt provides kernel-level read-only filesystem, equivalent to Linux bwrap.
+> - **Windows admin**: Low Integrity process provides kernel-level isolation, equivalent to bwrap/seatbelt.
+> - **Windows non-admin**: No file protection (warning only). attrib has been disabled because it blocks the agent's own file writes. Only admin Low Integrity provides real protection.
 >
-> **Bottom line**: Denying a command ≠ the operation is impossible. The sandbox narrows the writable scope, regex + confirmation dialogs prevent common mistakes, but without sandbox or with Windows sandbox, deliberate LLM bypass cannot be fully prevented.
+> **Bottom line**: Denying a command ≠ the operation is impossible. The sandbox narrows the writable scope, regex + confirmation dialogs + write-then-execute detection prevent common mistakes, but without sandbox or with Windows non-admin sandbox, deliberate LLM bypass cannot be fully prevented.
 
 ---
 

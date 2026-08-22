@@ -163,6 +163,7 @@
 | `Loaded N hook rule(s) from config` | `app.py` 启动 | config.toml 有 `[[hooks]]` 规则时 |
 | `Loaded N event listener(s): xxx` | `app.py` 启动 | listener_dirs 有 *.py 插件时 |
 | `Loaded N plugin(s): xxx` | `app.py` 启动 | plugin_dirs 有 *.py 插件或装有 `mini_agent.plugins` entry point 包时（P83）；详情用 `/plugins` 查看 |
+| `[sandbox] ...` 沙箱状态提示 | `app.py` 启动 | sandbox=true 但后端不可用/降级时（如 Linux 无 bwrap+unshare、Windows 非管理员仅警告模式）；后端正常且为管理员时不显示 |
 | `MCP: xxx connected (N tools)` | `app.py` 启动 | MCP 服务器连接成功时 |
 | `Cleaned N stale session(s)` | `app.py` 启动 | 自动清理超龄会话时 |
 | `Cleaned N stale worktree(s)` | `app.py` 启动 | 自动清理超龄 worktree 时 |

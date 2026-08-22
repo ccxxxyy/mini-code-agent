@@ -236,7 +236,7 @@ denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝
 # allowed_commands 放行或 sandbox_auto_allow 免确认。
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
 worktree_max_age_days = 7    # 超过此天数的干净 worktree 启动时自动清理（0 = 禁用）
-sandbox = true               # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows attrib），默认开启
+sandbox = true               # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 双模式），默认开启
 sandbox_auto_allow = false   # 沙箱下危险命令免确认（deny 规则仍拦）
 sandbox_network = false      # 允许沙箱内网络访问
 
@@ -787,9 +787,9 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 | 平台 | 后端 | 安装 |
 |---|---|---|
-| Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` 或 `yum install bubblewrap` |
+| Linux | bubblewrap (bwrap)，不可用时自动降级 unshare | bwrap: `sudo apt install bubblewrap` 或 `yum install bubblewrap`；unshare: util-linux 预装 |
 | macOS | Seatbelt (sandbox-exec) | 系统自带（`/usr/bin/sandbox-exec`） |
-| Windows | attrib +R 只读属性 | 系统自带（PowerShell + attrib）；弱于 bwrap/seatbelt，见下方安全边界 |
+| Windows | 双模式：管理员 Low Integrity 进程（内核级）/ 非管理员仅警告（无文件保护） | 系统自带（ctypes）；详见下方文件权限表 |
 
 **启用**：
 
@@ -808,18 +808,25 @@ sandbox_network = false       # 可选：允许网络访问
 | 路径 | 权限 |
 |---|---|
 | 工作目录（项目目录） | 可读可写 |
-| 系统临时目录（`/tmp`） | 可读可写 |
+| 系统临时目录（`tempfile.gettempdir()`，跨平台） | 可读可写 |
 | `~/.mini-agent` | 只读（防命令篡改配置） |
 | 其余整个文件系统 | 只读 |
 
-**Windows（attrib）**——文件属性级保护，只保护具体路径：
+Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（util-linux 预装），提供类似的挂载命名空间隔离。
+
+**Windows 管理员模式（Low Integrity 进程）**——内核级隔离，等同 bwrap/seatbelt：
 
 | 路径 | 权限 |
 |---|---|
 | 工作目录（项目目录） | 可读可写 |
 | 系统临时目录 | 可读可写 |
-| `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` + deny_write 配置 | 只读（`attrib +R`，命令结束后恢复） |
-| 其余文件系统 | **仍可写**（这是 Windows 沙箱与 bwrap/seatbelt 的核心差异） |
+| 其余文件系统 | **内核强制不可写**（Low Integrity token 无法写入 Medium/High 完整性对象） |
+
+通过 ctypes 降低子进程令牌完整性（`_low_integrity.py` helper），与 bwrap/seatbelt 提供等效的内核级保护。
+
+**Windows 非管理员模式（仅警告，无文件保护）**——attrib 已禁用（会阻断 agent 自身文件写入）：
+
+非管理员模式启动时仅显示警告，不做任何文件保护。只有管理员 Low Integrity 模式提供真正的沙箱隔离。
 
 **sandbox_auto_allow 与 permissions.toml 的配合**：
 
@@ -834,7 +841,7 @@ sandbox_network = false       # 可选：允许网络访问
      sandbox_auto_allow=true → 放行（沙箱兜底）
      sandbox_auto_allow=false → 弹窗确认
   ↓
-④ 执行：有沙箱 → 隔离执行（Linux/macOS 只读 rootfs；Windows 只读敏感路径）
+④ 执行：有沙箱 → 隔离执行（Linux/macOS 只读 rootfs；Windows 管理员 Low Integrity 内核级隔离）
        无沙箱 → 原样执行
 ```
 
@@ -849,10 +856,12 @@ sandbox_network = false       # 可选：允许网络访问
 > **`sandbox=false` 时**（已改为默认开启）：三个平台都只有正则 + 确认框防护。LLM 被拒 `rm -rf` 后可改用 `python -c "shutil.rmtree(...)"` 绕过（D3 已把常见内联解释器加入危险模式弹确认；写 `.py` 文件再执行会被写后执行检测拦截弹确认）。
 >
 > **`sandbox=true` 时**：
-> - **Linux/macOS**：bwrap/seatbelt 提供内核级只读文件系统。即使 LLM 绕过正则，也写不了受保护路径。这是最强防护。
-> - **Windows**：attrib 沙箱保护 `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` 等敏感路径不被篡改，但**未保护的路径仍可写**。比 Linux/macOS 弱，比无沙箱强。
+> - **Linux**：bwrap（或 unshare 后备）提供内核级只读文件系统。即使 LLM 绕过正则，也写不了受保护路径。这是最强防护。
+> - **macOS**：seatbelt 提供内核级只读文件系统，等同 Linux bwrap。
+> - **Windows 管理员**：Low Integrity 进程提供内核级隔离，等同 bwrap/seatbelt。
+> - **Windows 非管理员**：非管理员模式无文件保护（仅警告）。attrib 已禁用，因为会阻断 agent 自身文件写入。只有管理员 Low Integrity 提供真正保护。
 >
-> **结论**：拒绝一条命令 ≠ 该操作不可能完成。沙箱收窄了可写范围，正则 + 确认框防常见误操作，但在无沙箱或 Windows 沙箱下无法完全防 LLM 刻意绕过。
+> **结论**：拒绝一条命令 ≠ 该操作不可能完成。沙箱收窄了可写范围，正则 + 确认框 + 写后执行检测防常见误操作，但在无沙箱或 Windows 非管理员沙箱下无法完全防 LLM 刻意绕过。
 
 ---
 

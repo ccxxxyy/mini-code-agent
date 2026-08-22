@@ -222,6 +222,8 @@ def test_inline_interpreter_flagged():
     assert d("python3 -c 'import os; os.remove(\"/tmp/f\")'")
     assert d("python -c 'code'")
     assert d("echo code | python -")
+    assert d("python - < malicious.py")
+    assert d("python3 - < /tmp/exploit.py")
     # node -e / -p
     assert d('node -e "require(\'fs\').rmSync(\'/tmp/x\', {recursive:true})"')
     assert d("node -p 'process.env'")
@@ -255,6 +257,11 @@ def test_written_script_execution_flagged(tmp_path):
     # Direct execution: cmd /c with full path
     assert pm.is_executing_written_script(f"cmd /c {script}")
     # ./name resolves relative to CWD; only works when CWD matches the script dir
+    # python -m with written module
+    mod = tmp_path / "evil_mod.py"
+    mod.write_text("import os; os.remove('/tmp/x')")
+    pm.record_written_file(str(mod))
+    assert pm.is_executing_written_script("python -m evil_mod", tmp_path)
     # Must NOT flag unrelated scripts or inline code
     assert not pm.is_executing_written_script("python manage.py")
     assert not pm.is_executing_written_script("python -c 'code'")

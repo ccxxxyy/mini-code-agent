@@ -1,18 +1,14 @@
 """Helper: lower this process to Low integrity and run a command.
 辅助脚本：将本进程降为 Low 完整性后执行命令。
 
-Usage: python _low_integrity.py [--allow-write PATH ...] -- COMMAND...
+Usage: python _low_integrity.py -- COMMAND...
 
 The process lowers its own token to Windows Mandatory Low integrity, then
 runs the command via subprocess. Low integrity processes cannot write to
 Medium integrity objects (the default for all user files) -- the kernel
 blocks it at the syscall level, even os.chmod/attrib -R cannot undo it.
-
-Allowed write paths must be set to Low integrity by the CALLER before
-invoking this helper (the helper is already Low and cannot change labels).
 本进程降为 Low 完整性后用 subprocess 执行命令。Low 进程无法写入 Medium
 对象（用户文件默认值）——内核在 syscall 层阻止，os.chmod/attrib 也无法解除。
-允许写入的路径须由调用方在调用前设为 Low 完整性（本进程已是 Low，无法改标签）。
 """
 
 from __future__ import annotations
@@ -38,7 +34,6 @@ class TOKEN_MANDATORY_LABEL(ctypes.Structure):
 
 
 def _setup_ctypes() -> tuple:
-    """Set up ctypes function signatures. 设置 ctypes 函数签名。"""
     advapi32 = ctypes.windll.advapi32
     kernel32 = ctypes.windll.kernel32
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
@@ -103,7 +98,7 @@ def lower_integrity() -> None:
 def main() -> int:
     args = sys.argv[1:]
     if "--" not in args:
-        print("usage: _low_integrity.py [--allow-write PATH ...] -- COMMAND...", file=sys.stderr)
+        print("usage: _low_integrity.py -- COMMAND...", file=sys.stderr)
         return 2
 
     sep = args.index("--")

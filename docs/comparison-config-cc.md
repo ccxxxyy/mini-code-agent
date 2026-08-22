@@ -506,7 +506,7 @@ cache_creation = 3.0                 # 缓存创建价（可选）
 | **事件监听插件** | `listener_dirs` 列表 | 目录下的 `*.py` 文件自动注册为 EventBus 监听器 |
 | **插件生态** | `plugin_dirs` / `disabled_plugins` | 本地 `*.py` 或 pip 包（`mini_agent.plugins` entry point）注册工具/命令/技能，`/plugins` 查看 |
 | **技能系统** | `skill_dirs` 列表 | `skills/*/SKILL.md` 定义可复用的 LLM 指令模板 |
-| **OS 沙箱** | `[security] sandbox = true` | Linux bwrap / macOS seatbelt 内核级隔离 |
+| **OS 沙箱** | `[security] sandbox = true`（默认开启） | Linux bwrap/unshare + macOS seatbelt + Windows 双模式（管理员 Low Integrity 内核级 / 非管理员仅警告） |
 | **压缩调优** | `[memory]` 段 | 软/硬压缩阈值、熔断器、溢写预算等 |
 | **会话清理** | `session_cleanup_days` | 自动清理 N 天前的旧会话文件 |
 | **主题** | `theme` | `default` / `dark` / `light`，也可 `/theme` 运行时切换 |

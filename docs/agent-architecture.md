@@ -82,7 +82,7 @@ while True:
 
 **核心模式**：工具执行前过一道门控——自动放行 / 弹窗确认 / 直接拒绝。
 
-**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。26 条危险命令正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh + D3 新增内联解释器拦截：python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh）。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。P79 补上工具级 scope：`/deny tool delete_file` 直接拦掉整个工具（在命令/路径检查之前评估），`check()` 重构为按 scope 分发的通用检查入口。P82 pane worker 跨进程权限审批：`security/remote_confirm.py` RemoteConfirm 文件协议，worker 写请求 JSON → 父进程轮询中转 → 超时安全拒绝；弹窗前发射 `PermissionCheckEvent(decision="pending")` 事件。
+**本项目实现**：`security/permission.py` PermissionManager + `security/path_guard.py` 路径守卫。项目内路径自动放行，`~/.ssh` 等敏感路径直接拒绝，项目外路径弹确认。三级模式（allow/ask/deny）可配。26 条危险命令正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh + D3 新增内联解释器拦截：python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh）。写后执行检测（`record_written_file()` + `is_executing_written_script()`）：先写 .py/.js/.bat 再执行会被拦截弹确认。P78 增加运行时规则管理：`/allow` `/deny` 斜杠命令动态添加规则，`--save` 持久化到 TOML 文件。P79 补上工具级 scope：`/deny tool delete_file` 直接拦掉整个工具（在命令/路径检查之前评估），`check()` 重构为按 scope 分发的通用检查入口。P82 pane worker 跨进程权限审批：`security/remote_confirm.py` RemoteConfirm 文件协议，worker 写请求 JSON → 父进程轮询中转 → 超时安全拒绝；弹窗前发射 `PermissionCheckEvent(decision="pending")` 事件。OS 级沙箱（`security/sandbox/`，默认开启）：Linux bwrap/unshare、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员仅警告，无文件保护）。
 
 **判断标准**：框架有没有工具执行前的权限检查？危险命令（rm、sudo）有没有拦截？用户能不能控制拦截策略（不仅能在启动前配文件，还能在运行中动态调整）？
 

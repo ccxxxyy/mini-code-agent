@@ -2916,80 +2916,34 @@ A2 真实验证实测暴露两次绕过：用户拒掉 4 条 `rm`/`rmdir`/`del` 
 
 ## 88.2 方案
 
-**三管齐下：候选 ① 内联解释器黑名单 + 候选 ② Windows attrib 沙箱 + 文档标注边界**。
+**内联解释器黑名单 + Windows Low Integrity 沙箱 + 写后执行检测**。
 
-`DANGEROUS_COMMAND_PATTERNS`（`security/permission.py`）新增 7 条正则：
+`DANGEROUS_COMMAND_PATTERNS`（`security/permission.py`）新增 7 条正则（19→26 条，IGNORECASE），命中即弹确认框：`python -c`/`python - < file`、`node -e/-p`、`perl -e`、`ruby -e`、`(ba)?sh -c`、`powershell -Command/-c`、`pwsh -Command/-c`。
 
-| 模式 | 命中 | 不命中 |
-|---|---|---|
-| `python[23]? -(c\|$)` | `python -c "code"`、`python3 -c`、`python -`(stdin) | `python script.py`、`python -m pytest` |
-| `node -(e\|p)` | `node -e "code"`、`node -p` | `node index.js` |
-| `perl -e` | `perl -e '...'` | `perl script.pl` |
-| `ruby -e` | `ruby -e '...'` | `ruby app.rb` |
-| `(ba)?sh -c` | `sh -c "cmd"`、`bash -c "cmd"` | `bash script.sh` |
-| `powershell -(Command\|c)` | `powershell -Command "..."` | — |
-| `pwsh -(Command\|c)` | `pwsh -c "..."` | — |
+**Windows Low Integrity 沙箱**（`sandbox/windows.py` + `_low_integrity.py`）：管理员运行时，`_low_integrity.py` helper 用 ctypes 调 `SetTokenInformation` 将子进程 token 降为 Low 完整性。内核级强制——Low 进程不能写 Medium 对象（用户文件默认值），`os.chmod`/`attrib -R`/`shutil.rmtree+onerror` 全部被内核阻止。允许写入路径用 `icacls /setintegritylevel L` 降为 Low（需管理员），命令结束后恢复 Medium。deny_write 路径保持 Medium 不降。
 
-命中后与 `rm -rf` 同等待遇：弹确认框，用户可拒。19→26 条模式，IGNORECASE。
+**attrib 方案的教训**：最初尝试用 `attrib +R` 设置只读保护敏感路径。实测发现三个致命缺陷：① 子进程可用 `os.chmod`/`attrib -R` 一行清除；② `attrib` 是系统级的，阻断了 agent 自身对 `~/.mini-agent/input_history`/session/memory 的写入；③ 崩溃时只读标志残留。已完全禁用——`activate()`/`deactivate()` 为空操作，非管理员模式仅显示启动警告。
 
-**Windows attrib 沙箱**（`sandbox/windows.py`）：
-
-`create_sandbox()` 在 Windows 上不再返回 None，改为返回 `WindowsSandbox`。`wrap()` 生成一段 base64 编码的 PowerShell 脚本，在 try/finally 块中：
-1. try：`attrib +R /S /D <path>` 对敏感路径设置只读属性（允许读取，阻止写入和删除）
-2. 执行原始命令
-3. finally：`attrib -R /S /D <path>` 移除只读属性
-
-保护的路径：显式 `deny_write` 配置 + `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent`（排除 `allow_write` 中的路径）。
+**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat`/`./script.py`/`python -m module` 执行写过的脚本时弹确认。`_would_ask_command()` 同步更新防流式抢跑。`shared_written_files` 支持跨 Agent 共享。
 
 ## 88.3 权衡
 
-**内联解释器黑名单**是减速带而非围墙。LLM 仍可：① 写 `.py` 文件再 `python script.py`；② 用更冷门的解释器。正则看不进文件内容。
+- 内联解释器黑名单是减速带——LLM 仍可用更冷门的解释器绕过，但写后执行检测堵住了"先写 .py 再执行"的路径
+- Windows 管理员 Low Integrity = 内核级保护（等同 bwrap/seatbelt），非管理员 = 无文件保护（OS 限制无解）
+- Linux：bwrap 优先，bwrap 不可用时自动降级 unshare（`unshare --mount --map-root-user`，util-linux 预装）
+- sandbox 默认开启（`SecurityConfig.sandbox = True`），后端不可用时启动警告
 
-**Windows attrib 沙箱**弱于 bwrap/seatbelt：
-- bwrap/seatbelt：整个文件系统只读，只放行白名单路径 → 未知路径默认安全
-- Windows attrib：只对已知的敏感路径设置只读标志，其余可写 → 未知路径默认可写
-- attrib 修改的是文件只读属性，不是进程级隔离；硬崩溃可能残留只读标志
-- 但比零防护强：至少 `~/.ssh`/`~/.mini-agent` 等关键路径不会被命令篡改
+## 88.4 验证
 
-Job Object 不做的原因：只管进程资源限制，不提供文件系统隔离。AppContainer/Restricted Token 实现复杂度极高且兼容性差。attrib 方案更简单可靠，是实用性与可行性的折中。
+- 权限测试 6 个 + 沙箱测试 17 个 = 23 个新测试函数，全量 1055 passed
+- 管理员 Low Integrity E2E 验证通过：写入/删除/shutil.rmtree+onerror/attrib -R 绕过全被内核阻止，读取正常
+- 管理员 icacls setintegritylevel L/M 实测返回 0（降级和恢复都成功）
+- deny_write Low Integrity 验证通过：allow_write 内的 deny 子路径保持 Medium 不可写
+- 真实 LLM 运行验证通过：`python -c "print('hello')"` 弹确认框 `dangerous command detected`
+- record_written_file + is_executing_written_script + would_ask 集成验证通过
+- 非管理员模式启动警告正常显示
+- Linux/macOS 待对应平台验证（unshare 需 unprivileged user namespaces，seatbelt 需 macOS）
 
-## 88.4 文档同步
+## 88.5 已知遗留
 
-- `config-guide.md`（中/英）：沙箱章节新增 Windows 安全边界警告（"拒绝命令 ≠ 操作不可能"）+ 模式数量 19→26 + 新增模式列表
-- `spec.md`：DANGEROUS_COMMAND_PATTERNS 描述更新，加内联解释器拦截说明和 Windows 定位
-- `CHANGELOG.md`：D3 条目
-- `roadmap.md`：D3 勾选并写完成记录
-
-## 88.5 后续补强（同一轮）
-
-**④ 写后执行检测**：agent 用 write_file/edit_file 写的文件路径记入 `PermissionManager._session_written_files`（`agent_loop.py` 执行成功后调用 `record_written_file`）。`is_executing_written_script()` 用三组正则检测命令是否在执行写过的脚本：`python/node/perl/ruby <file>`、`./file`、`cmd /c file`。命中则弹确认框（与危险命令同等待遇）。`_would_ask_command()` 同步更新，防止流式期间抢跑执行。
-
-**⑤ sandbox 默认开启**：`SecurityConfig.sandbox` 默认值 `False` → `True`。后端不可用时 `create_sandbox()` 返回的实例 `.available()` 为 False，静默跳过——不会影响无 PowerShell/bwrap 的环境。
-
-**⑥ Windows 主目录全覆盖**：`_collect_deny_paths` 从"4 个已知敏感目录"改为"扫描 `Path.home()` 下所有子目录"（排除 allow_write），接近 bwrap 的"默认只读"行为。
-
-## 88.6 验证
-
-- 权限测试：4 个新测试函数（内联解释器 13+8 用例 + 写后执行检测 2 用例），66 测试全绿
-- 沙箱测试：10 个新测试函数（含网络限制 2 个），27 测试全绿
-- 总计 93 passed，ruff clean
-- 真实运行验证：`attrib +R` 沙箱端到端测试通过（写入/删除/Python os.remove 全被阻止，读取正常，finally 恢复正常）
-
-## 88.7 后续补强 2：双模式沙箱 + unshare + 启动警告
-
-- **Windows 双模式**：`is_admin()` 检测管理员权限。管理员 → `_low_integrity.py` helper（ctypes 降 token 完整性到 Low，内核级写保护）；非管理员 → attrib（可绕过，启动警告）。
-- **Linux unshare 后备**：`create_sandbox()` 在 bwrap 不可用时自动降级到 `UnshareSandbox`（`unshare --mount --map-root-user`），几乎不需用户干预。
-- **启动警告**：sandbox=true 但后端不可用/降级时 `app.py` 在 `show_welcome` 后调用 `show_info` 显示明确警告。
-- **deny_write 修复**：`_wrap_low_integrity` 对 deny_write 路径显式 `icacls /setintegritylevel M` 保持 Medium。
-
-## 88.8 已知遗留（31 项完整清单）
-
-完整清单及每项详述见 roadmap.md D3 条目。按性质分四类：
-
-**代码层（15 项）**：① Windows 非管理员 attrib 可绕过（OS 限制无解）；② `./script.py` 路径解析 CWD 不匹配；③ `_ps_escape` 不处理 PowerShell 特殊字符；④ `would_ask` 里 `Path.resolve()` I/O；⑤ helper `--` 解析未测含 `--` 的命令；⑥ 子 Agent 不共享写文件追踪；⑦ attrib 主目录扫描性能；⑧ Windows 主目录外路径 attrib 模式不覆盖；⑨ `self.working_dir` 加了但从没赋值（#2 的修复等于没做）；⑩ `python - < file` 不被正则捕获；⑪ `python -m` 可运行 agent 写的模块；⑫ sandbox=true 默认导致 Windows 每条 bash 经 PowerShell 增加延迟；⑬ `_collect_deny_paths` 扫描含 AppData 可能影响其他程序；⑭ `_low_integrity.py` 不处理 GBK 编码；⑮ CHANGELOG 测试数量前后不一致。
-
-**验证层（10 项）**：⑯ 管理员下 icacls setintegritylevel 未验证；⑰ unshare 需 unprivileged user namespaces；⑱ mount remount,ro 取决于内核版本；⑲ unshare/bwrap 未在真实 Linux 测过；⑳ seatbelt 未在真实 macOS 测过；㉑ netsh 防火墙未验证且需管理员；㉒ 没做真实 LLM 运行验证；㉓ deny_write Low Integrity 修复未验证；㉔ record_written_file 无集成测试；㉕ 四个后端行为不一致无统一集成测试。
-
-**文档层（4 项）**：㉖ 文档未同步最新改动；㉗ spec.md 目录树未更新；㉘ README 测试数/文件数未更新；㉙ comparison-config-cc.md 未检查。
-
-**不属于 D3（2 项）**：㉚ D2 行为层；㉛ 全量测试已通过（已解决）。
+完整清单见 roadmap.md D3 条目。

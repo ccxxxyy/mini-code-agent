@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1033%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1055%20passed-brightgreen)]()
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
@@ -40,7 +40,7 @@
 
 🔌 **MCP Protocol** — stdio + HTTP + SSE transport, connect any MCP-compatible tool server via config; `loading = "dispatch"` for lazy discovery
 
-🔒 **OS Sandbox** — Linux bubblewrap + macOS seatbelt kernel-level isolation (optional `[security] sandbox = true`)
+🔒 **OS Sandbox** — Linux bubblewrap/unshare + macOS seatbelt + Windows dual-mode (admin Low Integrity kernel-level / non-admin warning only) — on by default (`[security] sandbox = true`)
 
 🎨 **Themes** — dark/light/default, markdown heading colors follow theme
 
@@ -297,7 +297,7 @@ mini-code-agent/
 │   ├── core/        # Agent loop, state, sub-agents, teams, planner, mailbox, pane worker, cost tracker, task store, tool recorder, agent types, spawn backends
 │   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/dispatch) + hook system
 │   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
-│   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/seatbelt), worktree isolation, remote confirm (cross-process)
+│   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/unshare/seatbelt/windows dual-mode), worktree isolation, remote confirm (cross-process)
 │   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher
 │   ├── remote/      # WebSocket server + browser UI (--remote mode, disconnect queuing)
 │   ├── extensions/  # Slash commands (26), skills (4 built-in), hooks (11 stages), event listener + tool/command/skill plugins
@@ -305,7 +305,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1033 tests, 80%+ coverage
+├── tests/           # 1055 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -326,7 +326,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1033 tests
+uv run pytest tests/           # 1055 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
