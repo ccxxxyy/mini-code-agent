@@ -223,15 +223,28 @@ async def test_windows_nonadmin_no_deny_no_net_passthrough():
 
 
 async def test_windows_available():
-    with patch("shutil.which", return_value="/usr/bin/powershell"):
-        with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
-            assert WindowsSandbox().available()
+    with patch("mini_agent.security.sandbox.windows.sys") as mock_sys:
+        mock_sys.platform = "win32"
+        mock_sys.executable = "/usr/bin/python"
+        with patch("shutil.which", return_value="/usr/bin/powershell"):
+            with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
+                assert WindowsSandbox().available()
 
 
 async def test_windows_available_missing_powershell():
-    with patch("shutil.which", return_value=None):
-        with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
-            assert not WindowsSandbox().available()
+    with patch("mini_agent.security.sandbox.windows.sys") as mock_sys:
+        mock_sys.platform = "win32"
+        with patch("shutil.which", return_value=None):
+            with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
+                assert not WindowsSandbox().available()
+
+
+async def test_windows_available_on_linux():
+    with patch("mini_agent.security.sandbox.windows.sys") as mock_sys:
+        mock_sys.platform = "linux"
+        with patch("shutil.which", return_value="/usr/bin/powershell"):
+            with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
+                assert not WindowsSandbox().available()
 
 
 async def test_windows_collect_deny_paths_excludes_allowed(tmp_path):
