@@ -75,6 +75,27 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"\bformat\s+[a-z]:",  # Windows format Windows 的格式化磁盘
     r"curl[^|]*\|\s*(ba)?sh",  # curl | sh 下载并直接执行脚本
     r"wget[^|]*\|\s*(ba)?sh",
+    # Inline interpreter execution -- arbitrary code inside quotes bypasses
+    # command-signature matching (D3: proven by real A2 bypass twice).
+    # 内联解释器——引号内任意代码绕过命令签名匹配（D3：A2 实测两次绕过证实）。
+    r"\bpython[23]?\s+-(c\b|$)",  # python -c "..." / python -（stdin 模式）
+    r"\bnode\s+-(e|p)\b",  # node -e "..." / node --eval / node -p
+    r"\bperl\s+-e\b",  # perl -e '...'
+    r"\bruby\s+-e\b",  # ruby -e '...'
+    r"\b(ba)?sh\s+-c\b",  # sh -c "..." / bash -c "..."
+    r"\bpowershell\s+-(Command|c)\b",  # powershell -Command "..."
+    r"\bpwsh\s+-(Command|c)\b",  # pwsh -c "..."
+]
+
+# Matches script execution to detect write-then-execute bypass:
+#   python script.py / node app.js / perl x.pl / ruby x.rb
+#   ./script.py / .\script.bat (direct execution)
+#   cmd /c script.bat
+# 匹配脚本执行以检测写后执行绕过。
+_SCRIPT_EXEC_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?:python[23]?|node|perl|ruby)\s+(?!-\S)(?P<path>\S+)", re.IGNORECASE),
+    re.compile(r"^\.[\\/](?P<path>\S+)", re.IGNORECASE),
+    re.compile(r"\bcmd\s+/c\s+(?P<path>\S+)", re.IGNORECASE),
 ]
 
 # Callback to ask the user for confirmation.
@@ -108,6 +129,8 @@ class PermissionManager:
         self._event_bus = event_bus
         self._rules: list[PermissionRule] = []
         self._session_grants: set[tuple[PermissionScope, str]] = set()
+        self._session_written_files: set[str] = set()
+        self.working_dir: Path | None = None
         # OS sandbox auto-allows normal commands (kernel provides isolation)
         # OS 沙箱自动放行普通命令（内核提供隔离）
         self.sandbox_auto_allow: bool = False
@@ -406,14 +429,20 @@ class PermissionManager:
         if decision is not None:
             return decision
 
-        # Dangerous pattern -> confirm (unless kernel sandbox provides isolation)
-        # 危险模式 -> 确认（除非内核沙箱提供隔离）
-        if self.is_dangerous_command(command):
+        # Dangerous pattern or executing a script written this session -> confirm
+        # 危险模式 或 执行本会话写过的脚本 -> 确认
+        is_dangerous = self.is_dangerous_command(command)
+        is_written_script = self.is_executing_written_script(command, self.working_dir)
+        if is_dangerous or is_written_script:
             if self.sandbox_auto_allow:
                 self.last_decision_reason = "sandbox_auto_allow"
                 return PermissionDecision.GRANTED
-            request.context = "dangerous command detected"
-            self.last_decision_reason = "dangerous_command"
+            if is_written_script:
+                request.context = "executing script written by agent this session"
+                self.last_decision_reason = "written_script_execution"
+            else:
+                request.context = "dangerous command detected"
+                self.last_decision_reason = "dangerous_command"
             return await self._ask_user(request)
 
         # Normal command -> default mode 普通命令 -> 走默认模式
@@ -455,6 +484,32 @@ class PermissionManager:
     def is_dangerous_command(command: str) -> bool:
         return any(re.search(p, command, re.IGNORECASE) for p in DANGEROUS_COMMAND_PATTERNS)
 
+    def record_written_file(self, path: str) -> None:
+        """Track a file written by the agent this session.
+        记录本会话 agent 写过的文件。"""
+        self._session_written_files.add(str(Path(path).resolve()))
+
+    def is_executing_written_script(self, command: str, working_dir: Path | None = None) -> bool:
+        """Check if a command runs a script the agent wrote this session.
+        检测命令是否在执行本会话 agent 写过的脚本文件。
+        working_dir: bash 工具的工作目录，用于解析相对路径。"""
+        if not self._session_written_files:
+            return False
+        cmd = command.strip()
+        for pattern in _SCRIPT_EXEC_PATTERNS:
+            m = pattern.search(cmd)
+            if m:
+                script_path = m.group("path").strip().strip("'\"")
+                try:
+                    p = Path(script_path)
+                    if not p.is_absolute() and working_dir:
+                        p = working_dir / p
+                    if str(p.resolve()) in self._session_written_files:
+                        return True
+                except (ValueError, OSError):
+                    continue
+        return False
+
     # --- Non-interactive peek: "would this call pop a confirm dialog?"
     # --- 非交互预判："这次调用会不会弹确认框？"
     # Used by streaming tool execution: tools that would NOT prompt can be
@@ -485,9 +540,11 @@ class PermissionManager:
         request = PermissionRequest(scope=PermissionScope.COMMAND, resource=command)
         if self._rules_would_resolve(request):
             return False
-        if self.is_dangerous_command(command):
-            return True  # dangerous -> always confirms 危险命令始终确认
-        return False  # normal commands auto-resolve in every mode 普通命令各模式均自动判定
+        if self.is_dangerous_command(command) or self.is_executing_written_script(
+            command, self.working_dir
+        ):
+            return True
+        return False
 
     def _would_ask_path(self, path: Path) -> bool:
         if self._deny_rule_matches(PermissionScope.PATH, str(path)):

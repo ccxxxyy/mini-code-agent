@@ -1,7 +1,7 @@
 {
   "mode": "replace",
   "target": "D:\\PythonProjects\\mini-code-agent\\.claude",
-  "timestamp": "2026-08-21T05:37:22Z",
+  "timestamp": "2026-08-22T01:47:30Z",
   "added": [
     "ccmetr/bin",
     "skills/metr-bug",
@@ -26,14 +26,14 @@
   "permission_added": "Bash(.claude/ccmetr/bin/ccmetr *)",
   "hook_command_substring": "/ccmetr/bin/",
   "statusLine_was_set": true,
-  "prior_statusLine": null,
-  "schema_was_added": true,
-  "gitignore_created": true,
-  "gitignore_lines_appended": [
-    "settings.local.json",
-    "settings.local.json.bak",
-    "settings.json.bak",
-    "__pycache__/"
-  ],
+  "prior_statusLine": {
+    "type": "command",
+    "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/ccmetr/bin/ccmetr-client.py\" statusline",
+    "refreshInterval": 5,
+    "padding": 1
+  },
+  "schema_was_added": false,
+  "gitignore_created": false,
+  "gitignore_lines_appended": [],
   "wrote_settings_local": true
 }

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 import urllib.error
@@ -39,7 +40,7 @@ PLACEHOLDER_TOKEN = "PASTE-YOUR-STUDY-KEY-HERE"
 METR_TOKEN_ENV = "METR_AUTH_TOKEN"
 # Sent as X-CCMETR-Client-Version; the gateway 403s { code: client_outdated } if
 # this is too old. Bump per release (raise MAJOR for a breaking change).
-CLIENT_VERSION = "1.3.0"
+CLIENT_VERSION = "1.3.1"
 
 
 def base_url() -> str:
@@ -309,6 +310,43 @@ def _is_allowed_transcript(p: pathlib.Path) -> bool:
     return False
 
 
+# A Claude Code session id as it appears in a transcript filename. Validated
+# before it reaches a glob pattern: the gateway supplies the id, which is the same
+# reason _is_allowed_transcript exists, and a metacharacter or ".." in a pattern
+# would widen the search past the roots this is meant to stay inside.
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{7,127}\Z")
+
+
+def _find_transcript(sid: str) -> pathlib.Path | None:
+    """Locate a session's transcript by id, for when the path the gateway stored no
+    longer resolves. Searches only inside _transcript_roots(), so it widens the
+    allowed set by nothing; the caller still runs the hit back through
+    _is_allowed_transcript to reject a symlink escape."""
+    if not _SESSION_ID_RE.match(sid or ""):
+        return None
+    # A sub-agent's id and its FILENAME are not the same string. The gateway keys
+    # a sub-agent session on the hook payload's bare agent_id (hook/route.ts:
+    # String(payload.agent_id || "")), while Claude Code writes the file as
+    # agent-<agent_id>.jsonl -- so searching for "<sid>.jsonl" under subagents/
+    # matches nothing, measured 0/200 against real transcripts on a dev machine.
+    # Try the prefixed name first for a bare id, and skip that when the caller
+    # already handed us a prefixed one rather than globbing agent-agent-*.
+    sub_stems = [sid] if sid.startswith("agent-") else [f"agent-{sid}", sid]
+    # Cheapest first: the flat top-level layout is one stat per project dir, the
+    # nested sub-agent walk is recursive.
+    patterns = [f"*/{sid}.jsonl"]
+    patterns += [f"*/*/subagents/**/{stem}.jsonl" for stem in sub_stems]
+    for root in _transcript_roots():
+        for pattern in patterns:
+            try:
+                for hit in root.glob(pattern):
+                    if hit.is_file():
+                        return hit
+            except OSError:
+                continue
+    return None
+
+
 def upload_transcripts_and_bundle(resp: dict) -> str:
     """Upload each named transcript, then ask the gateway to bundle them. Returns
     the bundle's summary line to append to the user's output, or ""."""
@@ -321,7 +359,21 @@ def upload_transcripts_and_bundle(resp: dict) -> str:
         # Reject paths outside the transcript dir: the gateway picks the path, and a
         # bad one could otherwise exfiltrate local files.
         if not _is_allowed_transcript(p):
-            continue
+            # The stored path was written by whichever hook last fired for that
+            # session and can be stale by the time the task closes; the session id
+            # cannot. Fall back to locating the file by id — and if that fails too,
+            # LOG it. A bare `continue` here made a permanently unuploadable
+            # transcript indistinguishable from one still in flight, so the gateway
+            # re-issued the directive until it burned its attempt budget, then
+            # sealed the task and dropped a transcript that was intact on disk.
+            alt = _find_transcript(sid)
+            if alt is None or not _is_allowed_transcript(alt):
+                _note_err(
+                    "transcript",
+                    FileNotFoundError(f"session {sid}: no readable transcript (gateway named {path!r})"),
+                )
+                continue
+            p = alt
         try:
             _request(f"/api/ccmetr/transcript?session_id={urllib.parse.quote(sid)}", p.read_bytes(), "application/jsonl", UPLOAD_TIMEOUT)
         except Exception as e:

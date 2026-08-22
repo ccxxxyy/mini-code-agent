@@ -229,13 +229,14 @@ consolidation_threshold = 20 # Automatically run LLM semantic consolidation when
 permission_mode = "ask"      # "allow" (allow everything) | "ask" (prompt) | "deny" (deny everything)
 allowed_commands = ["git *", "uv *"]   # Confirmation-free command whitelist (default empty); a match is allowed through (including dangerous commands)
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional deny list (default values); a match is rejected
-# Note: denied_commands is glob exact-match rejection. There are also 19 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
+# Note: denied_commands is glob exact-match rejection. There are also 26 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
 # used for confirmation dialogs (rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
-# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh) — these are not configurable, but can be
+# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
+# sh -c/bash -c/powershell -Command/pwsh -c) — these are not configurable, but can be
 # allowed via allowed_commands or made confirmation-free via sandbox_auto_allow.
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree isolation directory
 worktree_max_age_days = 7    # Clean worktrees older than this many days are cleaned up automatically at startup (0 = disabled)
-sandbox = false              # OS-level sandbox (Linux bwrap / macOS seatbelt), true to enable
+sandbox = true               # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows attrib), on by default
 sandbox_auto_allow = false   # Dangerous commands skip confirmation under the sandbox (deny rules still block)
 sandbox_network = false      # Allow network access inside the sandbox
 
@@ -788,7 +789,7 @@ Kernel-level isolation of the execution environment for bash commands — even a
 |---|---|---|
 | Linux | bubblewrap (bwrap) | `sudo apt install bubblewrap` or `yum install bubblewrap` |
 | macOS | Seatbelt (sandbox-exec) | Bundled with the system (`/usr/bin/sandbox-exec`) |
-| Windows | Unsupported | Keeps the existing regex interception + permissions.toml rules |
+| Windows | attrib +R read-only attribute | Built-in (PowerShell + attrib); weaker than bwrap/seatbelt, see security boundary below |
 
 **Enabling**:
 
@@ -802,12 +803,23 @@ sandbox_network = false       # Optional: allow network access
 
 **File permissions inside the sandbox** (fixed in code, not user-configurable):
 
+**Linux/macOS (bwrap/seatbelt)** — process-level isolation, entire filesystem read-only:
+
 | Path | Permission |
 |---|---|
 | Working directory (project directory) | Read-write |
-| `/tmp` | Read-write |
-| `~/.mini-agent` | Read-only (prevents commands from tampering with the configuration) |
+| System temp directory (`/tmp`) | Read-write |
+| `~/.mini-agent` | Read-only (prevents commands from tampering with configuration) |
 | The rest of the entire filesystem | Read-only |
+
+**Windows (attrib)** — file-attribute-level protection, specific paths only:
+
+| Path | Permission |
+|---|---|
+| Working directory (project directory) | Read-write |
+| System temp directory | Read-write |
+| `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` + deny_write config | Read-only (`attrib +R`, restored after command) |
+| The rest of the filesystem | **Still writable** (this is the core difference from bwrap/seatbelt) |
 
 **How sandbox_auto_allow works with permissions.toml**:
 
@@ -818,11 +830,11 @@ Command arrives
   ↓
 ② permissions.toml allow rule / session grant? → allow
   ↓
-③ Dangerous command?
-     sandbox_auto_allow=true → allow (kernel as the backstop)
+③ Dangerous command (26 regexes, including inline interpreters)?
+     sandbox_auto_allow=true → allow (sandbox as backstop)
      sandbox_auto_allow=false → confirmation dialog
   ↓
-④ Execution: sandbox present → kernel-isolated execution (read-only rootfs)
+④ Execution: sandbox present → isolated execution (Linux/macOS: read-only rootfs; Windows: read-only sensitive paths)
        no sandbox → executed as-is
 ```
 
@@ -832,7 +844,15 @@ Command arrives
 
 **Verifying it works**: after `/trace on`, execute a command; the trace line shows `sandbox_auto_allow` as the decision basis (when confirmation is skipped under the sandbox).
 
-**Windows**: `sandbox = true` with no bwrap/sandbox-exec available → silently falls back; functionality is unaffected, no error raised.
+> **⚠ Security Boundary (applies to all three platforms)**
+>
+> **When `sandbox=false`** (now off by default — sandbox is on): all three platforms have only regex + confirmation dialogs as protection. If the LLM is denied `rm -rf`, it can switch to `python -c "shutil.rmtree(...)"` to bypass (D3 added common inline interpreters to the dangerous patterns; writing a `.py` file and running it is caught by the write-then-execute detection).
+>
+> **When `sandbox=true`**:
+> - **Linux/macOS**: bwrap/seatbelt provide kernel-level read-only filesystem. Even if the LLM bypasses regex, it cannot write to protected paths. This is the strongest protection.
+> - **Windows**: attrib sandbox protects `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.mini-agent` and other sensitive paths from tampering, but **unprotected paths are still writable**. Weaker than Linux/macOS, stronger than no sandbox.
+>
+> **Bottom line**: Denying a command ≠ the operation is impossible. The sandbox narrows the writable scope, regex + confirmation dialogs prevent common mistakes, but without sandbox or with Windows sandbox, deliberate LLM bypass cannot be fully prevented.
 
 ---
 

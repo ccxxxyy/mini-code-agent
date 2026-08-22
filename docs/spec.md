@@ -1706,8 +1706,7 @@ def write_decision(
 
 ### 4.21 `security/sandbox/` -- OS 级沙箱
 
-职责：将 bash 命令包裹进操作系统沙箱（Linux bwrap / macOS seatbelt；Windows 无实现，
-`create_sandbox()` 返回 None）。由 `SecurityConfig.sandbox` 开关，app.py 注入 bash 工具。
+职责：将 bash 命令包裹进操作系统沙箱（Linux bwrap / macOS seatbelt / Windows attrib）。由 `SecurityConfig.sandbox` 开关，app.py 注入 bash 工具。Windows 后端弱于 bwrap/seatbelt：只对特定路径设置只读属性而非令全文件系统只读。
 
 ```python
 @dataclass
@@ -2556,11 +2555,11 @@ class MemoryExtractor:
 
 **命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 19 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 26 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。D3 新增**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。D3 还新增**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台（bwrap/seatbelt/attrib）均提供 OS 级保护。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 
-**流式预判 `would_ask()`**：非交互、无副作用地回答"这次调用会不会弹确认框"。供流式提前执行（§9.3）使用：不会弹窗的工具在 LLM 响应还在流式输出时就提前提交，会弹窗的延迟到流结束后（弹窗不能与流式渲染交错）。
+**流式预判 `would_ask()`**：非交互、无副作用地回答"这次调用会不会弹确认框"。供流式提前执行（§9.3）使用：不会弹窗的工具在 LLM 响应还在流式输出时就提前提交，会弹窗的延迟到流结束后（弹窗不能与流式渲染交错）。检查范围包括危险命令正则和写后执行检测。
 
 **规则管理与持久化**：`add_rule() / remove_rule() / list_rules()` 支持运行时增删查（发射 `PermissionRuleAdded/RemovedEvent`）；`save_rule_to_file()` / `load_rule_files()` 读写用户级与项目级 `permissions.toml`，格式为三节两级：
 

@@ -197,15 +197,19 @@ class Application:
             project_file=working_dir / ".mini-agent" / "permissions.toml",
         )
 
-        # OS-level sandbox (Linux bwrap / macOS seatbelt)
-        # OS 级沙箱（Linux bwrap / macOS seatbelt）
+        # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows Low Integrity or attrib)
+        # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows Low Integrity 或 attrib）
+        self.sandbox_warning: str | None = None
         if config.security.sandbox:
+            import platform
+            import tempfile
+
             from mini_agent.security.sandbox import SandboxConfig, create_sandbox
 
             os_sandbox = create_sandbox()
             if os_sandbox and os_sandbox.available():
                 sb_config = SandboxConfig(
-                    allow_write=[str(working_dir), "/tmp"],
+                    allow_write=[str(working_dir), tempfile.gettempdir()],
                     deny_write=[str(Path.home() / ".mini-agent")],
                     network=config.security.sandbox_network,
                 )
@@ -215,6 +219,25 @@ class Application:
                     bash_tool.sandbox_config = sb_config
                 if config.security.sandbox_auto_allow:
                     self.permission_manager.sandbox_auto_allow = True
+                if hasattr(os_sandbox, "startup_warning"):
+                    self.sandbox_warning = os_sandbox.startup_warning()
+            else:
+                system = platform.system()
+                if system == "Linux":
+                    self.sandbox_warning = (
+                        "[sandbox] sandbox=true but neither bubblewrap nor unshare "
+                        "is available — sandbox is NOT active. "
+                        "Install: sudo apt install bubblewrap"
+                    )
+                elif system == "Windows":
+                    self.sandbox_warning = (
+                        "[sandbox] sandbox=true but sandbox backend unavailable — "
+                        "sandbox is NOT active."
+                    )
+                else:
+                    self.sandbox_warning = (
+                        "[sandbox] sandbox=true but no backend available — sandbox is NOT active."
+                    )
 
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
@@ -538,6 +561,8 @@ class Application:
             logger.warning("hook fire failed: startup", exc_info=True)
             pass
         self.terminal.show_welcome()
+        if self.sandbox_warning:
+            self.terminal.show_info(self.sandbox_warning)
         # Probe context window before the first turn's overflow check
         # 启动时预热探测上下文窗口，让首轮溢出检查就用上真实值
         await self._llm.prepare()

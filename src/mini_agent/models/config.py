@@ -114,9 +114,9 @@ class SecurityConfig:
     # Stale worktrees older than this are auto-removed at startup (0 = off)
     # 超过此天数的过期 worktree 启动时自动清理（0 = 禁用）
     worktree_max_age_days: int = 7
-    # OS-level sandbox (Linux bwrap / macOS seatbelt); Windows: no-op
-    # OS 级沙箱（Linux bwrap / macOS seatbelt）；Windows 无效
-    sandbox: bool = False
+    # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows attrib)
+    # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows attrib）
+    sandbox: bool = True
     sandbox_auto_allow: bool = False
     sandbox_network: bool = False
 
