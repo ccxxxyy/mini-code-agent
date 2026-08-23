@@ -341,6 +341,19 @@ class Application:
 
         self.event_bus.on(SubAgentCompleteEvent, _on_background_complete)
 
+        from mini_agent.models.events import ContextSummaryDoneEvent, ContextSummaryStartEvent
+
+        async def _on_ctx_summary_start(event: ContextSummaryStartEvent) -> None:
+            self.terminal.show_info("Summarizing conversation for context fork...")
+
+        async def _on_ctx_summary_done(event: ContextSummaryDoneEvent) -> None:
+            self.terminal.show_info(
+                f"Context summary ready ({event.duration_ms / 1000:.1f}s, {event.char_count} chars)"
+            )
+
+        self.event_bus.on(ContextSummaryStartEvent, _on_ctx_summary_start)
+        self.event_bus.on(ContextSummaryDoneEvent, _on_ctx_summary_done)
+
         # B1 process tools: expose plan-mode control + ask_user callback
         # B1 流程工具：暴露计划模式控制 + 结构化提问回调
         import types as _types

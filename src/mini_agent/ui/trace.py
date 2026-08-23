@@ -14,6 +14,8 @@ from rich.console import Console
 from mini_agent.events.bus import EventBus
 from mini_agent.models.events import (
     AgentPhaseChangeEvent,
+    ContextSummaryDoneEvent,
+    ContextSummaryStartEvent,
     LLMRequestEvent,
     LLMResponseEvent,
     PermissionCheckEvent,
@@ -50,6 +52,8 @@ class TraceRenderer:
         bus.on(LLMResponseEvent, self._on_llm_response)
         bus.on(TurnCompleteEvent, self._on_turn_complete)
         bus.on(UserMessageEvent, self._on_user_message)
+        bus.on(ContextSummaryStartEvent, self._on_ctx_summary_start)
+        bus.on(ContextSummaryDoneEvent, self._on_ctx_summary_done)
 
     def detach(self, bus: EventBus) -> None:
         """Unsubscribe all handlers. 取消所有订阅。"""
@@ -61,6 +65,8 @@ class TraceRenderer:
         bus.off(LLMResponseEvent, self._on_llm_response)
         bus.off(TurnCompleteEvent, self._on_turn_complete)
         bus.off(UserMessageEvent, self._on_user_message)
+        bus.off(ContextSummaryStartEvent, self._on_ctx_summary_start)
+        bus.off(ContextSummaryDoneEvent, self._on_ctx_summary_done)
 
     def _line(self, kind: str, body: str) -> None:
         """Print one trace line. 输出一行 trace。"""
@@ -132,6 +138,19 @@ class TraceRenderer:
             return
         tc = str(e.has_tool_calls).lower()
         self._line("llm", f"response [dim]{e.tokens_used} tokens, tool_calls={tc}[/dim]")
+
+    async def _on_ctx_summary_start(self, e: ContextSummaryStartEvent) -> None:
+        if not self.enabled:
+            return
+        self._line("ctx", "summarizing parent conversation for fork...")
+
+    async def _on_ctx_summary_done(self, e: ContextSummaryDoneEvent) -> None:
+        if not self.enabled:
+            return
+        self._line(
+            "ctx",
+            f"summary ready  [dim]{e.duration_ms:.0f}ms, {e.char_count} chars[/dim]",
+        )
 
     async def _on_turn_complete(self, e: TurnCompleteEvent) -> None:
         if not self.enabled:

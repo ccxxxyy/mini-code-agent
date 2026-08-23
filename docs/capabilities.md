@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1060 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1063 个测试全部通过（1 skipped）。
 
 ---
 
@@ -164,7 +164,7 @@
 - Mailbox 增强（P58.4）：`to='*'` 广播、request/response 结构化协议（request_id 配对 + approve 表态）、名字寻址（spawn_agents names 参数）、会话级审计留痕（drain 标记已读留盘）
 - 多后端 spawn（comparison 6.4）：`/spawn --pane` 把 SubAgent 跑进可见终端窗格（tmux 分屏 / **Windows Terminal** 分屏或共享窗口标签页——任意终端装了 wt 即可用，独立进程实时观看）；`--wait` 一条命令派发+进度面板+结果；Mailbox 跨进程改造（O_EXCL 文件锁 + 原子写 + 磁盘注册表，4 进程并发写零丢失实测）；worker 协议（spec JSON 进 → 结果 JSON 出，协议文件隔离在工作目录外 + schema 双校验防 LLM 早产桩）；worker 崩溃护栏 + Provider 429 退避重试；真实 LLM 跨进程 E2E + 六轮交互实测迭代
 - 后台派发 + 完成通知：spawn_agents 工具 `background=true` 立即返回，LLM 继续其他工作；子 agent 完成时经 mailbox 向 main 投递含结果的通知（截断 4000 字符），下一轮迭代自动注入对话；终端同步提示完成；默认仍阻塞
-- 摘要式上下文 fork：spawn_agents 工具 `inherit_context=true` / `/spawn --fork` 把父对话的 LLM 摘要（P67 9 节结构，失败回退提取式 digest）注入子 agent system prompt——"按我们讨论的去做"类任务子 agent 出生即知上下文；冻结快照回避 fork 一致性问题，与 background 可组合
+- 摘要式上下文 fork：spawn_agents 工具 `inherit_context=true` / `/spawn --fork` 把父对话的 LLM 摘要（P67 9 节结构，失败回退提取式 digest）注入子 agent system prompt——"按我们讨论的去做"类任务子 agent 出生即知上下文；冻结快照回避 fork 一致性问题，与 background 可组合（background+fork 时摘要+spawn 整体后台执行、立即返回）；摘要生成期间终端提示+trace 可见（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent`）
 
 **验证**：8 个单测含并行计时断言（3 个 0.1s Agent 并行 <0.35s）；真实 API E2E：2 个 Agent 并行读不同文件 2.3 秒各自正确报告
 
@@ -266,7 +266,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1060 个测试全部通过（1 skipped，约 90 秒，零网络依赖），单元 61 文件 + 集成 4 文件 |
+| 测试 | 1063 个测试全部通过（1 skipped，约 90 秒，零网络依赖），单元 61 文件 + 集成 4 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

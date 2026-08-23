@@ -282,6 +282,11 @@
 - [x] `/team <任务>` Planner 分解 + 并行 SubAgent + 汇总报告
 - [x] `/team --isolated <任务>` 团队成员 worktree 隔离
 - [x] SubAgentSpawnEvent / SubAgentCompleteEvent 正确 emit
+- [x] `background=true` 后台派生立即返回,完成后经 mailbox 通知 main、终端提示(SubAgentCompleteEvent 订阅)
+- [x] `inherit_context=true` / `/spawn --fork` 摘要式上下文 fork——父对话 LLM 摘要注入子 agent system prompt
+- [x] ContextSummaryStartEvent / ContextSummaryDoneEvent 正确 emit(摘要开始/完成,含耗时和字符数)
+- [x] 摘要期间终端提示"Summarizing conversation for context fork..." + `/trace on` 显示 `ctx` 行(不再零输出)
+- [x] `background=true + inherit_context=true` 非阻塞——摘要+spawn 整体后台 task,execute() 毫秒级返回(实测 13ms)
 
 ### 架构合规
 - [x] Application 装配 SubAgentManager + WorktreeManager（之前只有 Python API，无终端入口）

@@ -116,14 +116,50 @@ class SpawnAgentsTool(Tool):
         agent_type = kwargs.get("agent_type")
 
         # Fork-style context inheritance: summarize the parent
-        # conversation once, inject into every spawned agent's system prompt
-        # 摘要式上下文继承：父对话摘要一次，注入每个子 agent 的 system prompt
+        # conversation once, inject into every spawned agent's system prompt.
+        # background + inherit_context: defer both summary and spawn to a
+        # background task so execute() returns instantly (B4.2).
+        # 摘要式上下文继承：父对话摘要一次，注入每个子 agent 的 system prompt。
+        # background + inherit_context：摘要和 spawn 整体放后台，execute 立即返回。
         context_summary = ""
         if kwargs.get("inherit_context") and ctx.session is not None:
+            if kwargs.get("background"):
+                import asyncio
+                import logging
+
+                _log = logging.getLogger(__name__)
+                msgs_snapshot = list(ctx.session.conversation.messages)
+
+                async def _deferred_fork_spawn() -> None:
+                    try:
+                        summary = await mgr.build_context_summary(msgs_snapshot)
+                        await mgr.spawn_background(
+                            tasks,
+                            isolation=isolation,
+                            agent_type=agent_type,
+                            names=names,
+                            context_summary=summary,
+                        )
+                    except Exception as exc:
+                        _log.warning("deferred fork spawn failed: %s", exc, exc_info=True)
+
+                task = asyncio.create_task(_deferred_fork_spawn())
+                mgr._notify_tasks.add(task)
+                task.add_done_callback(mgr._notify_tasks.discard)
+                return ToolResult(
+                    call_id="",
+                    name="spawn_agents",
+                    output=(
+                        f"Spawning {len(tasks)} background agent(s) with context fork "
+                        "— summary is generating in the background. You will receive "
+                        "'[Background agent ...]' messages when each one completes."
+                    ),
+                )
             context_summary = await mgr.build_context_summary(ctx.session.conversation.messages)
 
-        # Background mode : fire-and-forget, results arrive as mailbox
-        # messages on completion 后台模式：立即返回，完成后经 mailbox 通知
+        # Background mode (no inherit_context): fire-and-forget, results
+        # arrive as mailbox messages on completion
+        # 后台模式（无 inherit_context）：立即返回，完成后经 mailbox 通知
         if kwargs.get("background"):
             try:
                 ids = await mgr.spawn_background(

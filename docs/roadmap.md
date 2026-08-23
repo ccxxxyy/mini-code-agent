@@ -566,9 +566,30 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：SubAgent 空白上下文（刻意设计：便宜/可并行/可预测），但"和主 agent 讨论半天需求后派 worker 按讨论去做"的场景下，task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承解决，但全量太贵（并行 N 个 = N 倍历史 token）且有"fork 后主对话继续变化"的一致性问题。
 **实现**：摘要式 fork——`memory/compressor.py` 新增公开函数 `summarize_conversation(llm, messages)`（复用 P67 的 `_extractive_digest` + `LLMSummarizeOldest._summarize` 9 节结构化摘要，LLM 失败回退提取式 digest——fork 绝不因摘要失败而失败）。摘要即冻结快照（回避一致性问题），成本 ≈ 一次摘要调用（≪ 全量历史 × N）。两个入口：`spawn_agents` 工具的 `inherit_context: bool` 参数（LLM 自主）+ `/spawn --fork`（用户命令）；摘要经 `SubAgentManager.build_context_summary()`（worker LLM）生成，`spawn/spawn_parallel/spawn_background` 透传 `context_summary`，注入子 agent system prompt 的 `[Inherited context ...]` 段。6 个新测试。诚实边界：`spawn_pane`（跨进程 WorkerSpec 协议）与 `/team` 未纳入。
 
-☐ **B4.2 fork 摘要生成阻塞且不可观测**
-**问题**（B4.1 终端验证中实测暴露）：`inherit_context=true` 时摘要生成（一次完整 LLM 调用）阻塞在 `spawn_agents.execute` 内部——实测对话稍长时耗时 46-54 秒，期间终端零输出、用户以为卡住。两个具体伤害：① `background=true + inherit_context=true` 组合下"立即返回"承诺打折（实测 spawn_agents done 53938ms，虽然仍未等子 agent，但工具调用本身被摘要阻塞）；② 摘要调用走 `complete()` 直调不经 AgentLoop，不发任何 trace 事件——`/trace on` 也看不到，可观测性为零。
-**方向**：① 至少先加可观测性：摘要生成前终端提示 `Generating context summary...`（或发一个事件供 trace 订阅）；② 进阶：background 模式下把摘要生成也放进后台任务（spawn 前置一个 summary future，SubAgent 构造延迟到摘要就绪），让 spawn_agents 真正立即返回。工作量：小（①）/ 中（②）。
+✅ **B4.2 fork 摘要生成阻塞且不可观测**（已完成）
+**问题**（B4.1 终端验证中实测暴露）：`inherit_context=true` 时摘要生成（一次完整 LLM 调用）阻塞在 `spawn_agents.execute` 内部——实测对话稍长时耗时 46-54 秒，期间终端零输出、用户以为卡住。两个具体伤害：① `background=true + inherit_context=true` 组合下"立即返回"承诺打折（实测 spawn_agents done 53938ms）；② 摘要调用走 `complete()` 直调不经 AgentLoop，不发任何 trace 事件——`/trace on` 也看不到。
+**✅ 已修复**：① 可观测性：`build_context_summary()` 前后发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`，app.py 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready (Xs, N chars)"），TraceRenderer 订阅显示 `ctx` trace 行——用户不再以为卡死，`/trace on` 可见。② 非阻塞：`background=true + inherit_context=true` 时摘要+spawn 整体放进 `asyncio.create_task`，`execute()` 立即返回；消息列表浅拷贝防竞态，task 引用存 `_notify_tasks` 防 GC。3 个新测试，1060→1063。
+
+☐ **B4.3 后台 agent 完成后结果不自动投递,需等用户下一次输入**
+**问题**（B4.2 终端验证实测暴露）：`background=true` 派发的子 agent 完成后,`_notify_on_complete`（`subagent.py:667`）经 `Mailbox.send()` 把结果发给 recipient `"main"`。但 `AgentLoop._deliver_mail()`（`agent_loop.py:248`）只在 `run()` 的 ReAct `while True` 每轮迭代开头调用——主 Agent 空闲等用户输入时 `run()` 已经 return 了,没有循环在跑,mailbox 消息滞留到用户下一次输入触发新的 `run()` 才被 drain 并注入对话。
+**现象**：终端提示 `Background agent xxx finished — result will be delivered to the conversation next turn`（`app.py` 的 `SubAgentCompleteEvent` 订阅,EventBus 异步触发——这条提示在 `prompt_async()` 期间出现是正常的,因为 asyncio 事件循环在跑、`patch_stdout=True` 保护输出不破坏提示符）,但用户不输入任何东西,结果就永远不进对话——用户必须发一条无关消息才能看到结果,体验割裂。
+**根因分析**：
+- `app.py` 主循环（`:624`）结构是 `while True: user_input = await get_user_input(); _handle_turn(user_input)`——严格串行,`get_user_input()` 独占等待,无并发 mailbox 检查。
+- `Mailbox` API（`core/mailbox.py`）只有 `drain()`（消费式读取）,没有 `has_unread()` / `peek()` 非消费式查询方法。
+- `prompt_async()` 是 async（`terminal.py:117`）,期间 asyncio 事件循环在跑——其他协程**可以**执行（`_on_background_complete` 能在此期间打印提示已证明）。`patch_stdout(raw=True)` 活跃——异步输出不会破坏提示符。
+**候选方案**：
+① `asyncio.wait(FIRST_COMPLETED)`：同时 await `prompt_async()` 和一个 `asyncio.Event`(由 `SubAgentCompleteEvent` 订阅者 set)。event 先触发时中断等待、调用 `_deliver_mail` + `agent_loop.run()` 处理 mailbox 消息;prompt 先触发时正常走 `_handle_turn`。需要 `prompt_toolkit` 支持外部取消或用 `asyncio.Task` 包装。
+② 轮询协程：在 `get_user_input()` 前 `create_task` 一个 mailbox 轮询器(间隔 0.5-1s),检测到消息时 inject 到对话并自动触发 `run()`。需要 Mailbox 加 `has_unread(agent_id)` 非消费式方法。
+③ `_notify_on_complete` 直接回调：`subagent.py` 的 notifier 完成后除了 mailbox.send,还调用一个 `on_background_result` 回调（app.py 注入）,回调直接调 `_deliver_mail` + `run()`。绕过 mailbox 轮询,但打破了"mailbox 是唯一通道"的设计。
+工作量：中。
+
+☐ **D7【UX·低】用户输入在终端里不够显眼,与 trace/工具/回答输出混在一起难以区分**
+**问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。
+**现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
+**现象对比**：
+- Claude Code：用户输入后有一行 bold 白色回显 `> 用户的话` + 分隔线,与 agent 输出视觉分层明确
+- mini-agent 当前：输入在 prompt 行显示一次（打字时可见），回车后被后续输出冲走，无二次回显,无颜色/加粗区分
+**方向**：用户输入确认后、进入处理前（`app.py` 主循环 `:632` user_input strip 之后），在终端打一行醒目的用户输入回显。格式：bold + 主题 warning 色前缀（如 `▶`），用户文字 bold 显示,与 dim 的 trace / 工具 / info 行形成对比。示例：`console.print(f"[bold {theme.warning}]▶[/] [bold]{user_input}[/]")`。如果用户输入过长(>200 字符)截断显示。改动在 app.py 主循环 1 行 + 可选 terminal.py 封装方法。工作量：小。
 
 ☐ **B5 权限模式矩阵**
 mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。
