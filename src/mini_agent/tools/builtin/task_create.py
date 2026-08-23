@@ -1,5 +1,5 @@
-"""TaskCreate tool — LLM creates a task on the persistent task board (B1).
-TaskCreate 工具——LLM 在持久化任务板上创建任务（B1）。"""
+"""TaskCreate tool — LLM creates a task on the persistent task board.
+TaskCreate 工具——LLM 在持久化任务板上创建任务。"""
 
 from __future__ import annotations
 

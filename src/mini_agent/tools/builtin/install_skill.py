@@ -1,5 +1,5 @@
-"""InstallSkill tool — LLM installs a skill from a path or git URL (B1).
-InstallSkill 工具——LLM 从路径或 git URL 安装技能（B1）。"""
+"""InstallSkill tool — LLM installs a skill from a path or git URL.
+InstallSkill 工具——LLM 从路径或 git URL 安装技能。"""
 
 from __future__ import annotations
 

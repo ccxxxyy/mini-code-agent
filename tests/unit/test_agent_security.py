@@ -137,14 +137,14 @@ async def test_dangerous_bash_approved_by_user(tool_context):
     assert "Permission denied" not in tool_msg.tool_result.output
 
 
-# --- D2: confirm-denial circuit breaker (threshold 1: one denial stops) ---
+# --- confirm-denial circuit breaker (threshold 1: one denial stops) ---
 # Covers dangerous commands, paths outside the project, and hook confirms.
 
 
 async def test_dangerous_denial_stops_loop_immediately(tool_context):
-    """D2: denying one dangerous command stops the goal at once (threshold 1),
+    """Denying one dangerous command stops the goal at once (threshold 1),
     never reaching the LLM's next bypass attempt.
-    D2：拒绝一条危险命令立即停止（阈值 1），到不了 LLM 的下一条绕过尝试。"""
+    拒绝一条危险命令立即停止（阈值 1），到不了 LLM 的下一条绕过尝试。"""
 
     async def deny(prompt):
         return False

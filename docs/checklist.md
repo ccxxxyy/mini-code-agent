@@ -284,7 +284,8 @@
 - [x] SubAgentSpawnEvent / SubAgentCompleteEvent 正确 emit
 - [x] `background=true` 后台派生立即返回,完成后经 mailbox 通知 main、终端提示(SubAgentCompleteEvent 订阅)
 - [x] `/spawn --background <任务>` 命令入口——后台派发,完成后结果自动投递到主对话（无需 `/spawn wait`）
-- [x] B4.3 后台 agent 结果自动投递——`Mailbox.has_pending()` 无锁只读查询 + `Terminal.interrupt_input()` 中断输入等待 + `_BG_INTERRUPT` 哨兵 + `_handle_background_delivery()` while-drain 循环 + `_run_agent_and_report()` 处理 mailbox 结果；3 个新 has_pending 测试（test_mailbox.py）
+- [x] 后台 agent 结果自动投递——`Mailbox.has_pending()` 无锁只读查询 + `Terminal.interrupt_input()` 中断输入等待 + `_BG_INTERRUPT` 哨兵 + `_handle_background_delivery()` while-drain 循环 + `_run_agent_and_report()` 处理 mailbox 结果；3 个新 has_pending 测试（test_mailbox.py）
+- [x] 用户输入行醒目化——Theme 新增 `user_input` 亮橙字段（default `#ffaf00`/dark `#ff9e64`/light `#b35900`）；`create_prompt_style()` 根样式输入文字 bold 亮橙；`get_user_input()` 输入行上下 `_input_rule()` 同色横线（`_BG_INTERRUPT` 中断不打下边线）
 - [x] `inherit_context=true` / `/spawn --fork` 摘要式上下文 fork——父对话 LLM 摘要注入子 agent system prompt
 - [x] ContextSummaryStartEvent / ContextSummaryDoneEvent 正确 emit(摘要开始/完成,含耗时和字符数)
 - [x] 摘要期间终端提示"Summarizing conversation for context fork..." + `/trace on` 显示 `ctx` 行(不再零输出)
@@ -1055,7 +1056,7 @@
 ## Phase 58.4 检查项：Mailbox 增强
 
 - [x] `to='*'` 广播——排除发送者、返回收件人列表、空团队报错
-- [x] `type=request` 自动分配 request_id 并在工具输出回显；`type=response` 缺 request_id 报错；非法 type 报错列出合法值
+- [x] `type=request` 自动分配 request_id 并在工具输出回传；`type=response` 缺 request_id 报错；非法 type 报错列出合法值
 - [x] approve 表态字段贯通（send → 落盘 → 投递前缀 approve=true/false）
 - [x] 投递前缀按类型区分：[Message ...] / [Request ... request_id=x] / [Response ... request_id=x approve=y]
 - [x] 名字寻址：register 别名、resolve id/名字双解析、别名随 unregister 失效、describe_peers 显示 "name (id)"

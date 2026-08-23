@@ -118,7 +118,7 @@ class SpawnAgentsTool(Tool):
         # Fork-style context inheritance: summarize the parent
         # conversation once, inject into every spawned agent's system prompt.
         # background + inherit_context: defer both summary and spawn to a
-        # background task so execute() returns instantly (B4.2).
+        # background task so execute() returns instantly.
         # 摘要式上下文继承：父对话摘要一次，注入每个子 agent 的 system prompt。
         # background + inherit_context：摘要和 spawn 整体放后台，execute 立即返回。
         context_summary = ""

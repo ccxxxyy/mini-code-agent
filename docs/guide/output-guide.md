@@ -46,7 +46,7 @@
 | 项 | 说明 |
 |---|---|
 | 来源 | `ui/input_handler.py` `create_prompt_session` → prompt_toolkit `message=HTML("<prompt>> </prompt>")` |
-| 颜色 | 跟随主题 `theme.primary`（`/theme dark` 可换色） |
+| 颜色 | 提示符 `>` 跟随 `theme.primary`；输入文字 bold 亮橙 `theme.user_input`；输入行上下有同色横线（`terminal.py` `_input_rule`） |
 | 关闭方法 | 不可关闭（关了没法输入） |
 
 ### ② Streaming 工具组装提示 `╭─ tool_name ...`
@@ -168,6 +168,7 @@
 | `Cleaned N stale session(s)` | `app.py` 启动 | 自动清理超龄会话时 |
 | `Cleaned N stale worktree(s)` | `app.py` 启动 | 自动清理超龄 worktree 时 |
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
+| 用户输入行 bold 亮橙着色 + 上下亮橙横线 | `input_handler.py` `create_prompt_style` 根样式 + `terminal.py` `_input_rule` | `> 输入文字` 行打字时和回车后均为 bold 亮橙（theme.user_input），回车后上下各一条同色横线框住输入行，滚动历史中与 dim 的 trace/工具输出直接可辨 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串；默认纯文本原样打印，带 `MARKDOWN_RESULT` 哨兵的（spawn 报告）走 Markdown 渲染，行内代码（文件名/agent id）亮橙色 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |

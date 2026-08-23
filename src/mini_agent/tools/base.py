@@ -91,8 +91,8 @@ class ToolContext:
     # 跨 Agent 消息：共享 Mailbox + 本 Agent 身份
     mailbox: Any = None
     agent_id: str = "main"
-    # B1 process tools: task board, plan-mode control, structured user questions
-    # B1 流程工具：任务板、计划模式控制、结构化用户提问
+    # Process tools: task board, plan-mode control, structured user questions
+    # 流程工具：任务板、计划模式控制、结构化用户提问
     task_store: Any = None
     agent_loop_ref: Any = None  # SimpleNamespace(get_plan_mode, set_plan_mode)
     ask_user_callback: Any = None  # async (question, choices) -> str

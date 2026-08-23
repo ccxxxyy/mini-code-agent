@@ -1,5 +1,5 @@
-"""TaskList tool — LLM lists all tasks on the board (B1).
-TaskList 工具——LLM 列出任务板上所有任务（B1）。"""
+"""TaskList tool — LLM lists all tasks on the board.
+TaskList 工具——LLM 列出任务板上所有任务。"""
 
 from __future__ import annotations
 

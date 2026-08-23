@@ -1,5 +1,5 @@
-"""TaskGet tool — LLM retrieves a task by ID or prefix (B1).
-TaskGet 工具——LLM 按 ID 或前缀查询任务（B1）。"""
+"""TaskGet tool — LLM retrieves a task by ID or prefix.
+TaskGet 工具——LLM 按 ID 或前缀查询任务。"""
 
 from __future__ import annotations
 

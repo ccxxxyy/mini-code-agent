@@ -389,7 +389,7 @@ async def test_replay_history_sends_messages():
 
 
 def test_token_comparison_uses_constant_time():
-    """A5: token comparison must use hmac.compare_digest, not == or !=."""
+    """Token comparison must use hmac.compare_digest, not == or !=."""
     import inspect
 
     from mini_agent.remote.server import RemoteServer

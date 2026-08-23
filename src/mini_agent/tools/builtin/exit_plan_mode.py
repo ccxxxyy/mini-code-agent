@@ -1,5 +1,5 @@
-"""ExitPlanMode tool — LLM signals plan complete, requests user review (B1).
-ExitPlanMode 工具——LLM 表示计划完成、请求用户审阅（B1）。"""
+"""ExitPlanMode tool — LLM signals plan complete, requests user review.
+ExitPlanMode 工具——LLM 表示计划完成、请求用户审阅。"""
 
 from __future__ import annotations
 

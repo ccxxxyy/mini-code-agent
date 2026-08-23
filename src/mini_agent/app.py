@@ -354,8 +354,8 @@ class Application:
         self.event_bus.on(ContextSummaryStartEvent, _on_ctx_summary_start)
         self.event_bus.on(ContextSummaryDoneEvent, _on_ctx_summary_done)
 
-        # B1 process tools: expose plan-mode control + ask_user callback
-        # B1 流程工具：暴露计划模式控制 + 结构化提问回调
+        # Process tools: expose plan-mode control + ask_user callback
+        # 流程工具：暴露计划模式控制 + 结构化提问回调
         import types as _types
 
         tool_context.agent_loop_ref = _types.SimpleNamespace(
@@ -416,7 +416,7 @@ class Application:
         self.skill_registry.load_all()
         self._tool_context.skill_registry = self.skill_registry
 
-        # Custom agent types (B3): load *.md definitions from agent_dirs
+        # Custom agent types: load *.md definitions from agent_dirs
         # 自定义 Agent 类型：从 agent_dirs 加载 *.md 定义
         from mini_agent.core.agent_type_loader import load_agent_types
 

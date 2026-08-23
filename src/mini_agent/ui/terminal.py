@@ -119,13 +119,20 @@ class Terminal:
             except Exception:
                 pass
 
+    def _input_rule(self) -> None:
+        """Bright rule framing the user input line: one printed above
+        before the prompt, one below after input is confirmed.
+        用户输入行的亮色边界线：输入前打上边线，确认后打下边线。"""
+        u = self.theme.user_input
+        self.console.print(f"[{u}]{'─' * self.console.width}[/{u}]")
+
     async def get_user_input(self) -> str | object:
         """Wait for user input, or return ``_BG_INTERRUPT`` if a background
         agent completes while waiting.
         等待用户输入；若等待期间后台 agent 完成则返回 _BG_INTERRUPT。"""
         # Top rule marking the input area (bottom toolbar is the lower bound)
-        # 输入区上边界线（下边界由底部工具栏承担）
-        self.console.print(f"[{self.theme.dim}]{'─' * self.console.width}[/{self.theme.dim}]")
+        # 输入区上边界线（下边界在输入确认后补上）
+        self._input_rule()
 
         self._bg_interrupt_event = asyncio.Event()
 
@@ -136,6 +143,7 @@ class Terminal:
                 task = self._pending_input_task
                 self._pending_input_task = None
                 self._bg_interrupt_event = None
+                self._input_rule()
                 return task.result()
 
             input_task = self._pending_input_task or asyncio.ensure_future(
@@ -152,6 +160,7 @@ class Terminal:
                 return _BG_INTERRUPT
             event_task.cancel()
             self._bg_interrupt_event = None
+            self._input_rule()
             return input_task.result()
 
         # TTY: prompt_toolkit path
@@ -165,6 +174,7 @@ class Terminal:
         self._bg_interrupt_event = None
         if result is _BG_INTERRUPT:
             return _BG_INTERRUPT
+        self._input_rule()
         return result
 
     async def confirm(self, prompt: str) -> bool | str:
@@ -253,8 +263,8 @@ class Terminal:
                 return False
 
     async def ask_structured(self, question: str, choices: list[str] | None = None) -> str:
-        """Structured question for the ask_user tool (B1).
-        ask_user 工具用的结构化提问（B1）。有 choices 时显示编号选项,
+        """Structured question for the ask_user tool.
+        ask_user 工具用的结构化提问。有 choices 时显示编号选项,
         无 choices 时自由文本输入。"""
         from prompt_toolkit import PromptSession as _PS
         from rich.panel import Panel

@@ -2026,8 +2026,8 @@ spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字�
 - `core/mailbox.py`：每 Agent 一个 JSON 收件箱文件。所有 Agent 跑在同一事件循环，send/drain 内部无 await，单文件读改写天然原子——**不需要文件锁**
 - `send_message` 工具：发给 'main' 或同伴 id；收件人未注册报错并列出已知 Agent（LLM 可据此降级）
 - `wait_message` 工具：0.5s 轮询阻塞等消息（上限 600s）——接收方的等待原语，超时返回信息而非错误
-- `AgentLoop._deliver_mail()`：每轮 THINK 前 drain 收件箱，消息注入为 USER 消息。后台 agent 完成时另有自动投递路径（B4.3：`terminal.interrupt_input()` → `_handle_background_delivery()`），不依赖用户输入
-- `Mailbox.has_pending(agent_id)`：无锁只读查询是否有未读消息（B4.3 新增），用于自动投递前判断是否需要发合成消息，避免空 drain
+- `AgentLoop._deliver_mail()`：每轮 THINK 前 drain 收件箱，消息注入为 USER 消息。后台 agent 完成时另有自动投递路径（`terminal.interrupt_input()` → `_handle_background_delivery()`），不依赖用户输入
+- `Mailbox.has_pending(agent_id)`：无锁只读查询是否有未读消息，用于自动投递前判断是否需要发合成消息，避免空 drain
 - 生命周期：SubAgent 构造时注册收件箱、结束时注销；register 总是重置文件防跨会话残留
 
 ## 58.3 三轮迭代
@@ -2052,7 +2052,7 @@ spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字�
 P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入对话），按 mini 的单进程架构做了减法（去锁）和加法（wait_message / 报错列已知 Agent / register 重置）。逐项对照 `mewcode/teams/` 曾记录四项差距，P58.4 全部实现：
 
 1. **广播** ✅——`Mailbox.broadcast()` + send_message `to='*'`，自动排除发送者，返回收件人列表
-2. **结构化消息协议** ✅——通用 `type=text/request/response` + request_id 配对（request 自动分配并回显）+ approve 表态，投递前缀区分 [Request]/[Response]。适配说明：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故用通用请求-应答而非照搬团队类型
+2. **结构化消息协议** ✅——通用 `type=text/request/response` + request_id 配对（request 自动分配并回传）+ approve 表态，投递前缀区分 [Request]/[Response]。适配说明：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故用通用请求-应答而非照搬团队类型
 3. **名字寻址** ✅——`register(id, name)` 别名注册 + `resolve()` id/名字双解析，spawn_agents 新增 `names` 参数（唯一性/保留字校验），notice 显示 'explorer' (id xxx, task: ...)
 4. **审计痕迹** ✅——drain 标记已读并留盘（会话内可 cat 排查），unregister 保留文件，新会话 SubAgentManager 初始化 `reset_all()` 统一清理。与 mewcode 差异：审计是**会话级**的，mewcode 留存至手动 cleanup
 
@@ -2847,11 +2847,11 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 
 关键洞察：**通知注入通道现成**。`agent_loop.run()` 的 while 循环每轮迭代 THINK 前调用 `_deliver_mail`——drain 主 agent 收件箱并以 USER 消息注入对话。子 agent 完成通知只需是一封发给 'main' 的普通 mailbox 消息。
 
-实现：`spawn_agents` 工具加 `background: bool = False` 参数；true 时走 `SubAgentManager.spawn_background()`——`spawn_parallel` 后为每个 agent 起 notifier 协程 `_notify_on_complete`（引用存 `_notify_tasks` 防 GC），协程内 `await self.wait(agent_id, 3600)` 拿到结果后 `mailbox.send(sender=agent_id, recipient="main", content="[Background agent 'x' completed successfully]\nTask: ...\nResult: ...")`。结果自动投递（B4.3）：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 即时 drain mailbox 并运行 `agent_loop.run()` 处理——无需等待用户下一次输入。
+实现：`spawn_agents` 工具加 `background: bool = False` 参数；true 时走 `SubAgentManager.spawn_background()`——`spawn_parallel` 后为每个 agent 起 notifier 协程 `_notify_on_complete`（引用存 `_notify_tasks` 防 GC），协程内 `await self.wait(agent_id, 3600)` 拿到结果后 `mailbox.send(sender=agent_id, recipient="main", content="[Background agent 'x' completed successfully]\nTask: ...\nResult: ...")`。结果自动投递：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 即时 drain mailbox 并运行 `agent_loop.run()` 处理——无需等待用户下一次输入。
 
 ## 86.3 设计权衡
 
-- **复用 mailbox 而非新通知机制**：mewcode 的 notification.py 是独立通知系统；mini 的 mailbox 已具备"注入对话"的全部语义（`_deliver_mail` + `[Message from agent 'x']` 前缀），新机制只会重复。通知就是一封信。投递时机后续由 B4.3 增强：除迭代开始时 `_deliver_mail` drain 外，后台 agent 完成时 `terminal.interrupt_input()` 中断输入等待触发即时投递
+- **复用 mailbox 而非新通知机制**：mewcode 的 notification.py 是独立通知系统；mini 的 mailbox 已具备"注入对话"的全部语义（`_deliver_mail` + `[Message from agent 'x']` 前缀），新机制只会重复。通知就是一封信。投递时机后续增强：除迭代开始时 `_deliver_mail` drain 外，后台 agent 完成时 `terminal.interrupt_input()` 中断输入等待触发即时投递（见 §92）
 - **notifier 内部调用 `wait()` 而非挂 done_callback**：wait 已封装超时/取消/`_active` 清理/`SubAgentCompleteEvent` 发射的全部语义，done_callback（同步）反而要重复这些
 - **结果截断 4000 字符**：通知注入对话消耗上下文，超长输出（如整文件内容）会撑爆；4000 足够容纳典型报告，超出提示 truncated
 - **默认仍阻塞**：需要全部结果才能继续的场景（如并行分析后汇总）阻塞语义更简单；background 是 opt-in
@@ -2859,8 +2859,8 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 
 ## 86.4 诚实边界
 
-- ~~主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话~~ **✅ 已解除（B4.3）**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环收到 `_BG_INTERRUPT` 哨兵后自动调 `_handle_background_delivery()` drain mailbox 并运行 `agent_loop.run()` 处理结果——空闲场景通知也即时送达，不再滞留
-- mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——后续由 §87（B4.1 摘要式 fork）实现
+- ~~主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话~~ **✅ 已解除（见 §92）**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环收到 `_BG_INTERRUPT` 哨兵后自动调 `_handle_background_delivery()` drain mailbox 并运行 `agent_loop.run()` 处理结果——空闲场景通知也即时送达，不再滞留
+- mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——后续由 §87（摘要式 fork）实现
 - notifier 的 3600s 超时后 agent 被 cancel 并通知 FAILED——比无限等待更可预测
 
 ## 86.5 验证
@@ -2902,10 +2902,10 @@ SubAgent 空白上下文是刻意设计（便宜/可并行/可预测），但暴
 
 ## 87.6 验证中暴露的问题（全部如实记录）
 
-- **摘要生成阻塞且不可观测（→ B4.2，已修复见 §91）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）。**已由 §91 修复：事件+终端提示+非阻塞后台。**
+- **摘要生成阻塞且不可观测（已修复见 §91）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）。**已由 §91 修复：事件+终端提示+非阻塞后台。**
 - **空白上下文幻觉编造（→ B9.1）**：见上 ②
 - **首轮验证被测 LLM 擅自动手（→ B9）**：用户说"先不要动手只讨论"，agent 盘点后主动问"确认 A/B 后动手"，用户下一句以"对"开头的补充讨论被解读为授权，未经明确指令改了 6 处文件（后经指令还原，git diff + grep + 测试三重核查确认恢复彻底）
-- **验证方案自身的两处判定错误（方法论教训）**：① 预设"trace 可见摘要 LLM 调用"——实际不可见（正是 B4.2 的可观测性缺口）；② 预设"background 组合毫秒级返回"——inherit_context 时不成立。教训：判定标准应先在代码层核实事件/输出的真实路径，而非从设计意图推断
+- **验证方案自身的两处判定错误（方法论教训）**：① 预设"trace 可见摘要 LLM 调用"——实际不可见（正是 §91 修复的可观测性缺口）；② 预设"background 组合毫秒级返回"——inherit_context 时不成立。教训：判定标准应先在代码层核实事件/输出的真实路径，而非从设计意图推断
 - **对话污染判断失误（流程教训）**：首轮验证 agent 改文件又还原后，曾判断"讨论细节还在可继续 fork 测试"——错误：对话历史含"修改成功"记录，摘要会把污染传给子 agent 使判定失真。正确做法（已执行）：重启干净会话重测
 
 ---
@@ -3019,7 +3019,7 @@ permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_
 
 ## 91.1 问题
 
-B4.1 终端验证实测暴露：`inherit_context=true` 时 `SubAgentManager.build_context_summary()` 调 `summarize_conversation()` → `LLMSummarizeOldest._summarize()` → `complete()`，做一次完整 LLM 调用（实测 46-54 秒）。期间终端零输出、`/trace on` 也看不到——`complete()` 直调绕过 AgentLoop 的事件链。`background=true` 组合下 `spawn_agents.execute()` 阻塞在摘要调用上，"立即返回"承诺打折。
+终端验证实测暴露：`inherit_context=true` 时 `SubAgentManager.build_context_summary()` 调 `summarize_conversation()` → `LLMSummarizeOldest._summarize()` → `complete()`，做一次完整 LLM 调用（实测 46-54 秒）。期间终端零输出、`/trace on` 也看不到——`complete()` 直调绕过 AgentLoop 的事件链。`background=true` 组合下 `spawn_agents.execute()` 阻塞在摘要调用上，"立即返回"承诺打折。
 
 ## 91.2 方案
 
@@ -3032,3 +3032,38 @@ B4.1 终端验证实测暴露：`inherit_context=true` 时 `SubAgentManager.buil
 ## 91.3 验证
 
 3 个新测试：`test_build_context_summary_emits_events`（Start/Done 各一、duration_ms≥0、char_count 匹配）、`test_background_inherit_context_returns_immediately`（background+fork 立即返回、输出含 "context fork"）、`test_trace_renderer_ctx_summary`（TraceRenderer 渲染两行 ctx 事件）。全量 1060→1063 passed。
+
+## 92. 后台 agent 结果自动投递
+
+## 92.1 问题
+
+终端验证实测暴露：`background=true` 派发的子 agent 完成后，`_notify_on_complete` 把结果写进 mailbox，但 `_deliver_mail()` 只在 `agent_loop.run()` 的每轮迭代开头执行——主 Agent 空闲等输入时 `run()` 已返回，消息滞留到用户下一次输入才被 drain。用户必须发一条无关消息才能看到后台结果，体验割裂。
+
+## 92.2 方案
+
+主循环把 `get_user_input()` 与后台完成信号做竞争。`SubAgentCompleteEvent(background=True)` 订阅者调 `terminal.interrupt_input()`：设置 `asyncio.Event` + TTY 路径 `prompt_session.app.exit(_BG_INTERRUPT)`（先保存 `current_buffer.text`，处理完经 `prompt_async(default=...)` 恢复，用户打了一半的字不丢）。非 TTY 路径 `asyncio.wait(FIRST_COMPLETED)` 竞争 `input()` executor 与 event（input 线程无法取消，中断后任务暂存 `_pending_input_task` 下次复用）。主循环收到 `_BG_INTERRUPT` 哨兵调 `_handle_background_delivery()`：注入合成 USER 消息触发 `agent_loop.run()`，`_deliver_mail()` 在第一轮迭代自然 drain 到结果。
+
+**关键竞态（并行验证实测暴露）**：第二个 agent 在第一个结果处理期间完成时，`_bg_interrupt_event` 是 None（不在 `get_user_input()` 里），event 信号丢失——首版实现靠 prompt_toolkit `app.exit()` 的排队行为碰巧触发第二次投递。修复：`_handle_background_delivery()` 改为 `while mailbox.has_pending("main")` 循环，处理完一个结果立即检查是否有新到消息，不依赖中断信号的可靠性。`Mailbox.has_pending()` 为此新增——无锁只读（写入走 atomic replace，纯读安全）。
+
+**为什么注入合成消息而非直接 drain**：`agent_loop.run()` 每轮迭代开头本就 drain mailbox，复用该路径零新增注入机制；合成消息同时给 LLM 明确指令（"结果已到，处理并汇报"），LLM 对 mailbox 注入的后台结果保持了交叉验证的怀疑态度（实测抓到子 agent 统计误差并修正）。
+
+## 92.3 验证
+
+3 个新 has_pending 测试。真实 LLM 终端验证：单任务 `spawn_agents(background=true)` 空闲 13 秒自动投递；`/spawn --background -p` 双任务并行，第二个 agent 在第一个处理期间完成，while 循环正确捕获，两个结果都送达。1063→1066 passed。
+
+## 93. 用户输入行醒目化
+
+## 93.1 问题
+
+终端验证实测暴露：回车后 prompt_toolkit 输入行留在原地（默认样式无颜色），紧接 dim trace 行、工具输出、LLM 流式回答——滚动历史中很难定位"哪些是我打的话"。
+
+## 93.2 方案
+
+给输入行本身上样式：`create_prompt_style()` 根样式 `"": "bold {theme.user_input}"`，prompt_toolkit 输入文字打字时即着色、回车后保持样式；`get_user_input()` 在输入行上下由 `_input_rule()` 打同色横线形成边界。输入行本就在正确位置，缺的只是视觉权重——上样式即可，不需要追加任何新输出行。
+
+## 93.3 细节
+
+- Theme 新增 `user_input` 字段而非复用 `warning`：实测 `#f39c12` 黑底偏暗，输入行需要更亮（default `#ffaf00`/dark `#ff9e64`/light 白底反而要深橙 `#b35900`）——语义也不同（输入标识 vs 警告）
+- 根样式 `""` 影响所有未声明 noinherit 的元素——补全菜单/工具栏/滚动条早已全部 noinherit，无泄漏
+- `_BG_INTERRUPT` 中断返回时不打下边线：没有用户输入确认，打线会留孤儿横线
+- 非 TTY 朴素 `input()` 路径不经过 prompt_toolkit，保留上下横线

@@ -1,5 +1,5 @@
-"""LoadSkill tool — LLM activates an installed skill into the conversation (B1).
-LoadSkill 工具——LLM 把已安装的技能激活到当前对话中（B1）。"""
+"""LoadSkill tool — LLM activates an installed skill into the conversation.
+LoadSkill 工具——LLM 把已安装的技能激活到当前对话中。"""
 
 from __future__ import annotations
 

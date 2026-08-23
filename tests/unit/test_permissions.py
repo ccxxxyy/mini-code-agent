@@ -190,8 +190,8 @@ async def test_curl_pipe_sh_flagged(path_guard):
 
 
 def test_dangerous_command_bypass_variants_flagged():
-    """A2 hardening: option-shape variants that once evaded the regexes.
-    A2 加固：曾绕过正则的选项变形，现在必须命中。"""
+    """Hardening: option-shape variants that once evaded the regexes.
+    加固：曾绕过正则的选项变形，现在必须命中。"""
     d = PermissionManager.is_dangerous_command
     # rm: long options + flags after the path
     assert d("rm --recursive --force foo")
@@ -243,8 +243,8 @@ def test_deletion_safe_variants_not_flagged():
 
 
 def test_inline_interpreter_flagged():
-    """D3: inline interpreter execution must be flagged as dangerous.
-    D3：内联解释器执行必须被标记为危险。"""
+    """Inline interpreter execution must be flagged as dangerous.
+    内联解释器执行必须被标记为危险。"""
     d = PermissionManager.is_dangerous_command
     # python -c / python3 -c / python - (stdin)
     assert d("python -c \"import shutil; shutil.rmtree('/tmp/x')\"")
@@ -289,8 +289,8 @@ def test_sensitive_file_command_detected():
 
 async def test_sensitive_file_command_asks_confirmation(path_guard):
     """A bash command touching a sensitive file must trigger the confirm dialog,
-    not auto-allow. Denying it is what D2 turns into a goal-stop.
-    触及敏感文件的 bash 命令必须弹确认而非自动放行；拒绝即 D2 停目标。"""
+    not auto-allow. Denying it triggers the goal-stop breaker.
+    触及敏感文件的 bash 命令必须弹确认而非自动放行；拒绝即熔断停目标。"""
     asked = []
 
     async def confirm(msg):
@@ -305,7 +305,7 @@ async def test_sensitive_file_command_asks_confirmation(path_guard):
 
 
 def test_written_script_execution_flagged(tmp_path):
-    """D3: executing a script the agent wrote this session must be flagged."""
+    """Executing a script the agent wrote this session must be flagged."""
     config = SecurityConfig(permission_mode="ask")
     guard = PathGuard(tool_config=ToolConfig(), security_config=config, project_dir=tmp_path)
     pm = PermissionManager(config=config, path_guard=guard)
@@ -343,8 +343,8 @@ def test_written_script_unwritten_file_not_flagged(tmp_path):
 
 
 def test_inline_interpreter_safe_variants_not_flagged():
-    """D3: normal interpreter usage (running scripts) must NOT be flagged.
-    D3：正常解释器用法（运行脚本文件）不得误报。"""
+    """Normal interpreter usage (running scripts) must NOT be flagged.
+    正常解释器用法（运行脚本文件）不得误报。"""
     d = PermissionManager.is_dangerous_command
     assert not d("python manage.py runserver")
     assert not d("python script.py")
@@ -358,8 +358,8 @@ def test_inline_interpreter_safe_variants_not_flagged():
 
 
 def test_dangerous_command_safe_variants_not_flagged():
-    """A2 hardening must not create false positives on safe commands.
-    A2 加固不得对安全命令误报。"""
+    """Hardening must not create false positives on safe commands.
+    加固不得对安全命令误报。"""
     d = PermissionManager.is_dangerous_command
     assert not d("git -C /repo status")
     assert not d("git -C /x diff")
