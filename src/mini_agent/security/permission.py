@@ -81,8 +81,8 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"curl[^|]*\|\s*(ba)?sh",  # curl | sh 下载并直接执行脚本
     r"wget[^|]*\|\s*(ba)?sh",
     # Inline interpreter execution -- arbitrary code inside quotes bypasses
-    # command-signature matching (D3: proven by real A2 bypass twice).
-    # 内联解释器——引号内任意代码绕过命令签名匹配（D3：A2 实测两次绕过证实）。
+    # command-signature matching (proven by real bypass twice).
+    # 内联解释器——引号内任意代码绕过命令签名匹配（实测两次绕过证实）。
     r"\bpython[23]?\s+-(c\b|(\s|<|$))",  # python -c "..." / python - / python - < file
     r"\bnode\s+-(e|p)\b",  # node -e "..." / node --eval / node -p
     r"\bperl\s+-e\b",  # perl -e '...'

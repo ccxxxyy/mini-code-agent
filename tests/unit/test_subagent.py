@@ -315,7 +315,7 @@ async def test_typed_subagent_still_overrides_iterations(tmp_path):
     assert agent._loop._config.max_agent_iterations == 50
 
 
-# --- B4: background spawn + completion notification 后台派生 + 完成通知 ---
+# --- background spawn + completion notification 后台派生 + 完成通知 ---
 
 
 async def test_spawn_background_returns_immediately(tmp_path):
@@ -410,7 +410,7 @@ async def test_spawn_agents_tool_background_mode(tmp_path):
     await asyncio.sleep(0.5)  # drain 等完成
 
 
-# --- B4.1: fork-style context inheritance 摘要式上下文继承 ---
+# --- fork-style context inheritance 摘要式上下文继承 ---
 
 
 async def test_summarize_conversation_llm_success(tmp_path):

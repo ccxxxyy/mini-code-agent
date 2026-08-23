@@ -1778,13 +1778,14 @@ def create_sandbox() -> Sandbox | None:
 User types message in terminal
          |
          v
-+------------------------------------------------------------------+
++-------------------------------------------------------------------+
 | 1. INTERACTION LAYER                                              |
-|    InputHandler.get_user_input() -> raw text                      |
+|    InputHandler.get_user_input() -> raw text | _BG_INTERRUPT      |
+|    (input line: bold theme.user_input + framing rules)            |
 |    SlashCommandRegistry.is_slash_command(text)?                   |
 |    +-- YES -> SlashCommandRegistry.execute() -> render result     |
 |    +-- NO  -> Continue to engine                                  |
-|    HookManager.run(USER_INPUT) -- BLOCK 可在到达 LLM 前拦截该轮    |
+|    HookManager.run(USER_INPUT) -- BLOCK 可在到达 LLM 前拦截该轮       |
 |    EventBus.emit(UserMessageEvent)                                |
 +------------------------+------------------------------------------+
                          |

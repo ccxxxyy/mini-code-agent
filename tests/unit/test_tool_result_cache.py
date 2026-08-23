@@ -113,8 +113,8 @@ async def test_is_spill_readback(tmp_path: Path):
 
 
 async def test_is_spill_readback_sibling_dir_not_misjudged(tmp_path: Path):
-    """A6: a sibling dir sharing the cache_dir name prefix must NOT match.
-    A6：与 cache_dir 同名前缀的兄弟目录不能被误判为读回。
+    """A sibling dir sharing the cache_dir name prefix must NOT match.
+    与 cache_dir 同名前缀的兄弟目录不能被误判为读回。
 
     Old code used str.startswith(abs(cache_dir)); ".../cache_evil/x" starts
     with ".../cache" as a string, so it was wrongly exempted from spilling.

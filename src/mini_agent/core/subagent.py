@@ -620,7 +620,7 @@ class SubAgentManager:
         results = await asyncio.gather(*(self.wait(aid, timeout=timeout) for aid in ids))
         return list(results)
 
-    # Truncation cap for background completion notifications (B4)
+    # Truncation cap for background completion notifications
     # 后台完成通知的输出截断上限
     NOTIFY_MAX_CHARS = 4000
 
@@ -644,7 +644,7 @@ class SubAgentManager:
         names: list[str] | None = None,
         context_summary: str = "",
     ) -> list[str]:
-        """Spawn sub-agents that notify 'main' via mailbox on completion (B4).
+        """Spawn sub-agents that notify 'main' via mailbox on completion.
         Returns immediately with agent ids; each completion delivers a mailbox
         message that the main agent picks up on its next iteration.
         后台派生：立即返回 agent id，每个 agent 完成时经 mailbox 通知 'main'，

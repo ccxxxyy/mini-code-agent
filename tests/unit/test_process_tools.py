@@ -1,5 +1,5 @@
-"""Tests for B1 process tools: ask_user, exit_plan_mode, task CRUD.
-B1 流程工具测试：ask_user、exit_plan_mode、task CRUD。"""
+"""Tests for process tools: ask_user, exit_plan_mode, task CRUD.
+流程工具测试：ask_user、exit_plan_mode、task CRUD。"""
 
 from __future__ import annotations
 

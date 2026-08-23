@@ -29,6 +29,12 @@ def create_prompt_style(theme: Theme | None = None) -> Style:
     t = theme or get_theme("default")
     return Style.from_dict(
         {
+            # Root style: typed input text is bold bright-orange, so the line
+            # the user typed stays visually distinct in scrollback --
+            # menu/toolbar/scrollbar all declare noinherit and are unaffected.
+            # 根样式：输入文字 bold + 亮橙色，回车后输入行在滚动历史中
+            # 醒目可辨——菜单/工具栏/滚动条均 noinherit 不受影响。
+            "": f"bold {t.user_input}",
             "prompt": f"bold {t.primary}",
             "completion-menu": "noinherit",
             "completion-menu.completion": f"noinherit {t.dim}",

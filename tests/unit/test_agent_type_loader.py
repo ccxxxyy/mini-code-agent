@@ -1,4 +1,4 @@
-"""Tests for custom agent type loading from .md files (B3).
+"""Tests for custom agent type loading from .md files.
 自定义 Agent 类型 .md 加载测试。"""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Load custom AgentTypeDefinitions from .md files (B3).
+"""Load custom AgentTypeDefinitions from .md files.
 从 .md 文件加载自定义 Agent 类型定义。
 
 Directory scan order: user-level first, project-level second. Later entries

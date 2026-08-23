@@ -1,5 +1,5 @@
-"""TaskUpdate tool — LLM updates a task's status or description (B1).
-TaskUpdate 工具——LLM 更新任务状态或描述（B1）。"""
+"""TaskUpdate tool — LLM updates a task's status or description.
+TaskUpdate 工具——LLM 更新任务状态或描述。"""
 
 from __future__ import annotations
 

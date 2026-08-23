@@ -48,7 +48,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Item | Description |
 |---|---|
 | Source | `ui/input_handler.py` `create_prompt_session` → prompt_toolkit `message=HTML("<prompt>> </prompt>")` |
-| Color | Follows theme `theme.primary` (`/theme dark` changes the color) |
+| Color | The `>` symbol follows `theme.primary`; typed text is bold bright-orange `theme.user_input`; the input line is framed by same-color rules (`terminal.py` `_input_rule`) |
 | How to disable | Cannot be disabled (you could not type without it) |
 
 ### ② Streaming Tool-Assembly Hint `╭─ tool_name ...`
@@ -170,6 +170,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | `Cleaned N stale session(s)` | `app.py` startup | When stale sessions are auto-cleaned |
 | `Cleaned N stale worktree(s)` | `app.py` startup | When stale worktrees are auto-cleaned |
 | Restore prompt `A session that did not shut down cleanly was detected...` | `app.py` `_maybe_restore_session` | When a crashed session is detected at startup |
+| User input line in bold bright-orange + framing rules | `input_handler.py` `create_prompt_style` root style + `terminal.py` `_input_rule` | The `> typed text` line is bold bright-orange (theme.user_input) both while typing and after Enter, framed by same-color rules above and below once confirmed, directly distinguishable from dim trace/tool output in scrollback |
 | Slash command output | Strings returned by each handler in `builtin_commands.py`; plain text is printed as-is by default, output carrying the `MARKDOWN_RESULT` sentinel (spawn reports) goes through Markdown rendering, inline code (filenames / agent ids) in bright orange | When `/xxx` is entered |
 | SubAgent progress board | `ui/board.py` `SubAgentBoard` Rich Live Table | During `/spawn wait` or `/team` |
 | Multi-agent result overview table + `Report i/N` sections + deliverable file lines | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | When `/spawn wait` receives multiple results |

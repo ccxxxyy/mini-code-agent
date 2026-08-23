@@ -410,9 +410,9 @@ async def test_no_retry_on_normal_finish(tool_context):
 
 class YieldingMockLLM(MockLLM):
     """MockLLM that yields control between chunks, mirroring real streaming's
-    network awaits -- required to reproduce the A3 race where an eagerly
+    network awaits -- required to reproduce the race where an eagerly
     submitted tool task actually RUNS before truncation is detected.
-    在 chunk 间让出事件循环的 MockLLM，模拟真实流式的网络 await——复现 A3
+    在 chunk 间让出事件循环的 MockLLM，模拟真实流式的网络 await——复现
     竞态（抢先提交的工具任务在检测到截断前真正跑完）所必需。"""
 
     async def stream(self, messages, tools=None, **kwargs):
@@ -424,7 +424,7 @@ class YieldingMockLLM(MockLLM):
 
 
 async def test_write_tool_not_double_executed_on_truncation_retry(tool_context):
-    """A3 fail-open timing: a write tool in a truncated response must not run
+    """Fail-open timing: a write tool in a truncated response must not run
     eagerly mid-stream, because its side effect cannot be rolled back on retry
     (task.cancel() is a no-op on a completed task).
 
@@ -435,7 +435,7 @@ async def test_write_tool_not_double_executed_on_truncation_retry(tool_context):
     (deferred to _act after recovery settles), not twice (eager on attempt 1
     + _act on retry). Distinct contents per attempt make a double call
     deterministically observable -- event-counting is defeated by cancel-timing.
-    A3 fail-open 时序：截断响应里的写工具不能在流式期间抢先执行——副作用无法
+    fail-open 时序：截断响应里的写工具不能在流式期间抢先执行——副作用无法
     在重试时回滚（task.cancel() 对已完成任务是空操作）。断言 execute() 恰好
     调用一次（延迟到 _act），而非两次。每次尝试用不同 content 使双执行可
     确定性观测（事件计数会被 cancel 时序击败，故改数 execute()）。
@@ -608,10 +608,10 @@ async def test_self_verify_disabled(tool_context):
 async def test_delete_file_routes_through_path_check(tool_context):
     """delete_file must go through check_path (write), not the unrestricted else.
 
-    Regression test for A1 fail-open: before the fix, delete_file fell into
+    Regression test for fail-open: before the fix, delete_file fell into
     the else branch of _check_permission and was unconditionally GRANTED —
     PathGuard's denied_paths / sensitive-file rules never fired.
-    回归测试 A1 fail-open：修复前 delete_file 落入 else 无条件放行，
+    回归测试 fail-open：修复前 delete_file 落入 else 无条件放行，
     PathGuard 的敏感路径拒绝规则完全不生效。
     """
     from mini_agent.security.path_guard import PathGuard

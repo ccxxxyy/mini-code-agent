@@ -1,5 +1,5 @@
-"""AskUser tool — LLM asks the user a structured question (B1).
-AskUser 工具——LLM 向用户提结构化问题（B1）。"""
+"""AskUser tool — LLM asks the user a structured question.
+AskUser 工具——LLM 向用户提结构化问题。"""
 
 from __future__ import annotations
 

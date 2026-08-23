@@ -386,9 +386,9 @@ async def test_toml_cost_section_merges(tmp_path, monkeypatch):
 
 
 async def test_concurrent_on_response_no_lost_updates():
-    """A4: parallel SubAgent events must not lose updates due to unlocked
+    """Parallel SubAgent events must not lose updates due to unlocked
     read-modify-write. Fire N events concurrently, assert the sum is exact.
-    A4：并行子 Agent 事件不得因无锁读-改-写而丢失更新。并发发射 N 个事件，
+    并行子 Agent 事件不得因无锁读-改-写而丢失更新。并发发射 N 个事件，
     断言总和精确。"""
     import asyncio
 

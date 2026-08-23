@@ -119,7 +119,7 @@ async def test_spawn_agents_not_in_subagent_clone(tmp_path):
     assert tools.get("read_file") is not None
 
 
-# --- B4.2: context summary observability + non-blocking background ---
+# --- context summary observability + non-blocking background ---
 
 
 async def test_build_context_summary_emits_events(tmp_path):

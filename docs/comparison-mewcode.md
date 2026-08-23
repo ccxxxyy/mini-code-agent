@@ -550,7 +550,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 | # | 原差距 | mewcode 实现 | mini 实现（P58.4） |
 |---|---|---|---|
 | 1 | 无广播 | `to='*'` 一键广播全队（可 exclude 自己） | ✅ `Mailbox.broadcast()` + send_message `to='*'`，自动排除发送者，返回收件人列表 |
-| 2 | 无结构化消息协议 | `type`（含 shutdown/plan_approval 等团队生命周期类型）+ `request_id` 配对 + `approve` 表态 | ✅ **mini 适配版**：通用 `type=text/request/response` + `request_id`（request 自动分配并回显）+ `approve`；投递前缀区分 `[Request ...]`/`[Response ...]`。诚实差异：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故采用通用请求-应答而非照搬团队类型 |
+| 2 | 无结构化消息协议 | `type`（含 shutdown/plan_approval 等团队生命周期类型）+ `request_id` 配对 + `approve` 表态 | ✅ **mini 适配版**：通用 `type=text/request/response` + `request_id`（request 自动分配并回传）+ `approve`；投递前缀区分 `[Request ...]`/`[Response ...]`。诚实差异：mewcode 的 shutdown/plan_approval 类型服务**常驻队友**的生命周期管理，mini 的 SubAgent 是一次性任务，故采用通用请求-应答而非照搬团队类型 |
 | 3 | 无名字寻址 | `AgentNameRegistry` 按名字或 id 解析 | ✅ `Mailbox.register(id, name)` 别名注册 + `resolve()` id/名字双解析；spawn_agents 新增 `names` 参数（唯一性/保留字校验），MAILBOX_NOTICE 显示 `'explorer' (id xxx, task: ...)` |
 | 4 | 无审计痕迹 | 消息带 `read` 标记 consume 后留盘；`read()` 只窥视 | ✅ `drain` 标记已读并留盘（会话内可 cat 排查）；`unregister` 保留文件；新会话 `SubAgentManager` 初始化时 `reset_all()` 统一清理。诚实差异：审计是**会话级**的，mewcode 留存至手动 cleanup |
 
@@ -558,7 +558,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 - ~~无锁设计只在单进程内成立~~ **✅ 已解除（6.4 前置）**：Mailbox 现已具备完整跨进程能力——O_EXCL 文件锁（指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时）+ temp/os.replace 原子写 + 磁盘注册表 `_registry.json`。实测 4 进程并发写零丢失。实现细节见 6.4
 - ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
-- ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除（B4）**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，**自动投递（B4.3）**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 自动 drain mailbox 并运行 `agent_loop.run()` 处理结果——无需等待用户输入，结果即时送达。`/spawn --background` 命令行也可直接后台派发。默认仍为阻塞模式（需要全部结果再继续的场景）。`inherit_context=true` 组合下的摘要 LLM 调用也已可观测（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent` + 终端提示 + trace 行）且 background 模式下非阻塞（摘要+spawn 整体后台 task，立即返回）。
+- ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，**自动投递**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 自动 drain mailbox 并运行 `agent_loop.run()` 处理结果——无需等待用户输入，结果即时送达。`/spawn --background` 命令行也可直接后台派发。默认仍为阻塞模式（需要全部结果再继续的场景）。`inherit_context=true` 组合下的摘要 LLM 调用也已可观测（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent` + 终端提示 + trace 行）且 background 模式下非阻塞（摘要+spawn 整体后台 task，立即返回）。
 
 ### 6.3 Agent 类型定义 ✅ 已实现（P48 + B3 自定义）
 

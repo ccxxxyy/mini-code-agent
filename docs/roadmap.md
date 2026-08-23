@@ -574,14 +574,6 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**（B4.2 终端验证实测暴露）：`background=true` 派发的子 agent 完成后,结果写入 mailbox 但需等用户下一次输入才被消费。
 **✅ 已修复**：`SubAgentCompleteEvent` 订阅者设置 `asyncio.Event` 并调用 `terminal.interrupt_input()` 中断输入等待，主循环将 `get_user_input()` 与该 event 做竞争——event 先触发时返回 `_BG_INTERRUPT` 哨兵。TTY 路径用 `prompt_session.app.exit(_BG_INTERRUPT)` 保存并恢复用户部分输入，非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争 `input()` executor 与 event。主循环收到 `_BG_INTERRUPT` 后调 `_handle_background_delivery()` 注入合成消息、运行 `agent_loop.run()` 处理 mailbox 结果。新增 `Mailbox.has_pending()` 无锁只读查询。提示文案改为 "processing result..."。3 个新测试。
 
-☐ **D7【UX·低】用户输入在终端里不够显眼,与 trace/工具/回答输出混在一起难以区分**
-**问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。
-**现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
-**现象对比**：
-- Claude Code：用户输入后有一行 bold 白色回显 `> 用户的话` + 分隔线,与 agent 输出视觉分层明确
-- mini-agent 当前：输入在 prompt 行显示一次（打字时可见），回车后被后续输出冲走，无二次回显,无颜色/加粗区分
-**方向**：用户输入确认后、进入处理前（`app.py` 主循环 `:632` user_input strip 之后），在终端打一行醒目的用户输入回显。格式：bold + 主题 warning 色前缀（如 `▶`），用户文字 bold 显示,与 dim 的 trace / 工具 / info 行形成对比。示例：`console.print(f"[bold {theme.warning}]▶[/] [bold]{user_input}[/]")`。如果用户输入过长(>200 字符)截断显示。改动在 app.py 主循环 1 行 + 可选 terminal.py 封装方法。工作量：小。
-
 ☐ **B5 权限模式矩阵**
 mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。
 
@@ -591,6 +583,9 @@ mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 
 ☐ **B7 远程模式 SessionStore 接入**
 mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。
 
+☐ **B8 恢复附件含 skill 调用记录（微小差距）**
+mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。工作量：小。
+
 ☐ **B9 模糊确认不算授权（system prompt 守则）**
 **问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
 **方向**：SYSTEM_PROMPT 增加守则："当用户明确表示只讨论/不要动手时，该约束持续有效，直到用户明确说'开始动手/执行'类指令；模糊确认（对/嗯/好）只确认理解，不解除约束——不确定时先问'现在可以动手了吗'"。可配合测试：对话式约束遵从的 E2E 用例。工作量：小。
@@ -598,9 +593,6 @@ mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/serve
 ☐ **B9.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则）**
 **问题**（B4.1 终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 已有"文件不存在要如实报告"守则，但没有"任务引用了你不知道的讨论/上下文时如实说明"的守则。
 **方向**：agent_types.py 各类型 prompt 加一条："If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed."（fork 场景注入的 `[Inherited context]` 段天然满足"有知识"，不受影响）。工作量：小。
-
-☐ **B8 恢复附件含 skill 调用记录（微小差距）**
-mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。工作量：小。
 
 ### C. 文档过时
 
@@ -715,6 +707,12 @@ A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` �
 D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），agent 立刻改用 `type D:\...\.env`（bash 通道）成功打印、**泄漏真实 API key**。与 D3 同源——bash 绕过工具层保护——但方向是读泄密。根因：敏感文件保护 `PathGuard.is_sensitive_file` 只在 read_file/write_file/delete_file 工具层，bash 命令管道从不查路径，`type`/`cat`/`Get-Content`/`more .env` 作普通命令被 auto-grant。
 修复：permission.py 新增 `command_references_sensitive_file()`，token 化命令、命中 `SENSITIVE_FILE_PATTERNS`（复用 path_guard 同一份模式）即路由到确认（reason=`sensitive_file_command`）。用确认而非静默拒绝——可见且拒绝时触发 D2 熔断停目标（静默 auto-deny 不触发 D2，agent 会像 A2 换法子重试）。2 个新测试，1058→1060。详见 tech-notes §90。
 **诚实边界**：减速带非围墙，同 D3 黑名单——变量展开（`$SECRET`）、通配、base64/echo 拼接、间接读取等混淆仍可逃逸。真正堵死读泄漏需 OS 沙箱读 ACL（Windows Low Integrity 不限制读 Medium 对象，读保护做不到），架构上同 #1/#8 不可完全消除。本条目把常见明显形态从"静默放行"提升到"弹确认+可熔断"。
+
+✅ **D7【UX·低】用户输入在终端里不够显眼,与 trace/工具/回答输出混在一起难以区分**
+**问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。
+**现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
+
+**✅ 已修复**：三件套——① Theme 新增 `user_input` 亮橙色字段（default `#ffaf00`/dark `#ff9e64`/light 白底用深橙 `#b35900`，实测 warning `#f39c12` 黑底偏暗）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮橙；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

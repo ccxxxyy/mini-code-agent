@@ -1358,19 +1358,24 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P58.4 增强：拉平 mewcode 四项差距
 - [x] 广播 — `Mailbox.broadcast()`（排除发送者）+ send_message `to='*'`
-- [x] 结构化消息协议 — `type=text/request/response` + request_id 配对（request 自动分配并回显）+ approve 表态；`_deliver_mail`/wait_message 前缀区分 [Request]/[Response]；response 缺 request_id 报错
+- [x] 结构化消息协议 — `type=text/request/response` + request_id 配对（request 自动分配并回传）+ approve 表态；`_deliver_mail`/wait_message 前缀区分 [Request]/[Response]；response 缺 request_id 报错
 - [x] 名字寻址 — `Mailbox.register(id, name)` 别名 + `resolve()` 双解析 + `describe_peers()`；spawn_agents 新增 `names` 参数（长度/唯一性/保留字 'main'/'*' 校验）；MAILBOX_NOTICE 显示 'explorer' (id xxx, task: ...)
 - [x] 审计留痕 — drain 标记已读留盘（会话级）、unregister 保留收件箱文件、SubAgentManager 持有默认 Mailbox 时初始化 `reset_all()` 清理上一会话
 - [x] 架构边界保持文档化不实现：跨进程文件锁 + 推送唤醒是 6.4 的前置（comparison 6.2）
 - [x] 13 个新测试（test_mailbox.py 共 31 个），684 个全过，覆盖率 80.85%，ruff clean
 
-### B4.3 后台 agent 结果自动投递
+### 后台 agent 结果自动投递
 - [x] `core/mailbox.py` — `Mailbox.has_pending(agent_id)` 无锁只读查询（未注册返回 False）
 - [x] `ui/terminal.py` — `Terminal.interrupt_input()` + `_BG_INTERRUPT` 哨兵；`get_user_input()` 支持中断（TTY 路径 `prompt_session.app.exit(_BG_INTERRUPT)` 保存恢复用户部分输入，非 TTY 路径 `asyncio.wait(FIRST_COMPLETED)` 竞争）
 - [x] `app.py` — `_handle_background_delivery()` while `has_pending` 循环 drain mailbox 注入合成消息 + `_run_agent_and_report()` 从 `_handle_turn()` 提取复用 + 主循环处理 `_BG_INTERRUPT` 哨兵触发自动投递
 - [x] `extensions/builtin_commands.py` — `/spawn --background` flag 解析,后台派发子 agent
 - [x] `app.py` — `SubAgentCompleteEvent` 订阅设置 `asyncio.Event` 并调 `terminal.interrupt_input()` 中断输入等待
 - [x] 3 个新 has_pending 测试（test_mailbox.py：有未读/drain 后无/未注册返回 False）
+
+### 用户输入行醒目化
+- [x] `ui/themes.py` — Theme 新增 `user_input` 字段：default `#ffaf00` 亮橙 / dark `#ff9e64` / light `#b35900`
+- [x] `ui/input_handler.py` — `create_prompt_style()` 根样式 `bold {theme.user_input}`，输入文字打字时和回车后均醒目着色（菜单/工具栏/滚动条 noinherit 不受影响）
+- [x] `ui/terminal.py` — `_input_rule()` 输入行上下各一条 `user_input` 色横线（上边线输入前、下边线输入确认后；`_BG_INTERRUPT` 中断不打下边线避免残线）
 
 ## 会话自动清理 (comparison 9.1)
 
