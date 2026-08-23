@@ -558,7 +558,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 
 - ~~无锁设计只在单进程内成立~~ **✅ 已解除（6.4 前置）**：Mailbox 现已具备完整跨进程能力——O_EXCL 文件锁（指数退避带抖动 + 10s 陈旧锁接管 + 5s 超时）+ temp/os.replace 原子写 + 磁盘注册表 `_registry.json`。实测 4 进程并发写零丢失。实现细节见 6.4
 - ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
-- ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除（B4）**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，主 Agent 下一轮迭代自动注入。默认仍为阻塞模式（需要全部结果再继续的场景）。残留边界：主 Agent 完全空闲时通知滞留到下一用户输入（终端提示先行）。`inherit_context=true` 组合下的摘要 LLM 调用也已可观测（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent` + 终端提示 + trace 行）且 background 模式下非阻塞（摘要+spawn 整体后台 task，立即返回）。
+- ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除（B4）**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，**自动投递（B4.3）**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 自动 drain mailbox 并运行 `agent_loop.run()` 处理结果——无需等待用户输入，结果即时送达。`/spawn --background` 命令行也可直接后台派发。默认仍为阻塞模式（需要全部结果再继续的场景）。`inherit_context=true` 组合下的摘要 LLM 调用也已可观测（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent` + 终端提示 + trace 行）且 background 模式下非阻塞（摘要+spawn 整体后台 task，立即返回）。
 
 ### 6.3 Agent 类型定义 ✅ 已实现（P48 + B3 自定义）
 

@@ -560,7 +560,7 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 
 ✅ **B4 后台子代理 + 完成通知**（已完成）
 **问题**：LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（spawn_agents.py `wait_all`），期间不能做其他工作——comparison 6.2 自认的限制。
-**实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话——复用现有跨 Agent 消息通道，零新增注入机制。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。诚实边界：主 Agent 完全空闲（等用户输入）时通知滞留到下一次用户输入才进对话（终端提示先行）；fork 对话上下文的 worker 后续由 B4.1 实现（摘要式）。
+**实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），自动投递即时送达（B4.3 解除了空闲滞留限制——`terminal.interrupt_input()` 中断输入等待，`_handle_background_delivery()` 自动 drain 并处理）——复用现有跨 Agent 消息通道，零新增注入机制。`/spawn --background` 命令行也可直接后台派发。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。fork 对话上下文的 worker 后续由 B4.1 实现（摘要式）。
 
 ✅ **B4.1 摘要式上下文 fork（fork-with-summary worker）**（已完成）
 **问题**：SubAgent 空白上下文（刻意设计：便宜/可并行/可预测），但"和主 agent 讨论半天需求后派 worker 按讨论去做"的场景下，task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承解决，但全量太贵（并行 N 个 = N 倍历史 token）且有"fork 后主对话继续变化"的一致性问题。
@@ -570,18 +570,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**（B4.1 终端验证中实测暴露）：`inherit_context=true` 时摘要生成（一次完整 LLM 调用）阻塞在 `spawn_agents.execute` 内部——实测对话稍长时耗时 46-54 秒，期间终端零输出、用户以为卡住。两个具体伤害：① `background=true + inherit_context=true` 组合下"立即返回"承诺打折（实测 spawn_agents done 53938ms）；② 摘要调用走 `complete()` 直调不经 AgentLoop，不发任何 trace 事件——`/trace on` 也看不到。
 **✅ 已修复**：① 可观测性：`build_context_summary()` 前后发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`，app.py 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready (Xs, N chars)"），TraceRenderer 订阅显示 `ctx` trace 行——用户不再以为卡死，`/trace on` 可见。② 非阻塞：`background=true + inherit_context=true` 时摘要+spawn 整体放进 `asyncio.create_task`，`execute()` 立即返回；消息列表浅拷贝防竞态，task 引用存 `_notify_tasks` 防 GC。3 个新测试，1060→1063。
 
-☐ **B4.3 后台 agent 完成后结果不自动投递,需等用户下一次输入**
-**问题**（B4.2 终端验证实测暴露）：`background=true` 派发的子 agent 完成后,`_notify_on_complete`（`subagent.py:667`）经 `Mailbox.send()` 把结果发给 recipient `"main"`。但 `AgentLoop._deliver_mail()`（`agent_loop.py:248`）只在 `run()` 的 ReAct `while True` 每轮迭代开头调用——主 Agent 空闲等用户输入时 `run()` 已经 return 了,没有循环在跑,mailbox 消息滞留到用户下一次输入触发新的 `run()` 才被 drain 并注入对话。
-**现象**：终端提示 `Background agent xxx finished — result will be delivered to the conversation next turn`（`app.py` 的 `SubAgentCompleteEvent` 订阅,EventBus 异步触发——这条提示在 `prompt_async()` 期间出现是正常的,因为 asyncio 事件循环在跑、`patch_stdout=True` 保护输出不破坏提示符）,但用户不输入任何东西,结果就永远不进对话——用户必须发一条无关消息才能看到结果,体验割裂。
-**根因分析**：
-- `app.py` 主循环（`:624`）结构是 `while True: user_input = await get_user_input(); _handle_turn(user_input)`——严格串行,`get_user_input()` 独占等待,无并发 mailbox 检查。
-- `Mailbox` API（`core/mailbox.py`）只有 `drain()`（消费式读取）,没有 `has_unread()` / `peek()` 非消费式查询方法。
-- `prompt_async()` 是 async（`terminal.py:117`）,期间 asyncio 事件循环在跑——其他协程**可以**执行（`_on_background_complete` 能在此期间打印提示已证明）。`patch_stdout(raw=True)` 活跃——异步输出不会破坏提示符。
-**候选方案**：
-① `asyncio.wait(FIRST_COMPLETED)`：同时 await `prompt_async()` 和一个 `asyncio.Event`(由 `SubAgentCompleteEvent` 订阅者 set)。event 先触发时中断等待、调用 `_deliver_mail` + `agent_loop.run()` 处理 mailbox 消息;prompt 先触发时正常走 `_handle_turn`。需要 `prompt_toolkit` 支持外部取消或用 `asyncio.Task` 包装。
-② 轮询协程：在 `get_user_input()` 前 `create_task` 一个 mailbox 轮询器(间隔 0.5-1s),检测到消息时 inject 到对话并自动触发 `run()`。需要 Mailbox 加 `has_unread(agent_id)` 非消费式方法。
-③ `_notify_on_complete` 直接回调：`subagent.py` 的 notifier 完成后除了 mailbox.send,还调用一个 `on_background_result` 回调（app.py 注入）,回调直接调 `_deliver_mail` + `run()`。绕过 mailbox 轮询,但打破了"mailbox 是唯一通道"的设计。
-工作量：中。
+✅ **B4.3 后台 agent 完成后结果自动投递**
+**问题**（B4.2 终端验证实测暴露）：`background=true` 派发的子 agent 完成后,结果写入 mailbox 但需等用户下一次输入才被消费。
+**✅ 已修复**：`SubAgentCompleteEvent` 订阅者设置 `asyncio.Event` 并调用 `terminal.interrupt_input()` 中断输入等待，主循环将 `get_user_input()` 与该 event 做竞争——event 先触发时返回 `_BG_INTERRUPT` 哨兵。TTY 路径用 `prompt_session.app.exit(_BG_INTERRUPT)` 保存并恢复用户部分输入，非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争 `input()` executor 与 event。主循环收到 `_BG_INTERRUPT` 后调 `_handle_background_delivery()` 注入合成消息、运行 `agent_loop.run()` 处理 mailbox 结果。新增 `Mailbox.has_pending()` 无锁只读查询。提示文案改为 "processing result..."。3 个新测试。
 
 ☐ **D7【UX·低】用户输入在终端里不够显眼,与 trace/工具/回答输出混在一起难以区分**
 **问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。

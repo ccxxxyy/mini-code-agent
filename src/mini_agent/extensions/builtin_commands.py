@@ -1195,6 +1195,8 @@ def _make_spawn(app: Application) -> HandlerFn:
                 "in one command (combines with --pane)\n"
                 "  `/spawn --type <name> <task>` — use agent type "
                 "(explore/plan/worker/verify)\n"
+                "  `/spawn --background <task>` — dispatch and auto-deliver "
+                "result via mailbox when done (no need for `/spawn wait`)\n"
                 "  `/spawn --fork <task>` — inherit a summary of the current "
                 "conversation (for tasks that refer to the discussion)\n"
                 "  `/spawn list` — show active agents\n"
@@ -1259,6 +1261,11 @@ def _make_spawn(app: Application) -> HandlerFn:
             auto_wait = True
             task_text = task_text.replace("--wait", "").strip()
 
+        background = False
+        if "--background" in task_text:
+            background = True
+            task_text = task_text.replace("--background", "").strip()
+
         agent_type_name: str | None = None
         type_match = re.search(r"--type[= ](\S+)", task_text)
         if type_match:
@@ -1307,6 +1314,18 @@ def _make_spawn(app: Application) -> HandlerFn:
                 tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
                 if not tasks:
                     return "No tasks provided. Use: `/spawn -p task1 | task2`"
+                if background:
+                    ids = await mgr.spawn_background(
+                        tasks,
+                        isolation=isolation,
+                        agent_type=agent_type_name,
+                        context_summary=context_summary,
+                    )
+                    lines = [f"Spawned {len(ids)} background SubAgents:"]
+                    for aid, task in zip(ids, tasks):
+                        lines.append(f"  `{aid}` — {task[:60]}")
+                    lines.append("Results will be auto-delivered when each completes.")
+                    return "\n".join(lines)
                 ids = await mgr.spawn_parallel(
                     tasks,
                     isolation=isolation,
@@ -1321,6 +1340,23 @@ def _make_spawn(app: Application) -> HandlerFn:
 
             if not task_text:
                 return "No task provided."
+            if background:
+                ids = await mgr.spawn_background(
+                    [task_text],
+                    isolation=isolation,
+                    agent_type=agent_type_name,
+                    context_summary=context_summary,
+                )
+                type_info = f"  Type: {agent_type_name}\n" if agent_type_name else ""
+                fork_info = "  Context: inherited (fork)\n" if context_summary else ""
+                return (
+                    f"Background SubAgent spawned: `{ids[0]}`\n"
+                    f"  Task: {task_text[:80]}\n"
+                    f"{type_info}"
+                    f"{fork_info}"
+                    f"  Isolation: {isolation}\n"
+                    "Result will be auto-delivered when it completes."
+                )
             agent_id = await mgr.spawn(
                 task_text,
                 isolation=isolation,

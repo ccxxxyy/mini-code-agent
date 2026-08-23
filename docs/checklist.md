@@ -283,6 +283,8 @@
 - [x] `/team --isolated <任务>` 团队成员 worktree 隔离
 - [x] SubAgentSpawnEvent / SubAgentCompleteEvent 正确 emit
 - [x] `background=true` 后台派生立即返回,完成后经 mailbox 通知 main、终端提示(SubAgentCompleteEvent 订阅)
+- [x] `/spawn --background <任务>` 命令入口——后台派发,完成后结果自动投递到主对话（无需 `/spawn wait`）
+- [x] B4.3 后台 agent 结果自动投递——`Mailbox.has_pending()` 无锁只读查询 + `Terminal.interrupt_input()` 中断输入等待 + `_BG_INTERRUPT` 哨兵 + `_handle_background_delivery()` while-drain 循环 + `_run_agent_and_report()` 处理 mailbox 结果；3 个新 has_pending 测试（test_mailbox.py）
 - [x] `inherit_context=true` / `/spawn --fork` 摘要式上下文 fork——父对话 LLM 摘要注入子 agent system prompt
 - [x] ContextSummaryStartEvent / ContextSummaryDoneEvent 正确 emit(摘要开始/完成,含耗时和字符数)
 - [x] 摘要期间终端提示"Summarizing conversation for context fork..." + `/trace on` 显示 `ctx` 行(不再零输出)
@@ -1037,7 +1039,7 @@
 
 ## Phase 58 检查项：Mailbox 跨 Agent 通信
 
-- [x] `core/mailbox.py` — 文件式 JSON 收件箱，register/unregister/send/drain/peers，单事件循环内同步读写原子无需文件锁
+- [x] `core/mailbox.py` — 文件式 JSON 收件箱，register/unregister/send/drain/has_pending/peers，单事件循环内同步读写原子无需文件锁
 - [x] register 总是重置收件箱——上一会话残留消息不会被投递
 - [x] `send_message` 工具注册（默认 enabled_tools），收件人未注册报错并列出已知 Agent
 - [x] `wait_message` 工具注册，阻塞轮询直到消息到达或超时（上限 600s），超时是信息不是错误

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from rich.console import Console
@@ -12,6 +13,8 @@ from rich.theme import Theme as RichTheme
 from mini_agent.ui.input_handler import SlashCommandCompleter, create_prompt_session
 from mini_agent.ui.renderer import StreamRenderer
 from mini_agent.ui.themes import Theme, get_theme
+
+_BG_INTERRUPT = object()
 
 
 def _markdown_styles(theme: Theme) -> RichTheme:
@@ -46,6 +49,9 @@ class Terminal:
         self._prompt_session = None
         self._toolbar_provider = None
         self._working_dir: Path | None = None
+        self._bg_interrupt_event: asyncio.Event | None = None
+        self._saved_buffer_text: str = ""
+        self._pending_input_task: asyncio.Task | None = None
 
     def set_working_dir(self, working_dir: Path) -> None:
         self._working_dir = working_dir
@@ -100,21 +106,66 @@ class Terminal:
         except Exception:
             return False
 
-    async def get_user_input(self) -> str:
+    def interrupt_input(self) -> None:
+        """Signal get_user_input() to return early for background result processing.
+        通知 get_user_input() 提前返回以处理后台 agent 结果。"""
+        if self._bg_interrupt_event is not None:
+            self._bg_interrupt_event.set()
+        if self._prompt_session is not None:
+            try:
+                app = self._prompt_session.app
+                self._saved_buffer_text = app.current_buffer.text
+                app.exit(result=_BG_INTERRUPT)
+            except Exception:
+                pass
+
+    async def get_user_input(self) -> str | object:
+        """Wait for user input, or return ``_BG_INTERRUPT`` if a background
+        agent completes while waiting.
+        等待用户输入；若等待期间后台 agent 完成则返回 _BG_INTERRUPT。"""
         # Top rule marking the input area (bottom toolbar is the lower bound)
         # 输入区上边界线（下边界由底部工具栏承担）
         self.console.print(f"[{self.theme.dim}]{'─' * self.console.width}[/{self.theme.dim}]")
-        if not self._stdin_is_console():
-            # Plain-input mode: no completion/toolbar, but works in mintty.
-            # 朴素输入模式：无补全/工具栏，但 mintty 下可用。
-            import asyncio
 
-            return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
+        self._bg_interrupt_event = asyncio.Event()
+
+        if not self._stdin_is_console():
+            # Non-TTY: race input() executor against bg interrupt event
+            # 非 TTY：input() 线程与后台中断事件竞争
+            if self._pending_input_task is not None and self._pending_input_task.done():
+                task = self._pending_input_task
+                self._pending_input_task = None
+                self._bg_interrupt_event = None
+                return task.result()
+
+            input_task = self._pending_input_task or asyncio.ensure_future(
+                asyncio.get_event_loop().run_in_executor(None, input, "> ")
+            )
+            self._pending_input_task = None
+            event_task = asyncio.ensure_future(self._bg_interrupt_event.wait())
+            done, _pending = await asyncio.wait(
+                {input_task, event_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if event_task in done:
+                self._pending_input_task = input_task
+                self._bg_interrupt_event = None
+                return _BG_INTERRUPT
+            event_task.cancel()
+            self._bg_interrupt_event = None
+            return input_task.result()
+
+        # TTY: prompt_toolkit path
         self._ensure_prompt_session()
         from prompt_toolkit.patch_stdout import patch_stdout
 
+        default = self._saved_buffer_text
+        self._saved_buffer_text = ""
         with patch_stdout(raw=True):
-            return await self._prompt_session.prompt_async()
+            result = await self._prompt_session.prompt_async(default=default)
+        self._bg_interrupt_event = None
+        if result is _BG_INTERRUPT:
+            return _BG_INTERRUPT
+        return result
 
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
