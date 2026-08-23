@@ -23,7 +23,11 @@ from mini_agent.models.permissions import (
     PermissionRule,
     PermissionScope,
 )
-from mini_agent.security.path_guard import PathGuard
+from mini_agent.security.path_guard import (
+    SENSITIVE_EXCEPTIONS,
+    SENSITIVE_FILE_PATTERNS,
+    PathGuard,
+)
 
 if TYPE_CHECKING:
     from mini_agent.events.bus import EventBus
@@ -49,10 +53,10 @@ _GIT_PREFIX = r"git\s+(?:-c\s+\S+\s+|-C\s+\S+\s+|--?\S+\s+)*"
 # 已证）。这些模式只堵常见明显形态，是减速带而非围墙；迭代上限与命中后的
 # 人工确认才是真正的护栏。
 DANGEROUS_COMMAND_PATTERNS = [
-    # rm with recursive/force flag anywhere (short -rf/-r/-f/-Rf, long
-    # --recursive/--force, flags before OR after the path)
-    # rm 带递归/强制标志（短 -rf/-r/-f、长 --recursive/--force、标志在路径前后均可）
-    r"\brm\s+(?:[^\n]*\s)?(?:-[a-z]*[rf]|--recursive\b|--force\b)",
+    # Any rm targeting something (bare `rm file` deletes too -- not just -rf).
+    # Excludes bare `rm` with no argument and rm --help/-h.
+    # 任何删文件的 rm（裸 `rm file` 也删，不只是 -rf）。排除无参 rm 和 --help。
+    r"\brm\s+(?!--help\b|-h\b)\S",
     r"\bsudo\b",
     # chmod 777/0777, tolerating leading option flags (chmod -R 777)
     # chmod 777/0777，容忍前置选项（chmod -R 777）
@@ -70,8 +74,9 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"\b" + _GIT_PREFIX + r"checkout\s+(?!-b\b)",
     r"\b" + _GIT_PREFIX + r"restore\b",
     r"\b" + _GIT_PREFIX + r"clean\b",
-    r"\bdel\s+/[sq]",  # Windows del /s /q Windows 的递归/静默删除
-    r"\brmdir\s+/s",  # Windows rmdir /s Windows 的递归删除目录
+    r"\bdel\s+\S",  # Windows del (any form -- deletes files) Windows 删文件
+    r"\brmdir\s+\S",  # Windows rmdir (any form, incl. empty dir) Windows 删目录
+    r"\brd\s+\S",  # Windows rd (rmdir alias) Windows rmdir 别名
     r"\bformat\s+[a-z]:",  # Windows format Windows 的格式化磁盘
     r"curl[^|]*\|\s*(ba)?sh",  # curl | sh 下载并直接执行脚本
     r"wget[^|]*\|\s*(ba)?sh",
@@ -98,6 +103,33 @@ _SCRIPT_EXEC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bcmd\s+/c\s+(?P<path>\S+)", re.IGNORECASE),
 ]
 _PYTHON_M_RE = re.compile(r"\bpython[23]?\s+-m\s+(?P<module>\S+)", re.IGNORECASE)
+
+# Splits a shell command into path-like tokens (whitespace, =, and shell
+# operators). Used to spot a sensitive filename referenced anywhere in a bash
+# command -- `type .env`, `cat ~/.ssh/id_rsa`, `Get-Content creds.json` all
+# bypass the read_file tool's sensitive-file DENY because they run via bash.
+# 把 shell 命令切成类路径 token（空白、=、shell 操作符）。用于发现 bash 命令里
+# 任意位置引用的敏感文件名——type/cat/Get-Content 读 .env 等会绕过 read_file
+# 工具的敏感文件拦截，因为它们走 bash 通道。
+_TOKEN_SPLIT_RE = re.compile(r"[\s=]+|[|;&<>()]+")
+
+
+def command_references_sensitive_file(command: str) -> bool:
+    """True if any token in a shell command names a sensitive file
+    (.env / *.pem / id_rsa / credentials / *secret*). A speed bump, not a wall:
+    obfuscated paths (env vars, wildcards) can still slip through.
+    命令中任一 token 命中敏感文件名则为真。减速带而非围墙：变量/通配等混淆仍可能逃逸。"""
+    for raw in _TOKEN_SPLIT_RE.split(command):
+        tok = raw.strip().strip("'\"")
+        if not tok:
+            continue
+        name = tok.replace("\\", "/").rsplit("/", 1)[-1]
+        if name in SENSITIVE_EXCEPTIONS:
+            continue
+        if any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILE_PATTERNS):
+            return True
+    return False
+
 
 # Callback to ask the user for confirmation.
 # Returns True (allow once), False (deny), or "always" (allow for session).
@@ -435,13 +467,17 @@ class PermissionManager:
         # 危险模式 或 执行本会话写过的脚本 -> 确认
         is_dangerous = self.is_dangerous_command(command)
         is_written_script = self.is_executing_written_script(command, self.working_dir)
-        if is_dangerous or is_written_script:
+        is_sensitive_file = command_references_sensitive_file(command)
+        if is_dangerous or is_written_script or is_sensitive_file:
             if self.sandbox_auto_allow:
                 self.last_decision_reason = "sandbox_auto_allow"
                 return PermissionDecision.GRANTED
             if is_written_script:
                 request.context = "executing script written by agent this session"
                 self.last_decision_reason = "written_script_execution"
+            elif is_sensitive_file:
+                request.context = "command references a sensitive file (.env / key / credentials)"
+                self.last_decision_reason = "sensitive_file_command"
             else:
                 request.context = "dangerous command detected"
                 self.last_decision_reason = "dangerous_command"

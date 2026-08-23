@@ -1922,7 +1922,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 13 个新测试（add_rule 基础/deny/去重/空pattern/空白pattern/事件/静默 + remove_rule 2 + list_rules 2 + save_rule_to_file 4），912 个测试全过，ruff clean
 ## Phase 79: 工具级权限与通用检查入口 (P79)
 
-> todo-code-quality 扩展点 #9 `PermissionScope.TOOL` + #15 `PermissionManager.check()` 接入（issue #175）。
+> todo-code-quality 扩展点 #9 `PermissionScope.TOOL` + #15 `PermissionManager.check()` 接入。
 > **前因**：权限系统只有 COMMAND/PATH 两个生效 scope，用户无法按工具名拦截/信任；`check()` 名为通用入口实际绕过危险命令确认和 PathGuard，外部消费者直接用会踩陷阱。**后果**：三级 scope 齐备（工具门先于资源检查），`check()` 按 scope 分发后成为真正的单点检查入口。详述见 tech-notes §79。
 
 ### P79.1 PermissionManager

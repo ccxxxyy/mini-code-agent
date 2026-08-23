@@ -184,6 +184,12 @@ class AgentLoop:
         # True when the last run() ended via circuit breaker, not a natural answer
         # 上一次 run() 是否因熔断（而非自然回答）结束
         self.stopped_early: bool = False
+        # Which circuit breaker fired ("" = none / iteration / loop guard).
+        # "confirm_denied" = user denied a confirm (dangerous command / path
+        # outside project / hook) -> stop the goal (default threshold 1).
+        # 哪个熔断触发（""=无/迭代/死循环守卫）；"confirm_denied"=用户拒绝了
+        # 确认框（危险命令/项目外路径/hook）（默认阈值 1，拒一次即停）。
+        self.stop_reason: str = ""
         self.plan_mode: bool = False
         # Cross-agent mailbox: drained at the start of each iteration (app/subagent injects)
         # 跨 Agent 收件箱——每轮开始前 drain（app/subagent 注入）
@@ -208,6 +214,7 @@ class AgentLoop:
         self._cancelled = False
         self._state = AgentState(max_iterations=self._config.max_agent_iterations)
         self.stopped_early = False
+        self.stop_reason = ""
         self._file_changes = {}
         self._streaming_tasks = {}
         if self.snapshot_store:
@@ -323,7 +330,13 @@ class AgentLoop:
                 await self._context.check_and_compress(conversation)
 
             if not self._should_continue():
-                final_content = response.content or "(stopped: iteration limit or cancellation)"
+                if self.stop_reason == "confirm_denied":
+                    final_content = (
+                        "已停止对这个目标的尝试——你拒绝了一个需要确认的操作。"
+                        "请告诉我你希望如何处理，或者确认是否放弃。"
+                    )
+                else:
+                    final_content = response.content or "(stopped: iteration limit or cancellation)"
                 self.stopped_early = True
                 await self._transition(AgentPhase.TERMINATED)
                 break
@@ -706,6 +719,10 @@ class AgentLoop:
         if hook_result.action == HookAction.CONFIRM:
             approved = await self._resolve_hook_confirm(tc.name, hook_result.reason)
             if not approved:
+                # Hook confirm denied -> count toward the confirm-denial breaker
+                # so the goal stops (same as a denied dangerous command / path).
+                # hook 确认被拒 -> 计入确认拒绝熔断，停止目标（同危险命令/路径）。
+                self._state.consecutive_confirm_denials += 1
                 return ToolResult(
                     call_id=tc.id,
                     name=tc.name,
@@ -845,6 +862,18 @@ class AgentLoop:
             decision = PermissionDecision.GRANTED
             self._permissions.last_decision_reason = "unrestricted_tool"
 
+        # A user-denied confirm (dangerous command OR path outside project)
+        # stops the goal -- the loop breaker reads consecutive_confirm_denials.
+        # Keyed on "user_confirm:no" so only ACTUAL confirm denials count, not
+        # auto policy denials (sensitive-path rules etc.) which just skip.
+        # 用户拒绝确认框（危险命令或项目外路径）时停止目标——熔断读
+        # consecutive_confirm_denials。按 "user_confirm:no" 计数，只算真正的
+        # 确认框拒绝，不算自动策略拒绝（敏感路径规则等，那些只跳过）。
+        if self._permissions.last_decision_reason == "user_confirm:no":
+            self._state.consecutive_confirm_denials += 1
+        elif decision == PermissionDecision.GRANTED:
+            self._state.consecutive_confirm_denials = 0
+
         await self._event_bus.emit(
             PermissionCheckEvent(
                 tool_name=tc.name,
@@ -862,6 +891,15 @@ class AgentLoop:
         if self._state.iteration >= self._state.max_iterations:
             return False
         if self._cancelled:
+            return False
+        # A denied confirm stops the goal (default threshold 1: one denial
+        # stops). Covers dangerous commands, paths outside the project, and
+        # hook confirms -- denying any of them means "don't do this", so the
+        # agent stops and asks instead of hunting for a workaround.
+        # 确认框被拒即停（默认阈值 1，拒一次就停）。涵盖危险命令、项目外路径、
+        # hook 确认——拒绝任一个都是"别做这个"，agent 停下回问而非找绕过。
+        if self._state.consecutive_confirm_denials >= self._config.max_consecutive_denials:
+            self.stop_reason = "confirm_denied"
             return False
         # Infinite loop guard 1: same tool+args called 6+ times in a row
         # 死循环保护 1：同一工具+参数连续调用 6 次及以上

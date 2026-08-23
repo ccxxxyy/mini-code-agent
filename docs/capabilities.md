@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1055 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1060 个测试全部通过（1 skipped）。
 
 ---
 
@@ -48,7 +48,7 @@
 **实现**（`core/agent_loop.py`）：
 - ReAct 循环：THINK（LLM 流式生成）→ 有 tool_calls 则 ACT（执行工具）→ OBSERVE（结果写回对话）→ 回到 THINK，直到 LLM 给出最终回答
 - 自主性本质：工具结果作为 TOOL 消息进入对话，LLM 看到结果自然继续推理——循环不含任务逻辑，所有决策由 LLM 做出
-- 熔断保护：max_iterations 上限（80）、用户取消、双层死循环检测（同签名连续 6 次 + 同一工具出现在连续 15 轮每轮中——P35 实验后升级 v2，不误杀批量并行）
+- 熔断保护：max_iterations 上限（80）、用户取消、双层死循环检测（同签名连续 6 次 + 同一工具出现在连续 15 轮每轮中——P35 实验后升级 v2，不误杀批量并行）、确认拒绝熔断（任何确认框被拒即停下回问用户——危险命令/项目外路径/hook 确认，默认阈值 1；自动策略拒绝不计数）
 
 **验证**：8 个 MockLLM 单测覆盖完整链路；真实 API 验证 Agent 自主多步执行（一次任务里自主 glob→read→回答）
 
@@ -104,15 +104,16 @@
 
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
-- 危险命令确认：26 条正则（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝）
+- 危险命令确认：27 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
+- 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
 - 声明式规则（comparison 7.2）：`[[hooks]]` TOML 配置（tool fnmatch + arg/contains/regex 匹配 + reason + action），`action = "block"`（默认）命中即拒绝工具执行，`action = "confirm"` 命中弹 y/a/n 确认框由用户裁决——给某目录加只读锁或给 git push 加人工闸门只需 5 行配置，无需写 Python
 
-**验证**：35 个安全测试（含危险命令三态、敏感文件拦截、Hook 阻止与观察）+ 20 个声明式规则测试（含 AgentLoop 端到端拦截 + CONFIRM y/n/always/无回调四路径端到端）
+**验证**：37 个安全测试（含危险命令三态、敏感文件拦截、敏感文件经 bash 通道弹确认、Hook 阻止与观察）+ 20 个声明式规则测试（含 AgentLoop 端到端拦截 + CONFIRM y/n/always/无回调四路径端到端）
 
 ---
 
@@ -214,7 +215,7 @@
 | Function Calling | OpenAI tool_calls 格式（碎片化 delta 增量组装）+ Anthropic tool_use 格式（双向转换） |
 | Tools 工具系统 | Tool ABC（schema + execute 双成员）+ ToolRegistry（注册/克隆/过滤）+ 参数校验 |
 | ReAct 范式 | think → act → observe 循环，失败即数据（错误回传 LLM 自纠错） |
-| Agent Loop 主循环 | `core/agent_loop.py` 状态机（8 个 AgentPhase），三重熔断护栏 |
+| Agent Loop 主循环 | `core/agent_loop.py` 状态机（8 个 AgentPhase），四重熔断护栏 |
 | 事件流 | `events/bus.py` 异步发布订阅 EventBus（on/on_any/off/off_any，handler 异常隔离并记日志），14 种类型化事件贯穿全部组件，5 个内置订阅者共 17 个订阅（Trace 8/Audit 4/Teach 2/Recorder 2/Cost 1）；`listener_dirs` 目录 *.py 插件零代码接入全局监听 |
 
 ### ✅ 层面 3：能力拓展协议
@@ -231,7 +232,7 @@
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；26 条危险命令正则（含 D3 内联解释器拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员仅警告） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；27 条危险命令正则（含内联解释器拦截，删除类命令任意形态均拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；确认拒绝熔断（任何确认框被拒——危险命令/项目外路径/hook 确认——连续 `max_consecutive_denials` 次后停止本回合、回问用户，默认 1——拒一次即停，防止被拒后继续找绕过路径；自动策略拒绝如敏感路径/deny 规则不计数、仅跳过继续）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明，无启动警告） |
 | 上下文压缩 | 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow），双阈值（75% 软 + 90% 硬绕过熔断器），token 驱动保留窗口，聚合溢写，/compact 手动 |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
@@ -265,7 +266,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1055 个测试全部通过（1 skipped，约 90 秒，零网络依赖），单元 61 文件 + 集成 4 文件 |
+| 测试 | 1060 个测试全部通过（1 skipped，约 90 秒，零网络依赖），单元 61 文件 + 集成 4 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

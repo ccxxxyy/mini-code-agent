@@ -259,6 +259,9 @@ output = 8.0
 # Top-level configuration (belongs to no section; note it must be written before all [sections] and [[hooks]] to count as top-level)
 max_agent_iterations = 80    # Maximum ReAct loop iterations (shared by the main loop and SubAgents without an explicit type;
                              # when /spawn --type explicitly selects a type, the type profile's budget is adopted, see P80)
+max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutive confirm-dialog denials
+                             # (dangerous command / path outside project / hook confirm; default 1 = one denial stops
+                             # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
 streaming_tool_execution = true  # During streaming, start executing a tool call as soon as it is fully assembled (false waits for the stream to end)
 enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on toggles at runtime)
@@ -487,7 +490,7 @@ Warnings only, no blocking — the LLM keeps working after the overage; whether 
 
 ### Hook Rule Details ([[hooks]] section)
 
-**What it does**: without writing a single line of Python, declare via configuration "which tool calls should be rejected or require confirmation". With `action = "block"` (default), a match means the call is **not executed**; the LLM receives `Blocked by hook: <reason>` and adjusts its strategy (switches approach or informs the user) instead of blindly retrying. With `action = "confirm"`, a match pops a y/a/n confirmation dialog for you to decide — y allows once, a stops asking for the same rule within this session, n rejects (the LLM receives `Denied by user: <reason>`).
+**What it does**: without writing a single line of Python, declare via configuration "which tool calls should be rejected or require confirmation". With `action = "block"` (default), a match means the call is **not executed**; the LLM receives `Blocked by hook: <reason>` and adjusts its strategy (switches approach or informs the user) instead of blindly retrying. With `action = "confirm"`, a match pops a y/a/n confirmation dialog for you to decide — y allows once, a stops asking for the same rule within this session, n rejects (the LLM receives `Denied by user: <reason>` and the task continues after skipping that call).
 
 **Where to write it**: user-level `~/.mini-agent/config.toml` (effective across projects) or project-level `.mini-agent/config.toml` (this project only).
 **Layer semantics (careful)**: when the project level defines `[[hooks]]`, it **wholesale replaces** the user-level rule list (no merging) — to have both take effect, copy the user-level rules into the project level.
@@ -760,6 +763,8 @@ Evaluation order (first match decides):
 4. Paths in `allowed_paths` (configurable in config.toml) → auto allow
 5. None of the above matches → ask the user (when `permission_mode = "ask"`)
 
+> **bash channel also covers sensitive files**: this PathGuard sensitive-file protection only guards the `read_file`/`write_file`/`delete_file` tools. bash commands used to skip path checks entirely — `type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` sailed through as normal commands, bypassing the file-tool block and printing the contents (a real API key leaked during verification). Now permission.py's `command_references_sensitive_file()` tokenizes a bash command and, if any token's basename matches the same sensitive-file patterns above, routes it to a **confirmation** (decision reason `sensitive_file_command`); a denial trips the confirm-denial breaker. Honest boundary, same as the dangerous-command blacklist: obfuscated paths (env vars like `$SECRET`, wildcards, base64/echo concatenation) can still slip through — see docs/tech-notes.md §90.
+
 **Tool-level rules (P79)**: the `[tools]` section matches by tool name (glob supported) and is evaluated **before** command/path checks — `deny` blocks the entire tool outright; `allow` trusts the tool wholesale, skipping subsequent resource checks (`allow = ["bash"]` means even dangerous commands are no longer confirmed — use with caution); tools with no matching rule go through command/path checks as usual.
 
 **Matching syntax**: glob style. `git *` matches `git status` but not `github`; `*secrets*` matches any path containing secrets.
@@ -789,7 +794,7 @@ Kernel-level isolation of the execution environment for bash commands — even a
 |---|---|---|
 | Linux | bubblewrap (bwrap), auto-fallback to unshare if unavailable | bwrap: `sudo apt install bubblewrap` or `yum install bubblewrap`; unshare: pre-installed (util-linux) |
 | macOS | Seatbelt (sandbox-exec) | Bundled with the system (`/usr/bin/sandbox-exec`) |
-| Windows | Dual-mode: admin Low Integrity process (kernel-level) / non-admin warning only (no file protection) | Built-in (ctypes); see file permissions table below |
+| Windows | Dual-mode: admin Low Integrity process (kernel-level) / non-admin no file protection (documented only, no startup warning) | Built-in (ctypes); see file permissions table below |
 
 **Enabling**:
 
@@ -824,9 +829,9 @@ On Linux, when bwrap is unavailable, the sandbox automatically falls back to `un
 
 Uses ctypes to lower the subprocess token integrity (`_low_integrity.py` helper), providing kernel-level protection equivalent to bwrap/seatbelt.
 
-**Windows non-admin mode (warning only, no file protection)** — attrib has been disabled (it blocks the agent's own file writes):
+**Windows non-admin mode (no file protection)** — attrib has been disabled (it blocks the agent's own file writes):
 
-Non-admin mode shows a startup warning only. No file protection is applied. Only admin Low Integrity mode provides real sandbox isolation.
+Non-admin mode applies no file protection and prints no startup warning (this limitation is documented here only, to avoid noise on every launch). Only admin Low Integrity mode provides real sandbox isolation.
 
 **How sandbox_auto_allow works with permissions.toml**:
 
@@ -837,7 +842,7 @@ Command arrives
   ↓
 ② permissions.toml allow rule / session grant? → allow
   ↓
-③ Dangerous command (26 regexes, including inline interpreters)?
+③ Dangerous command (27 regexes, including inline interpreters)?
      sandbox_auto_allow=true → allow (sandbox as backstop)
      sandbox_auto_allow=false → confirmation dialog
   ↓
@@ -853,13 +858,15 @@ Command arrives
 
 > **⚠ Security Boundary (applies to all three platforms)**
 >
-> **When `sandbox=false`** (now off by default -- sandbox is on): all three platforms have only regex + confirmation dialogs as protection. If the LLM is denied `rm -rf`, it can switch to `python -c "shutil.rmtree(...)"` to bypass (D3 added common inline interpreters to the dangerous patterns; writing a `.py` file and running it is caught by the write-then-execute detection).
+> **When `sandbox=false`** (now off by default -- sandbox is on): all three platforms have only regex + confirmation dialogs as protection. If the LLM is denied `rm -rf`, it can switch to `python -c "shutil.rmtree(...)"` to bypass (common inline interpreters have been added to the dangerous patterns; writing a `.py` file and running it is caught by the write-then-execute detection).
 >
 > **When `sandbox=true`**:
 > - **Linux**: bwrap (or unshare fallback) provides kernel-level read-only filesystem. Even if the LLM bypasses regex, it cannot write to protected paths. This is the strongest protection.
 > - **macOS**: seatbelt provides kernel-level read-only filesystem, equivalent to Linux bwrap.
 > - **Windows admin**: Low Integrity process provides kernel-level isolation, equivalent to bwrap/seatbelt.
-> - **Windows non-admin**: No file protection (warning only). attrib has been disabled because it blocks the agent's own file writes. Only admin Low Integrity provides real protection.
+> - **Windows non-admin**: No file protection (this limitation is documented here only; no startup warning is printed). attrib has been disabled because it blocks the agent's own file writes. Only admin Low Integrity provides real protection.
+>
+> **Read-leak boundary**: the sandbox governs "what can be written," not "what can be read" — a Low Integrity process can still read Medium-integrity objects. Leaking a sensitive file (`.env`/keys/credentials) via bash `type`/`cat`/`Get-Content` is caught by the command-layer `command_references_sensitive_file()` confirmation (see §8's "bash channel also covers sensitive files" note), not by the sandbox. Same speed bump: obfuscated paths can still slip through.
 >
 > **Bottom line**: Denying a command ≠ the operation is impossible. The sandbox narrows the writable scope, regex + confirmation dialogs + write-then-execute detection prevent common mistakes, but without sandbox or with Windows non-admin sandbox, deliberate LLM bypass cannot be fully prevented.
 

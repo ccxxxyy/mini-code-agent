@@ -229,9 +229,10 @@ consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并�
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）
 allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单（默认空），命中即放行（含危险命令）
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝列表（默认值），命中即拒绝
-# 注意：denied_commands 是 glob 精确匹配拒绝。另有 26 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
-# 用于弹窗确认（rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
-# restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
+# 注意：denied_commands 是 glob 精确匹配拒绝。另有 27 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
+# 用于弹窗确认（删除类 rm/del/rmdir/rd 任意形态均命中——裸 rmdir、rm/del 单文件也算，不限于
+# -rf、/s、/q；另有 sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
+# restore/clean/Windows format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
 # sh -c/bash -c/powershell -Command/pwsh -c）——这些不可配，但可通过
 # allowed_commands 放行或 sandbox_auto_allow 免确认。
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
@@ -259,6 +260,8 @@ output = 8.0
 # 顶级配置（不属于任何段；注意必须写在所有 [段] 和 [[hooks]] 之前才算顶级）
 max_agent_iterations = 80    # ReAct 循环最大迭代数（主循环与未指定类型的 SubAgent 共用；
                              # /spawn --type 显式选类型时采纳类型档案预算，见 P80）
+max_consecutive_denials = 1  # 确认框连续被拒 N 次后熔断停机、回问用户（危险命令/项目外路径/hook 确认；
+                             # 默认 1 = 拒一次即停；调大可给被拒后修正重试的空间。防止被拒后继续找绕过路径）
 theme = "default"            # "default" | "dark" | "light"
 streaming_tool_execution = true  # 流式期间工具调用一组装完成就开始执行（false 等流结束再执行）
 enable_plan_mode = false     # 启动时进入只读计划模式（/plan on 运行时切换）
@@ -487,7 +490,7 @@ MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 
 ### Hook 规则详解（[[hooks]] 段）
 
-**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝或需要确认"。`action = "block"`（默认）命中即**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试；`action = "confirm"` 命中弹 y/a/n 确认框由你裁决——y 放行一次、a 本会话内同一规则不再询问、n 拒绝（LLM 收到 `Denied by user: <reason>`）。
+**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝或需要确认"。`action = "block"`（默认）命中即**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试；`action = "confirm"` 命中弹 y/a/n 确认框由你裁决——y 放行一次、a 本会话内同一规则不再询问、n 拒绝（LLM 收到 `Denied by user: <reason>`，跳过该次调用后任务继续）。
 
 **写在哪**：用户级 `~/.mini-agent/config.toml`（跨项目生效）或项目级 `.mini-agent/config.toml`（仅本项目）。
 **层级语义（注意）**：项目级定义了 `[[hooks]]` 时**整体替换**用户级的规则列表（不合并）——想两边都生效，把用户级规则复制进项目级。
@@ -760,6 +763,8 @@ deny = ["delete_file"]     # 直接拦截整个工具
 4. `allowed_paths` 中的路径（config.toml 可配） → 自动放行
 5. 以上都不匹配 → 询问用户（`permission_mode = "ask"` 时）
 
+> **bash 通道也覆盖敏感文件**：上面这套 PathGuard 敏感文件保护只作用于 `read_file`/`write_file`/`delete_file` 三个文件工具。bash 命令曾对路径零检查——`type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` 会作普通命令被自动放行，绕过文件工具的拦截并把内容打印出来（真实验证实测泄漏过 API key）。现 permission.py 的 `command_references_sensitive_file()` 会把 bash 命令切成 token，任一 token 的 basename 命中上面同一份敏感文件模式即**弹确认**（判定 reason `sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同危险命令黑名单：变量展开（`$SECRET`）、通配、base64/echo 拼接等混淆仍可逃逸——详见 docs/tech-notes.md §90。
+
 **工具级规则（P79）**：`[tools]` 节按工具名匹配（支持 glob），在命令/路径检查**之前**评估——`deny` 直接拦截整个工具；`allow` 整体信任该工具，跳过后续资源检查（`allow = ["bash"]` 意味着危险命令也不再确认，慎用）；无匹配规则的工具照常走命令/路径检查。
 
 **匹配语法**：glob 风格。`git *` 匹配 `git status` 但不匹配 `github`；`*secrets*` 匹配任何含 secrets 的路径。
@@ -789,7 +794,7 @@ deny = ["delete_file"]     # 直接拦截整个工具
 |---|---|---|
 | Linux | bubblewrap (bwrap)，不可用时自动降级 unshare | bwrap: `sudo apt install bubblewrap` 或 `yum install bubblewrap`；unshare: util-linux 预装 |
 | macOS | Seatbelt (sandbox-exec) | 系统自带（`/usr/bin/sandbox-exec`） |
-| Windows | 双模式：管理员 Low Integrity 进程（内核级）/ 非管理员仅警告（无文件保护） | 系统自带（ctypes）；详见下方文件权限表 |
+| Windows | 双模式：管理员 Low Integrity 进程（内核级）/ 非管理员无文件保护（限制仅文档说明，无启动警告） | 系统自带（ctypes）；详见下方文件权限表 |
 
 **启用**：
 
@@ -824,9 +829,9 @@ Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（
 
 通过 ctypes 降低子进程令牌完整性（`_low_integrity.py` helper），与 bwrap/seatbelt 提供等效的内核级保护。
 
-**Windows 非管理员模式（仅警告，无文件保护）**——attrib 已禁用（会阻断 agent 自身文件写入）：
+**Windows 非管理员模式（无文件保护）**——attrib 已禁用（会阻断 agent 自身文件写入）：
 
-非管理员模式启动时仅显示警告，不做任何文件保护。只有管理员 Low Integrity 模式提供真正的沙箱隔离。
+非管理员模式不做任何文件保护，也不打启动警告（该限制仅在本文档说明，避免每次启动的噪音）。只有管理员 Low Integrity 模式提供真正的沙箱隔离。
 
 **sandbox_auto_allow 与 permissions.toml 的配合**：
 
@@ -837,7 +842,7 @@ Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（
   ↓
 ② permissions.toml allow 规则 / session grant？→ 放行
   ↓
-③ 危险命令（26 条正则，含内联解释器）？
+③ 危险命令（27 条正则，含内联解释器）？
      sandbox_auto_allow=true → 放行（沙箱兜底）
      sandbox_auto_allow=false → 弹窗确认
   ↓
@@ -853,13 +858,15 @@ Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（
 
 > **⚠ 安全边界（三个平台都适用）**
 >
-> **`sandbox=false` 时**（已改为默认开启）：三个平台都只有正则 + 确认框防护。LLM 被拒 `rm -rf` 后可改用 `python -c "shutil.rmtree(...)"` 绕过（D3 已把常见内联解释器加入危险模式弹确认；写 `.py` 文件再执行会被写后执行检测拦截弹确认）。
+> **`sandbox=false` 时**（已改为默认开启）：三个平台都只有正则 + 确认框防护。LLM 被拒 `rm -rf` 后可改用 `python -c "shutil.rmtree(...)"` 绕过（已把常见内联解释器加入危险模式弹确认；写 `.py` 文件再执行会被写后执行检测拦截弹确认）。
 >
 > **`sandbox=true` 时**：
 > - **Linux**：bwrap（或 unshare 后备）提供内核级只读文件系统。即使 LLM 绕过正则，也写不了受保护路径。这是最强防护。
 > - **macOS**：seatbelt 提供内核级只读文件系统，等同 Linux bwrap。
 > - **Windows 管理员**：Low Integrity 进程提供内核级隔离，等同 bwrap/seatbelt。
-> - **Windows 非管理员**：非管理员模式无文件保护（仅警告）。attrib 已禁用，因为会阻断 agent 自身文件写入。只有管理员 Low Integrity 提供真正保护。
+> - **Windows 非管理员**：非管理员模式无文件保护（该限制仅在本文档说明，不打启动警告）。attrib 已禁用，因为会阻断 agent 自身文件写入。只有管理员 Low Integrity 提供真正保护。
+>
+> **读泄漏边界**：沙箱管"能写哪"，管不了"能读哪"——Low Integrity 进程仍能读 Medium 完整性对象。敏感文件（`.env`/密钥/凭据）经 bash `type`/`cat`/`Get-Content` 读取的泄漏，靠命令层的 `command_references_sensitive_file()` 弹确认拦（见 §八"bash 通道也覆盖敏感文件"说明），而非沙箱。同样是减速带：混淆路径仍可逃逸。
 >
 > **结论**：拒绝一条命令 ≠ 该操作不可能完成。沙箱收窄了可写范围，正则 + 确认框 + 写后执行检测防常见误操作，但在无沙箱或 Windows 非管理员沙箱下无法完全防 LLM 刻意绕过。
 

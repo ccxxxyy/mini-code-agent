@@ -163,15 +163,12 @@ async def test_windows_mode_admin():
     with patch("mini_agent.security.sandbox.windows.is_admin", return_value=True):
         sb = WindowsSandbox()
         assert sb.mode == "low_integrity"
-        assert sb.startup_warning() is None
 
 
 async def test_windows_mode_non_admin():
     with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
         sb = WindowsSandbox()
-        assert sb.mode == "attrib"
-        assert sb.startup_warning() is not None
-        assert "admin" in sb.startup_warning().lower()
+        assert sb.mode == "no_protection"
 
 
 async def test_windows_admin_wrap_uses_helper(tmp_path):
@@ -191,28 +188,15 @@ async def test_windows_admin_wrap_uses_helper(tmp_path):
 
 
 async def test_windows_nonadmin_wrap_passthrough(tmp_path):
-    """Non-admin attrib mode: wrap returns command as-is (attrib set at session level)."""
-    deny_dir = tmp_path / "protected"
-    deny_dir.mkdir()
+    """Non-admin mode: no file protection -> wrap returns command as-is."""
     with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
         sb = WindowsSandbox()
         cfg = SandboxConfig(
             allow_write=[str(tmp_path / "work")],
-            deny_write=[str(deny_dir)],
+            deny_write=[str(tmp_path / "protected")],
             network=True,
         )
         wrapped = sb.wrap("echo hello", cfg)
-    assert wrapped == "echo hello"
-
-
-async def test_windows_nonadmin_no_deny_no_net_passthrough():
-    with patch("mini_agent.security.sandbox.windows.is_admin", return_value=False):
-        sb = WindowsSandbox()
-        cfg = SandboxConfig(allow_write=["/work"], deny_write=[], network=True)
-        with patch(
-            "mini_agent.security.sandbox.windows._collect_deny_paths", return_value=[]
-        ):
-            wrapped = sb.wrap("echo hello", cfg)
     assert wrapped == "echo hello"
 
 
@@ -253,10 +237,10 @@ async def test_ps_escape_special_chars():
 
 async def test_low_integrity_helper_parses_double_dash():
     """Helper must handle commands containing -- correctly."""
-    from mini_agent.security.sandbox._low_integrity import main
-
     import sys
     from unittest.mock import patch as mpatch
+
+    from mini_agent.security.sandbox._low_integrity import main
 
     # "-- echo -- hello" → command should be "echo -- hello"
     with mpatch.object(sys, "argv", ["helper", "--", "echo", "--", "hello"]):
@@ -267,27 +251,6 @@ async def test_low_integrity_helper_parses_double_dash():
         ):
             result = main()
     assert result == 1  # lower_integrity fails, returns 1
-
-
-async def test_windows_collect_deny_paths_excludes_allowed(tmp_path):
-    from mini_agent.security.sandbox.windows import _collect_deny_paths
-
-    deny_dir = tmp_path / "config"
-    deny_dir.mkdir()
-    cfg = SandboxConfig(allow_write=[str(deny_dir)], deny_write=[str(deny_dir)])
-    paths = _collect_deny_paths(cfg)
-    assert str(deny_dir.resolve()) not in paths
-
-
-async def test_windows_collect_deny_paths_ignores_config_deny_write(tmp_path):
-    """Attrib mode skips config.deny_write (agent needs to write those dirs)."""
-    from mini_agent.security.sandbox.windows import _collect_deny_paths
-
-    deny_dir = tmp_path / "secrets"
-    deny_dir.mkdir()
-    cfg = SandboxConfig(allow_write=[str(tmp_path / "work")], deny_write=[str(deny_dir)])
-    paths = _collect_deny_paths(cfg)
-    assert str(deny_dir.resolve()) not in paths
 
 
 async def test_windows_nonadmin_wrap_is_passthrough_even_with_net_deny(tmp_path):

@@ -114,8 +114,10 @@ class SecurityConfig:
     # Stale worktrees older than this are auto-removed at startup (0 = off)
     # 超过此天数的过期 worktree 启动时自动清理（0 = 禁用）
     worktree_max_age_days: int = 7
-    # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows attrib)
-    # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows attrib）
+    # OS-level sandbox (Linux bwrap/unshare / macOS seatbelt / Windows admin
+    # Low Integrity; Windows non-admin = no file protection, no startup warning)
+    # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low
+    # Integrity；非管理员无文件保护、不打启动警告）
     sandbox: bool = True
     sandbox_auto_allow: bool = False
     sandbox_network: bool = False
@@ -165,6 +167,15 @@ class AgentConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 80
+    # Stop and ask the user after this many confirm-dialog denials (dangerous
+    # command / path outside project / hook confirm). Default 1: one denial
+    # stops the goal (denying a confirm means "don't do this"; the agent asks
+    # instead of hunting for a bypass). Raise to give the agent room to retry
+    # with a corrected command after a denial.
+    # 确认框被拒达到这个次数就停下回问用户（危险命令/项目外路径/hook 确认）。
+    # 默认 1：拒一次即停（拒绝确认框 = "别做这个"，agent 停下问你而非找绕过）。
+    # 调大可给 agent 被拒后用修正命令重试的空间。
+    max_consecutive_denials: int = 1
     # Declarative PRE_TOOL rejection rules from `[[hooks]]` TOML (raw dicts,
     # parsed by tools/hooks.parse_hook_rules)
     # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）

@@ -165,7 +165,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | `Loaded N hook rule(s) from config` | `app.py` startup | When config.toml contains `[[hooks]]` rules |
 | `Loaded N event listener(s): xxx` | `app.py` startup | When listener_dirs contains *.py plugins |
 | `Loaded N plugin(s): xxx` | `app.py` startup | When plugin_dirs contains *.py plugins or packages with the `mini_agent.plugins` entry point are installed (P83); use `/plugins` for details |
-| `[sandbox] ...` sandbox status hint | `app.py` startup | When sandbox=true but backend is unavailable/degraded (e.g. Linux without bwrap+unshare, Windows non-admin warning-only mode); not shown when backend is active and admin |
+| `[sandbox] ...` sandbox status hint | `app.py` startup | Only when sandbox=true and the backend is genuinely unavailable (e.g. Linux with neither bwrap nor unshare); no longer printed for Windows non-admin (the no-file-protection limitation is documented in the config guide only); not shown when the backend is active |
 | `MCP: xxx connected (N tools)` | `app.py` startup | When an MCP server connects successfully |
 | `Cleaned N stale session(s)` | `app.py` startup | When stale sessions are auto-cleaned |
 | `Cleaned N stale worktree(s)` | `app.py` startup | When stale worktrees are auto-cleaned |
