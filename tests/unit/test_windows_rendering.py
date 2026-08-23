@@ -168,6 +168,101 @@ async def test_confirm_falls_back_to_input(monkeypatch):
     assert await t.confirm("Allow?") is True
 
 
+# --- confirm/ask input waits must reroute concurrent output above the prompt
+# confirm/ask 等输入期间的并发输出必须重定向到提示行上方（不打进输入行）
+
+
+def _fake_patch_stdout(seen: dict):
+    """Recording stand-in for patch_stdout (the real StdoutProxy needs an
+    actual console, unavailable under pytest). 记录调用的 patch_stdout 替身
+    （真 StdoutProxy 需要真控制台，pytest 下不可用）。"""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fake(raw=False):
+        seen["active"] = True
+        try:
+            yield
+        finally:
+            seen["exited"] = True
+
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_confirm_prompts_inside_patch_stdout(monkeypatch):
+    from mini_agent.ui.terminal import Terminal
+
+    seen: dict = {}
+    monkeypatch.setattr("prompt_toolkit.patch_stdout.patch_stdout", _fake_patch_stdout(seen))
+
+    class FakeTempSession:
+        async def prompt_async(self, message=""):
+            assert seen.get("active") is True  # prompt runs inside the proxy
+            return "y"
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeTempSession())
+    t = Terminal()
+    assert await t.confirm("Allow?") is True
+    assert seen.get("exited") is True
+
+
+@pytest.mark.asyncio
+async def test_ask_yes_no_prompts_inside_patch_stdout(monkeypatch):
+    from mini_agent.ui.terminal import Terminal
+
+    seen: dict = {}
+    monkeypatch.setattr("prompt_toolkit.patch_stdout.patch_stdout", _fake_patch_stdout(seen))
+
+    class FakeTempSession:
+        async def prompt_async(self, message=""):
+            assert seen.get("active") is True
+            return "n"
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeTempSession())
+    t = Terminal()
+    assert await t.ask_yes_no("continue?") is False
+    assert seen.get("exited") is True
+
+
+@pytest.mark.asyncio
+async def test_ask_structured_prompts_inside_patch_stdout(monkeypatch):
+    from mini_agent.ui.terminal import Terminal
+
+    seen: dict = {}
+    monkeypatch.setattr("prompt_toolkit.patch_stdout.patch_stdout", _fake_patch_stdout(seen))
+
+    class FakeTempSession:
+        async def prompt_async(self, message=""):
+            assert seen.get("active") is True
+            return "2"
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeTempSession())
+    t = Terminal()
+    assert await t.ask_structured("pick one", ["a", "b"]) == "b"
+    assert seen.get("exited") is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_works_when_stdout_proxy_unavailable(monkeypatch):
+    """The proxy failing to build (no console) must not break the prompt.
+    proxy 建不出来（无控制台）时 prompt 仍要正常工作。"""
+    from mini_agent.ui.terminal import Terminal
+
+    def boom(raw=False):
+        raise RuntimeError("NoConsoleScreenBufferError simulated")
+
+    monkeypatch.setattr("prompt_toolkit.patch_stdout.patch_stdout", boom)
+
+    class FakeTempSession:
+        async def prompt_async(self, message=""):
+            return "a"
+
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeTempSession())
+    t = Terminal()
+    assert await t.confirm("Allow?") == "always"
+
+
 # --- todo emoji fallback on legacy ---
 
 

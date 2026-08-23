@@ -2567,7 +2567,7 @@ mewcode 语义（"prompt 太长时丢弃最旧 20% 后重试"）适配 mini 的 
 
 1. **配置层**：`HookRule` 新增 `action` 字段（`"block"` 默认 / `"confirm"`，非法值告警跳过不阻断启动——与既有非法条目语义一致）
 2. **裁决层**：`agent_loop._resolve_hook_confirm()` 用 app 注入的 `terminal.confirm` 弹 y/a/n（与权限确认同一弹窗，用户零新概念）；"a" 按 (工具名, 原因) 记会话授权，同规则不再问
-3. **并发防护**：确认弹窗加 `asyncio.Lock`（并行工具执行时弹窗不可交错，等锁后重查授权防重复问）；流式工具执行经 `HookManager.would_confirm()` 非交互预判（对标 `PermissionManager.would_ask`），会弹窗的延迟到 `_act`——弹窗不能和流式渲染交错
+3. **并发防护**：确认弹窗加 `asyncio.Lock`（并行工具执行时弹窗不可交错，等锁后重查授权防重复问）；流式工具执行经 `HookManager.would_confirm()` 非交互预判（对标 `PermissionManager.would_ask`），会弹窗的延迟到 `_act`——弹窗不能和流式渲染交错；弹窗等输入期间并行工具的输出经 `_prompt_protected` 的 `patch_stdout` 重定向到提示行上方（§94），输入行不被打断
 
 **权衡**：CONFIRM 短路意味着用户放行后**不再执行链上后续 hook**（与 BLOCK 同语义）——按"安全裁决一票定案"的既有原则接受；`would_confirm` 只覆盖声明式规则，代码注册的 hook 返回 CONFIRM 无法不执行即预测（诚实边界）。fail-safe 延续：无 confirm 回调（脚本/CI/子 Agent）一律拒绝。
 
@@ -3067,3 +3067,19 @@ permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_
 - 根样式 `""` 影响所有未声明 noinherit 的元素——补全菜单/工具栏/滚动条早已全部 noinherit，无泄漏
 - `_BG_INTERRUPT` 中断返回时不打下边线：没有用户输入确认，打线会留孤儿横线
 - 非 TTY 朴素 `input()` 路径不经过 prompt_toolkit，保留上下横线
+
+## 94. 确认弹窗输入行防并发输出打断
+
+## 94.1 问题
+
+终端验证实测暴露：工具并行执行时，一个工具触发权限确认弹窗（`allow? [y/a/n] > ` 等待输入），另一个并行工具完成时的 trace 行直接打进确认输入行——用户看不到输入位置。此前的 `patch_stdout` 只包裹了主输入框（`get_user_input` 的 `prompt_async`），`terminal.confirm()`/`ask_yes_no()`/`ask_structured()` 三条临时 PromptSession 输入路径未覆盖。`agent_loop` 的 `_confirm_lock` 只防多个弹窗互相交错，不防其他输出打断。
+
+## 94.2 方案
+
+`Terminal._prompt_protected(session, message)` 辅助方法：`prompt_async` 外包 `patch_stdout(raw=True)`——等输入期间所有 stdout 写入（Rich console 的 trace/工具结果行）经 StdoutProxy 重定向到提示行上方，输入行自动重绘保持干净。三条输入路径统一改走该方法。
+
+**为什么不用 `with patch_stdout(...)` 直接包**：StdoutProxy 构建在无控制台环境（pytest、管道）抛 `NoConsoleScreenBufferError`，直接包会把本能正常工作的 prompt 拖进 plain-input 兜底（该兜底在 pytest 下 `input()` 又抛 OSError 连环炸）。辅助方法手动 `__enter__`/`__exit__`：proxy 建不出来就置 None、裸跑 prompt——保护是增强而非前置条件。
+
+## 94.3 验证
+
+4 个新测试（test_windows_rendering.py）：三条路径各验证 prompt 在 fake patch_stdout 上下文内执行且正常退出（真 StdoutProxy 需真控制台，pytest 下用记录替身）+ proxy 构建失败时 confirm 仍正常返回。1066→1070 passed。
