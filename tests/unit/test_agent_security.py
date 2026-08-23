@@ -137,6 +137,113 @@ async def test_dangerous_bash_approved_by_user(tool_context):
     assert "Permission denied" not in tool_msg.tool_result.output
 
 
+# --- D2: confirm-denial circuit breaker (threshold 1: one denial stops) ---
+# Covers dangerous commands, paths outside the project, and hook confirms.
+
+
+async def test_dangerous_denial_stops_loop_immediately(tool_context):
+    """D2: denying one dangerous command stops the goal at once (threshold 1),
+    never reaching the LLM's next bypass attempt.
+    D2：拒绝一条危险命令立即停止（阈值 1），到不了 LLM 的下一条绕过尝试。"""
+
+    async def deny(prompt):
+        return False
+
+    # LLM would keep trying bypasses (rm -> rmdir -> python -c). One denial stops.
+    scripts = [
+        tool_call("bash", {"command": "rm -rf /tmp/target"}),
+        tool_call("bash", {"command": "rmdir /s /q /tmp/target"}),
+        tool_call("bash", {"command": "python -c \"import shutil; shutil.rmtree('/tmp/target')\""}),
+        text("done"),
+    ]
+    loop = make_secured_loop(scripts, tool_context, confirm=deny)
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.stopped_early
+    assert loop.stop_reason == "confirm_denied"
+    # Stopped after the FIRST denial (1 iteration), bypasses never reached
+    assert loop.state.iteration == 1
+    # Only one bash tool result (the denied rm), no bypass executed
+    bash_results = [m.tool_result.output for m in conv.messages if m.role == Role.TOOL]
+    assert len(bash_results) == 1
+    assert "Permission denied" in bash_results[0]
+
+
+async def test_granted_dangerous_command_does_not_stop(tool_context):
+    """A granted dangerous command proceeds (counter stays 0, no breaker).
+    危险命令被放行时继续（计数器保持 0，不熔断）。"""
+
+    async def allow(prompt):
+        return True
+
+    scripts = [
+        tool_call("bash", {"command": "rm -rf ./build || echo ok"}),
+        text("done"),
+    ]
+    loop = make_secured_loop(scripts, tool_context, confirm=allow)
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.stop_reason != "confirm_denied"
+    assert loop.state.consecutive_confirm_denials == 0
+
+
+async def test_path_denial_stops_goal(tool_context):
+    """Denying a path-outside-project confirm also stops the goal (threshold 1).
+    拒绝项目外路径确认同样停止目标（阈值 1）。"""
+    outside = tool_context.working_dir.parent / "outside.txt"
+    outside.write_text("x", encoding="utf-8")
+
+    async def deny(prompt):
+        return False
+
+    scripts = [
+        tool_call("read_file", {"file_path": str(outside)}),
+        tool_call("read_file", {"file_path": str(outside)}),
+        text("done"),
+    ]
+    loop = make_secured_loop(scripts, tool_context, confirm=deny)
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.stopped_early
+    assert loop.stop_reason == "confirm_denied"
+    assert loop.state.iteration == 1
+
+
+async def test_hook_confirm_denial_stops_goal(tool_context):
+    """Denying a hook confirm also stops the goal (threshold 1).
+    拒绝 hook 确认同样停止目标（阈值 1）。"""
+    from mini_agent.tools.hooks import HookManager
+
+    hooks = HookManager()
+
+    async def confirm_rule(ctx):
+        if ctx.tool_name == "bash":
+            return HookResult(action=HookAction.CONFIRM, reason="needs confirm")
+        return HookResult(action=HookAction.CONTINUE)
+
+    hooks.register(HookStage.PRE_TOOL, confirm_rule)
+
+    async def deny(prompt):
+        return False
+
+    scripts = [
+        tool_call("bash", {"command": "echo hello"}),
+        tool_call("bash", {"command": "echo world"}),
+        text("done"),
+    ]
+    loop = make_secured_loop(scripts, tool_context, confirm=deny, hooks=hooks)
+    loop.confirm_callback = deny
+    conv = Conversation()
+    await loop.run(conv)
+
+    assert loop.stopped_early
+    assert loop.stop_reason == "confirm_denied"
+    assert loop.state.iteration == 1
+
+
 async def test_sensitive_file_blocked(tool_context):
     env_file = tool_context.working_dir / ".env"
     env_file.write_text("SECRET=x", encoding="utf-8")

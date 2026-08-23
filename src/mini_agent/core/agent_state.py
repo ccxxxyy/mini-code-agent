@@ -35,6 +35,13 @@ class AgentState:
     # 的熔断阈值一致）——真死循环是每轮都调同一个工具；
     # 批量任务是一轮内并行调多次，这是正常的
     iteration_tools: list[frozenset[str]] = field(default_factory=list)
+    # Confirm-dialog denials this turn (dangerous command / path outside
+    # project / hook confirm). Drives the circuit breaker: when the user
+    # denies a confirm, the agent stops the goal and asks instead of hunting
+    # for a workaround. Reset when a confirm is granted.
+    # 本轮确认框被拒次数（危险命令 / 项目外路径 / hook 确认）。驱动熔断：
+    # 用户拒绝确认时 agent 停下回问，而非找绕过。确认被放行时归零。
+    consecutive_confirm_denials: int = 0
 
     def record_iteration_tools(self, names: set[str]) -> None:
         self.iteration_tools.append(frozenset(names))

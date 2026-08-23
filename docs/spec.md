@@ -115,7 +115,7 @@ mini-code-agent/
 │       │       ├── bwrap.py         # Linux bubblewrap backend
 │       │       ├── seatbelt.py      # macOS sandbox-exec backend
 │       │       ├── unshare.py       # Linux unshare fallback (when bwrap unavailable)
-│       │       ├── windows.py       # Windows sandbox (admin: Low Integrity / non-admin: warning only)
+│       │       ├── windows.py       # Windows sandbox (admin: Low Integrity / non-admin: no file protection, documented only)
 │       │       └── _low_integrity.py # Windows Low Integrity process helper (ctypes)
 │       │
 │       ├── ui/                      # === INTERACTION LAYER ===
@@ -157,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 61 unit test files, 1055 tests
+│   ├── unit/                        # 61 unit test files, 1060 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -547,7 +547,7 @@ class SecurityConfig:
     ])
     worktree_base_dir: str = ".mini-agent/worktrees"
     worktree_max_age_days: int = 7        # 过期 worktree 启动时自动清理（0 = 禁用）
-    sandbox: bool = True                  # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity / 非管理员仅警告），默认开启
+    sandbox: bool = True                  # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明），默认开启
     sandbox_auto_allow: bool = False
     sandbox_network: bool = False
 
@@ -586,6 +586,8 @@ class AgentConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     cost: CostConfig = field(default_factory=CostConfig)
     max_agent_iterations: int = 80
+    # 确认框连续被拒 N 次后停下回问用户（危险命令/项目外路径/hook 确认；默认 1 = 拒一次即停；防止被拒后找绕过路径）
+    max_consecutive_denials: int = 1
     # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）
     hooks: list = field(default_factory=list)
     self_verify: bool = False
@@ -1712,7 +1714,7 @@ def write_decision(
 职责：将 bash 命令包裹进操作系统沙箱。由 `SecurityConfig.sandbox` 开关（默认开启），app.py 注入 bash 工具。
 - **Linux**：bwrap（首选），不可用时自动降级 unshare（`unshare --mount --map-root-user`，util-linux 预装）。
 - **macOS**：seatbelt（`sandbox-exec`）。
-- **Windows 双模式**：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员仅显示警告，不做文件保护（attrib 已禁用，会阻断 agent 自身文件写入）。
+- **Windows 双模式**：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员不做文件保护——该限制仅文档说明（config-guide），不打启动警告（attrib 已禁用，会阻断 agent 自身文件写入）。
 
 ```python
 @dataclass
@@ -2315,7 +2317,7 @@ PRE_TOOL 阶段的 BLOCK/CONFIRM 除了用 Python 注册 hook 外，还可通过
 
 ### 9.2 决策逻辑
 
-`_should_continue` 是**同步方法**、不发事件，三重熔断：
+`_should_continue` 是**同步方法**、不发事件，四重熔断：
 
 ```python
 # core/agent_loop.py
@@ -2326,12 +2328,17 @@ def _should_continue(self) -> bool:
         return False
     if self._cancelled:
         return False
-    # 熔断 2: 同一 工具+参数 签名连续调用 6 次及以上
+    # 熔断 2: 确认框被拒——被拒是"用户不想做"的强信号，
+    # 继续只会让 LLM 找绕过路径；停下并回问用户（默认阈值 1，拒一次即停）
+    if self._state.consecutive_confirm_denials >= self._config.max_consecutive_denials:
+        self.stop_reason = "confirm_denied"
+        return False
+    # 熔断 3: 同一 工具+参数 签名连续调用 6 次及以上
     # （同一工具处理不同文件是正常批量工作，只有参数也相同才算死循环）
     recent = self._state.recent_tool_names[-6:]
     if len(recent) >= 6 and len(set(recent)) == 1:
         return False
-    # 熔断 3: 最近 15 轮迭代每轮都出现同一工具
+    # 熔断 4: 最近 15 轮迭代每轮都出现同一工具
     # （iteration_tools 记录每轮迭代用到的工具名集合的滑动窗口——
     #   真死循环是每轮都调同一个工具；批量任务是一轮内并行调多次）
     window = self._state.iteration_tools[-15:]
@@ -2341,6 +2348,8 @@ def _should_continue(self) -> bool:
             return False
     return True
 ```
+
+熔断 2 的计数器是 `AgentState.consecutive_confirm_denials`：统计**任何确认框被用户拒绝**——危险命令确认、项目外路径确认、hook（`[[hooks]] action=confirm`）确认，以权限判定 reason `user_confirm:no` + hook 确认被拒为准。确认框被拒 +1、确认框获准清零、未弹确认的调用中性不动（被拒之间的只读分析不重置计数）；计数器每回合重置。自动策略拒绝不计数：敏感路径拒绝（`path_guard:sensitive`）、显式 deny 规则、无 UI 默认拒绝仍只是跳过该次调用、任务继续，不触发熔断——那是策略在拦，不是用户当场说"别做"。触发后 `stop_reason="confirm_denied"`，Agent 返回一条回问用户如何处理的消息，app.py 据此显示独立警告。阈值 `max_consecutive_denials` 默认 1——拒一次即停；调大可给被拒后修正重试的空间。这与执行层封堵内联解释器绕过互补：执行层让绕过路径也弹确认，行为层让 Agent 在被拒后干脆停手。
 
 上下文占用不参与终止判定——压缩与 `ensure_fits` 兜底截断（§9.1 / §5）保证上下文不会溢出，无需在此熔断。
 
@@ -2469,7 +2478,7 @@ class Compressor:
       "id": "mem_abc123",
       "content": "This project uses pytest with --tb=short for testing",
       "source": "extracted",
-      "created_at": "2026-08-01T10:30:00",
+      "created_at": "<ISO8601 timestamp>",
       "tags": ["testing", "pytest"]
     }
   ]
@@ -2484,7 +2493,7 @@ class Compressor:
       "id": "mem_xyz789",
       "content": "User prefers type hints on all function signatures",
       "source": "user",
-      "created_at": "2026-07-15T08:00:00",
+      "created_at": "<ISO8601 timestamp>",
       "tags": ["preferences", "python"]
     }
   ]
@@ -2561,7 +2570,7 @@ class MemoryExtractor:
 
 **命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 26 条正则，除经典破坏项（`rm -rf`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del /s/q`、`rmdir /s`、`format`、`curl|sh`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。D3 新增**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。D3 还新增**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员仅警告，attrib 已禁用）。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 27 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 
@@ -2616,6 +2625,8 @@ class PathGuard:
 ```
 
 敏感文件模式 `SENSITIVE_FILE_PATTERNS`：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`id_ed25519*`、`credentials*`、`*secret*`、`*.p12`、`*.pfx`。例外清单 `SENSITIVE_EXCEPTIONS`：`.env.example` / `.env.sample` / `.env.template` 是模板不是秘密，放行。
+
+这份模式清单同时被 permission.py 的 `command_references_sensitive_file()` 复用：`PathGuard.is_sensitive_file` 只守 read_file/write_file/delete_file 三个文件工具，而 bash 通道曾对路径零检查——`type`/`cat`/`Get-Content`/`more .env` 会作普通命令被自动放行，绕过文件工具的敏感文件拦截并泄漏内容（真实验证实测泄漏过 API key）。现 bash 命令会被 token 化，任一 token 的 basename 命中敏感模式即路由到确认弹窗（reason=`sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同命令黑名单：变量展开 / 通配 / base64 拼接等混淆仍可逃逸——详见 tech-notes §90。
 
 溢写缓存目录（`~/.mini-agent/cache/results`）只读自动放行是配套设计：超大工具结果落盘后占位文案会引导 LLM 读回，每次读回都弹权限框会废掉溢写机制；写入该目录仍走询问。
 
@@ -2673,7 +2684,7 @@ class MergeResult:
 
 - **Linux**：bubblewrap（`bwrap`，首选）——用户命名空间隔离、只读 rootfs；不可用时自动降级 `unshare --mount --map-root-user`（`unshare.py`，util-linux 预装）。
 - **macOS**：Seatbelt（`sandbox-exec`）——SBPL deny-default profile。
-- **Windows 双模式**（`windows.py`）：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员仅显示警告，不做文件保护（attrib 已禁用，会阻断 agent 自身文件写入）。
+- **Windows 双模式**（`windows.py`）：管理员运行时用 Low Integrity 进程（`_low_integrity.py` helper，ctypes 降低 token 完整性，内核级，等同 bwrap/seatbelt）；非管理员不做文件保护——该限制仅文档说明（config-guide），不打启动警告（attrib 已禁用，会阻断 agent 自身文件写入）。
 
 `create_sandbox()` 探测可用实现并包装 bash 命令。`SandboxConfig` 声明可写路径（工作目录、`tempfile.gettempdir()`）和 `sandbox_network` 网络开关。启动时若后端不可用或降级，显示警告告知用户。配套配置 `sandbox_auto_allow`：沙箱已提供隔离时，权限层自动放行命令（含危险命令，见 11.1）。
 

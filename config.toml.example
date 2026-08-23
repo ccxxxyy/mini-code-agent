@@ -5,6 +5,7 @@
 
 # 顶层字段 Top-level fields:
 # max_agent_iterations = 50           # 每轮对话最大 ReAct 迭代数
+# max_consecutive_denials = 1         # 确认框被拒 N 次后停下回问用户（危险命令/项目外路径/hook 确认；默认 1，拒一次即停；防绕过）
 # streaming_tool_execution = true     # 流式期间工具组装完成即执行（false 回退流后执行）
 
 [llm]
@@ -33,7 +34,7 @@
 [security]
 # permission_mode = "ask"    # "allow" | "ask" | "deny"
 # allowed_commands = ["git *", "npm *", "python *", "uv *"]
-# sandbox = true             # OS 沙箱（Linux bwrap / macOS seatbelt / Windows attrib），默认开启
+# sandbox = true             # OS 沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity），默认开启
 # sandbox_auto_allow = false # 沙箱下危险命令免确认（deny 规则仍拦）
 # sandbox_network = false    # 允许沙箱内网络访问
 

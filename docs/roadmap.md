@@ -554,6 +554,10 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端（共享 EventBus → 共享 Rich Console），和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。
 **修复**：`PromptSession` 创建时加 `patch_stdout=True`（prompt_toolkit 内置机制）。prompt 活跃期间所有 stdout 写入自动打印到 prompt 上方，prompt 行自动重绘。一行改动。
 
+☐ **B3.2 权限确认弹窗输入行被并发输出淹没**
+**问题**（B4.1 终端验证中实测暴露）：工具并行执行时，一个工具触发权限确认弹窗（`allow? [y/a/n] > ` 等待输入），另一个并行工具完成时的 trace 行直接打进确认输入行——用户看不到输入位置。B3.1 的 `patch_stdout` 只包裹了主输入框（`get_user_input` 的 `prompt_async`），`terminal.confirm()` 的输入路径未覆盖。
+**方向**：confirm() 的输入读取同样用 `patch_stdout` 包裹；或弹窗期间暂停 trace/流式输出（`_confirm_lock` 已防多弹窗交错，但不防其他输出打断）。工作量：小。
+
 ✅ **B4 后台子代理 + 完成通知**（已完成）
 **问题**：LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（spawn_agents.py `wait_all`），期间不能做其他工作——comparison 6.2 自认的限制。
 **实现**：`spawn_agents` 工具新增 `background: bool` 参数（默认 false 保持阻塞行为）。`true` 时走 `SubAgentManager.spawn_background()`：spawn 后立即返回 agent ids，每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 **mailbox** 向 'main' 投递含结果的通知（截断 4000 字符），主 Agent 在下一轮迭代的 `_deliver_mail` 自动注入对话——复用现有跨 Agent 消息通道，零新增注入机制。`SubAgentCompleteEvent` 加 `background` 字段，app.py 订阅后终端提示完成。5 个新测试。诚实边界：主 Agent 完全空闲（等用户输入）时通知滞留到下一次用户输入才进对话（终端提示先行）；fork 对话上下文的 worker 后续由 B4.1 实现（摘要式）。
@@ -562,21 +566,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：SubAgent 空白上下文（刻意设计：便宜/可并行/可预测），但"和主 agent 讨论半天需求后派 worker 按讨论去做"的场景下，task 文本装不下讨论内容，子 agent 不知道之前聊了什么。mewcode `agents/fork.py` 用全量继承解决，但全量太贵（并行 N 个 = N 倍历史 token）且有"fork 后主对话继续变化"的一致性问题。
 **实现**：摘要式 fork——`memory/compressor.py` 新增公开函数 `summarize_conversation(llm, messages)`（复用 P67 的 `_extractive_digest` + `LLMSummarizeOldest._summarize` 9 节结构化摘要，LLM 失败回退提取式 digest——fork 绝不因摘要失败而失败）。摘要即冻结快照（回避一致性问题），成本 ≈ 一次摘要调用（≪ 全量历史 × N）。两个入口：`spawn_agents` 工具的 `inherit_context: bool` 参数（LLM 自主）+ `/spawn --fork`（用户命令）；摘要经 `SubAgentManager.build_context_summary()`（worker LLM）生成，`spawn/spawn_parallel/spawn_background` 透传 `context_summary`，注入子 agent system prompt 的 `[Inherited context ...]` 段。6 个新测试。诚实边界：`spawn_pane`（跨进程 WorkerSpec 协议）与 `/team` 未纳入。
 
-☐ **B3.2 权限确认弹窗输入行被并发输出淹没**
-**问题**（B4.1 终端验证中实测暴露）：工具并行执行时，一个工具触发权限确认弹窗（`allow? [y/a/n] > ` 等待输入），另一个并行工具完成时的 trace 行直接打进确认输入行——用户看不到输入位置。B3.1 的 `patch_stdout` 只包裹了主输入框（`get_user_input` 的 `prompt_async`），`terminal.confirm()` 的输入路径未覆盖。
-**方向**：confirm() 的输入读取同样用 `patch_stdout` 包裹；或弹窗期间暂停 trace/流式输出（`_confirm_lock` 已防多弹窗交错，但不防其他输出打断）。工作量：小。
-
-☐ **B7 模糊确认不算授权（system prompt 守则）**
-**问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
-**方向**：SYSTEM_PROMPT 增加守则："当用户明确表示只讨论/不要动手时，该约束持续有效，直到用户明确说'开始动手/执行'类指令；模糊确认（对/嗯/好）只确认理解，不解除约束——不确定时先问'现在可以动手了吗'"。可配合测试：对话式约束遵从的 E2E 用例。工作量：小。
-
 ☐ **B4.2 fork 摘要生成阻塞且不可观测**
 **问题**（B4.1 终端验证中实测暴露）：`inherit_context=true` 时摘要生成（一次完整 LLM 调用）阻塞在 `spawn_agents.execute` 内部——实测对话稍长时耗时 46-54 秒，期间终端零输出、用户以为卡住。两个具体伤害：① `background=true + inherit_context=true` 组合下"立即返回"承诺打折（实测 spawn_agents done 53938ms，虽然仍未等子 agent，但工具调用本身被摘要阻塞）；② 摘要调用走 `complete()` 直调不经 AgentLoop，不发任何 trace 事件——`/trace on` 也看不到，可观测性为零。
 **方向**：① 至少先加可观测性：摘要生成前终端提示 `Generating context summary...`（或发一个事件供 trace 订阅）；② 进阶：background 模式下把摘要生成也放进后台任务（spawn 前置一个 summary future，SubAgent 构造延迟到摘要就绪），让 spawn_agents 真正立即返回。工作量：小（①）/ 中（②）。
-
-☐ **B7.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则）**
-**问题**（B4.1 终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 已有"文件不存在要如实报告"守则，但没有"任务引用了你不知道的讨论/上下文时如实说明"的守则。
-**方向**：agent_types.py 各类型 prompt 加一条："If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed."（fork 场景注入的 `[Inherited context]` 段天然满足"有知识"，不受影响）。工作量：小。
 
 ☐ **B5 权限模式矩阵**
 mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。
@@ -586,6 +578,14 @@ mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 
 
 ☐ **B7 远程模式 SessionStore 接入**
 mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。
+
+☐ **B9 模糊确认不算授权（system prompt 守则）**
+**问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
+**方向**：SYSTEM_PROMPT 增加守则："当用户明确表示只讨论/不要动手时，该约束持续有效，直到用户明确说'开始动手/执行'类指令；模糊确认（对/嗯/好）只确认理解，不解除约束——不确定时先问'现在可以动手了吗'"。可配合测试：对话式约束遵从的 E2E 用例。工作量：小。
+
+☐ **B9.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则）**
+**问题**（B4.1 终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 已有"文件不存在要如实报告"守则，但没有"任务引用了你不知道的讨论/上下文时如实说明"的守则。
+**方向**：agent_types.py 各类型 prompt 加一条："If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed."（fork 场景注入的 `[Inherited context]` 段天然满足"有知识"，不受影响）。工作量：小。
 
 ☐ **B8 恢复附件含 skill 调用记录（微小差距）**
 mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。工作量：小。
@@ -610,13 +610,23 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 备选（非必需，更重且不更彻底）：① 仿主流做 thinking 缓冲按行 flush——解决同一症状却引入缓冲状态与额外 bug 面，仅当需要对思考流做 Markdown/Live 渲染才值得；② 裸写 `console.file.write` + 手动 ANSI——完全脱离 Rich 但丢样式整合、需自理 legacy Windows ANSI，跨平台更脆，是退步。
 诚实边界：soft_wrap 后超宽思考文本由终端硬折行（不按词），但思考流是 dim 辅助信息，可读性足够。工作量：小（一行 + 真实推理模型运行验证碎行消失）。验证要点：改完必须对着会吐 `reasoning_content` 的模型真实跑一轮肉眼确认碎行消失（reasoning 里本就有的 \n 是真内容、不归此修复管）。
 
-☐ **D2【行为·高】危险命令被拒后 agent 自主找绕过路径，而非停下求助**
+✅ **D2【行为·高】危险命令被拒后 agent 自主找绕过路径，而非停下求助**
 现象（A2 真实验证时实测）：用户让删 `/tmp/a2test`，agent 连续被拒 4 条危险命令（`rm --recursive --force`→`rmdir /S /Q`→`cmd /c rmdir`→`del /Q && rmdir`，正则全部正确命中并弹窗、用户全拒），但 agent 没有停下，而是继续自主换方式,第 12 轮用 `python -c "shutil.rmtree(...)"`（不匹配任何危险正则）**GRANTED 并真的删除了目录**——共 13 轮、烧 97k tokens。
 根因：拒绝一条命令的语义是"这条不行"，agent 据此重构等价命令重试；黑名单只认命令签名，语义等价的未列命令（python shutil / os.remove / 移动到临时目录等）畅通无阻。这是 A2「诚实边界」（黑名单不可穷尽）在行为层的放大——**绕过之所以得逞，本质是"被拒后继续找路"的行为，而非正则不够全**。比 A2 正则加固更本质。
 候选方案（需设计，未定）：① 连续 N 次危险命令被拒后，agent 停止本目标并回问用户（把"反复被拒"当作强信号）；② 把用户的 DENY 记为会话级软意图（"用户不想删这个目标"），后续语义相近操作预警或直接挡；③ 工具层面：破坏性操作（rm/rmdir/del/shutil.rmtree/移动删除等）归一化为"删除意图"识别，而非逐命令签名——但这又回到不可穷尽问题，治标。
 诚实边界：完全防住语义绕过在架构上不可能（同 A2）；本条目目标是"降低被拒后无意义绕过的概率 + 及早把决定权交回用户"，不是"堵死所有绕过"。工作量：中（行为策略设计 + agent_loop 集成 + 真实验证）。
 
-☑ **D3【安全·高】内联解释器执行绕过命令黑名单 + Windows 无 OS 沙箱底线**
+**已修复——采用方案 ①（连续被拒熔断）**：
+- **范围**：熔断统计**任何确认框被用户拒绝**——危险命令确认、项目外路径确认、hook（`[[hooks]] action=confirm`）确认。以权限判定 reason `user_confirm:no` + hook 确认被拒为准。自动策略拒绝**不计数**——敏感路径拒绝（`path_guard:sensitive`）、显式 deny 规则、无 UI 默认拒绝仍只是跳过该次调用、任务继续（那是策略在拦，不是用户在说"别做"）。初版只统计危险命令被拒（靠 `last_check_was_dangerous` peek 属性识别，该属性已随扩展移除）。
+- **计数**：`AgentState` 加 `consecutive_confirm_denials`（每轮 run() 重建自动重置）。`agent_loop._check_permission` 里确认框 DENIED→+1、确认框 GRANTED→归零；未弹确认的调用中性（被拒之间的只读分析不重置）。
+- **熔断**：`_should_continue` 加守卫，被拒 ≥ `max_consecutive_denials`（默认 1，拒一次即停）时设 `stop_reason="confirm_denied"` 停循环（复用现有 `stopped_early` 熔断机制，零新机制）。
+- **回问用户**：run() 熔断分支按 stop_reason 定制 final_content（中文回问"继续找绕过不是你想要的，请告诉我如何处理"）；`app.py` 按 stop_reason 显示区别于迭代上限的提示。
+- **配置**：`AgentConfig.max_consecutive_denials = 1`（用户拒绝确认框通常就是"别做"，首次被拒即停、把决定权交回用户；调大可给被拒后修正重试的空间），config.toml.example 加说明。
+- **测试**：4 个新测试（熔断触发 / 放行重置计数 / 未弹确认的调用中性 / 计数属性），全量 1059 passed。
+- **真实验证**：复现 D2 事故脚本（rm→rmdir→del→python -c shutil.rmtree），确认第 3 次被拒后 agent 停下（iterations=3），第 4 步 python 内联解释器绕过从未执行（验证时默认阈值为 3；现默认阈值 1、`stop_reason="confirm_denied"`，首次被拒即停，且项目外路径确认与 hook 确认被拒同样触发）。
+- **与 D3 的关系**：D3 执行层（内联解释器正则 + 写后执行检测 + 沙箱）让绕过路径也弹确认；D2 行为层让连续被拒后停下。两者叠加才构成完整防线——D2 在阈值内仍可能发生少量绕过尝试，D3 兜住这些尝试的执行。
+
+✅ **D3【安全·高】内联解释器执行绕过命令黑名单 + Windows 无 OS 沙箱底线**
 现象（A2 真实验证时两次实测）：
 - 删目录场景：4 条危险命令（rm/rmdir/del 各形态）全被 A2 正则正确拦下并被用户拒绝后，agent 用 `python -c "import shutil; shutil.rmtree(...)"` → GRANTED（mode:ask）→ 目录真被删。
 - 删文件场景：`delete_file` 工具走 PathGuard 弹"write access outside project directory"被用户拒绝后（A1 修复正确工作），agent 用 `python -c "import os; os.remove(...)"` → GRANTED → 文件真被删。
@@ -624,28 +634,28 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 **平台缺口（关键）**：唯一真正气密的防护是 OS 沙箱（`security/sandbox/` bwrap+seatbelt，内核级只读 rootfs + 可写白名单，与命令文本无关）——但**只有 Linux/macOS 后端，Windows 无对应实现**。故 Windows 上命令签名是唯一防线，而它对内联解释器无效 = **Windows 上破坏性操作实际无底线防护**。这是本条目最严重的部分。
 **✅ 已修复**：
 - **① 内联解释器黑名单**：`DANGEROUS_COMMAND_PATTERNS` 新增 7 条模式（`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell`/`pwsh`），19→26 条，命中即弹确认。
-- **② Windows 沙箱**：新增 `sandbox/windows.py` WindowsSandbox（管理员 Low Integrity 内核级 / 非管理员仅警告），`create_sandbox()` Windows 不再返回 None。
+- **② Windows 沙箱**：新增 `sandbox/windows.py` WindowsSandbox（管理员 Low Integrity 内核级 / 非管理员无文件保护、不打启动警告），`create_sandbox()` Windows 不再返回 None。
 - **③ 安全边界文档**：config-guide 中英文版分平台标注（Linux/macOS 内核级 vs Windows 路径级 vs 无沙箱），三平台适用。
 - **④ 写后执行检测**：`record_written_file()` 追踪本会话写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认（堵住"先写 .py 再执行"绕过）。`would_ask()` 同步更新防流式抢跑。
 - **⑤ sandbox 默认开启**：`SecurityConfig.sandbox` 默认值 `False` → `True`，三平台默认有沙箱保护。
 - **⑥ `/tmp` 跨平台修正**：`app.py` 的 `allow_write` 从硬编码 `/tmp` 改为 `tempfile.gettempdir()`。
-- **⑦ Windows 沙箱**：管理员运行时用 Low Integrity 进程（内核级，`_low_integrity.py` helper 通过 ctypes 降低 token 完整性），等同 bwrap/seatbelt；非管理员仅显示启动警告（attrib 已禁用——会阻断 agent 自身文件写入）。
+- **⑦ Windows 沙箱**：管理员运行时用 Low Integrity 进程（内核级，`_low_integrity.py` helper 通过 ctypes 降低 token 完整性），等同 bwrap/seatbelt；非管理员无文件保护、不打启动警告（attrib 已禁用——会阻断 agent 自身文件写入；限制仅 config-guide 文档说明）。
 - **⑧ Linux unshare 后备**：`create_sandbox()` 在 Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（util-linux 预装），不再需要用户手动装 bwrap。
-- **⑨ 启动警告**：sandbox=true 但后端不可用/降级时，启动提示明确告知用户沙箱未生效或为弱模式，不再静默跳过。
+- **⑨ 启动警告**：sandbox=true 且后端真正不可用时（如 Linux 既无 bwrap 也无 unshare），启动提示明确告知用户沙箱未生效，不再静默跳过。Windows 非管理员不再打启动警告（每次启动的噪音已移除，无文件保护的限制改为仅在 config-guide 文档化）。
 - **⑩ deny_write Low Integrity 修复**：`_wrap_low_integrity` 现在对 deny_write 路径显式设回 Medium 完整性，防止 allow_write 目录内的 deny 子路径被一并降级。
 - **测试**：全量 1055 passed（含 97 权限+沙箱测试），1 skipped，ruff clean。
 
-**D3 已知遗留（1 项不属于 D3）**：
+**D3 已知遗留（31 项）**：
 
 代码层（15 项）：
-1. ✅ **Windows 非管理员 attrib 已禁用**：attrib 会阻断 agent 自身文件写入，`activate()`/`deactivate()` 已改为空操作。非管理员模式仅显示警告，无文件保护。
+1. ✅ **Windows 非管理员 attrib 已禁用**：attrib 会阻断 agent 自身文件写入，`activate()`/`deactivate()` 已改为空操作。非管理员模式无文件保护、不打启动警告（限制仅 config-guide 文档说明）。**D2 缓解**：连续被拒熔断断了"反复试直到绕过"的链，缩小攻击面；但执行层的 OS 限制（无进程级隔离）D2 无法消除——一条不触发危险正则/非写后执行的破坏性命令仍会静默放行执行。完全解决只有管理员 Low Integrity 或 Windows 非管理员进程级沙箱原语（不存在）。
 2. ✅ **`./script.py` 路径解析**：已修。`working_dir` 传入 `is_executing_written_script`，相对路径用 bash 的工作目录解析而非 Python CWD。验证：`./exploit.py` 在正确 CWD 下返回 True。
 3. ✅ **`_ps_escape` 特殊字符**：已修。转义 `` ` ``→` `` `` `、`$`→`` `$ ``、`"`→`` `" ``。验证：`$PATH` 原样输出不被 PowerShell 展开；`test_ps_escape_special_chars` passed。
 4. ✅ **`would_ask` Path.resolve()**：Python 3.11 的 `resolve()` 对不存在的路径不做 stat（仅字符串规范化），已有 `try/except` 兜底。无需代码修改。
 5. ✅ **helper `--` 参数解析**：`args.index("--")` 取第一个 `--`，后续 `--` 保留在命令内。逻辑正确。验证：`test_low_integrity_helper_parses_double_dash` passed。
 6. ✅ **子 Agent 共享写文件追踪**：已修。`shared_written_files` 指向主 Agent 的 `_session_written_files`（同一对象），`is_executing_written_script` 查两个集合的并集。验证：主 Agent 写的文件子 Agent 检测返回 True。
-7. ✅ **attrib 已完全禁用**：attrib 会阻断 agent 自身文件写入（input_history/session/memory），`activate()`/`deactivate()` 改为空操作。非管理员模式仅显示警告，不做任何文件保护。`_SENSITIVE_HOME_DIRS` 保留（.ssh/.aws/.gnupg/.config/.kube，不含 .mini-agent）但不再使用。
-8. ⬚ **Windows 主目录外路径**：Low Integrity 模式下这些路径默认 Medium 子进程写不了（已 E2E 验证）。attrib 模式不覆盖，属 #1 的延伸。
+7. ✅ **attrib 已完全禁用**：attrib 会阻断 agent 自身文件写入（input_history/session/memory），`activate()`/`deactivate()` 改为空操作。非管理员模式不做任何文件保护、不打启动警告（限制仅 config-guide 文档说明）。`_SENSITIVE_HOME_DIRS` 保留（.ssh/.aws/.gnupg/.config/.kube，不含 .mini-agent）但不再使用。
+8. ⬚ **Windows 主目录外路径**：Low Integrity 模式下这些路径默认 Medium 子进程写不了（已 E2E 验证）。非管理员模式无文件保护（同 #1）。D2 行为层缓解但不消除——同 #1 的执行层 OS 限制。
 9. ✅ **`working_dir` 赋值**：已修。`app.py` 在 PermissionManager 构造后立即赋值 `pm.working_dir = working_dir`。验证：Application 构建后 `working_dir` 为当前目录而非 None。
 10. ✅ **`python - < file`**：已修。正则从 `-(c\b|$)` 改为 `-(c\b|(\s|<|$))`，匹配 `-` 后跟空格或 `<`。验证：`python - < malicious.py` 返回 `is_dangerous=True`。
 11. ✅ **`python -m module`**：已修。新增 `_PYTHON_M_RE`，`is_executing_written_script` 末尾检查 `-m module_name` 是否对应 agent 写过的 `module_name.py`。验证：`python -m evil_mod`（agent 写了 `evil_mod.py`）被检测。
@@ -660,21 +670,21 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 18. **namespace 里 `mount -o remount,ro /` 取决于内核版本**：部分内核版本或安全策略（如 AppArmor/SELinux 限制）下可能不生效。
 19. **unshare/bwrap 没在真实 Linux 上测过**：在 Windows 上编写，测试只验证命令字符串格式，没验证实际隔离效果。
 20. **macOS seatbelt 没在真实 macOS 上测过**：同上，只验证字符串格式。
-21. ❌ **netsh 防火墙网络限制验证失败并已移除**：管理员实测 `program=%ComSpec%` 只阻断 cmd.exe 自身出站，子进程不受限制。netsh/firewall 代码已完全移除，网络隔离不属于 D3 范围。
+21. **netsh 防火墙网络限制验证失败并已移除**：管理员实测 `program=%ComSpec%` 只阻断 cmd.exe 自身出站，子进程不受限制。netsh/firewall 代码已完全移除，网络隔离不属于 D3 范围。
 22. ✅**整个 D3 没做真实 LLM 运行验证**：没有启动 agent 让 LLM 真的尝试 `python -c` 绕过并验证弹确认框。
 23. ✅ **deny_write Low Integrity 已验证**：管理员终端实测 `mode: low_integrity`，deny_write 路径内文件未被覆盖（`content: 'PROTECTED'`）。
 24. ✅**`record_written_file` 没有集成测试**：agent_loop 里的调用没验证过在完整 agent 流程中真的会触发写后执行检测。
 25. ✅**四个沙箱后端行为不一致**：bwrap/seatbelt/unshare/windows 各有不同的失败模式和边界情况，没有统一的集成测试验证它们提供相同的安全保证。
 
-文档层（4 项，全部已解决）：
+文档层（4 项）：
 26. ✅ **文档已同步**：15 个文档更新（config-guide 中英文、spec、agent-architecture、capabilities、comparison-mewcode、comparison-config-cc、positioning、output-guide 中英文、README 双语、CHANGELOG、tech-notes、roadmap），7 个无需改。
 27. ✅ **spec.md 目录树已更新**：`windows.py`、`_low_integrity.py`、`unshare.py` 已加入。
 28. ✅ **README 测试数/文件数已更新**：1055 passed、112 源码文件。
 29. ✅ **comparison-config-cc.md 已更新**：sandbox 默认 true + 三平台描述。
 
 不属于 D3（2 项）：
-30. ⬚ **D2 行为层（被拒后不停）**：连续被拒 N 次后 agent 应停止而非继续找新路径。不在 D3 范围内。
-31. ✅ **全量测试已通过**：1055 passed, 1 skipped。
+30. ✅ **D2 行为层已实现**：任何确认框被拒后 agent 停下回问用户（危险命令/项目外路径/hook 确认；默认阈值 1，拒一次即停，`max_consecutive_denials` 可调大；自动策略拒绝如敏感路径/deny 规则不计数），不再找绕过路径。详见 D2 条目完成记录 + tech-notes §89。D2 断了 D3 事故"反复试直到绕过"的链，但两者是不同层——D2 管行为（要不要继续试），管不了执行层（某条命令能不能真写文件）。Windows 非管理员的执行层 OS 限制（#1/#8）D2 无法消除，只能缩小攻击面。
+31. ✅ **全量测试已通过**：1059 passed, 1 skipped。
 
 ☐ **D4【中·时序】带副作用的 bash 命令仍可能在截断重试时双执行（A3 残留）**
 A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` 消除双执行，但 **bash 工具未纳入**：非危险的带副作用 bash（`echo >file`、`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑（危险 bash 已由 would_ask 延迟，不受影响）。
@@ -688,6 +698,11 @@ A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` �
 - `/explain`（:1076）：无参数 = **toggle**（`not tr.enabled`）
 - `/audit`（:1105）：无参数 = **toggle**（`not al.enabled`）
 建议统一为：**无参数 = 只显示当前状态不改变**，`on`/`off` 显式切换。或至少把 `/plan` 的无参数行为从"无条件打开"改为与其他三个一致的 toggle。工作量：小（4 处 else 分支改为显示状态）。
+
+✅ **D6【安全·高】bash 通道读敏感文件绕过 read_file 拦截（泄漏 API key）**
+D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），agent 立刻改用 `type D:\...\.env`（bash 通道）成功打印、**泄漏真实 API key**。与 D3 同源——bash 绕过工具层保护——但方向是读泄密。根因：敏感文件保护 `PathGuard.is_sensitive_file` 只在 read_file/write_file/delete_file 工具层，bash 命令管道从不查路径，`type`/`cat`/`Get-Content`/`more .env` 作普通命令被 auto-grant。
+修复：permission.py 新增 `command_references_sensitive_file()`，token 化命令、命中 `SENSITIVE_FILE_PATTERNS`（复用 path_guard 同一份模式）即路由到确认（reason=`sensitive_file_command`）。用确认而非静默拒绝——可见且拒绝时触发 D2 熔断停目标（静默 auto-deny 不触发 D2，agent 会像 A2 换法子重试）。2 个新测试，1058→1060。详见 tech-notes §90。
+**诚实边界**：减速带非围墙，同 D3 黑名单——变量展开（`$SECRET`）、通配、base64/echo 拼接、间接读取等混淆仍可逃逸。真正堵死读泄漏需 OS 沙箱读 ACL（Windows Low Integrity 不限制读 Medium 对象，读保护做不到），架构上同 #1/#8 不可完全消除。本条目把常见明显形态从"静默放行"提升到"弹确认+可熔断"。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

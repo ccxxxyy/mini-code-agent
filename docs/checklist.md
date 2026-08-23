@@ -82,7 +82,8 @@
 ### 功能完整性
 - [x] PermissionManager 评估顺序正确（DENY → ALLOW → Session → Default，单测锁定）
 - [x] PathGuard 敏感目录拒绝生效（.ssh/.aws/.gnupg + 敏感文件模式）
-- [x] 危险 bash 命令触发确认弹窗（19 条正则，即使 allow 模式也确认）
+- [x] 危险 bash 命令触发确认弹窗（27 条正则，含内联解释器 + 删除类任意形态，即使 allow 模式也确认）
+- [x] 敏感文件经 bash 通道读取触发确认（`type`/`cat`/`Get-Content .env` 弹确认，绕过 read_file 的洞已堵）
 - [x] 用户选择 "always allow" 后同类操作不再弹窗（confirm 支持 y/a/n 三选，"a" 写入会话白名单，单测验证）
 - [x] Hook PRE_TOOL 能阻止工具执行（BLOCK 短路 + reason 回传 LLM）
 - [x] Hook POST_TOOL 能观察工具结果（集成测试验证）

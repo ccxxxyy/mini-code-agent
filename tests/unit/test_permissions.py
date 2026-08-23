@@ -213,19 +213,48 @@ def test_dangerous_command_bypass_variants_flagged():
     assert d("chmod 0777 x")
 
 
+def test_bare_deletion_commands_flagged():
+    """Deletions must confirm in ANY form -- not just rm -rf / rmdir /s.
+    A bare rmdir on an empty dir once slipped through with no prompt.
+    删除命令任何形态都要确认——不只是 rm -rf / rmdir /s。裸 rmdir 空目录曾漏网。"""
+    d = PermissionManager.is_dangerous_command
+    # bare rm on a single file (no -r/-f flag)
+    assert d("rm file.txt")
+    assert d("rm ./notes.md")
+    # bare rmdir / rd on an empty dir (no /s)
+    assert d("rmdir D:\\tmp\\d2test")
+    assert d("rmdir ./build")
+    assert d("rd /s /q C:\\x")
+    assert d("rd mydir")
+    # bare del (no /s /q)
+    assert d("del report.txt")
+    assert d("del C:\\tmp\\a.log")
+
+
+def test_deletion_safe_variants_not_flagged():
+    """Non-deletion commands must not false-positive on rm/del/rd substrings.
+    非删除命令不得因 rm/del/rd 子串误报。"""
+    d = PermissionManager.is_dangerous_command
+    assert not d("npm run build")  # 'rm' inside 'npm', not a word
+    assert not d("rm")  # bare rm with no argument
+    assert not d("rm --help")
+    assert not d("format-code src/")  # not 'format <drive>:'
+    assert not d("model.py")  # 'del' inside 'model', not a word
+
+
 def test_inline_interpreter_flagged():
     """D3: inline interpreter execution must be flagged as dangerous.
     D3：内联解释器执行必须被标记为危险。"""
     d = PermissionManager.is_dangerous_command
     # python -c / python3 -c / python - (stdin)
-    assert d('python -c "import shutil; shutil.rmtree(\'/tmp/x\')"')
+    assert d("python -c \"import shutil; shutil.rmtree('/tmp/x')\"")
     assert d("python3 -c 'import os; os.remove(\"/tmp/f\")'")
     assert d("python -c 'code'")
     assert d("echo code | python -")
     assert d("python - < malicious.py")
     assert d("python3 - < /tmp/exploit.py")
     # node -e / -p
-    assert d('node -e "require(\'fs\').rmSync(\'/tmp/x\', {recursive:true})"')
+    assert d("node -e \"require('fs').rmSync('/tmp/x', {recursive:true})\"")
     assert d("node -p 'process.env'")
     # perl / ruby -e
     assert d("perl -e 'unlink(\"/tmp/f\")'")
@@ -238,12 +267,47 @@ def test_inline_interpreter_flagged():
     assert d('pwsh -c "Remove-Item /tmp/x"')
 
 
+def test_sensitive_file_command_detected():
+    """Reading a secret via bash (type/cat/Get-Content .env) must be flagged --
+    it bypasses the read_file tool's sensitive-file DENY.
+    经 bash 读密钥（type/cat/Get-Content .env）必须被标记——它绕过 read_file 拦截。"""
+    from mini_agent.security.permission import command_references_sensitive_file as ref
+
+    assert ref("type .env")
+    assert ref("type D:\\PythonProjects\\mini-code-agent\\.env")
+    assert ref("cat .env.production")
+    assert ref("cat ~/.ssh/id_rsa")
+    assert ref("Get-Content credentials.json")
+    assert ref("more server.pem")
+    assert ref("cp secret.key /tmp/x")  # write side leaks too
+    # Must NOT flag templates or unrelated files
+    assert not ref("cat .env.example")
+    assert not ref("cat README.md")
+    assert not ref("ls -la")
+    assert not ref("echo hello")
+
+
+async def test_sensitive_file_command_asks_confirmation(path_guard):
+    """A bash command touching a sensitive file must trigger the confirm dialog,
+    not auto-allow. Denying it is what D2 turns into a goal-stop.
+    触及敏感文件的 bash 命令必须弹确认而非自动放行；拒绝即 D2 停目标。"""
+    asked = []
+
+    async def confirm(msg):
+        asked.append(msg)
+        return False
+
+    pm = make_pm(path_guard, mode="ask", confirm=confirm)
+    decision = await pm.check_command("type D:\\proj\\.env")
+    assert decision == PermissionDecision.DENIED
+    assert asked  # user was prompted
+    assert pm.last_decision_reason == "user_confirm:no"
+
+
 def test_written_script_execution_flagged(tmp_path):
     """D3: executing a script the agent wrote this session must be flagged."""
     config = SecurityConfig(permission_mode="ask")
-    guard = PathGuard(
-        tool_config=ToolConfig(), security_config=config, project_dir=tmp_path
-    )
+    guard = PathGuard(tool_config=ToolConfig(), security_config=config, project_dir=tmp_path)
     pm = PermissionManager(config=config, path_guard=guard)
 
     script = tmp_path / "exploit.py"
@@ -270,9 +334,7 @@ def test_written_script_execution_flagged(tmp_path):
 def test_written_script_unwritten_file_not_flagged(tmp_path):
     """Scripts NOT written by the agent this session must not be flagged."""
     config = SecurityConfig(permission_mode="ask")
-    guard = PathGuard(
-        tool_config=ToolConfig(), security_config=config, project_dir=tmp_path
-    )
+    guard = PathGuard(tool_config=ToolConfig(), security_config=config, project_dir=tmp_path)
     pm = PermissionManager(config=config, path_guard=guard)
 
     script = tmp_path / "legit.py"
@@ -305,8 +367,9 @@ def test_dangerous_command_safe_variants_not_flagged():
     assert not d("chmod 644 file.py")
     assert not d("chmod 755 x")
     assert not d("chmod +x script.sh")
-    assert not d("rm -i file.txt")  # interactive, no r/f
-    assert not d("rm -v file.txt")  # verbose, no r/f
+    # NOTE: `rm -i file.txt` / `rm -v file.txt` ARE now flagged -- any rm that
+    # deletes a file confirms (see test_bare_deletion_commands_flagged). The old
+    # "only -r/-f is dangerous" policy let bare deletions slip through unprompted.
     assert not d("npm run reset-db")  # not a git reset
     assert not d("echo pushback")  # not a git push
     assert not d("git stashed_helper.sh")  # 'stash' not on a word boundary

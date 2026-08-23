@@ -119,6 +119,11 @@ class Terminal:
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
         Returns True (allow once), False (deny), or "always" (allow for session).
+        Note: denying a dangerous command stops the whole goal at once (the
+        loop's dangerous-denial breaker, threshold 1) -- no need to deny again.
+        返回 True（允许一次）、False（拒绝）、"always"（本会话总是允许）。
+        注意：拒绝一条危险命令会一次性停止整个目标（循环的危险命令熔断，
+        阈值 1）——不必再逐条拒绝。
         """
         w = self.theme.warning
         e = self.theme.error

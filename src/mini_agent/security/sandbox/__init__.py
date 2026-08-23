@@ -3,10 +3,10 @@ OS 级命令沙箱——bash 工具执行的内核隔离。
 
 Linux: bubblewrap (bwrap) or unshare fallback -- user-namespace isolation, read-only rootfs
 macOS: Seatbelt (sandbox-exec) -- SBPL deny-default profile
-Windows: Low Integrity (admin, kernel-enforced) or attrib +R (non-admin, bypassable)
+Windows: Low Integrity (admin, kernel-enforced) or no file protection (non-admin, no warning)
 Linux：bubblewrap 或 unshare 后备——用户命名空间隔离，只读根文件系统
 macOS：Seatbelt——SBPL 默认拒绝策略
-Windows：Low Integrity（管理员，内核级）或 attrib +R（非管理员，可绕过）"""
+Windows：Low Integrity（管理员，内核级）或无文件保护（非管理员，不打启动警告）"""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
-"""Windows sandbox -- dual mode: Low Integrity (admin) or attrib (non-admin).
-Windows 沙箱——双模式：Low 完整性（管理员）或 attrib（非管理员）。
+"""Windows sandbox -- Low Integrity (admin) or no protection (non-admin).
+Windows 沙箱——Low 完整性（管理员）或无文件保护（非管理员）。
 
 Admin mode: child process runs at Low integrity via Mandatory Integrity
 Control. The kernel blocks all writes to Medium objects (user files default).
@@ -10,11 +10,14 @@ cannot be bypassed by os.chmod/attrib/shutil.rmtree.
 默认值）。允许写入路径降为 Low 完整性。与 IE/Chrome 沙箱同一机制，
 内核级强制，os.chmod/attrib/shutil.rmtree 均无法绕过。
 
-Non-admin mode: attrib +R on sensitive paths. A speed bump only -- the child
-process can clear read-only flags and write anyway. A startup warning tells
-the user to run as admin for real protection.
-非管理员模式：对敏感路径 attrib +R。仅减速带——子进程可清除只读标志。
-启动时提示用户以管理员运行以获得真正保护。"""
+Non-admin mode: NO file protection and NO startup warning -- the limitation is
+documented only in config-guide (to avoid noise on every launch). An earlier
+attrib +R approach was tried and removed: attrib is bypassable (a command can
+clear the read-only flag) AND, being system-wide, it blocked the agent's own
+writes to ~/.mini-agent (session/history/memory).
+非管理员模式：无文件保护，也不打启动警告——该限制仅在 config-guide 文档
+说明（避免每次启动的噪音）。曾尝试 attrib +R 但已移除：可被命令清除，且
+系统级只读会阻断 agent 自身对 ~/.mini-agent（会话/历史/记忆）的写入。"""
 
 from __future__ import annotations
 
@@ -39,20 +42,25 @@ def is_admin() -> bool:
 
 
 class WindowsSandbox(Sandbox):
-    """Windows sandbox -- Low Integrity (admin) or attrib (non-admin).
-    Windows 沙箱——Low 完整性（管理员）或 attrib（非管理员）。"""
+    """Windows sandbox -- Low Integrity (admin) or no protection (non-admin).
+    Windows 沙箱——Low 完整性（管理员）或无文件保护（非管理员，不打启动警告）。"""
 
     def __init__(self) -> None:
         self._admin = is_admin()
 
     @property
     def mode(self) -> str:
-        return "low_integrity" if self._admin else "attrib"
+        return "low_integrity" if self._admin else "no_protection"
 
     def wrap(self, command: str, config: SandboxConfig) -> str:
+        # Admin: run at Low integrity (kernel-enforced write protection).
+        # Non-admin: no file protection available -> run the command as-is
+        # (limitation documented in config-guide, no startup warning).
+        # 管理员：Low 完整性运行（内核级写保护）。非管理员：无文件保护，
+        # 原样执行（限制在 config-guide 文档说明，不打启动警告）。
         if self._admin:
             return self._wrap_low_integrity(command, config)
-        return self._wrap_attrib(command, config)
+        return command
 
     def available(self) -> bool:
         return sys.platform == "win32" and _powershell_exe() is not None
@@ -86,30 +94,6 @@ class WindowsSandbox(Sandbox):
             cleanup,
             f'    & "{python}" "{helper}" -- {escaped}',
         )
-
-    def _wrap_attrib(self, command: str, config: SandboxConfig) -> str:
-        """Non-admin mode: commands run directly (attrib set at session level).
-        非管理员模式：命令直接执行（attrib 在会话级别设置）。"""
-        return command
-
-    def activate(self, config: SandboxConfig) -> None:
-        """No-op. Attrib mode disabled — bypassable and causes agent's own
-        file writes to fail. Only Low Integrity (admin) provides real protection.
-        空操作。attrib 模式已禁用——可绕过且会阻断 agent 自身文件写入。
-        只有 Low Integrity（管理员）提供真正保护。"""
-
-    def deactivate(self) -> None:
-        """No-op. 空操作。"""
-
-    def startup_warning(self, config: SandboxConfig | None = None) -> str | None:
-        """Return warnings about sandbox limitations.
-        返回沙箱限制的警告。"""
-        if not self._admin:
-            return (
-                "[sandbox] Running without admin -- sandbox uses attrib (bypassable). "
-                "Run as administrator for kernel-level Low Integrity protection."
-            )
-        return None
 
 
 def _build_ps_script(setup: list[str], cleanup: list[str], run_line: str) -> str:
@@ -151,40 +135,3 @@ def _collect_existing_paths(paths: list[str]) -> list[str]:
         if rp.exists():
             out.append(str(rp))
     return out
-
-
-_SENSITIVE_HOME_DIRS = [".ssh", ".aws", ".gnupg", ".config", ".kube"]
-
-
-def _collect_deny_paths(config: SandboxConfig) -> list[str]:
-    """Attrib mode: collect paths to protect (sensitive home dirs ONLY).
-    Attrib 模式：只保护已知敏感主目录（不含 deny_write 配置）。
-    deny_write paths (like ~/.mini-agent) are skipped in attrib mode because
-    attrib is system-wide and would block the agent's own writes to those dirs.
-    deny_write 路径（如 ~/.mini-agent）在 attrib 模式下跳过，因为 attrib
-    是系统级的，会阻断 agent 自己对这些目录的写入。"""
-    allow_resolved = {Path(resolve_path(p)).resolve() for p in config.allow_write}
-    deny_set: set[str] = set()
-
-    home = Path.home().resolve()
-    for name in _SENSITIVE_HOME_DIRS:
-        sd = home / name
-        if sd.exists() and not _is_under(sd, allow_resolved):
-            deny_set.add(str(sd))
-
-    return sorted(deny_set)
-
-
-def _is_under(path: Path, allow_set: set[Path]) -> bool:
-    for allowed in allow_set:
-        try:
-            path.relative_to(allowed)
-            return True
-        except ValueError:
-            pass
-        try:
-            allowed.relative_to(path)
-            return True
-        except ValueError:
-            pass
-    return False

@@ -199,8 +199,10 @@ class Application:
             project_file=working_dir / ".mini-agent" / "permissions.toml",
         )
 
-        # OS-level sandbox (Linux bwrap / macOS seatbelt / Windows Low Integrity or attrib)
-        # OS 级沙箱（Linux bwrap / macOS seatbelt / Windows Low Integrity 或 attrib）
+        # OS-level sandbox (Linux bwrap/unshare / macOS seatbelt / Windows admin
+        # Low Integrity; non-admin = no file protection, no startup warning)
+        # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low
+        # Integrity；非管理员无文件保护、不打启动警告）
         self.sandbox_warning: str | None = None
         if config.security.sandbox:
             import platform
@@ -221,11 +223,6 @@ class Application:
                     bash_tool.sandbox_config = sb_config
                 if config.security.sandbox_auto_allow:
                     self.permission_manager.sandbox_auto_allow = True
-                if hasattr(os_sandbox, "activate"):
-                    os_sandbox.activate(sb_config)
-                    self._sandbox_to_deactivate = os_sandbox
-                if hasattr(os_sandbox, "startup_warning"):
-                    self.sandbox_warning = os_sandbox.startup_warning(sb_config)
             else:
                 system = platform.system()
                 if system == "Linux":
@@ -703,8 +700,6 @@ class Application:
             except Exception:
                 logger.warning("hook fire failed: session-end", exc_info=True)
                 pass
-            if hasattr(self, "_sandbox_to_deactivate"):
-                self._sandbox_to_deactivate.deactivate()
             self.session.metadata.closed_cleanly = True
             await self._autosave(force=True)
             if self.agent_loop.snapshot_store:
@@ -910,10 +905,17 @@ class Application:
         try:
             await self.agent_loop.run(self.session.conversation)
             if self.agent_loop.stopped_early:
-                self.terminal.show_error(
-                    "⚠ Agent stopped early (iteration/loop limit reached). "
-                    "Try a more specific question to reduce tool calls."
-                )
+                if self.agent_loop.stop_reason == "confirm_denied":
+                    self.terminal.show_error(
+                        "⚠ Agent stopped: you denied an action that required "
+                        "confirmation. It stopped instead of looking for a "
+                        "workaround. Tell it how to proceed, or drop the goal."
+                    )
+                else:
+                    self.terminal.show_error(
+                        "⚠ Agent stopped early (iteration/loop limit reached). "
+                        "Try a more specific question to reduce tool calls."
+                    )
             self.terminal.show_file_changes(self.agent_loop.last_turn_file_changes)
             turn_tokens = self.agent_loop.last_turn_tokens
             self.session.metadata.total_tokens_used += turn_tokens

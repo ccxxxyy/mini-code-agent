@@ -125,7 +125,7 @@ class EventBus:
     async def emit(event)            # 广播，asyncio.gather 并发分发
 ```
 
-以**事件类的 type 对象**作为字典键做路由——`emit` 时 `type(event)` 精确匹配订阅者。所有处理器用 `asyncio.gather(..., return_exceptions=True)` 并发执行，单个处理器异常不影响其他订阅者；异常由 `emit` 逐个记 warning 日志（issue #166 起，此前静默吞掉）。
+以**事件类的 type 对象**作为字典键做路由——`emit` 时 `type(event)` 精确匹配订阅者。所有处理器用 `asyncio.gather(..., return_exceptions=True)` 并发执行，单个处理器异常不影响其他订阅者；异常由 `emit` 逐个记 warning 日志（此前静默吞掉）。
 
 **零代码全局监听**：`extensions/event_listeners.py` 从顶级配置 `listener_dirs`（默认 `./.mini-agent/listeners` + `~/.mini-agent/listeners`）加载 *.py 插件——契约为 `register(bus)`（完全控制，优先）或 `on_event(event)`（同步/异步均可，自动经 `on_any` 注册为全局监听）。插件导入/注册/运行异常全部隔离并记日志，绝不影响主流程；app 启动时提示 "Loaded N event listener(s)"。用途：把全部事件落盘 JSONL、统计工具调用分布等。
 
@@ -373,14 +373,17 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 **通用检查入口**（P79，扩展点 #15）：`check(request)` 按 `request.scope` 分发到 COMMAND / PATH / 通用管道，任意消费者构造 `PermissionRequest` 一次调用即得正确判定；`check_command` / `check_path` / `check_tool` 是各 scope 的便捷入口，共用内部管道无递归。
 
-**危险命令检测**用 19 条正则覆盖高危模式：
+**危险命令检测**用 27 条正则覆盖高危模式（原 19 条 → D3 加 7 条内联解释器 + 删除类放宽/新增 `rd`）：
 
 ```
-rm -rf / rm -r / rm -f、sudo、chmod 777、mkfs、dd if=、>/dev/sd、
-git push/commit/reset/stash/rebase/checkout/restore/clean、
+rm（任意形态，含裸 rm 删单文件；排除 rm --help/-h）、sudo、chmod 777、mkfs、dd if=、>/dev/sd、
+git push/commit/reset/stash/rebase/checkout（-b 除外）/restore/clean、
 curl|sh、wget|sh、
-Windows: del /s /q、rmdir /s、format c:
+Windows: del/rmdir/rd（任意形态，含裸 rmdir 删空目录）、format c:、
+D3 内联解释器: python -c / node -e|-p / perl -e / ruby -e / sh -c / bash -c / powershell -Command / pwsh -c
 ```
+
+删除类命令 rm/del/rmdir/rd **任意形态均拦截**（裸 `rmdir` 空目录、`rm`/`del` 单文件也弹确认，不限于 -rf、/s、/q）——见 §90 之前的删除检测放宽记录。另有敏感文件命令检测（D6，§90）不属于这 27 条正则，是独立的 `command_references_sensitive_file()` token 匹配。
 
 命令检查的特殊逻辑：危险命令**即使在 allow 模式也要确认**（`check_command` 独立于普通规则流）；普通命令在 ask 模式下自动放行——弹窗只留给真正危险的操作，避免"狼来了"式的确认疲劳。
 
@@ -2095,7 +2098,7 @@ P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入�
 ```python
 {
     "summary": "[Compressed conversation history]\n...",
-    "timestamp": "2026-08-15T00:20:10.440632",
+    "timestamp": "<ISO8601 压缩时刻>",
     "read_files": ["src/app.py", "README.md"]
 }
 ```
@@ -2795,7 +2798,7 @@ edit_file/write_file 原本对文件内容零认知要求：LLM 可以凭想象�
 
 ## 84.3 强制问题与修复
 
-B2 首版在 app.py/subagent.py **无条件** `FileStateCache()`——门禁强制开启、用户无法关闭；同时 config 里加的 `enforce_read_before_edit: bool = False` 从未被任何代码读取（死配置），且语义与实际行为相反（声明默认关、实际永远开）。#200 修复：字段默认改 `True`，两处装配点改条件创建（`false` → `file_state=None` 门禁整体关闭），主 Agent 与所有 SubAgent 同步受控。
+B2 首版在 app.py/subagent.py **无条件** `FileStateCache()`——门禁强制开启、用户无法关闭；同时 config 里加的 `enforce_read_before_edit: bool = False` 从未被任何代码读取（死配置），且语义与实际行为相反（声明默认关、实际永远开）。修复：字段默认改 `True`，两处装配点改条件创建（`false` → `file_state=None` 门禁整体关闭），主 Agent 与所有 SubAgent 同步受控。
 
 ## 84.4 设计权衡
 
@@ -2810,7 +2813,7 @@ B2 首版在 app.py/subagent.py **无条件** `FileStateCache()`——门禁强�
 - TOML 加载端到端实测：`[tools] enforce_read_before_edit = false` 经 ConfigLoader 后字段确为 False（`_merge` 的 hasattr 动态映射天然支持新字段，无需改 loader）
 - 真实终端验证：真实 LLM 会话中直接 edit 被拦、报错文案返回后 LLM 自主调整策略（先读或改用 bash——后者即"bash 旁路"设计边界的实证）
 
-# 85. 自定义 Agent 类型：.md 声明式定义（B3）
+# 85. 自定义 Agent 类型：.md 声明式定义
 
 ## 85.1 动机
 
@@ -2833,7 +2836,7 @@ P48 实现了 4 种硬编码 agent 类型（explore/plan/worker/verify），但�
 - autouse fixture 保存/恢复 AGENT_TYPES 防测试交叉污染
 - 全量 1022 passed + 1 skipped，ruff clean
 
-# 86. 后台子代理与完成通知（B4）
+# 86. 后台子代理与完成通知
 
 ## 86.1 动机
 
@@ -2894,19 +2897,19 @@ SubAgent 空白上下文是刻意设计（便宜/可并行/可预测），但暴
 
 - 6 个新测试：summarize_conversation 成功/失败回退、SubAgent 注入/默认不注入、spawn_background 透传、spawn_agents 工具 inherit_context 端到端（MockLLM 脚本序列：第一项摘要输出、第二项子 agent 回复）
 - 全量测试通过，ruff clean
-- 真实终端验证（干净会话，4 场景全过）：① `/spawn --fork` 子 agent **Tools:0 且 5/5 讨论细节全中**（120→300/example 同步/中英文档/不动 llm timeout/跑测试查断言），连"当前仅讨论未修改文件"的状态都继承了；② 对照组（无 --fork）同任务 Tools:0 但 **0/5 细节、自信编造了完全不同的方案**（含虚构文件名）——空白上下文的幻觉风险实证，比"承认不知道"更糟（→ B7.1）；③ LLM 自主开 `inherit_context=True`，报告 300 秒正确；④ `background=true + inherit_context=true` 组合生效，通知报告"llm 的 timeout"正确
+- 真实终端验证（干净会话，4 场景全过）：① `/spawn --fork` 子 agent **Tools:0 且 5/5 讨论细节全中**（120→300/example 同步/中英文档/不动 llm timeout/跑测试查断言），连"当前仅讨论未修改文件"的状态都继承了；② 对照组（无 --fork）同任务 Tools:0 但 **0/5 细节、自信编造了完全不同的方案**（含虚构文件名）——空白上下文的幻觉风险实证，比"承认不知道"更糟（→ B9.1）；③ LLM 自主开 `inherit_context=True`，报告 300 秒正确；④ `background=true + inherit_context=true` 组合生效，通知报告"llm 的 timeout"正确
 
 ## 87.6 验证中暴露的问题（全部如实记录）
 
 - **摘要生成阻塞且不可观测（→ B4.2）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）
-- **空白上下文幻觉编造（→ B7.1）**：见上 ②
-- **首轮验证被测 LLM 擅自动手（→ B7）**：用户说"先不要动手只讨论"，agent 盘点后主动问"确认 A/B 后动手"，用户下一句以"对"开头的补充讨论被解读为授权，未经明确指令改了 6 处文件（后经指令还原，git diff + grep + 测试三重核查确认恢复彻底）
+- **空白上下文幻觉编造（→ B9.1）**：见上 ②
+- **首轮验证被测 LLM 擅自动手（→ B9）**：用户说"先不要动手只讨论"，agent 盘点后主动问"确认 A/B 后动手"，用户下一句以"对"开头的补充讨论被解读为授权，未经明确指令改了 6 处文件（后经指令还原，git diff + grep + 测试三重核查确认恢复彻底）
 - **验证方案自身的两处判定错误（方法论教训）**：① 预设"trace 可见摘要 LLM 调用"——实际不可见（正是 B4.2 的可观测性缺口）；② 预设"background 组合毫秒级返回"——inherit_context 时不成立。教训：判定标准应先在代码层核实事件/输出的真实路径，而非从设计意图推断
 - **对话污染判断失误（流程教训）**：首轮验证 agent 改文件又还原后，曾判断"讨论细节还在可继续 fork 测试"——错误：对话历史含"修改成功"记录，摘要会把污染传给子 agent 使判定失真。正确做法（已执行）：重启干净会话重测
 
 ---
 
-# §88 D3：内联解释器绕过封堵 + Windows 安全边界
+# §88 内联解释器绕过封堵 + Windows 安全边界
 
 ## 88.1 前因
 
@@ -2922,7 +2925,7 @@ A2 真实验证实测暴露两次绕过：用户拒掉 4 条 `rm`/`rmdir`/`del` 
 
 **Windows Low Integrity 沙箱**（`sandbox/windows.py` + `_low_integrity.py`）：管理员运行时，`_low_integrity.py` helper 用 ctypes 调 `SetTokenInformation` 将子进程 token 降为 Low 完整性。内核级强制——Low 进程不能写 Medium 对象（用户文件默认值），`os.chmod`/`attrib -R`/`shutil.rmtree+onerror` 全部被内核阻止。允许写入路径用 `icacls /setintegritylevel L` 降为 Low（需管理员），命令结束后恢复 Medium。deny_write 路径保持 Medium 不降。
 
-**attrib 方案的教训**：最初尝试用 `attrib +R` 设置只读保护敏感路径。实测发现三个致命缺陷：① 子进程可用 `os.chmod`/`attrib -R` 一行清除；② `attrib` 是系统级的，阻断了 agent 自身对 `~/.mini-agent/input_history`/session/memory 的写入；③ 崩溃时只读标志残留。已完全禁用——`activate()`/`deactivate()` 为空操作，非管理员模式仅显示启动警告。
+**attrib 方案的教训**：最初尝试用 `attrib +R` 设置只读保护敏感路径。实测发现三个致命缺陷：① 子进程可用 `os.chmod`/`attrib -R` 一行清除；② `attrib` 是系统级的，阻断了 agent 自身对 `~/.mini-agent/input_history`/session/memory 的写入；③ 崩溃时只读标志残留。已完全禁用——`activate()`/`deactivate()` 为空操作，非管理员模式无文件保护且不打启动警告（限制仅 config-guide 文档说明）。
 
 **写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat`/`./script.py`/`python -m module` 执行写过的脚本时弹确认。`_would_ask_command()` 同步更新防流式抢跑。`shared_written_files` 支持跨 Agent 共享。
 
@@ -2941,9 +2944,72 @@ A2 真实验证实测暴露两次绕过：用户拒掉 4 条 `rm`/`rmdir`/`del` 
 - deny_write Low Integrity 验证通过：allow_write 内的 deny 子路径保持 Medium 不可写
 - 真实 LLM 运行验证通过：`python -c "print('hello')"` 弹确认框 `dangerous command detected`
 - record_written_file + is_executing_written_script + would_ask 集成验证通过
-- 非管理员模式启动警告正常显示
+- 非管理员模式无文件保护、不打启动警告（限制仅 config-guide 文档说明，避免每次启动噪音）；`wrap()` 原样返回命令
 - Linux/macOS 待对应平台验证（unshare 需 unprivileged user namespaces，seatbelt 需 macOS）
 
 ## 88.5 已知遗留
 
 完整清单见 roadmap.md D3 条目。
+
+---
+
+# §89 危险命令被拒后停下求助，而非找绕过路径
+
+## 89.1 前因
+
+A2 实测事故：用户让删 `/tmp/a2test`，agent 连续被拒 4 条危险命令（rm/rmdir/del 各形态，正则全命中弹窗、用户全拒），但没停下，继续换方式，第 12 轮用 `python -c "shutil.rmtree(...)"`（不匹配任何危险正则）GRANTED 并真的删了目录——共 13 轮、烧 97k tokens。
+
+根因是**行为层**：拒绝一条命令的语义是"这条不行"，agent 据此重构等价命令重试。绕过之所以得逞，本质是"被拒后继续找路"，而非正则不够全。D3（执行层：让绕过路径也弹确认）是互补项，D2 才是治本——连续被拒后停下。
+
+## 89.2 方案
+
+采用候选方案 ①（连续被拒熔断），复用现有 `_should_continue` + `stopped_early` 熔断机制，零新机制。初版只统计危险命令被拒，后扩展为覆盖**所有确认框被拒**——危险命令确认、项目外路径确认、hook（`[[hooks]] action=confirm`）确认：
+
+1. **检测**：以真实确认框被拒为准——权限判定 reason `user_confirm:no` + hook 确认被拒。初版靠 `permission.py` 的 `last_check_was_dangerous` peek 属性识别危险命令，扩展后该属性已移除。自动策略拒绝不算：敏感路径拒绝（`path_guard:sensitive`）、显式 deny 规则、无 UI 默认拒绝是策略在拦、不是用户在说"别做"，不计数。
+2. **计数**（`agent_state.py`）：`AgentState.consecutive_confirm_denials`，每轮 run() 重建 AgentState 自动重置。
+3. **计数逻辑**（`agent_loop._check_permission`）：确认框 DENIED→+1、确认框 GRANTED→归零；未弹确认的调用中性（被拒之间的只读分析不动计数器）。
+4. **熔断**（`_should_continue`）：计数 ≥ `max_consecutive_denials`（默认 1，拒一次即停）→ 设 `stop_reason="confirm_denied"` 停循环。
+5. **回问**：run() 熔断分支按 stop_reason 定制 final_content（中文回问），app.py 按 stop_reason 显示区别于迭代上限的提示。
+
+## 89.3 权衡
+
+- 阈值 1：用户拒绝确认框通常就是"别做"，停下问你比猜下一条更好；调大可给被拒后修正重试的空间。
+- 熔断只统计**用户在确认框上的拒绝**（`user_confirm:no` + hook 确认被拒）——自动策略拒绝（敏感路径 `path_guard:sensitive`、显式 deny 规则、无 UI 默认拒绝）不计数、仍只是跳过该次调用继续：那是配置好的策略在拦，不是用户当场表达"别做"。
+- 为什么"未弹确认的调用中性"而非"任何命令都重置"：事故里被拒之间夹杂只读分析（读文件/grep）。若任何 grant 都重置，counter 永远到不了阈值。只统计连续的**确认框**被拒才是正确信号。
+- 为什么确认框 GRANTED 重置：用户放行了 = 目标合法推进，不该再累积。
+
+## 89.4 验证
+
+- 4 个新测试：熔断触发 / 放行重置计数 / 未弹确认的调用中性 / 计数属性。全量 1059 passed。
+- 真实复现 D2 事故脚本（rm→rmdir→del→python -c shutil.rmtree）：确认第 3 次被拒后 agent 停下（iterations=3），第 4 步 python 内联解释器绕过从未执行——D2 事故的完整绕过链被行为层截断（验证时默认阈值为 3、stop_reason 时名 repeated_denials；现默认阈值 1、`stop_reason="confirm_denied"`，首次被拒即停）。
+- 扩展后范围补充：项目外路径确认被拒、hook 确认被拒同样触发熔断停机（验证时熔断只覆盖危险命令，此为后续扩展的行为）。
+
+## 89.5 与 D3 的关系
+
+D3 执行层（内联解释器正则 + 写后执行检测 + Windows Low Integrity 沙箱）让绕过路径也弹确认/被内核拦；D2 行为层让连续被拒后停下。两者叠加：D2 在阈值内仍可能有绕过尝试（默认阈值 1 时首次被拒即停、窗口几乎为零；调大阈值窗口相应变大），D3 兜住这些尝试的执行。单独任一层都不完整。
+
+**诚实边界（Windows 非管理员）**：上面"D3 兜住执行"只在有 OS 沙箱时成立——Linux bwrap/unshare、macOS seatbelt、Windows 管理员 Low Integrity。**Windows 非管理员下 D3 沙箱啥也不做**（attrib 已禁用），执行层只剩危险正则。若一条破坏性命令既不触发危险正则、又不是写后执行的脚本，它会被静默放行（auto-grant）直接执行，D2（只数确认框被拒——这条命令根本没弹确认）计数器不增加、D3 也拦不住。这是 #1/#8 的执行层 OS 限制，D2/D3 都无法在此场景消除，只能靠 D2 缩小攻击面。完全解决只有管理员运行或 Windows 出非管理员进程级沙箱原语（不存在）。
+
+## 90. bash 通道读敏感文件绕过 read_file 拦截（泄漏 API key）
+
+## 90.1 现象
+
+严重读泄漏：让 agent 读 `.env`，`read_file` 工具正确拒绝（命中 `PathGuard.is_sensitive_file`），但 agent 立刻改用 `type D:\...\.env`（bash 工具通道）成功打印文件内容，**泄漏了真实 API key**。与删除绕过同源——bash 能绕过工具层保护——但方向是读泄密而非破坏。
+
+## 90.2 根因
+
+敏感文件保护 `PathGuard.is_sensitive_file`（`.env`/`*.pem`/`*.key`/`id_rsa*`/`credentials*`/`*secret*` 等）只在 `read_file`/`write_file`/`delete_file` 三个文件工具上生效。**bash 命令管道（`_check_command_request`）从不做路径检查**——它只过 deny 规则、危险正则、写后执行检测，然后按默认模式放行。于是 `type`/`cat`/`Get-Content`/`more .env` 作为"普通命令"被 auto-grant。
+
+## 90.3 方案
+
+permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_SPLIT_RE`（空白/`=`/shell 操作符 `|;&<>()`）把命令切成类路径 token，逐个取 basename，命中 `SENSITIVE_FILE_PATTERNS`（复用 path_guard 的同一份模式，`.env.example`/`.sample`/`.template` 例外）即为真。`_check_command_request` 里与 `is_dangerous`/`is_written_script` 并列判断，命中则 `request.context` 标注、`last_decision_reason="sensitive_file_command"`，走 `_ask_user`。
+
+**为什么用确认而非静默拒绝**：静默 auto-deny（像 `path_guard:sensitive` 那样）不触发熔断（只数确认框被拒），agent 会换着法子重试；确认既给用户可见性，拒绝时又设 `user_confirm:no` 触发停目标。两个机制在这里自然咬合。
+
+## 90.4 权衡与诚实边界
+
+减速带而非围墙，同命令黑名单：token 化只能抓字面出现的敏感文件名，**变量展开（`$SECRET_FILE`）、通配、base64/echo 拼接、间接读取（`for /f`）等混淆仍可逃逸**。真正堵死读泄漏需要 OS 沙箱的读 ACL（Windows Low Integrity 不限制读 Medium 对象，故读保护它也做不到），架构上不可完全消除。本条目把常见明显形态从"静默放行"提升到"弹确认+可熔断"。
+
+## 90.5 验证
+
+`test_sensitive_file_command_detected`（token 检测正误报）+ `test_sensitive_file_command_asks_confirmation`（`type .env` 弹确认、拒绝后 reason=`user_confirm:no`）。真实验证：`type .env`/`cat ~/.ssh/id_rsa` 弹确认，`echo hello`/`cat README.md` 不受影响。2 个新测试，1058→1060。
