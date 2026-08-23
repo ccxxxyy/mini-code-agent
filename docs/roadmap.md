@@ -554,9 +554,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**：`/spawn`（非阻塞）+ `/trace on` 同时开启时，子 agent 的 trace 日志异步输出到终端（共享 EventBus → 共享 Rich Console），和主终端的 `>` 输入提示符混在同一行，用户看不清提示符、以为程序卡住。
 **修复**：`PromptSession` 创建时加 `patch_stdout=True`（prompt_toolkit 内置机制）。prompt 活跃期间所有 stdout 写入自动打印到 prompt 上方，prompt 行自动重绘。一行改动。
 
-☐ **B3.2 权限确认弹窗输入行被并发输出淹没**
+✅ **B3.2 权限确认弹窗输入行被并发输出淹没**
 **问题**（B4.1 终端验证中实测暴露）：工具并行执行时，一个工具触发权限确认弹窗（`allow? [y/a/n] > ` 等待输入），另一个并行工具完成时的 trace 行直接打进确认输入行——用户看不到输入位置。B3.1 的 `patch_stdout` 只包裹了主输入框（`get_user_input` 的 `prompt_async`），`terminal.confirm()` 的输入路径未覆盖。
-**方向**：confirm() 的输入读取同样用 `patch_stdout` 包裹；或弹窗期间暂停 trace/流式输出（`_confirm_lock` 已防多弹窗交错，但不防其他输出打断）。工作量：小。
+**✅ 已修复**：`Terminal` 新增 `_prompt_protected(session, message)` 辅助方法——`prompt_async` 外包 `patch_stdout(raw=True)`，等输入期间并发输出重定向到提示行上方、输入行自动重绘；stdout proxy 建不出来时（无控制台环境）退回裸 prompt 不破坏原有语义。三个临时 PromptSession 输入路径（`confirm`/`ask_yes_no`/`ask_structured`）统一接入。4 个新测试（三路径 patch_stdout 包裹验证 + proxy 不可用兜底），1066→1070。
 
 ✅ **B4 后台子代理 + 完成通知**（已完成）
 **问题**：LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（spawn_agents.py `wait_all`），期间不能做其他工作——comparison 6.2 自认的限制。

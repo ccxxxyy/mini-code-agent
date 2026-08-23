@@ -104,7 +104,7 @@
 
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
-- 危险命令确认：27 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）
+- 危险命令确认：27 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问

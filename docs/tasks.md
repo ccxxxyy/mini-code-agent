@@ -1377,6 +1377,11 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `ui/input_handler.py` — `create_prompt_style()` 根样式 `bold {theme.user_input}`，输入文字打字时和回车后均醒目着色（菜单/工具栏/滚动条 noinherit 不受影响）
 - [x] `ui/terminal.py` — `_input_rule()` 输入行上下各一条 `user_input` 色横线（上边线输入前、下边线输入确认后；`_BG_INTERRUPT` 中断不打下边线避免残线）
 
+### 确认弹窗输入行防并发输出打断
+- [x] `ui/terminal.py` — `_prompt_protected(session, message)` 辅助方法：`prompt_async` 外包 `patch_stdout(raw=True)`，等输入期间并发输出重定向到提示行上方；proxy 构建失败（无控制台环境）退回裸 prompt
+- [x] `confirm`/`ask_yes_no`/`ask_structured` 三个临时 PromptSession 输入路径统一接入 `_prompt_protected`
+- [x] 4 个新测试（三路径 patch_stdout 包裹验证 + proxy 不可用兜底，test_windows_rendering.py）
+
 ## 会话自动清理 (comparison 9.1)
 
 - [x] `SessionStore.cleanup_stale(max_age_days)` — 扫描 `~/.mini-agent/sessions/`，删除超过 N 天且 `closed_cleanly=True` 的会话；未正常关闭的跳过（崩溃恢复保留）

@@ -37,7 +37,7 @@
 
 在现有框架上补齐体验差距：
 1. **可折叠工具调用块**：工具调用默认显示简略版（`╭─ read_file file_path=x.txt → ✓ 42 lines`），`/trace on` 时展开详情。当前已基本实现，只需微调格式
-2. **内联权限对话框**：当前 `confirm()` 已是 Panel 形式，效果等同 mewcode 的 InlinePermissionWidget
+2. **内联权限对话框**：当前 `confirm()` 已是 Panel 形式，效果等同 mewcode 的 InlinePermissionWidget；等输入期间并发输出经 patch_stdout 重定向到提示行上方，输入行不被并行工具打断
 3. **进度树**：`/team` 和 `/spawn` 已有进度面板显示，效果已对齐
 
 ### 0.3 依赖策略

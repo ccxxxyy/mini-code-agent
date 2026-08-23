@@ -177,7 +177,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Worker pane output (task header / tool lines / streaming answer / linger countdown) | `core/worker.py` direct stdout printing | Inside the pane of `/spawn --pane` |
 | `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent spawned via `spawn_agents background=true` completes; automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` subscriber of `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` | When `inherit_context=true` or `/spawn --fork` triggers a summary LLM call; `/trace on` also shows `ctx` trace lines |
-| Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit |
+| Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit; concurrent output during the input wait (trace/result lines from parallel tools) reroutes above the prompt so the input line is never disrupted |
 | Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content |
 | `Goodbye!` | `app.py` `run()` finally | On normal exit |
 | `Interrupted.` | `app.py` `_handle_turn` except | On Ctrl+C / double-Esc interrupt |

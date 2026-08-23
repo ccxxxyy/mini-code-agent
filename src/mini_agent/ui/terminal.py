@@ -177,6 +177,28 @@ class Terminal:
         self._input_rule()
         return result
 
+    @staticmethod
+    async def _prompt_protected(session, message: str) -> str:
+        """prompt_async wrapped in patch_stdout so concurrent output (trace
+        lines from parallel tools) reroutes above the prompt instead of
+        printing into the input line. Falls back to a bare prompt when the
+        stdout proxy cannot be built (environments without a console).
+        prompt_async 外包 patch_stdout——等输入期间并行工具的 trace 行
+        重定向到提示行上方而非打进输入行；无控制台环境建不出 proxy 时
+        退回裸 prompt。"""
+        from prompt_toolkit.patch_stdout import patch_stdout
+
+        try:
+            ctx = patch_stdout(raw=True)
+            ctx.__enter__()
+        except Exception:
+            ctx = None
+        try:
+            return await session.prompt_async(message)
+        finally:
+            if ctx is not None:
+                ctx.__exit__(None, None, None)
+
     async def confirm(self, prompt: str) -> bool | str:
         """Ask user for confirmation.
         Returns True (allow once), False (deny), or "always" (allow for session).
@@ -220,7 +242,7 @@ class Terminal:
             return _plain_confirm()
         while True:
             try:
-                answer = (await tmp.prompt_async("allow? [y/a/n] > ")).strip().lower()
+                answer = (await self._prompt_protected(tmp, "allow? [y/a/n] > ")).strip().lower()
             except Exception:
                 return _plain_confirm()
             if answer in ("y", "yes"):
@@ -254,7 +276,7 @@ class Terminal:
 
         while True:
             try:
-                answer = (await tmp.prompt_async(f"{prompt} [y/n] > ")).strip().lower()
+                answer = (await self._prompt_protected(tmp, f"{prompt} [y/n] > ")).strip().lower()
             except Exception:
                 return _plain_input()
             if answer in ("y", "yes"):
@@ -286,7 +308,7 @@ class Terminal:
 
         try:
             tmp = _PS()
-            raw = (await tmp.prompt_async("> ")).strip()
+            raw = (await self._prompt_protected(tmp, "> ")).strip()
         except Exception:
             raw = _plain()
 
