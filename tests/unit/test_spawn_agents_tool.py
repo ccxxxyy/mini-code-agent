@@ -117,3 +117,84 @@ async def test_spawn_agents_not_in_subagent_clone(tmp_path):
     tools = agent._loop._tools
     assert tools.get("spawn_agents") is None
     assert tools.get("read_file") is not None
+
+
+# --- B4.2: context summary observability + non-blocking background ---
+
+
+async def test_build_context_summary_emits_events(tmp_path):
+    """build_context_summary must emit Start/Done events with timing."""
+    from mini_agent.models.events import ContextSummaryDoneEvent, ContextSummaryStartEvent
+    from mini_agent.models.message import Message, Role
+
+    ctx = make_ctx(tmp_path)
+    mgr = ctx.subagent_manager
+    events: list = []
+
+    async def _collect_start(e: ContextSummaryStartEvent) -> None:
+        events.append(("start", e))
+
+    async def _collect_done(e: ContextSummaryDoneEvent) -> None:
+        events.append(("done", e))
+
+    mgr._event_bus.on(ContextSummaryStartEvent, _collect_start)
+    mgr._event_bus.on(ContextSummaryDoneEvent, _collect_done)
+
+    msgs = [Message(role=Role.USER, content="hello")]
+    summary = await mgr.build_context_summary(msgs)
+
+    assert len(events) == 2
+    assert events[0][0] == "start"
+    assert events[1][0] == "done"
+    done_event = events[1][1]
+    assert done_event.duration_ms >= 0
+    assert done_event.char_count == len(summary)
+
+
+async def test_background_inherit_context_returns_immediately(tmp_path):
+    """background=True + inherit_context=True should return instantly,
+    deferring summary+spawn to a background task."""
+    import asyncio
+
+    from mini_agent.models.message import Conversation, Message, Role
+
+    ctx = make_ctx(tmp_path)
+    ctx.session.conversation = Conversation()
+    ctx.session.conversation.append(Message(role=Role.USER, content="discuss plan"))
+
+    tool = SpawnAgentsTool()
+    result = await tool.execute(
+        ctx,
+        tasks=["summarize discussion"],
+        background=True,
+        inherit_context=True,
+    )
+    assert not result.is_error
+    assert "background" in result.output.lower()
+    assert "context fork" in result.output.lower()
+    await asyncio.sleep(0.3)
+
+
+async def test_trace_renderer_ctx_summary(tmp_path):
+    """TraceRenderer must render context summary events."""
+    from unittest.mock import MagicMock
+
+    from mini_agent.models.events import ContextSummaryDoneEvent, ContextSummaryStartEvent
+    from mini_agent.ui.trace import TraceRenderer
+
+    console = MagicMock()
+    renderer = TraceRenderer(console)
+    renderer.enabled = True
+
+    bus = EventBus()
+    renderer.attach(bus)
+
+    await bus.emit(ContextSummaryStartEvent())
+    await bus.emit(ContextSummaryDoneEvent(duration_ms=1234.5, char_count=500))
+
+    assert console.print.call_count == 2
+    calls = [str(c) for c in console.print.call_args_list]
+    assert any("summarizing" in c for c in calls)
+    assert any("summary ready" in c for c in calls)
+
+    renderer.detach(bus)

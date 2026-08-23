@@ -2901,7 +2901,7 @@ SubAgent 空白上下文是刻意设计（便宜/可并行/可预测），但暴
 
 ## 87.6 验证中暴露的问题（全部如实记录）
 
-- **摘要生成阻塞且不可观测（→ B4.2）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）
+- **摘要生成阻塞且不可观测（→ B4.2，已修复见 §91）**：`inherit_context` 的摘要是 execute 内的同步 LLM 调用，实测 46-54 秒终端零输出（用户以为卡住）；`complete()` 直调不发 trace 事件，`/trace on` 也不可见；background 组合下"立即返回"承诺打折（spawn_agents done 53938ms）。**已由 §91 修复：事件+终端提示+非阻塞后台。**
 - **空白上下文幻觉编造（→ B9.1）**：见上 ②
 - **首轮验证被测 LLM 擅自动手（→ B9）**：用户说"先不要动手只讨论"，agent 盘点后主动问"确认 A/B 后动手"，用户下一句以"对"开头的补充讨论被解读为授权，未经明确指令改了 6 处文件（后经指令还原，git diff + grep + 测试三重核查确认恢复彻底）
 - **验证方案自身的两处判定错误（方法论教训）**：① 预设"trace 可见摘要 LLM 调用"——实际不可见（正是 B4.2 的可观测性缺口）；② 预设"background 组合毫秒级返回"——inherit_context 时不成立。教训：判定标准应先在代码层核实事件/输出的真实路径，而非从设计意图推断
@@ -3013,3 +3013,21 @@ permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_
 ## 90.5 验证
 
 `test_sensitive_file_command_detected`（token 检测正误报）+ `test_sensitive_file_command_asks_confirmation`（`type .env` 弹确认、拒绝后 reason=`user_confirm:no`）。真实验证：`type .env`/`cat ~/.ssh/id_rsa` 弹确认，`echo hello`/`cat README.md` 不受影响。2 个新测试，1058→1060。
+
+## 91. fork 摘要生成可观测 + background 非阻塞
+
+## 91.1 问题
+
+B4.1 终端验证实测暴露：`inherit_context=true` 时 `SubAgentManager.build_context_summary()` 调 `summarize_conversation()` → `LLMSummarizeOldest._summarize()` → `complete()`，做一次完整 LLM 调用（实测 46-54 秒）。期间终端零输出、`/trace on` 也看不到——`complete()` 直调绕过 AgentLoop 的事件链。`background=true` 组合下 `spawn_agents.execute()` 阻塞在摘要调用上，"立即返回"承诺打折。
+
+## 91.2 方案
+
+**可观测性**：`build_context_summary()` 前后发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`（新事件，`models/events.py`）。两个订阅者：① `app.py` 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready (Xs, N chars)"），无论 `/trace` 是否开启用户都看到；② `TraceRenderer` 订阅显示 `ctx` 行，`/trace on` 下可见。事件在 `subagent.py` 的 `build_context_summary()` 发射（而非 `compressor.py`），因为后者没有 EventBus 且被压缩管线共用。
+
+**非阻塞**：`background=true + inherit_context=true` 时把"摘要+spawn"整体放进 `asyncio.create_task`（`spawn_agents.py`），`execute()` 立即返回。消息列表浅拷贝防后续对话修改，task 引用存 `mgr._notify_tasks`（已有的 GC 保护模式）。前台模式不变（阻塞等摘要完成后再 spawn）。
+
+`/spawn --fork` 命令总是前台，可观测性已被事件覆盖，无需非阻塞改造。
+
+## 91.3 验证
+
+3 个新测试：`test_build_context_summary_emits_events`（Start/Done 各一、duration_ms≥0、char_count 匹配）、`test_background_inherit_context_returns_immediately`（background+fork 立即返回、输出含 "context fork"）、`test_trace_renderer_ctx_summary`（TraceRenderer 渲染两行 ctx 事件）。全量 1060→1063 passed。

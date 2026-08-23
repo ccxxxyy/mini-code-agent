@@ -21,7 +21,12 @@ from mini_agent.core.mailbox import Mailbox
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider
 from mini_agent.models.config import AgentConfig
-from mini_agent.models.events import SubAgentCompleteEvent, SubAgentSpawnEvent
+from mini_agent.models.events import (
+    ContextSummaryDoneEvent,
+    ContextSummaryStartEvent,
+    SubAgentCompleteEvent,
+    SubAgentSpawnEvent,
+)
 from mini_agent.models.message import Conversation, Message, Role
 from mini_agent.models.session import Session
 from mini_agent.security.permission import ConfirmCallback, PermissionManager
@@ -624,7 +629,12 @@ class SubAgentManager:
         为摘要式上下文继承生成父对话摘要（LLM 失败时回退提取式 digest）。"""
         from mini_agent.memory.compressor import summarize_conversation
 
-        return await summarize_conversation(self._llm, messages)
+        await self._event_bus.emit(ContextSummaryStartEvent())
+        t0 = time.monotonic()
+        summary = await summarize_conversation(self._llm, messages)
+        ms = (time.monotonic() - t0) * 1000
+        await self._event_bus.emit(ContextSummaryDoneEvent(duration_ms=ms, char_count=len(summary)))
+        return summary
 
     async def spawn_background(
         self,

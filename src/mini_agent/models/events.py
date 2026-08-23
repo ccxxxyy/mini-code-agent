@@ -137,6 +137,23 @@ class SubAgentCompleteEvent(Event):
     background: bool = False
 
 
+@dataclass
+class ContextSummaryStartEvent(Event):
+    """Fork-style context summarization began (LLM call in progress).
+    fork 式上下文摘要开始（LLM 调用进行中）。"""
+
+    agent_count: int = 0
+
+
+@dataclass
+class ContextSummaryDoneEvent(Event):
+    """Fork-style context summarization finished.
+    fork 式上下文摘要完成。"""
+
+    duration_ms: float = 0
+    char_count: int = 0
+
+
 # --- Session Events ---
 
 
