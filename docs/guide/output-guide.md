@@ -172,7 +172,7 @@
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
-| `Background agent xxx finished — result will be delivered to the conversation next turn` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | LLM 以 `spawn_agents background=true` 派发的后台 agent 完成时；结果本身经 mailbox 在下一轮迭代注入对话 |
+| `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | LLM 以 `spawn_agents background=true` 派发的后台 agent 完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果 |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` 的 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` 订阅者 | `inherit_context=true` 或 `/spawn --fork` 时摘要 LLM 调用开始/完成；`/trace on` 下同时显示 `ctx` trace 行 |
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中 |
 | thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时 |

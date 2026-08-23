@@ -335,9 +335,9 @@ class Application:
             if event.background:
                 status = "finished" if event.success else "FAILED"
                 self.terminal.show_info(
-                    f"Background agent {event.agent_id} {status} — "
-                    "result will be delivered to the conversation next turn"
+                    f"Background agent {event.agent_id} {status} — processing result..."
                 )
+                self.terminal.interrupt_input()
 
         self.event_bus.on(SubAgentCompleteEvent, _on_background_complete)
 
@@ -620,6 +620,8 @@ class Application:
             logger.warning("hook fire failed: session-init", exc_info=True)
             pass
 
+        from mini_agent.ui.terminal import _BG_INTERRUPT
+
         try:
             while True:
                 try:
@@ -628,6 +630,10 @@ class Application:
                     break
                 except KeyboardInterrupt:
                     break
+
+                if user_input is _BG_INTERRUPT:
+                    await self._handle_background_delivery()
+                    continue
 
                 user_input = user_input.strip()
                 if not user_input:
@@ -914,7 +920,32 @@ class Application:
 
         self.session.conversation.append(Message(role=Role.USER, content=user_input))
         self.session.metadata.total_turns += 1
+        await self._run_agent_and_report()
 
+    async def _handle_background_delivery(self) -> None:
+        """Process mailbox results from completed background agents.
+        Loop until no more pending messages (another agent may complete
+        while we are processing the first one).
+        处理已完成的后台 agent 经 mailbox 投递的结果。循环直到无更多待处理
+        消息（处理第一个结果期间可能又有 agent 完成）。"""
+        while self.mailbox.has_pending("main"):
+            self.session.conversation.append(
+                Message(
+                    role=Role.USER,
+                    content=(
+                        "[System notification] Background agent(s) have completed. "
+                        "Their results are now available in your inbox. "
+                        "Process them and report to the user."
+                    ),
+                )
+            )
+            self.session.metadata.total_turns += 1
+            await self._run_agent_and_report()
+            await self._autosave(force=True)
+
+    async def _run_agent_and_report(self) -> None:
+        """Run the agent loop and display post-turn stats.
+        执行 agent loop 并显示轮次统计。"""
         try:
             await self.agent_loop.run(self.session.conversation)
             if self.agent_loop.stopped_early:

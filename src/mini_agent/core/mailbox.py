@@ -297,6 +297,18 @@ class Mailbox:
         self._with_lock(path, _mark)
         return unread
 
+    def has_pending(self, agent_id: str) -> bool:
+        """Check for unread messages without locking (read-only).
+        无锁检查是否有未读消息（只读安全：写入走 atomic replace）。"""
+        path = self._inbox_path(agent_id)
+        if not path.is_file():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return any(not m.get("read", False) for m in data.get("messages", []))
+        except (OSError, ValueError, TypeError):
+            return False
+
     @staticmethod
     def _read(path: Path) -> list[MailMessage]:
         if not path.is_file():

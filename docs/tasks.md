@@ -305,6 +305,7 @@ P1-P83 每个阶段的任务分解、实现记录与验收结果。每条任务�
 - [x] 单任务派生：`/spawn <任务>` → 返回 agent_id
 - [x] 并行派生：`/spawn -p <任务1> | <任务2>`
 - [x] worktree 隔离：`/spawn --isolated <任务>`
+- [x] 后台派发：`/spawn --background <任务>` → 后台运行,完成后结果自动投递到主对话（无需 `/spawn wait`）
 - [x] 子命令：`/spawn list` / `/spawn wait [id]` / `/spawn cancel [id]`
 
 ### P12.4 /team 命令
@@ -1362,6 +1363,14 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 审计留痕 — drain 标记已读留盘（会话级）、unregister 保留收件箱文件、SubAgentManager 持有默认 Mailbox 时初始化 `reset_all()` 清理上一会话
 - [x] 架构边界保持文档化不实现：跨进程文件锁 + 推送唤醒是 6.4 的前置（comparison 6.2）
 - [x] 13 个新测试（test_mailbox.py 共 31 个），684 个全过，覆盖率 80.85%，ruff clean
+
+### B4.3 后台 agent 结果自动投递
+- [x] `core/mailbox.py` — `Mailbox.has_pending(agent_id)` 无锁只读查询（未注册返回 False）
+- [x] `ui/terminal.py` — `Terminal.interrupt_input()` + `_BG_INTERRUPT` 哨兵；`get_user_input()` 支持中断（TTY 路径 `prompt_session.app.exit(_BG_INTERRUPT)` 保存恢复用户部分输入，非 TTY 路径 `asyncio.wait(FIRST_COMPLETED)` 竞争）
+- [x] `app.py` — `_handle_background_delivery()` while `has_pending` 循环 drain mailbox 注入合成消息 + `_run_agent_and_report()` 从 `_handle_turn()` 提取复用 + 主循环处理 `_BG_INTERRUPT` 哨兵触发自动投递
+- [x] `extensions/builtin_commands.py` — `/spawn --background` flag 解析,后台派发子 agent
+- [x] `app.py` — `SubAgentCompleteEvent` 订阅设置 `asyncio.Event` 并调 `terminal.interrupt_input()` 中断输入等待
+- [x] 3 个新 has_pending 测试（test_mailbox.py：有未读/drain 后无/未注册返回 False）
 
 ## 会话自动清理 (comparison 9.1)
 

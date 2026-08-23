@@ -2026,7 +2026,8 @@ spawn_agents 阻塞等待所有子代理返回最终报告（各截断 500 字�
 - `core/mailbox.py`：每 Agent 一个 JSON 收件箱文件。所有 Agent 跑在同一事件循环，send/drain 内部无 await，单文件读改写天然原子——**不需要文件锁**
 - `send_message` 工具：发给 'main' 或同伴 id；收件人未注册报错并列出已知 Agent（LLM 可据此降级）
 - `wait_message` 工具：0.5s 轮询阻塞等消息（上限 600s）——接收方的等待原语，超时返回信息而非错误
-- `AgentLoop._deliver_mail()`：每轮 THINK 前 drain 收件箱，消息注入为 USER 消息
+- `AgentLoop._deliver_mail()`：每轮 THINK 前 drain 收件箱，消息注入为 USER 消息。后台 agent 完成时另有自动投递路径（B4.3：`terminal.interrupt_input()` → `_handle_background_delivery()`），不依赖用户输入
+- `Mailbox.has_pending(agent_id)`：无锁只读查询是否有未读消息（B4.3 新增），用于自动投递前判断是否需要发合成消息，避免空 drain
 - 生命周期：SubAgent 构造时注册收件箱、结束时注销；register 总是重置文件防跨会话残留
 
 ## 58.3 三轮迭代
@@ -2846,11 +2847,11 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 
 关键洞察：**通知注入通道现成**。`agent_loop.run()` 的 while 循环每轮迭代 THINK 前调用 `_deliver_mail`——drain 主 agent 收件箱并以 USER 消息注入对话。子 agent 完成通知只需是一封发给 'main' 的普通 mailbox 消息。
 
-实现：`spawn_agents` 工具加 `background: bool = False` 参数；true 时走 `SubAgentManager.spawn_background()`——`spawn_parallel` 后为每个 agent 起 notifier 协程 `_notify_on_complete`（引用存 `_notify_tasks` 防 GC），协程内 `await self.wait(agent_id, 3600)` 拿到结果后 `mailbox.send(sender=agent_id, recipient="main", content="[Background agent 'x' completed successfully]\nTask: ...\nResult: ...")`。主 Agent 下一轮迭代自动收到。
+实现：`spawn_agents` 工具加 `background: bool = False` 参数；true 时走 `SubAgentManager.spawn_background()`——`spawn_parallel` 后为每个 agent 起 notifier 协程 `_notify_on_complete`（引用存 `_notify_tasks` 防 GC），协程内 `await self.wait(agent_id, 3600)` 拿到结果后 `mailbox.send(sender=agent_id, recipient="main", content="[Background agent 'x' completed successfully]\nTask: ...\nResult: ...")`。结果自动投递（B4.3）：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 即时 drain mailbox 并运行 `agent_loop.run()` 处理——无需等待用户下一次输入。
 
 ## 86.3 设计权衡
 
-- **复用 mailbox 而非新通知机制**：mewcode 的 notification.py 是独立通知系统；mini 的 mailbox 已具备"注入下一轮对话"的全部语义（`_deliver_mail` + `[Message from agent 'x']` 前缀），新机制只会重复。通知就是一封信
+- **复用 mailbox 而非新通知机制**：mewcode 的 notification.py 是独立通知系统；mini 的 mailbox 已具备"注入对话"的全部语义（`_deliver_mail` + `[Message from agent 'x']` 前缀），新机制只会重复。通知就是一封信。投递时机后续由 B4.3 增强：除迭代开始时 `_deliver_mail` drain 外，后台 agent 完成时 `terminal.interrupt_input()` 中断输入等待触发即时投递
 - **notifier 内部调用 `wait()` 而非挂 done_callback**：wait 已封装超时/取消/`_active` 清理/`SubAgentCompleteEvent` 发射的全部语义，done_callback（同步）反而要重复这些
 - **结果截断 4000 字符**：通知注入对话消耗上下文，超长输出（如整文件内容）会撑爆；4000 足够容纳典型报告，超出提示 truncated
 - **默认仍阻塞**：需要全部结果才能继续的场景（如并行分析后汇总）阻塞语义更简单；background 是 opt-in
@@ -2858,7 +2859,7 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 
 ## 86.4 诚实边界
 
-- 主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话——终端提示（app.py 订阅者）先行让用户知情，但 LLM 要到下轮才"知道"。轮内多任务场景（LLM 派发后继续干活）通知实时生效
+- ~~主 Agent 完全空闲（REPL 等用户输入）时，通知滞留 mailbox 直到下一次用户输入触发 `run()` 才注入对话~~ **✅ 已解除（B4.3）**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环收到 `_BG_INTERRUPT` 哨兵后自动调 `_handle_background_delivery()` drain mailbox 并运行 `agent_loop.run()` 处理结果——空闲场景通知也即时送达，不再滞留
 - mewcode 的 fork.py（fork 当前对话上下文的 worker）未纳入本批——后续由 §87（B4.1 摘要式 fork）实现
 - notifier 的 3600s 超时后 agent 被 cancel 并通知 FAILED——比无限等待更可预测
 
@@ -2867,7 +2868,7 @@ LLM 的 `spawn_agents` 工具阻塞等待全部子 agent 完成（`wait_all(ids,
 - 5 个新测试：立即返回（返回时 agent 仍 active）/ 完成通知内容与 sender / 取消后 FAILED 通知 / 事件 background 字段两态 / spawn_agents 工具 background 路径
 - 全量测试通过，ruff clean
 - 真实终端验证（4 场景全过）：① 后台派发 24ms 返回（对照阻塞模式 7125ms），LLM 并行完成 README 12 章节总结，通知轮内送达；② 空闲滞留——LLM"已派发"结束 turn 后终端提示先行、通知不丢、输入"结果"两字即送达并注入第一轮迭代；③ 默认阻塞行为原样；④ 任务内容失败（文件不存在）由 agent 如实报告、通知仍为 completed（FAILED 语义只对应 agent 本身取消/超时/崩溃）
-- **验证中的设计红利发现**：LLM 两次自主调用 `wait_message` 主动等待后台通知而非被动等 `_deliver_mail` 注入——因通知走 mailbox 通道，天然兼容三种消费方式（wait_message 阻塞等 / 迭代注入 / 下轮注入），零额外代码。LLM 还两次交叉验证后台结果（抓到子 agent 107 vs 实际 109 的统计误差并修正）——后台结果作为消息注入而非工具返回值，LLM 对其保持了应有的怀疑态度
+- **验证中的设计红利发现**：LLM 两次自主调用 `wait_message` 主动等待后台通知而非被动等 `_deliver_mail` 注入——因通知走 mailbox 通道，天然兼容三种消费方式（wait_message 阻塞等 / 迭代注入 / 自动投递），零额外代码。LLM 还两次交叉验证后台结果（抓到子 agent 107 vs 实际 109 的统计误差并修正）——后台结果作为消息注入而非工具返回值，LLM 对其保持了应有的怀疑态度
 
 # 87. 摘要式上下文 fork
 

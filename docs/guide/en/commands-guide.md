@@ -85,6 +85,7 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 /spawn --fork <task>              # Inherit a summary of the current conversation (for tasks referring to the discussion)
 /spawn --pane <task>              # Run in a visible terminal pane (separate process, watch live)
 /spawn --wait <task>              # Dispatch + progress panel + result in one command
+/spawn --background <task>        # Dispatch in the background; result auto-delivered when complete (no /spawn wait needed)
 /spawn --pane --wait <task>       # Combined: open a pane + block for the result
 ```
 
@@ -102,6 +103,7 @@ Parameter details:
 | `--pane` | Requires a tmux session, a Windows Terminal session (split pane), or any terminal with wt.exe installed (falls back to a new tab in the shared mini-agents window). Fails with a clear error when no backend is available |
 | `--wait` | Blocks until completion (900-second cap) while showing a progress panel; without it, use the two-stage collection via `/spawn wait` |
 | `--isolated` | Each agent gets its own dedicated worktree; results come with merge hints |
+| `--background` | Dispatches in the background; when the agent finishes, its result is auto-delivered to the main conversation (interrupts input wait, drains mailbox, triggers agent loop); no need to collect via `/spawn wait` |
 | `--type` | explore/plan/verify use a read-only toolset, worker gets all tools. When unspecified, falls back to the default worker type profile (P80) but keeps the configured `max_agent_iterations` iteration budget; when explicitly specified, adopts the type profile's budget (worker=50/verify=20, etc.) |
 
 Notes:

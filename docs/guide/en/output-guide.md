@@ -174,7 +174,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | SubAgent progress board | `ui/board.py` `SubAgentBoard` Rich Live Table | During `/spawn wait` or `/team` |
 | Multi-agent result overview table + `Report i/N` sections + deliverable file lines | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | When `/spawn wait` receives multiple results |
 | Worker pane output (task header / tool lines / streaming answer / linger countdown) | `core/worker.py` direct stdout printing | Inside the pane of `/spawn --pane` |
-| `Background agent xxx finished — result will be delivered to the conversation next turn` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent spawned via `spawn_agents background=true` completes; the result itself is injected into the conversation via mailbox on the next iteration |
+| `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent spawned via `spawn_agents background=true` completes; automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` subscriber of `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` | When `inherit_context=true` or `/spawn --fork` triggers a summary LLM call; `/trace on` also shows `ctx` trace lines |
 | Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit |
 | Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content |

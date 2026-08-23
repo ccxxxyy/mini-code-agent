@@ -85,6 +85,7 @@
 /spawn --fork <task>              # 继承当前对话摘要（任务引用了之前讨论时用）
 /spawn --pane <task>              # 在可见终端窗格运行（独立进程，实时观看）
 /spawn --wait <task>              # 派发+进度面板+结果一条命令完成
+/spawn --background <task>        # 后台派发，完成后自动投递结果（无需 /spawn wait）
 /spawn --pane --wait <task>       # 组合：弹窗格 + 阻塞等结果
 ```
 
@@ -102,6 +103,7 @@
 | `--pane` | 需要 tmux 会话、Windows Terminal 会话（分屏）或装有 wt.exe 的任意终端（降级为共享窗口 mini-agents 的新标签页）。无可用后端时明确报错 |
 | `--wait` | 阻塞至完成（上限 900 秒），期间显示进度面板；不加则用 `/spawn wait` 二段式收集 |
 | `--isolated` | 每个 agent 独占 worktree，结果附合并提示 |
+| `--background` | 后台派发，agent 完成后结果自动投递到主对话（中断输入等待、drain mailbox、触发 agent loop）；无需再用 `/spawn wait` 收集 |
 | `--type` | explore/plan/verify 为只读工具集，worker 全工具。不指定时回退默认 worker 类型档案（P80），但保留配置的 `max_agent_iterations` 迭代预算；显式指定则采纳类型档案预算（worker=50/verify=20 等） |
 
 注意事项：

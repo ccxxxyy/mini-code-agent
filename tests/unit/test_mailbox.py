@@ -44,6 +44,29 @@ async def test_send_and_drain(tmp_path):
     assert mb.drain("main") == []
 
 
+async def test_has_pending_true_when_unread(tmp_path):
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+    assert not mb.has_pending("main")
+    mb.send(sender="agent_a", recipient="main", content="hello")
+    assert mb.has_pending("main")
+
+
+async def test_has_pending_false_after_drain(tmp_path):
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+    mb.send(sender="agent_a", recipient="main", content="hello")
+    mb.drain("main")
+    assert not mb.has_pending("main")
+
+
+async def test_has_pending_unregistered(tmp_path):
+    mb = make_mailbox(tmp_path)
+    assert not mb.has_pending("ghost")
+
+
 async def test_send_to_unknown_recipient(tmp_path):
     mb = make_mailbox(tmp_path)
     mb.register("main")

@@ -230,7 +230,7 @@ while True:
 
 **为什么需要**：串行等待浪费时间。后台执行+完成通知让 Agent 的吞吐量成倍提升。
 
-**本项目实现**：`core/subagent.py` SubAgentManager.spawn() 使用 `asyncio.create_task` 后台执行。`/spawn wait` 收集结果，`/spawn cancel` 取消。工具并行（P17）用 asyncio.gather。**完成通知（B4）**：LLM 调 `spawn_agents` 时 `background=true` 立即返回，`spawn_background()` 为每个 agent 起 notifier 协程，完成时经 mailbox 向 'main' 投递含结果的通知，主 Agent 下一轮迭代自动注入。
+**本项目实现**：`core/subagent.py` SubAgentManager.spawn() 使用 `asyncio.create_task` 后台执行。`/spawn wait` 收集结果，`/spawn cancel` 取消。工具并行（P17）用 asyncio.gather。**完成通知（B4）**：LLM 调 `spawn_agents` 时 `background=true` 立即返回，`spawn_background()` 为每个 agent 起 notifier 协程，完成时经 mailbox 向 'main' 投递含结果的通知；**自动投递**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环收到 `_BG_INTERRUPT` 后自动 drain mailbox 并运行 `agent_loop.run()` 处理结果，无需用户手动输入。
 
 **判断标准**：长操作能不能后台运行？Agent 在等待时能不能处理其他输入？
 
