@@ -598,8 +598,9 @@ mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 
 ☐ **B7 远程模式 SessionStore 接入**
 mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。
 
-☐ **B8 恢复附件含 skill 调用记录（微小差距）**
-mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。工作量：小。
+✅ **B8 恢复附件含 skill 调用记录**
+mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。
+**✅ 已实现**：`SkillRegistry` 记录保序去重的激活历史（`_invocations`，deactivate 不抹除——是调用记录不是当前状态）；`ContextManager.set_skill_provider()` 回调注入技能状态（memory 层不 import extensions 层，保持依赖方向）；压缩恢复附件新增技能行——激活中的标注 "do NOT re-activate"（prompt 在 system prompt 中存活、不被压缩，丢的是激活历史），已停用的单列历史行；`compact_boundary` 持久化 `skill_invocations`/`active_skills`，`adopt_boundary` 暂存、app 层经 `restore_state()` 写回 registry（不重注入 prompt——恢复的 system_prompt 已含，重走 activate 会重复拼接）。会话恢复后 `is_active`/`deactivate`/`match_triggers`/`reload` 全部恢复正常。**复验补修**：终端复验发现手动 /compact 绕过 `check_and_compress` 直接调 compressor——恢复附件与全部边界字段（已读文件/用户请求/技能状态）都不写（既有缺陷，本次暴露）。`check_and_compress` 加 `force` 参数，/compact 改走同一管道；连锁收益：空对话+激活技能时 force 也能建边界持久化技能状态。**边界**：自动压缩仅在阈值触发，未经历任何压缩（也未手动 /compact）的会话恢复时激活集合仍丢（prompt 本身在序列化的 system_prompt 中存活）；完整会话级持久化属 /session 存档格式扩展，另行考虑。12 个新测试，1143→1155。
 
 ☐ **B9 模糊确认不算授权（system prompt 守则）**
 **问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。

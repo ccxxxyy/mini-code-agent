@@ -1214,3 +1214,144 @@ async def test_summarize_oldest_skips_when_prefix_too_small():
     original_count = len(conv.messages)
     await strategy.compress(conv, per_msg)
     assert len(conv.messages) == original_count
+
+
+# --- Skill state in recovery attachment 恢复附件中的技能状态 ---
+
+
+def _skill_cm(invoked, active, window=10000):
+    cm = ContextManager(MemoryConfig(context_window=window))
+    cm.set_skill_provider(lambda: (invoked, active))
+    return cm
+
+
+def test_inject_includes_active_skills():
+    """Recovery attachment names active skills with a do-NOT-re-activate note.
+    恢复附件列出激活技能并注明勿重复激活。"""
+    cm = _skill_cm(["code_review", "teach"], ["code_review", "teach"])
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    text = conv.messages[0].content
+    assert "[Skills active" in text
+    assert "code_review, teach" in text
+    assert "do NOT re-activate" in text
+
+
+def test_inject_lists_deactivated_skills_separately():
+    """Invoked-but-deactivated skills go to a separate history line.
+    激活过但已停用的技能单列历史行。"""
+    cm = _skill_cm(["a", "b"], ["b"])
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    text = conv.messages[0].content
+    assert "[Skills active" in text and ": b]" in text
+    assert "[Skills previously used this session" in text and ": a]" in text
+
+
+def test_inject_no_skill_provider_no_skill_lines():
+    """Without a provider the attachment is unchanged (backward compat).
+    无 provider 时附件不变（向后兼容）。"""
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.record_file_read("a.py", "x")
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    assert "[Skills" not in conv.messages[0].content
+
+
+def test_inject_strips_old_skill_block_on_recompress():
+    """Second compression replaces the old skill block instead of stacking.
+    二次压缩替换旧技能块而非堆叠。"""
+    cm = _skill_cm(["a"], ["a"])
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)
+    cm._inject_read_files(conv)
+    text = conv.messages[0].content
+    assert text.count("[Skills active") == 1
+    assert text.count("summary") == 1
+
+
+def test_skill_provider_failure_is_swallowed():
+    """A crashing provider must not break compression. provider 崩溃不破坏压缩。"""
+
+    def boom():
+        raise RuntimeError("boom")
+
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    cm.set_skill_provider(boom)
+    conv = Conversation()
+    conv.messages.append(Message(role=Role.SYSTEM, content="summary", compressed=True))
+    cm._inject_read_files(conv)  # must not raise
+    assert "[Skills" not in conv.messages[0].content
+
+
+def test_adopt_boundary_restores_skill_state():
+    """adopt_boundary stashes skill state for the app layer to push into
+    the registry. adopt_boundary 暂存技能状态供 app 层写回 registry。"""
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {
+        "summary": "s",
+        "timestamp": "t",
+        "skill_invocations": ["a", "b"],
+        "active_skills": ["b"],
+    }
+    cm.adopt_boundary(conv)
+    assert cm.adopted_skills == (["a", "b"], ["b"])
+
+
+def test_adopt_boundary_no_skill_fields_backward_compat():
+    """Old boundaries without skill fields leave adopted_skills as None.
+    无技能字段的旧边界，adopted_skills 保持 None。"""
+    cm = ContextManager(MemoryConfig(context_window=10000))
+    conv = Conversation()
+    conv.compact_boundary = {"summary": "s", "timestamp": "t"}
+    cm.adopt_boundary(conv)
+    assert cm.adopted_skills is None
+
+
+async def test_skill_state_in_boundary_end_to_end():
+    """check_and_compress writes skill_invocations/active_skills into the
+    boundary. check_and_compress 把技能字段写入压缩边界（端到端）。"""
+    cm = ContextManager(MemoryConfig(context_window=2000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+    cm.set_skill_provider(lambda: (["a", "b"], ["b"]))
+
+    conv = Conversation()
+    for i in range(30):
+        conv.messages.append(make_msg(role=Role.USER, content=f"do thing {i}", token_count=40))
+        conv.messages.append(make_msg(role=Role.ASSISTANT, content=f"ok {i}", token_count=40))
+
+    await cm.check_and_compress(conv)
+    assert conv.compact_boundary is not None
+    assert conv.compact_boundary["skill_invocations"] == ["a", "b"]
+    assert conv.compact_boundary["active_skills"] == ["b"]
+
+
+async def test_force_compress_writes_skill_boundary_even_when_below_threshold():
+    """Manual /compact (force=True) goes through the full pipeline: even a
+    tiny conversation gets a boundary with skill state -- real-run: manually
+    compacted then saved session restored with no skill state because
+    /compact called the compressor directly, skipping every boundary field.
+    手动 /compact（force=True）走完整管道：小对话也产生带技能状态的边界——
+    实测 /compact 直接调 compressor 跳过全部边界字段，保存恢复后技能状态全丢。"""
+    cm = ContextManager(MemoryConfig(context_window=100_000, compression_threshold=0.75))
+    cm.set_compressor(Compressor())
+    cm.set_skill_provider(lambda: (["code-review"], ["code-review"]))
+
+    conv = Conversation()
+    conv.messages.append(make_msg(role=Role.USER, content="hi", token_count=10))
+    conv.messages.append(make_msg(role=Role.ASSISTANT, content="hello", token_count=10))
+
+    # Far below threshold -- without force this is a no-op
+    # 远低于阈值——不带 force 时是 no-op
+    assert await cm.check_and_compress(conv) is False
+    assert conv.compact_boundary is None
+
+    assert await cm.check_and_compress(conv, force=True) is True
+    assert conv.compact_boundary is not None
+    assert conv.compact_boundary["active_skills"] == ["code-review"]
+    assert conv.compact_boundary["skill_invocations"] == ["code-review"]

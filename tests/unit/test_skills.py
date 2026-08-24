@@ -261,3 +261,55 @@ def test_programmatic_register_survives_load_all(tmp_path):
 
     reg.load_all()
     assert reg.get("plugin-skill") is not None
+
+
+# --- skill invocation record (recovery attachment) 技能调用记录（恢复附件） ---
+
+
+def test_activate_records_invocation(tmp_path):
+    """activate() appends to the ordered, deduplicated invocation history."""
+    make_skill_dir(tmp_path, "a", "name: skill-a\ndescription: A", "Prompt A")
+    make_skill_dir(tmp_path, "b", "name: skill-b\ndescription: B", "Prompt B")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    conv = Conversation()
+
+    reg.activate("skill-a", conv)
+    reg.activate("skill-b", conv)
+    reg.activate("skill-a", conv)  # duplicate -- must not repeat 重复激活不重复记录
+
+    assert reg.invoked_names == ["skill-a", "skill-b"]
+    assert reg.active_names == ["skill-a", "skill-b"]
+
+
+def test_deactivate_keeps_invocation_history(tmp_path):
+    """Invocation history is a RECORD -- deactivate must not erase it.
+    调用历史是记录——停用不抹除。"""
+    make_skill_dir(tmp_path, "a", "name: skill-a\ndescription: A", "Prompt A")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    conv = Conversation()
+
+    reg.activate("skill-a", conv)
+    reg.deactivate("skill-a", conv)
+
+    assert reg.invoked_names == ["skill-a"]
+    assert reg.active_names == []
+
+
+def test_restore_state_does_not_touch_prompt(tmp_path):
+    """restore_state() restores sets WITHOUT re-injecting prompts -- a
+    restored system_prompt already contains the skill prompt markers.
+    restore_state 只恢复集合不重注入 prompt——恢复的 system_prompt 已含标记。"""
+    make_skill_dir(tmp_path, "a", "name: skill-a\ndescription: A", "Prompt A")
+    reg = SkillRegistry(skill_dirs=[tmp_path])
+    reg.load_all()
+    conv = Conversation()
+    conv.system_prompt = "base\n\n--- Skill: skill-a ---\nPrompt A"  # as restored 恢复态
+
+    reg.restore_state(["skill-a"], ["skill-a"])
+
+    assert reg.is_active("skill-a")
+    assert reg.invoked_names == ["skill-a"]
+    # prompt NOT duplicated -- restore never touches conversation
+    assert conv.system_prompt.count("--- Skill: skill-a ---") == 1

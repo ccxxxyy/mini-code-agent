@@ -32,6 +32,12 @@ class SkillRegistry:
     def __init__(self, skill_dirs: list[Path] | None = None) -> None:
         self._skills: dict[str, Skill] = {}
         self._active: set[str] = set()
+        # Ordered, deduplicated activation history -- deactivate does NOT
+        # remove entries: this is the invocation RECORD, not current state.
+        # Feeds the compression recovery attachment and the compact boundary.
+        # 保序去重的激活历史——deactivate 不移除：这是"调用记录"不是
+        # "当前状态"。供压缩恢复附件与压缩边界使用。
+        self._invocations: list[str] = []
         self._skill_dirs = skill_dirs or []
         # Programmatically registered skills (plugin API) -- survive load_all()
         # 编程式注册的技能（插件 API）——load_all() 后仍保留
@@ -78,6 +84,8 @@ class SkillRegistry:
         if name in self._active:
             return True
         self._active.add(name)
+        if name not in self._invocations:
+            self._invocations.append(name)
         if skill.prompt:
             conversation.system_prompt += f"\n\n--- Skill: {skill.name} ---\n{skill.prompt}"
         return True
@@ -95,6 +103,27 @@ class SkillRegistry:
 
     def is_active(self, name: str) -> bool:
         return name in self._active
+
+    @property
+    def active_names(self) -> list[str]:
+        """Currently active skill names, sorted. 当前激活的技能名（排序）。"""
+        return sorted(self._active)
+
+    @property
+    def invoked_names(self) -> list[str]:
+        """All skills activated this session, in activation order (kept after
+        deactivate). 本会话激活过的全部技能（按激活顺序，停用后仍保留）。"""
+        return list(self._invocations)
+
+    def restore_state(self, invocations: list[str], active: list[str]) -> None:
+        """Restore invocation history and active set WITHOUT re-injecting
+        prompts -- a restored conversation's system_prompt already contains
+        the skill prompt markers; going through activate() would append
+        duplicates.
+        恢复调用历史与激活集合但**不重注入 prompt**——恢复的会话
+        system_prompt 已含 skill prompt 标记，再走 activate() 会重复拼接。"""
+        self._invocations = [n for n in invocations if isinstance(n, str)]
+        self._active = {n for n in active if isinstance(n, str)}
 
     def match_triggers(self, user_message: str) -> list[Skill]:
         """Find skills whose trigger patterns match the user message.

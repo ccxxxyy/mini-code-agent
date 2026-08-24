@@ -710,9 +710,15 @@ def _make_compact(app: Application) -> HandlerFn:
         if cm._compressor is None:
             return "No compressor configured."
 
-        target = int(cm.max_tokens * 0.5)
-        await cm._compressor.compress(app.session.conversation, target)
-        cm.update_total(app.session.conversation)
+        # Manual compact goes through the SAME pipeline as auto-compression
+        # (check_and_compress force=True) -- calling the compressor directly
+        # skipped the recovery attachment and all boundary fields (read files
+        # / last user request / skill state), real-run: a manually compacted
+        # then saved session restored with no skill state.
+        # 手动压缩与自动压缩走同一管道（check_and_compress force=True）——
+        # 直接调 compressor 会跳过恢复附件和全部边界字段（已读文件/用户
+        # 请求/技能状态），实测手动压缩后保存的会话恢复时技能状态全丢。
+        await cm.check_and_compress(app.session.conversation, force=True)
 
         after = cm.total_tokens
         after_msgs = len(app.session.conversation.messages)

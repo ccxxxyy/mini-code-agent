@@ -19,6 +19,7 @@
 
 ### /compact
 手动压缩对话历史（触发四级压缩级联：DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow）。无参数。**会调用 LLM**（LLM 摘要策略时）。
+手动压缩与自动压缩走同一管道——恢复附件（用户请求/已读文件/技能状态）与压缩边界字段一并写入，`/session save` 后这些状态可随会话恢复。
 
 ### /session — 会话管理
 ```
@@ -31,6 +32,7 @@
 /session untag <name>      # 移除当前会话标签
 /session tags              # 查看当前会话所有标签
 ```
+`load` 恢复完整对话（含工具调用）与 system prompt；若会话经历过压缩（存在压缩边界），一并恢复已读文件清单、用户最近请求与**技能激活状态**（`/skill` 的 `[ACTIVE]` 标记、deactivate 均恢复正常，prompt 不重复注入）。  
 无参数时显示用法。标签可用于分类会话（如 `#bug-fix`、`#refactor`），列出时带 `--tag` 按标签过滤。会话存 `~/.mini-agent/sessions/`，超过 `session_cleanup_days`（默认 30 天）的已正常关闭会话启动时自动清理。
 
 ### /undo [N]
@@ -284,7 +286,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 | `/trace` `/explain` | 开关不落盘 |
 | `/model` | 切换 LLM Profile 仅本会话 |
 | `/audit on/off` | 开关是会话级（审计日志文件本身持久） |
-| `/skill activate/deactivate` | 激活状态注入 system prompt，仅本会话 |
+| `/skill activate/deactivate` | 激活状态注入 system prompt；`/session save` 后若会话经历过压缩（存在压缩边界），`load` 时激活状态随边界恢复（prompt 不重注入），否则 prompt 仍在但注册表激活状态丢失 |
 | 确认弹窗的 `a`（always） | 会话授权，重启清空 |
 
 持久化（写盘位置）：

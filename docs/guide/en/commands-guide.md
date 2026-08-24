@@ -19,6 +19,7 @@ Clear conversation history (system prompt and memory injection are preserved). N
 
 ### /compact
 Manually compress conversation history (triggers the four-level compression cascade: DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow). No parameters. **Calls the LLM** (when using the LLM summarization strategy).
+Manual compaction goes through the same pipeline as auto-compression — the recovery attachment (user request / read files / skill state) and all compact-boundary fields are written, so these survive a `/session save` + restore.
 
 ### /session — Session Management
 ```
@@ -31,6 +32,7 @@ Manually compress conversation history (triggers the four-level compression casc
 /session untag <name>      # Remove a tag from the current session
 /session tags              # Show all tags of the current session
 ```
+`load` restores the full conversation (tool calls included) and the system prompt; if the session has been compressed (a compact boundary exists), the read-file list, the last user request and the **skill activation state** are restored too (`/skill`'s `[ACTIVE]` markers and deactivate work again; prompts are not re-injected).
 Shows usage when called without parameters. Tags can be used to categorize sessions (e.g. `#bug-fix`, `#refactor`); use `--tag` with list to filter by tag. Sessions are stored in `~/.mini-agent/sessions/`; normally closed sessions older than `session_cleanup_days` (default 30 days) are automatically cleaned up at startup.
 
 ### /undo [N]
@@ -284,7 +286,7 @@ Session-level (lost on restart):
 | `/trace` `/explain` | Toggles are not written to disk |
 | `/model` | LLM profile switch is per-session |
 | `/audit on/off` | The toggle is session-level (the audit log file itself is persistent) |
-| `/skill activate/deactivate` | Activation injects into the system prompt, per-session |
+| `/skill activate/deactivate` | Activation injects into the system prompt; after `/session save`, if the session has been compressed (a compact boundary exists), `load` restores the activation state from the boundary (prompts are not re-injected) — otherwise prompts survive but the registry's active state is lost |
 | The `a` (always) answer in confirmation dialogs | Session grant, cleared on restart |
 
 Persistent (disk location):

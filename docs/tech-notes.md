@@ -3231,3 +3231,23 @@ mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions �
 ## 97.3 验证
 
 10 个新测试（test_project_context.py 从 11→21）：相对路径展开、home 路径展开、两层嵌套、循环引用注释标记、文件缺失注释标记、深度限制保留原行、depth=0 禁用、展开后截断、行内不误触、用户指令 @-include。全量 1143 passed。
+
+
+# §98 恢复附件含 skill 调用记录
+
+## 98.1 问题
+
+压缩时 system prompt 不参与压缩，激活的 skill prompt 本身不丢——丢的是**激活历史**：`load_skill` 工具调用 / `/skill activate` 所在的消息被摘要吞掉后，LLM 不知道自己已激活过什么，会重复激活或遗忘能力。会话恢复的缺口更实际：system_prompt 序列化在会话 JSON 里（prompt 存活），但 `SkillRegistry._active` 集合是运行时状态——恢复后 `is_active()` 全 False、`deactivate()` 失效、`match_triggers()` 重复建议已激活技能、`reload()` 丢激活状态。mewcode 的恢复附件含 `record_skill_invocation/snapshot_skills`，mini 无对应。
+
+## 98.2 方案
+
+1. **SkillRegistry 记录调用历史**：`_invocations` 保序去重列表，`activate()` 成功时追加，`deactivate()` 不移除——它是"调用记录"不是"当前状态"。暴露 `active_names`/`invoked_names` 属性。
+2. **回调注入保持层级方向**：`ContextManager.set_skill_provider(fn)` 接收返回 `(invoked, active)` 的可调用对象，app 装配时注入 lambda——memory 层不 import extensions 层。provider 崩溃被静默吞掉（不能因技能状态获取失败破坏压缩主流程）。
+3. **恢复附件技能行**（`_inject_read_files` 第 4 段）：激活中的列 `[Skills active (their prompts remain in the system prompt -- do NOT re-activate): x, y]`——与已读文件 "do NOT re-read" 同一防重复模式；激活过但已停用的单列 `[Skills previously used this session (now deactivated): z]`。二次压缩剥离旧块的标记清单加入两个技能标记（否则只有技能没有已读文件的会话会堆叠旧块）。
+4. **边界持久化与恢复**：`compact_boundary["skill_invocations"/"active_skills"]`；`adopt_boundary()` 暂存到 `adopted_skills` 属性（context.py 不反向操作 registry）；app 层 `_adopt_session` 调 `SkillRegistry.restore_state(invocations, active)`——**只恢复两个集合，不重注入 prompt**：恢复的 system_prompt 已含 skill prompt 标记，重走 `activate()` 会重复拼接。
+
+**复验补修：手动 /compact 绕过管道**——终端复验（/skill activate → /compact → save → 重启 load → /skill）发现恢复后 `[ACTIVE]` 标记消失。根因链：/compact 直接调 `compressor.compress()` 而非 `check_and_compress()`，恢复附件与全部边界字段（已读文件/用户请求/技能状态）都不写——这是既有缺陷（read_files 等字段在手动压缩路径一直缺失），技能字段跟着一起缺；且复验对话为空（0 消息无可压），无摘要无边界。修复：`check_and_compress` 加 `force` 参数（跳过阈值与熔断检查），/compact 改走 `check_and_compress(conv, force=True)`——手动与自动压缩同一管道。连锁收益：force 模式下即使空对话，只要有激活技能，`_inject_read_files` 会插入恢复 SYSTEM 消息、fallback 从它建边界并写入技能字段——空对话场景也能持久化技能状态了。
+
+## 98.3 验证
+
+12 个新测试（3 skills + 9 context）：激活历史保序去重、停用保留历史、restore_state 不动 system_prompt、附件含激活行与 do NOT re-activate、停用单列、无 provider 附件不变（向后兼容）、二次压缩替换旧块不堆叠、provider 崩溃静默、adopt 暂存、旧边界无技能字段 adopted_skills 为 None、check_and_compress 端到端边界写入、force=True 低于阈值也走全管道并写技能边界。全量 1143→1155。

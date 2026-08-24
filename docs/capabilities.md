@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1143 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1155 个测试全部通过（1 skipped）。
 
 ---
 
@@ -129,7 +129,7 @@
   1. DropToolResults — 压可摘要前缀内的冗余工具输出，绝不碰模型正在使用的工作集（P69，防重读死循环）
   2. LLMSummarizeOldest — LLM 结构化摘要旧消息（`<analysis>` 草稿 + 9 节 `<summary>`，P67；偶发失败先重试 2 次再回退抽取式，P72；prompt 超长时丢最旧 20% 消息 + cap 缩 20% 收缩重试最多 3 轮，P73），token 驱动保留窗口随压缩目标缩放（P68）；旧摘要整条前传且剥离恢复附件防淹没（P67.5/P72），收缩丢弃时也绝不丢头部旧摘要（P73）
   3. SlidingWindow — 滑动窗口兜底，三重锚点：孤儿工具对防护 + 任务锚点（最新 USER 消息）+ 摘要锚点（P71，绝不删刚生成的摘要）
-- 压缩后恢复注入：最近请求 + 已读文件清单 + 文件内容（预算 min(25K, 窗口//4) 随窗口缩放，P70）
+- 压缩后恢复注入：最近请求 + 已读文件清单 + 文件内容（预算 min(25K, 窗口//4) 随窗口缩放，P70）+ **skill 调用记录**（激活中标注勿重复激活、已停用单列；边界持久化、会话恢复重建激活集合不重注入 prompt）
 - 手动入口：`/compact` 命令
 
 **验证**：12 个单测 + 压缩链专项 20+ 单测；九轮真实终端无污染埋点验证（虚构约定穿透多轮压缩后五问全中，JSON 判定答案唯一来源为摘要）
@@ -146,7 +146,7 @@
 - 手动管理：`/memory add <内容>` 添加、`/memory` 查看、`/memory export/import` 导出导入（mewcode 兼容 .md 互操作格式，comparison 4.6）
 - 会话持久化：`/session save/list/load/delete/tag/untag/tags` — 完整对话（含工具调用）JSON 序列化，重启后恢复继续；`tag` 分类标签，`list --tag` 按标签过滤
 - 会话自动清理（comparison 9.1）：启动时 `cleanup_stale` 删除超过 N 天的旧会话（默认 30 天，`session_cleanup_days` 可配），未正常关闭的跳过（崩溃恢复保留）
-- 压缩边界标记（comparison 9.2）：压缩后记录 `compact_boundary`（摘要 + 已读文件列表），会话恢复时跳过已归档消息、从边界重建并恢复已读文件状态——防止压缩-重读膨胀循环的入口
+- 压缩边界标记（comparison 9.2）：压缩后记录 `compact_boundary`（摘要 + 已读文件清单与内容 + 用户最近请求 + 技能调用记录/激活集合），会话恢复时跳过已归档消息、从边界重建并恢复已读文件状态与技能激活状态——防止压缩-重读膨胀循环的入口
 
 **验证**：15 个单测（CRUD/搜索/提取/去重/序列化往返） + 4 个清理测试 + 6 个边界测试（4 单元 + 2 集成）
 
@@ -268,7 +268,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1143 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
+| 测试 | 1155 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
