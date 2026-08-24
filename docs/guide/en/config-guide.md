@@ -251,7 +251,8 @@ sandbox_network = false      # Allow network access inside the sandbox
 instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
                              # Project instruction file names and priority (list order = priority, first hit is used)
 user_instructions_file = "~/.mini-agent/instructions.md"   # User-level global instructions path
-max_chars = 8000             # Per-file truncation length (characters)
+max_chars = 8000             # Per-file truncation length (characters, applied after expansion)
+max_include_depth = 5        # @-include recursive expansion max depth (0 to disable)
 
 [cost]                       # Cost dashboard (P29)
 budget = 5.0                 # Session budget cap (yuan), 0 = unlimited (default 0)
@@ -639,6 +640,48 @@ instruction_files = ["MY_RULES.md"]        # Only recognize this one file
 user_instructions_file = "~/my-notes/ai-rules.md"
 ```
 
+### @-include Recursive Inclusion
+
+**Purpose**: combine project rules spread across multiple files into a single instruction entry point — no need to cram everything into one AGENT.md. Each referenced file is maintained independently; edit any of them and restart mini for it to take effect.
+
+**Syntax**: in an instruction file (AGENT.md / CLAUDE.md / instructions.md), write `@./relative/path` or `@~/home/path` **on its own line**. At startup, that line is replaced with the referenced file's content. Inline occurrences (e.g. `see @./doc.md for details` in running text) are NOT expanded.
+
+**Example** — AGENT.md as an index, individual rule files maintained separately:
+
+```markdown
+# Project rules
+
+@./docs/code-style.md
+@./docs/testing-rules.md
+@~/.mini-agent/global-rules.md
+```
+
+After starting mini, the system prompt will contain the full content of all three files (as if they were inlined into AGENT.md).
+
+**Path resolution**:
+
+- `@./path` — relative to the **directory of the including file** (not the project root). E.g. if `docs/rules.md` contains `@./sub/detail.md`, it resolves to `docs/sub/detail.md`
+- `@~/path` — relative to the user's home directory. Good for cross-project rules
+
+**Nesting**: referenced files can contain their own `@./` directives, expanded recursively up to depth 5 (`[context] max_include_depth`, set 0 to disable entirely).
+
+**Error handling**:
+
+- File not found → inserts `<!-- include not found: ./path -->` comment, does not break the rest
+- Circular include (A references B, B references A) → inserts `<!-- circular include: ./path -->` comment, no infinite loop
+- Expanded content exceeds `max_chars` → truncated normally
+
+**Typical use cases**:
+
+| Scenario | Approach |
+|---|---|
+| Large team project | Different roles maintain separate rule files; AGENT.md just indexes them |
+| Monorepo | Root AGENT.md includes each sub-project's rules as needed |
+| Personal cross-project rules | `@~/.mini-agent/global-rules.md` avoids duplicating rules in every project |
+| User-level instructions | `~/.mini-agent/instructions.md` also supports @-include |
+
+**Note**: some IDEs may show lint warnings for `@./` syntax in instruction files (e.g. "import path outside project root") — this is a false positive from the IDE's static analysis and does not affect mini-agent.
+
 ---
 
 ## 6. FAQ
@@ -648,6 +691,17 @@ A: config.toml holds parameters read by the **program** (changes affect program 
 
 **Q: What happens if a project has both AGENT.md and CLAUDE.md?**
 A: Only AGENT.md is read (higher priority wins); CLAUDE.md is ignored. Not merging is deliberate — it avoids the LLM being torn when the two files conflict.
+
+**Q: What does `@./path` mean in an instruction file?**
+A: **@-include recursive inclusion** — a line containing only `@./relative/path.md` or `@~/home/path.md` is replaced at startup with the referenced file's content (relative paths resolve from the including file's directory, not the project root). Nested includes are expanded recursively up to depth 5 (`[context] max_include_depth`, set 0 to disable). Circular includes and missing files produce `<!-- circular include: ... -->` / `<!-- include not found: ... -->` comment markers without affecting the rest. Inline occurrences (e.g. `see @./doc.md for details`) are NOT expanded.
+
+Example AGENT.md:
+```markdown
+# Project rules
+@./docs/code-style.md
+@./docs/testing-rules.md
+@~/.mini-agent/global-rules.md
+```
 
 **Q: Why did the LLM not react after I edited CLAUDE.md?**
 A: Instruction files are read once at startup; restart `mini` after editing.

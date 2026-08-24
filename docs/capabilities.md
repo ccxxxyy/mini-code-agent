@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1133 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1143 个测试全部通过（1 skipped）。
 
 ---
 
@@ -268,7 +268,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1133 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
+| 测试 | 1143 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |
@@ -283,7 +283,7 @@
 | Diff 预览 | edit_file 成功后整行背景色彩色 diff（P23）——删除行深红底、新增行深绿底，一眼看出改了什么 |
 | Streaming 中间态 | LLM 生成工具调用参数时立即显示工具名（P23）——不再等 JSON 组装完才冒出工具行 |
 | 文件变更汇总 | 轮次结束显示本轮新建（+绿）/修改（~黄）/删除（-红）的文件清单（P24）——多文件操作一目了然 |
-| 上下文感知 | 启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令（P25）——LLM 无需读文件即知项目约定 |
+| 上下文感知 | 启动自动注入 AGENT.md/CLAUDE.md/instructions.md 项目指令 + 用户级全局指令（P25）——LLM 无需读文件即知项目约定；**@-include 递归引用**：指令文件中整行 `@./path` / `@~/path` 展开为引用文件内容（深度 5 可配置，循环/缺失注释降级） |
 | 对话分叉/回滚 | `/undo` 回滚 N 轮 + `/fork` 分叉新会话原线保留（P26）——CC 无此能力（服务端历史不可操作），本地自持有 Conversation 的差异化优势；P27 进一步支持操作级撤销（undo 连文件一起恢复） |
 | 工具链录制/回放 | `/record` 录制工具调用序列 + `/replay` 零 LLM 确定性重放（P28）——例行操作录一次永久复用，CC 无此能力 |
 | 成本仪表盘 | `/cost` 按模型分账 input/output 计价 + 会话预算警告（P29）——按量付费用户的刚需，CC 订阅制无此功能 |

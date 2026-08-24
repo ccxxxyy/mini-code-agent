@@ -159,7 +159,7 @@
 | 输出 | 来源 | 触发 |
 |---|---|---|
 | 欢迎标题 `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | 启动时 |
-| `context: loaded <文件名>` | `app.py` 启动 | 项目指令文件（AGENT.md/CLAUDE.md）注入成功时 |
+| `context: loaded <文件名>` | `app.py` 启动 | 项目指令文件（AGENT.md/CLAUDE.md）注入成功时（文件中的 `@./path` / `@~/path` @-include 指令已递归展开） |
 | `Loaded N hook rule(s) from config` | `app.py` 启动 | config.toml 有 `[[hooks]]` 规则时 |
 | `Loaded N event listener(s): xxx` | `app.py` 启动 | listener_dirs 有 *.py 插件时 |
 | `Loaded N plugin(s): xxx` | `app.py` 启动 | plugin_dirs 有 *.py 插件或装有 `mini_agent.plugins` entry point 包时（P83）；详情用 `/plugins` 查看 |

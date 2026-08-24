@@ -597,6 +597,7 @@ P1-P83 每个阶段的任务分解、实现记录与验收结果。每条任务�
 
 ### P25.4 验证
 - [x] `tests/unit/test_project_context.py` 新建 12 个测试（优先级/回退/截断/空文件/用户指令/自定义文件名/自定义截断/Application 集成注入），321 个测试全过
+- [x] `memory/project_context.py` — @-include 递归引用（`_expand_includes` 逐行匹配 `@./` `@~/`，base_dir 跟文件走，循环/缺失注释降级）；`ContextConfig.max_include_depth`；`app.py` 传递配置；10 个新测试（1133→1143）
 
 ### P25.5 文档
 - [x] `docs/config-guide.md` 新建——配置文件/上下文文件/数据文件三类区分、全部文件清单、优先级链、修改方法、常见问题

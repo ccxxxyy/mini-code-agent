@@ -3208,3 +3208,26 @@ mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions �
 ## 96.8 验证
 
 19 个新测试（test_tool_categories.py）：20 内置工具类别快照（防漂移）、默认 EXTERNAL、矩阵单元格（plan×WRITE 无路径参数/plan×EXTERNAL/未注册名/bypass×EXTERNAL/default 不变/plan×READ 放行）、子视图（不弹窗拒危险/规则实时共享/mode 双向委托/敏感路径/trace 隔离）、spawn 传播（子视图类型与 mode 跟随/无 pm 无门/plan 有门派生放行）、对话框工具声明快照 + 默认 False。1101→1120 passed。
+
+# §97 指令文件 @-include
+
+## 97.1 问题
+
+`memory/project_context.py` 只读单个指令文件（候选列表中 first-match-wins），不支持文件内引用其他文件。mewcode 的 `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5），mini 无此能力——项目规范分散在多个文件时，要么全复制进 AGENT.md 导致膨胀，要么 LLM 看不到没写进来的规范。
+
+## 97.2 方案
+
+`_expand_includes(text, base_dir, max_depth, _seen)` 逐行扫描，整行 `@./path` 或 `@~/path`（正则 `^\s*@(\./[^\s]+|~/[^\s]+)\s*$`）被替换为引用文件内容。关键设计：
+
+1. **base_dir 跟着文件走**——A 引用 `@./sub/B.md` 时 B 的 base_dir 变为 `sub/`，B 中的 `@./C.md` 解析为 `sub/C.md`，符合直觉
+2. **_seen 集合做循环检测**——resolve 后入 set，命中插 `<!-- circular include: path -->`
+3. **缺失文件注释降级**——`<!-- include not found: path -->`，不中断加载
+4. **max_depth=0 时不展开**——保留原行，`ContextConfig.max_include_depth` 可配
+5. **展开后整体截断**——`_read_capped` 先展开再 max_chars 截断，include 引入的内容计入总长度
+6. **只匹配整行**——行内 `see @./doc.md for details` 不触发，避免误触正文中的 @ 引用
+
+`_read_capped` 新增 `max_include_depth` 参数（首文件自身也入 `_seen` 防自包含）。`load_project_instructions` / `load_user_instructions` 签名新增 `max_include_depth`，`app.py` 传递 `config.context.max_include_depth`。
+
+## 97.3 验证
+
+10 个新测试（test_project_context.py 从 11→21）：相对路径展开、home 路径展开、两层嵌套、循环引用注释标记、文件缺失注释标记、深度限制保留原行、depth=0 禁用、展开后截断、行内不误触、用户指令 @-include。全量 1143 passed。

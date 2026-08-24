@@ -157,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 64 unit test files, 1133 tests
+│   ├── unit/                        # 64 unit test files, 1143 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2641,7 +2641,7 @@ class MemoryExtractor:
 
 - **`memory/session_store.py`**：会话以 JSON 存于 `~/.mini-agent/sessions/`。元数据含 `closed_cleanly` 标志——启动时发现上次未干净退出的会话即提示崩溃恢复。`cleanup_stale(max_age_days=30)` 清理过期会话，但**保留**崩溃会话（它们可能还没被恢复过）。
 - **`memory/file_snapshots.py`**：操作级 `/undo` 的文件快照。只保留最近 `KEEP_TURNS=5` 轮；单文件超 `MAX_SNAPSHOT_BYTES=30MB` 跳过快照（恢复时提示手动处理）。
-- **`memory/project_context.py`**：启动时按优先级查找项目指令文件（`AGENT.md` → `CLAUDE.md` → `.mini-agent/instructions.md`，可经 `[context]` 配置），连同用户级 `~/.mini-agent/instructions.md` 注入 system prompt（默认 8000 字符截断）。
+- **`memory/project_context.py`**：启动时按优先级查找项目指令文件（`AGENT.md` → `CLAUDE.md` → `.mini-agent/instructions.md`，可经 `[context]` 配置），连同用户级 `~/.mini-agent/instructions.md` 注入 system prompt（默认 8000 字符截断）。支持 @-include 递归引用：指令文件中整行 `@./path` 或 `@~/path` 展开为引用文件内容（`_expand_includes` 逐行匹配，base_dir 跟文件走，循环/缺失注释降级，深度 5 可配，展开后整体截断）。
 
 ---
 

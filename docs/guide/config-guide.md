@@ -250,7 +250,8 @@ sandbox_network = false      # 允许沙箱内网络访问
 instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
                              # 项目指令文件名及优先级（列表顺序=优先级，第一个命中即用）
 user_instructions_file = "~/.mini-agent/instructions.md"   # 用户级全局指令路径
-max_chars = 8000             # 单文件截断长度（字符）
+max_chars = 8000             # 单文件截断长度（字符，展开后整体截断）
+max_include_depth = 5        # @-include 递归展开最大深度（0 禁用）
 
 [cost]                       # 成本仪表盘（P29）
 budget = 5.0                 # 会话预算上限（元），0 = 不限（默认 0）
@@ -637,6 +638,48 @@ instruction_files = ["MY_RULES.md"]        # 只认这一个文件
 user_instructions_file = "~/my-notes/ai-rules.md"
 ```
 
+### @-include 递归引用
+
+**作用**：把分散在多个文件的项目规范组合进一个指令入口——不必全塞进一个 CLAUDE.md 导致膨胀，每个被引用文件独立维护，改了任何一个重启 mini 就生效。
+
+**语法**：在指令文件（AGENT.md / CLAUDE.md / instructions.md）中，**独占一整行**写 `@./相对路径` 或 `@~/home路径`，启动时该行被替换为引用文件的内容。行内出现的 `@./`（如正文中的 `see @./doc.md for details`）不会被展开。
+
+**示例** — AGENT.md 做索引，各规范文件独立维护：
+
+```markdown
+# 项目规范
+
+@./docs/code-style.md
+@./docs/testing-rules.md
+@~/.mini-agent/global-rules.md
+```
+
+启动 mini 后，system prompt 中会出现 code-style.md、testing-rules.md、global-rules.md 三个文件的完整内容（相当于全部内联进了 AGENT.md）。
+
+**路径解析规则**：
+
+- `@./path` — 相对于**当前引用文件所在目录**（不是项目根）。例：如果 `docs/rules.md` 里写 `@./sub/detail.md`，解析为 `docs/sub/detail.md`
+- `@~/path` — 相对于用户 home 目录。适合跨项目通用规则
+
+**嵌套引用**：被引用文件里还可以继续写 `@./`，递归展开至最大深度 5 层（`[context] max_include_depth` 可调，设 0 完全禁用）。
+
+**容错**：
+
+- 引用的文件不存在 → 插入 `<!-- include not found: ./path -->` 注释行，不影响其余内容
+- 循环引用（A 引用 B，B 又引用 A）→ 插入 `<!-- circular include: ./path -->` 注释行，不死循环
+- 展开后总内容超过 `max_chars` → 正常截断
+
+**典型场景**：
+
+| 场景 | 做法 |
+|---|---|
+| 大团队项目 | 不同角色维护不同规范文件，AGENT.md 只做索引 |
+| 单体仓库 | 根 AGENT.md 按需引入各子项目规范 |
+| 个人跨项目规则 | `@~/.mini-agent/global-rules.md`，避免每个项目重复写 |
+| 用户级指令 | `~/.mini-agent/instructions.md` 同样支持 @-include |
+
+**注意**：某些 IDE 可能对指令文件中的 `@./` 语法报 lint 警告（如"导入路径超出项目根目录"）——这是 IDE 自身的静态检查误报，不影响 mini-agent 运行。
+
 ---
 
 ## 六、常见问题
@@ -646,6 +689,17 @@ A：config.toml 是给**程序**读的参数（改了影响程序行为，如超
 
 **Q：项目里同时有 AGENT.md 和 CLAUDE.md 会怎样？**
 A：只读 AGENT.md（优先级高的赢），CLAUDE.md 被忽略。不合并是有意设计——避免两个文件内容冲突时 LLM 无所适从。
+
+**Q：指令文件里的 `@./path` 是什么意思？**
+A：**@-include 递归引用**——一行只写 `@./relative/path.md` 或 `@~/home/path.md`，启动时该行会被替换为引用文件的内容（相对路径按引用方所在目录解析，不是项目根）。嵌套引用递归展开，最大深度 5（`[context] max_include_depth` 可调，设 0 禁用）。循环引用和文件不存在会插入 `<!-- circular include: ... -->` / `<!-- include not found: ... -->` 注释行，不影响其余内容。行内出现的 `@./`（如 `see @./doc.md for details`）不会被误展开。
+
+示例 AGENT.md：
+```markdown
+# 项目规范
+@./docs/code-style.md
+@./docs/testing-rules.md
+@~/.mini-agent/global-rules.md
+```
 
 **Q：为什么我改了 CLAUDE.md 但 LLM 没反应？**
 A：指令文件启动时读取一次，改完要重启 `mini`。

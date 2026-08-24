@@ -43,8 +43,10 @@
 # instruction_files = ["AGENT.md", "CLAUDE.md", ".mini-agent/instructions.md"]
 # 用户级全局指令文件
 # user_instructions_file = "~/.mini-agent/instructions.md"
-# 单文件截断长度（字符）
+# 单文件截断长度（字符，展开后整体截断）
 # max_chars = 8000
+# @-include 递归展开最大深度（0 禁用）
+# max_include_depth = 5
 
 [cost]
 # 成本仪表盘：/cost 查看，每轮结束超预算时警告
