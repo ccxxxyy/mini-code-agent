@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from rich.console import Console
+from rich.markup import escape
 
 from mini_agent.events.bus import EventBus
 from mini_agent.models.events import (
@@ -106,10 +107,15 @@ class TraceRenderer:
         else:
             color = self.theme.error
             label = e.decision.upper()
+        # Dynamic fields (paths, rule reasons, commands) may contain square
+        # brackets that Rich parses as markup -- a `[/...]` fragment crashed
+        # this handler with MarkupError (real-run). Escape everything dynamic.
+        # 动态字段（路径/规则理由/命令）可能含方括号，Rich 会当作标记解析——
+        # `[/...]` 片段曾让本处理器 MarkupError 崩溃（实测）。动态内容全转义。
         self._line(
             "perm",
-            f"{e.scope} [dim]{e.resource[:60]}[/dim] [dim]->[/dim] "
-            f"[{color}]{label}[/{color}] [dim]({e.reason})[/dim]",
+            f"{e.scope} [dim]{escape(e.resource[:60])}[/dim] [dim]->[/dim] "
+            f"[{color}]{label}[/{color}] [dim]({escape(e.reason)})[/dim]",
         )
 
     async def _on_tool_start(self, e: ToolCallStartEvent) -> None:
@@ -117,7 +123,7 @@ class TraceRenderer:
             return
         p = self.theme.primary
         preview = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(e.arguments.items())[:3])
-        self._line("tool", f"[{p}]{e.tool_name}[/{p}] start  [dim]{preview}[/dim]")
+        self._line("tool", f"[{p}]{e.tool_name}[/{p}] start  [dim]{escape(preview)}[/dim]")
 
     async def _on_tool_end(self, e: ToolCallEndEvent) -> None:
         if not self.enabled:
@@ -134,7 +140,7 @@ class TraceRenderer:
         if not self.enabled:
             return
         tag = " [dim]\\[slash][/dim]" if e.is_slash_command else ""
-        self._line("user", f'[dim]"{e.content[:60]}"[/dim]{tag}')
+        self._line("user", f'[dim]"{escape(e.content[:60])}"[/dim]{tag}')
 
     async def _on_llm_request(self, e: LLMRequestEvent) -> None:
         if not self.enabled:

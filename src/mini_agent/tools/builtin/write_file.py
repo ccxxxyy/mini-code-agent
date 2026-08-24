@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -22,6 +23,7 @@ class WriteFileParams(BaseModel):
 
 class WriteFileTool(Tool):
     _name = "write_file"
+    category = ToolCategory.WRITE
     _description = (
         "Write content to a file. Creates the file (and parent directories) "
         "if it doesn't exist, overwrites if it does."

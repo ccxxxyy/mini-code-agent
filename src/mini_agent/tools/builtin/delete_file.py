@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -21,6 +22,7 @@ class DeleteFileParams(BaseModel):
 
 class DeleteFileTool(Tool):
     _name = "delete_file"
+    category = ToolCategory.WRITE
     _description = (
         "Delete a single file. Fails if the path is a directory "
         "or the file does not exist. Prefer this over shell rm/del."

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
 
 if TYPE_CHECKING:
@@ -15,6 +16,10 @@ if TYPE_CHECKING:
 class MCPToolAdapter(Tool):
     """Wraps an MCP-discovered tool as an internal Tool.
     把 MCP 发现的工具包装为内部 Tool。"""
+
+    # External-process side effects: cannot be verified read-only, so plan
+    # mode denies MCP tools. 进程外副作用无法验证只读——plan 模式拒绝。
+    category = ToolCategory.EXTERNAL
 
     def __init__(
         self,

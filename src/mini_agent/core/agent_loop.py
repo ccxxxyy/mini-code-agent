@@ -24,7 +24,7 @@ from mini_agent.models.events import (
     TurnCompleteEvent,
 )
 from mini_agent.models.message import Conversation, Message, Role, ToolCall, ToolResult
-from mini_agent.models.permissions import PermissionDecision
+from mini_agent.models.permissions import PermissionDecision, PermissionMode, ToolCategory
 from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.hooks import HookAction, HookContext, HookManager, HookStage
@@ -40,8 +40,6 @@ ToolStartCallback = Callable[[ToolCall], None]
 ToolEndCallback = Callable[[ToolResult, float], None]
 
 
-_WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
-
 # Human/LLM-readable hints per denial reason: without the WHY the LLM burns
 # tokens investigating configs instead of adapting (real-run: 50K tokens
 # spent hunting a nonexistent rule after a bare "Permission denied").
@@ -51,7 +49,10 @@ _DENY_REASON_HINTS = {
     "mode:plan": "read-only plan mode — ask the user to approve exiting plan mode first",
     "path_guard:sensitive": "sensitive path (keys/credentials), protected in every mode",
     "user_confirm:no": "the user denied the confirmation",
-    "no_ui:default_deny": "confirmation required but no interactive user is available",
+    "no_ui:default_deny": (
+        "confirmation required but no interactive user is available — "
+        "denied fail-safe, do NOT retry via alternative routes"
+    ),
 }
 
 
@@ -412,7 +413,11 @@ class AgentLoop:
         api_messages = conversation.to_api_messages()
         tool_schemas = self._tools.get_schemas()
         if self.plan_mode:
-            tool_schemas = [s for s in tool_schemas if s["function"]["name"] not in _WRITE_TOOLS]
+            tool_schemas = [
+                s
+                for s in tool_schemas
+                if self._category(s["function"]["name"]) is not ToolCategory.WRITE
+            ]
 
         estimated = self._context.total_tokens if self._context else 0
         await self._event_bus.emit(
@@ -521,7 +526,7 @@ class AgentLoop:
                 for tc in assembler.feed(chunk):
                     if not tc.name or not tc.id:
                         continue
-                    if tc.name in _WRITE_TOOLS:
+                    if self._category(tc.name) is ToolCategory.WRITE:
                         # Never eager-execute write tools mid-stream: a
                         # truncated response (finish_reason="length") triggers
                         # a retry, but an already-completed side-effecting task
@@ -536,13 +541,14 @@ class AgentLoop:
                         # max_tokens 恢复确定最终非截断响应后才执行。
                         # （同时覆盖 plan 模式拒绝，由 _act 处理。）
                         continue
-                    if tc.name == "exit_plan_mode":
-                        # Its user-approval dialog cannot interleave with live
-                        # rendering -> defer to _act.
-                        # 其用户审批弹窗不能和流式渲染交错 -> 延迟到 _act。
+                    tool_obj = self._tools.get(tc.name)
+                    if tool_obj is not None and tool_obj.opens_dialog:
+                        # Dialog tools (ask_user, exit_plan_mode) cannot
+                        # interleave with live rendering -> defer to _act.
+                        # 对话框工具不能和流式渲染交错 -> 延迟到 _act。
                         continue
                     if self._permissions is not None and self._permissions.would_ask(
-                        tc.name, tc.arguments
+                        tc.name, tc.arguments, category=self._category(tc.name)
                     ):
                         continue  # deferred to _act 延迟到 _act
                     if self._hooks.would_confirm(tc.name, tc.arguments):
@@ -614,7 +620,7 @@ class AgentLoop:
                 decisions.append(PermissionDecision.GRANTED)  # already running 已在执行
                 deny_reasons.append("")
                 continue
-            if self.plan_mode and tc.name in _WRITE_TOOLS:
+            if self.plan_mode and self._category(tc.name) is ToolCategory.WRITE:
                 decisions.append(PermissionDecision.DENIED)
                 deny_reasons.append("mode:plan — read-only plan mode blocks write tools")
                 continue
@@ -854,17 +860,32 @@ class AgentLoop:
             return True
         return bool(answer)
 
+    def _category(self, name: str) -> ToolCategory:
+        """Category of a tool by name; unknown names (hallucinated or
+        unregistered plugin tools) are treated as EXTERNAL (conservative).
+        按名字查工具类别；未知名字（幻觉/未注册插件）保守视为 EXTERNAL。"""
+        tool = self._tools.get(name)
+        return tool.category if tool is not None else ToolCategory.EXTERNAL
+
     async def _check_permission(self, tc: ToolCall) -> PermissionDecision:
-        """Route permission check by tool type. 按工具类型路由权限检查。"""
+        """Route permission check by tool category (mode × category matrix).
+        按工具类别路由权限检查（模式 × 类别矩阵）。"""
         assert self._permissions is not None
         scope = "tool"
         resource = tc.name
+        category = self._category(tc.name)
+        # Mode from the permission manager, NOT self.plan_mode: a sub-agent's
+        # loop flag is False but its propagated permission stack still carries
+        # the parent's mode -- this is what makes propagation bite.
+        # 模式取自权限管理器而非 self.plan_mode：子 agent 的 loop 标志是
+        # False，但传播来的权限栈仍带着父级模式——传播正是在这里生效。
+        mode = self._permissions.mode
 
         # 0. Tool-level gate: explicit TOOL rules decide outright.
         # DENY blocks the tool; ALLOW trusts it wholesale (skips resource
-        # checks); no rule falls through to command/path routing below.
+        # checks); no rule falls through to category/command/path routing.
         # 工具级门：显式 TOOL 规则直接判定。DENY 拦截工具；ALLOW 整体信任
-        # （跳过资源检查）；无规则则继续走下面的命令/路径路由。
+        # （跳过资源检查）；无规则则继续走类别/命令/路径路由。
         tool_decision = await self._permissions.check_tool(tc.name)
         if tool_decision is not None:
             decision = tool_decision
@@ -872,40 +893,52 @@ class AgentLoop:
             scope = "command"
             resource = str(tc.arguments.get("command", ""))
             decision = await self._permissions.check_command(resource)
-        elif tc.name in ("read_file", "glob", "grep"):
-            path_arg = tc.arguments.get("file_path") or tc.arguments.get("path")
-            if path_arg:
-                scope = "path"
-                resource = str(path_arg)
-                decision = await self._permissions.check_path(
-                    Path(resource), "read", tool_name=tc.name
-                )
-            else:
-                decision = PermissionDecision.GRANTED
-                self._permissions.last_decision_reason = "no_path_arg"
-        elif tc.name in ("write_file", "edit_file", "delete_file"):
-            path_arg = tc.arguments.get("file_path")
-            if path_arg:
-                scope = "path"
-                resource = str(path_arg)
-                decision = await self._permissions.check_path(
-                    Path(resource), "write", tool_name=tc.name
-                )
-            else:
-                decision = PermissionDecision.GRANTED
-                self._permissions.last_decision_reason = "no_path_arg"
+        # Category-level mode gate: covers tools WITHOUT path args too
+        # (install_skill writes skill dirs, MCP tools mutate external state).
+        # 类别级模式门：覆盖无路径参数的工具（install_skill 写技能目录，
+        # MCP 工具改外部状态）。
+        elif category is ToolCategory.WRITE and mode is PermissionMode.PLAN:
+            decision = PermissionDecision.DENIED
+            self._permissions.last_decision_reason = "mode:plan"
+        elif category is ToolCategory.EXTERNAL and mode is PermissionMode.PLAN:
+            decision = PermissionDecision.DENIED
+            self._permissions.last_decision_reason = "mode:plan"
+        elif category is ToolCategory.EXTERNAL and mode is PermissionMode.BYPASS:
+            decision = PermissionDecision.GRANTED
+            self._permissions.last_decision_reason = "mode:bypass"
+        elif category in (ToolCategory.READ, ToolCategory.WRITE) and (
+            path_arg := tc.arguments.get("file_path") or tc.arguments.get("path")
+        ):
+            scope = "path"
+            resource = str(path_arg)
+            operation = "write" if category is ToolCategory.WRITE else "read"
+            decision = await self._permissions.check_path(
+                Path(resource), operation, tool_name=tc.name
+            )
+        elif category in (ToolCategory.READ, ToolCategory.WRITE):
+            decision = PermissionDecision.GRANTED
+            self._permissions.last_decision_reason = "no_path_arg"
         else:
             decision = PermissionDecision.GRANTED
             self._permissions.last_decision_reason = "unrestricted_tool"
 
         # A user-denied confirm (dangerous command OR path outside project)
         # stops the goal -- the loop breaker reads consecutive_confirm_denials.
-        # Keyed on "user_confirm:no" so only ACTUAL confirm denials count, not
-        # auto policy denials (sensitive-path rules etc.) which just skip.
-        # 用户拒绝确认框（危险命令或项目外路径）时停止目标——熔断读
-        # consecutive_confirm_denials。按 "user_confirm:no" 计数，只算真正的
-        # 确认框拒绝，不算自动策略拒绝（敏感路径规则等，那些只跳过）。
-        if self._permissions.last_decision_reason == "user_confirm:no":
+        # "no_ui:default_deny" counts too: it is the same confirm-denial
+        # semantic translated to headless loops (gated sub-agents) -- without
+        # it a child hunts bypass routes forever (real-run: 9 tools across 10
+        # iterations retrying a denied ping). Policy denials (rule:/mode:/
+        # sensitive-path) stay neutral everywhere: they skip and continue.
+        # 用户拒绝确认框时停止目标——熔断读 consecutive_confirm_denials。
+        # "no_ui:default_deny" 同样计数：它是确认拒绝语义在无头循环（有门
+        # 子 agent）中的对应物——不计数时子 agent 会无限找绕路（实测：被拒
+        # ping 后连试 9 个工具 10 轮）。策略拒绝（规则/模式/敏感路径）在
+        # 任何地方都中性：跳过继续。
+        if decision == PermissionDecision.DENIED:
+            reason = self._permissions.last_decision_reason
+            if reason and reason not in self._state.denial_reasons:
+                self._state.denial_reasons.append(reason)
+        if self._permissions.last_decision_reason in ("user_confirm:no", "no_ui:default_deny"):
             self._state.consecutive_confirm_denials += 1
         elif decision == PermissionDecision.GRANTED:
             self._state.consecutive_confirm_denials = 0

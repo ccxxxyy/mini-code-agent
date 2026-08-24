@@ -509,9 +509,13 @@ def test_plan_mode_hides_write_schemas(tool_context):
     assert "edit_file" in names_normal
 
     loop.plan_mode = True
-    from mini_agent.core.agent_loop import _WRITE_TOOLS
+    from mini_agent.models.permissions import ToolCategory
 
-    filtered = [s for s in loop._tools.get_schemas() if s["function"]["name"] not in _WRITE_TOOLS]
+    filtered = [
+        s
+        for s in loop._tools.get_schemas()
+        if loop._category(s["function"]["name"]) is not ToolCategory.WRITE
+    ]
     names_filtered = {s["function"]["name"] for s in filtered}
     assert "write_file" not in names_filtered
     assert "edit_file" not in names_filtered

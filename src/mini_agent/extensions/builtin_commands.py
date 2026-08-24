@@ -1653,7 +1653,10 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
                 return f"Removed {level_name} rule: \\[{scope_str}] `{pattern}`"
             return f"No such rule: {level_name} \\[{scope_str}] `{pattern}`"
 
-        reason = "slash command (saved)" if save else "slash command"
+        # Rule source lands in denial reasons (rule:xxx [source]) so the LLM
+        # knows a session rule has no config-file origin to hunt for.
+        # 规则来源会进入拒绝理由——LLM 知道会话规则没有配置文件可查。
+        reason = f"/{level_name} --save" if save else f"/{level_name} session rule, not persisted"
         rule = PermissionRule(scope=scope, pattern=pattern, level=level, reason=reason)
         try:
             added = pm.add_rule(rule)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re
 import sys
 import time
 import uuid
@@ -221,6 +222,56 @@ class SubAgent:
             # Circuit-breaker termination is a failure, not a completed task
             # 熔断终止是失败，不算任务完成
             stopped = self._loop.stopped_early
+            error = None
+            if stopped:
+                # Carry WHY and WHAT'S LEFT into the report: without the
+                # denial reason the parent blindly re-spawns down the same
+                # dead end, and breaker-stop leaves this run's written files
+                # behind with no cleanup chance (real-run: a second identical
+                # child + two orphaned .bat files).
+                # 报告带上原因和遗留物：不带拒绝原因父级会盲目重派走同一条
+                # 死路；熔断即停没有清理机会，本次写的文件会留在磁盘
+                # （实测：重派了一个一模一样的子 agent + 两个孤儿 .bat）。
+                error = "Stopped early (iteration limit or cancellation)"
+                if self._loop.stop_reason == "confirm_denied":
+                    # ALL distinct denials, not just the breaker-tripping one:
+                    # the root cause (e.g. a deny rule) usually came first.
+                    # 全部去重拒绝原因而非最后一击：根因（如 deny 规则）
+                    # 通常在最前面。
+                    reasons = "; ".join(self._loop.state.denial_reasons) or "denied"
+                    error = (
+                        f"Stopped by permission denial. Denials encountered: "
+                        f"{reasons}. Re-spawning will hit the same denial -- "
+                        "report this to the user instead of retrying."
+                    )
+                    # Without these facts the parent invented a removal command
+                    # and offered to run the command itself -- a deny rule
+                    # applies to EVERY agent in the session (real-run). The
+                    # removal command is given VERBATIM: a placeholder form
+                    # got garbled into `/deny remove ping ping*` (real-run).
+                    # 没有这两条事实，父级会编造移除命令、并提议自己代跑——
+                    # deny 规则对会话内所有 agent 生效（实测）。移除命令给
+                    # 可照抄的完整形式：占位符写法曾被错代入成
+                    # `/deny remove ping ping*`（实测）。
+                    removals = []
+                    for r in self._loop.state.denial_reasons:
+                        m = re.match(r"^rule:(command|path|tool):(.+?)(?:\s\(|$)", r)
+                        if m:
+                            cmd = f'/deny remove {m.group(1)} "{m.group(2)}"'
+                            if cmd not in removals:
+                                removals.append(cmd)
+                    if removals:
+                        error += (
+                            " Note: deny rules apply to every agent in this session"
+                            " including the main agent (do NOT offer to run it"
+                            " yourself); the user can remove them by typing"
+                            f" exactly: {'; '.join(removals)}"
+                        )
+                created = [
+                    path for kind, path in self._loop.last_turn_file_changes if kind == "created"
+                ]
+                if created:
+                    error += f" Files left behind by this run: {', '.join(created)}"
             return SubAgentResult(
                 agent_id=self.agent_id,
                 task=self.task,
@@ -229,7 +280,7 @@ class SubAgent:
                 tool_calls_made=tool_calls,
                 tokens_used=self._loop.last_turn_tokens,
                 worktree_path=self._worktree_path,
-                error="Stopped early (iteration limit or cancellation)" if stopped else None,
+                error=error,
             )
         except Exception as e:
             return SubAgentResult(
@@ -305,6 +356,7 @@ class SubAgentManager:
         model_name: str = "",
         mailbox: Mailbox | None = None,
         confirm_callback: ConfirmCallback | None = None,
+        permission_manager: PermissionManager | None = None,
     ) -> None:
         self._llm = llm
         self._tools = tool_registry
@@ -314,6 +366,11 @@ class SubAgentManager:
         self._worktree_manager = worktree_manager
         self._model_name = model_name
         self._confirm_callback = confirm_callback
+        # Parent permission stack: each in-process spawn gets a child view
+        # (full gate, no dialogs). None = ungated sub-agents (legacy embeds).
+        # 父级权限栈：每个 in-process 派生获得子视图（完整门禁、不弹窗）。
+        # None = 无门子 agent（旧式嵌入场景）。
+        self._permission_manager = permission_manager
         self._active: dict[str, _ActiveAgent] = {}
         # Agents spawned in background mode: completion notifies 'main'
         # 后台模式派生的 agent：完成时经 mailbox 通知 'main'
@@ -327,6 +384,12 @@ class SubAgentManager:
             # audit files 新会话拥有默认收件箱：清掉上一会话的审计留痕
             mailbox.reset_all()
         self.mailbox = mailbox
+
+    @property
+    def has_permission_gate(self) -> bool:
+        """True when spawned sub-agents inherit a permission stack.
+        派生的子 agent 是否继承权限栈。"""
+        return self._permission_manager is not None
 
     async def spawn(
         self,
@@ -366,6 +429,13 @@ class SubAgentManager:
             peers=peers,
             name=name,
             context_summary=context_summary,
+            # Propagate the permission stack: child view = full parent gate
+            # (deny rules / sensitive paths / dangerous commands / mode
+            # matrix), fail-safe denial instead of dialogs.
+            # 传播权限栈：子视图 = 父级完整门禁，需弹窗处安全拒绝。
+            permission_manager=(
+                self._permission_manager.child_view() if self._permission_manager else None
+            ),
         )
         handle = asyncio.create_task(agent.run())
         self._active[agent.agent_id] = _ActiveAgent(

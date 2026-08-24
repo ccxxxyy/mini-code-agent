@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -23,6 +24,8 @@ class ToolSearchTool(Tool):
     按关键词搜索可用的 dispatch 模式 MCP 工具。"""
 
     _name = "tool_search"
+
+    category = ToolCategory.READ
     _description = (
         "Search available MCP tools by keyword. "
         "Returns matching tool names, descriptions, and parameter schemas. "

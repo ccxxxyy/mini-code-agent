@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 MAX_RESULTS = 500
@@ -27,6 +28,7 @@ class GlobParams(BaseModel):
 
 class GlobTool(Tool):
     _name = "glob"
+    category = ToolCategory.READ
     _description = (
         "Find files matching a glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
         "Returns matching file paths sorted by modification time (newest first)."

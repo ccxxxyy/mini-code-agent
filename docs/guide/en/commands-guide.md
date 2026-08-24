@@ -137,11 +137,12 @@ The four modes:
 |---|---|
 | `default` | Default behavior: dangerous commands / paths outside the project prompt for confirmation |
 | `accept-edits` | File writes auto-approved (both inside and outside the project); dangerous commands still prompt; reads outside the project still prompt |
-| `plan` | Read-only plan mode: write tools disabled + write-form bash commands (redirects/mkdir/copy/move/del ...) denied + spawn_agents disabled, i.e. the former `/plan on` |
+| `plan` | Read-only plan mode: write tools disabled + write-form bash commands (redirects/mkdir/copy/move/del ...) denied + WRITE/EXTERNAL-category tools (install_skill/MCP) denied; research agents may still be spawned (children inherit the permission stack, so their writes are equally denied), i.e. the former `/plan on` |
 | `bypass` | Everything auto-approved — except explicit DENY rules and sensitive paths (`~/.ssh`, `.env`, etc.) |
 
 Note: DENY rules and sensitive paths hold in **every mode** — bypass is no exception.
 Switching to/from plan mode syncs the plan-mode system prompt; the `exit_plan_mode` tool requires **user approval of the plan** (a yes/no question) before exiting plan mode and resetting to default — the LLM cannot lift its own read-only restriction, and a rejection keeps plan mode active.
+Mode switches take effect **immediately for running sub-agents** (a sub-agent's permission view delegates to the main session's mode, live).
 The startup mode can be set via `[security] approval_mode` in config.toml (see the configuration guide).
 
 ---
@@ -172,6 +173,7 @@ Teaching mode: prints an explanatory panel before each tool call (why this tool 
 ```
 The scope must be `command`, `path` or `tool`; patterns use glob matching.
 The `tool` scope matches by tool name and is evaluated before command/path checks: allow trusts the tool entirely (dangerous commands are no longer confirmed either); deny blocks the entire tool outright.
+Command-scope allow rules match the plain command only — unlike deny, they do NOT unwrap `cmd /c`-style wrappers (widening deny fails closed, widening allow fails open).
 Without `--save`, rules only apply to the current session; with `--save`, they are written to the project-level permissions.toml and loaded automatically after restart.
 Duplicate rules are automatically deduplicated and will not be added twice.
 
@@ -185,6 +187,8 @@ Duplicate rules are automatically deduplicated and will not be added twice.
 /deny remove tool delete_file     # Remove a DENY rule from the current session
 ```
 Same syntax as `/allow`. DENY takes priority over ALLOW (evaluation order: DENY → ALLOW → session authorization → default mode).
+Command-scope deny rules match wrapped and chained forms too: `cmd /c "ping x"` and `echo hi & ping x` both hit `ping*` (quoted data never false-denies; see the "Permission rule files" chapter in the config guide for the full match scope and its boundary).
+Deny rules bind **every agent in the session, live** — including running spawned sub-agents; the trace shows them as `rule:<scope>:<pattern> (source)`.
 `remove` only removes rules from the current session's rule table (exact scope+pattern+level match); rules from permissions.toml will still be loaded on the next startup — edit the file itself to remove them.
 
 ### /tools

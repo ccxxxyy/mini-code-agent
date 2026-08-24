@@ -23,6 +23,7 @@ from mini_agent.models.permissions import (
     PermissionRequest,
     PermissionRule,
     PermissionScope,
+    ToolCategory,
 )
 from mini_agent.security.path_guard import (
     SENSITIVE_EXCEPTIONS,
@@ -119,15 +120,31 @@ WRITE_COMMAND_PATTERNS = [
 # 成对引号段——写形态匹配前剥离
 _QUOTED_SEGMENT_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
 
+# Shell wrapper prefixes that embed an inner command. DENY rules must match
+# the inner command too: `cmd /c "ping x"` sailed past a `ping*` deny rule
+# and was only caught by the dangerous-command confirm layer (real-run) --
+# in an interactive session the user could approve that confirm without
+# noticing it wraps a denied command.
+# 内嵌命令的 shell 包装前缀。deny 规则必须同时匹配内层命令：实测
+# `cmd /c "ping x"` 绕过了 `ping*` deny 规则，仅靠危险命令确认层兜底——
+# 交互会话里用户可能没注意到确认框里包着一条被拒命令就点了同意。
+_WRAPPER_COMMAND_RE = re.compile(
+    r"^\s*(?:cmd(?:\.exe)?\s+/[ck]\s+"
+    r"|(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*-c(?:ommand)?\s+"
+    r"|(?:ba)?sh\s+-c\s+)(?P<inner>.+)$",
+    re.IGNORECASE,
+)
+
 # Matches script execution to detect write-then-execute bypass:
 #   python script.py / node app.js / perl x.pl / ruby x.rb
 #   ./script.py / .\script.bat (direct execution)
-#   cmd /c script.bat
+#   cmd /c script.bat / call script.bat / start script.bat
 # 匹配脚本执行以检测写后执行绕过。
 _SCRIPT_EXEC_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?:python[23]?|node|perl|ruby)\s+(?!-\S)(?P<path>\S+)", re.IGNORECASE),
     re.compile(r"^\.[\\/](?P<path>\S+)", re.IGNORECASE),
     re.compile(r"\bcmd\s+/c\s+(?P<path>\S+)", re.IGNORECASE),
+    re.compile(r"\b(?:call|start)\s+(?P<path>\S+)", re.IGNORECASE),
 ]
 _PYTHON_M_RE = re.compile(r"\bpython[23]?\s+-m\s+(?P<module>\S+)", re.IGNORECASE)
 
@@ -204,6 +221,14 @@ class PermissionManager:
         self.last_decision_reason: str = ""
         self.last_matched_rule: str = ""
         self._load_rules_from_config(config)
+
+    def child_view(self) -> ChildPermissionManager:
+        """A view of this manager for in-process sub-agents: shares rules,
+        session grants, written-file tracking and (live) the mode, but never
+        prompts -- anything that would ask the user is denied fail-safe.
+        给 in-process 子 agent 的视图：共享规则/会话授权/写文件追踪/模式
+        （实时），但绝不弹窗——需要询问用户的一律安全拒绝。"""
+        return ChildPermissionManager(self)
 
     def _load_rules_from_config(self, config: SecurityConfig) -> None:
         for pattern in config.denied_commands:
@@ -482,14 +507,63 @@ class PermissionManager:
             return PermissionDecision.GRANTED
         return await self._check_generic(request)
 
+    @staticmethod
+    def _rule_reason(rule: PermissionRule) -> str:
+        """Decision reason carrying the rule's SOURCE -- without it the LLM
+        hunts config files for session rules that live only in memory
+        (real-run: 347K tokens spent tracing a /deny rule's origin).
+        Parentheses, NOT square brackets: reasons flow into Rich-rendered
+        trace lines where `[/...]` parses as a closing markup tag (real-run:
+        MarkupError traceback dumped to the terminal).
+        带规则来源的判定理由——不带来源时 LLM 会翻遍配置文件找只存在于
+        内存的会话规则（实测：为溯源一条 /deny 规则烧了 34 万 token）。
+        用圆括号而非方括号：理由会进入 Rich 渲染的 trace 行，`[/...]` 会被
+        解析为闭合标记（实测 MarkupError 崩溃刷屏）。"""
+        if rule.reason:
+            return f"rule:{rule.scope.value}:{rule.pattern} ({rule.reason})"
+        return f"rule:{rule.scope.value}:{rule.pattern}"
+
+    @staticmethod
+    def _deny_command_variants(command: str) -> list[str]:
+        """Command + unwrapped inner commands + unquoted segments, for DENY
+        matching only. ALLOW rules stay on the plain command: expanding what
+        a deny catches fails closed, expanding what an allow grants does not.
+        命令本体 + 解包后的内层命令 + 去引号分段，仅用于 deny 匹配。
+        allow 规则只看命令本体：扩大 deny 命中面是收紧，扩大 allow 是放松。"""
+        variants = [command]
+        inner = command
+        for _ in range(3):
+            m = _WRAPPER_COMMAND_RE.match(inner)
+            if not m:
+                break
+            inner = m.group("inner").strip().strip("\"'")
+            if inner not in variants:
+                variants.append(inner)
+        # Quoted spans blanked before splitting: `echo "a & ping x"` must not
+        # produce a `ping x` segment (data, not a command).
+        # 分段前先抹掉引号段：`echo "a & ping x"` 不能拆出 `ping x` 段
+        # （那是数据不是命令）。
+        for v in list(variants):
+            blanked = _QUOTED_SEGMENT_RE.sub('""', v)
+            for seg in re.split(r"[|;&]+", blanked):
+                seg = seg.strip()
+                if seg and seg not in variants:
+                    variants.append(seg)
+        return variants
+
+    def _matches_deny(self, pattern: str, scope: PermissionScope, resource: str) -> bool:
+        if scope is PermissionScope.COMMAND:
+            return any(self._matches(pattern, v) for v in self._deny_command_variants(resource))
+        return self._matches(pattern, resource)
+
     def _deny_rule_matches(self, scope: PermissionScope, resource: str) -> bool:
         for rule in self._rules:
             if (
                 rule.scope == scope
                 and rule.level == PermissionLevel.DENY
-                and self._matches(rule.pattern, resource)
+                and self._matches_deny(rule.pattern, scope, resource)
             ):
-                self.last_decision_reason = f"rule:{rule.pattern}"
+                self.last_decision_reason = self._rule_reason(rule)
                 return True
         return False
 
@@ -576,17 +650,17 @@ class PermissionManager:
         self.last_matched_rule = ""
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.DENY:
-                if self._matches(rule.pattern, request.resource):
+                if self._matches_deny(rule.pattern, request.scope, request.resource):
                     request.matched_rule = rule
                     self.last_matched_rule = f"{rule.level}:{rule.pattern}"
-                    self.last_decision_reason = f"rule:{rule.pattern}"
+                    self.last_decision_reason = self._rule_reason(rule)
                     return PermissionDecision.DENIED
         for rule in self._rules:
             if rule.scope == request.scope and rule.level == PermissionLevel.ALLOW:
                 if self._matches(rule.pattern, request.resource):
                     request.matched_rule = rule
                     self.last_matched_rule = f"{rule.level}:{rule.pattern}"
-                    self.last_decision_reason = f"rule:{rule.pattern}"
+                    self.last_decision_reason = self._rule_reason(rule)
                     return PermissionDecision.GRANTED
         for scope, pattern in self._session_grants:
             if scope == request.scope and self._matches(pattern, request.resource):
@@ -633,19 +707,35 @@ class PermissionManager:
         if not all_written:
             return False
         cmd = command.strip()
+
+        def _is_written(script_path: str) -> bool:
+            try:
+                p = Path(script_path.strip().strip("'\""))
+                if not p.is_absolute() and working_dir:
+                    p = working_dir / p
+                # resolve() on 3.11+ does not stat for non-existent paths
+                return str(p.resolve()) in all_written
+            except (ValueError, OSError):
+                return False
+
+        # Bare invocation: the FIRST token of any command segment names a
+        # written file (`run_ping.bat` runs directly on Windows -- real-run:
+        # a sub-agent bypassed a deny rule this way; the regex patterns only
+        # caught ./x, cmd /c x and interpreter forms). First-token-only so
+        # reading a written file (`type run_ping.bat`) does not trigger.
+        # 裸调用：命令段首 token 是写过的文件（Windows 下 `run_ping.bat`
+        # 直接执行——实测子 agent 借此绕过 deny 规则；原正则只认 ./x、
+        # cmd /c x 和解释器形态）。只查首 token——读取写过的文件
+        # （type run_ping.bat）不误触发。
+        for segment in re.split(r"[|;&]+", cmd):
+            parts = segment.strip().split()
+            if parts and _is_written(parts[0]):
+                return True
+
         for pattern in _SCRIPT_EXEC_PATTERNS:
             m = pattern.search(cmd)
-            if m:
-                script_path = m.group("path").strip().strip("'\"")
-                try:
-                    p = Path(script_path)
-                    if not p.is_absolute() and working_dir:
-                        p = working_dir / p
-                    # resolve() on 3.11+ does not stat for non-existent paths
-                    if str(p.resolve()) in all_written:
-                        return True
-                except (ValueError, OSError):
-                    continue
+            if m and _is_written(m.group("path")):
+                return True
         m_mod = _PYTHON_M_RE.search(cmd)
         if m_mod and working_dir:
             mod_name = m_mod.group("module").strip()
@@ -666,7 +756,13 @@ class PermissionManager:
     # 供流式工具执行使用：不会弹窗的工具可以在流式期间提前提交执行，
     # 会弹窗的延迟到流结束后（弹窗不能和流式渲染交错）。不弹窗、无副作用。
 
-    def would_ask(self, tool_name: str, arguments: dict) -> bool:
+    def would_ask(
+        self, tool_name: str, arguments: dict, category: ToolCategory | None = None
+    ) -> bool:
+        """category routes the check (mode × category matrix); None falls back
+        to EXTERNAL, which never prompts -- callers that know the tool should
+        always pass its category. category 决定路由（模式 × 类别矩阵）；None
+        回退 EXTERNAL（永不弹窗）——知道工具的调用方应总是传类别。"""
         # Explicit tool-level rule resolves without prompting
         # 显式工具级规则直接判定，不弹窗
         tool_request = PermissionRequest(
@@ -676,13 +772,15 @@ class PermissionManager:
             return False
         if tool_name == "bash":
             return self._would_ask_command(str(arguments.get("command", "")))
-        if tool_name in ("read_file", "glob", "grep", "write_file", "edit_file", "delete_file"):
+        if category in (ToolCategory.READ, ToolCategory.WRITE):
             path = arguments.get("file_path") or arguments.get("path")
             if not path:
                 return False
-            writes = tool_name in ("write_file", "edit_file", "delete_file")
-            return self._would_ask_path(Path(str(path)), "write" if writes else "read")
-        return False  # unrestricted tools never prompt 非受限工具永不弹窗
+            operation = "write" if category is ToolCategory.WRITE else "read"
+            return self._would_ask_path(Path(str(path)), operation)
+        # EXECUTE / EXTERNAL / unknown: category-gate denies or grants,
+        # never prompts. EXECUTE/EXTERNAL/未知：类别门拒绝或放行，不弹窗。
+        return False
 
     def _would_ask_command(self, command: str) -> bool:
         request = PermissionRequest(scope=PermissionScope.COMMAND, resource=command)
@@ -771,3 +869,49 @@ class PermissionManager:
             prefix = pattern[:-1]
             return bool(prefix) and resource.startswith(prefix)
         return resource == pattern
+
+
+class ChildPermissionManager(PermissionManager):
+    """Permission view for in-process sub-agents: the FULL parent gate
+    (deny rules, sensitive paths, dangerous commands, mode matrix) with one
+    difference -- no confirm callback, so anything that would prompt the
+    user is denied fail-safe instead. Mutable state is SHARED by reference
+    (rules list, session grants, written-file sets), and ``mode`` delegates
+    to the parent live -- /deny and /mode in the main session affect running
+    sub-agents immediately. ``last_decision_reason`` is per-child (parallel
+    agents must not clobber each other's trace context).
+    in-process 子 agent 的权限视图：父级完整门禁（deny 规则/敏感路径/危险
+    命令/模式矩阵），唯一区别是无确认回调——需要弹窗的一律安全拒绝。可变
+    状态按引用共享（规则表/会话授权/写文件集合），``mode`` 实时委托父级——
+    主会话的 /deny 和 /mode 即时影响运行中的子 agent。``last_decision_reason``
+    每个子实例独立（并行 agent 不互相覆盖 trace 上下文）。"""
+
+    def __init__(self, parent: PermissionManager) -> None:
+        # Deliberately NOT calling super().__init__: state is bound to the
+        # parent's objects, not rebuilt from config (which would duplicate
+        # config-declared rules into the shared list).
+        # 刻意不调 super().__init__：状态绑定父级对象而非从配置重建
+        # （重建会把配置声明的规则重复灌进共享列表）。
+        self._parent = parent
+        self._config = parent._config
+        self._path_guard = parent._path_guard
+        self._confirm = None  # never prompts 绝不弹窗
+        self._event_bus = parent._event_bus
+        self._rules = parent._rules  # shared list 共享列表（/allow /deny 实时生效）
+        self._session_grants = parent._session_grants
+        self._session_written_files = parent._session_written_files
+        self.shared_written_files = parent.shared_written_files
+        self.working_dir = parent.working_dir
+        self.sandbox_auto_allow = parent.sandbox_auto_allow
+        self.last_decision_reason = ""
+        self.last_matched_rule = ""
+
+    @property
+    def mode(self) -> PermissionMode:  # type: ignore[override]
+        return self._parent.mode
+
+    @mode.setter
+    def mode(self, value: PermissionMode) -> None:
+        # Single source of truth: a child never diverges from the parent.
+        # 单一事实源：子视图不允许与父级分叉。
+        self._parent.mode = value

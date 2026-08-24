@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from mini_agent.core.mailbox import VALID_MESSAGE_TYPES
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -46,6 +47,8 @@ class SendMessageTool(Tool):
     允许 Agent 向其他 Agent 的收件箱发送消息。"""
 
     _name = "send_message"
+
+    category = ToolCategory.READ
     _description = (
         "Send a message to another agent by name or id ('main' is the "
         "orchestrator, '*' broadcasts to all). The recipient sees it at the "

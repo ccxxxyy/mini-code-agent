@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -29,6 +30,7 @@ class EditFileParams(BaseModel):
 
 class EditFileTool(Tool):
     _name = "edit_file"
+    category = ToolCategory.WRITE
     _description = (
         "Replace an exact string in a file with a new string. "
         "old_text must appear exactly once in the file unless replace_all is true."

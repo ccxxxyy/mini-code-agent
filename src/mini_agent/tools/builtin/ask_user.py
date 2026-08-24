@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -21,6 +22,8 @@ class AskUserParams(BaseModel):
 
 class AskUserTool(Tool):
     _name = "ask_user"
+    category = ToolCategory.READ
+    opens_dialog = True
     _description = (
         "Ask the user a question and wait for their answer. "
         "Use when you need clarification, a choice between options, "

@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
 
 MAX_OUTPUT_CHARS = 30_000
@@ -38,6 +39,7 @@ def _decode_console_bytes(data: bytes) -> str:
 
 
 class BashTool(Tool):
+    category = ToolCategory.EXECUTE
     sandbox = None  # Sandbox | None — injected by app.py when enabled app.py 启用时注入
     sandbox_config = None  # SandboxConfig | None
 

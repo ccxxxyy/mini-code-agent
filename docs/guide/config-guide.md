@@ -760,6 +760,10 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 **优先级**：`deny 规则 > allow 规则 > 内置默认`（危险命令确认 / 敏感路径拒绝 / 项目内放行）。deny 最优先——即使路径在项目内也会被拦。
 
+**deny 命令规则的匹配范围与边界**：command 类 deny 规则除命令本体外，还匹配包装内层与串联分段——`cmd /c "ping x"`、`echo hi & ping x` 都会命中 `ping*` 规则（解包 cmd /c / cmd /k / powershell -Command / sh -c 前缀，抹引号后按 `&;|` 分段逐段匹配；引号内的数据不误拒；allow 规则不解包）。但这是纵深防御而非围墙：`p^ing` 转义、环境变量间接调用、base64 编码等深度混淆无法在规则层穷尽——安全保证靠分层：混淆载体本身（cmd /c、powershell -EncodedCommand 等）在危险命令清单里必弹确认，OS 沙箱是最终围墙。deny 规则的定位是表达策略意图，不是替代沙箱。
+
+**子 Agent 边界**：deny 规则对会话内所有 Agent（含 spawn 的子 Agent）实时生效；但子 Agent 无确认 UI，需要弹窗确认的操作（危险命令等）一律安全拒绝而非询问——想让子 Agent 的危险操作被人工放行，目前请改由主 Agent 执行。
+
 **内置路径保护**（PathGuard，不需配置，代码固定）：
 
 评估顺序（先匹配先决定）：
@@ -775,7 +779,7 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 **匹配语法**：glob 风格。`git *` 匹配 `git status` 但不匹配 `github`；`*secrets*` 匹配任何含 secrets 的路径。
 
-**验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<pattern>` 作为判定依据。
+**验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<scope>:<pattern>` 作为判定依据。
 
 **修改后生效**：重启 mini（启动时加载一次）。或在运行中使用 `/allow` `/deny` 命令实时添加规则——带 `--save` 标志的规则会写入项目级 permissions.toml，下次启动自动加载。
 

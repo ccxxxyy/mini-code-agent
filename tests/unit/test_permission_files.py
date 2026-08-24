@@ -109,4 +109,4 @@ async def test_rule_source_in_reason(tmp_path: Path):
     f = write_rules(tmp_path / "r.toml", '[commands]\ndeny = ["evil *"]\n')
     pm.load_rule_files(project_file=f)
     await pm.check_command("evil command")
-    assert "rule:evil *" in pm.last_decision_reason
+    assert "rule:command:evil *" in pm.last_decision_reason

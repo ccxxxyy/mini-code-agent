@@ -42,6 +42,15 @@ class AgentState:
     # 本轮确认框被拒次数（危险命令 / 项目外路径 / hook 确认）。驱动熔断：
     # 用户拒绝确认时 agent 停下回问，而非找绕过。确认被放行时归零。
     consecutive_confirm_denials: int = 0
+    # Every DISTINCT denial reason seen this run, in order. The breaker-stop
+    # report needs the ROOT cause, not just the tripping denial: a sub-agent
+    # denied by rule:ping* then breaker-stopped on no_ui carried only the
+    # latter -- the parent misdiagnosed "missing confirm UI" and suggested
+    # fixes that would hit the same rule (real-run).
+    # 本轮出现过的全部去重拒绝原因（按序）。熔断报告需要根因而非最后一击：
+    # 实测子 agent 先被 rule:ping* 拒、后因 no_ui 熔断，报告只带后者——
+    # 父级误诊为"缺确认 UI"，给出的建议仍会撞上同一条规则。
+    denial_reasons: list[str] = field(default_factory=list)
 
     def record_iteration_tools(self, names: set[str]) -> None:
         self.iteration_tools.append(frozenset(names))

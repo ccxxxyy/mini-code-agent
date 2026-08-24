@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 MAX_WAIT_SECONDS = 600.0
@@ -30,6 +31,8 @@ class WaitMessageTool(Tool):
     阻塞直到本 Agent 收件箱收到其他 Agent 的消息。"""
 
     _name = "wait_message"
+
+    category = ToolCategory.READ
     _description = (
         "Wait (block) until a message from another agent arrives in your inbox, "
         "then return it. Use this when your task says to wait for information "

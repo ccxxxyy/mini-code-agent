@@ -137,11 +137,12 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 |---|---|
 | `default` | 默认行为：危险命令 / 项目外路径弹窗确认 |
 | `accept-edits` | 文件写入自动放行（项目内外均是）；危险命令仍确认；项目外读取仍确认 |
-| `plan` | 只读计划模式：写类工具禁用 + bash 写形态命令（重定向/mkdir/copy/move/del 等）拒绝 + spawn_agents 禁用，即原 `/plan on` |
+| `plan` | 只读计划模式：写类工具禁用 + bash 写形态命令（重定向/mkdir/copy/move/del 等）拒绝 + WRITE/EXTERNAL 类别工具（install_skill/MCP）拒绝；可派研究 agent（子 agent 继承权限栈，写照样被拒），即原 `/plan on` |
 | `bypass` | 全部自动放行——但显式 DENY 规则和敏感路径（`~/.ssh`、`.env` 等）例外 |
 
 注意：DENY 规则和敏感路径在**所有模式**下都生效，bypass 也不例外。  
 切换进出 plan 模式会同步计划模式系统提示词；`exit_plan_mode` 工具需**用户批准计划**（yes/no 提问）后才退出 plan 模式并重置为 default——LLM 不能自行解除只读限制，拒绝则保持 plan 模式。  
+模式切换对**运行中的子 agent 即时生效**（子 agent 的权限视图实时委托主会话模式）。  
 启动时的默认模式可通过 config.toml 的 `[security] approval_mode` 配置（见配置指南）。
 
 ---
@@ -172,6 +173,7 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 ```
 scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。  
 `tool` scope 按工具名匹配，在命令/路径检查之前评估：allow 整体信任该工具（危险命令也不再确认）；deny 直接拦截整个工具。  
+`command` 类 allow 规则只匹配命令本体，不像 deny 那样解包 `cmd /c` 等包装形态（扩大 deny 是收紧、扩大 allow 是放松）。  
 不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。  
 重复规则自动去重，不会重复添加。
 
@@ -185,6 +187,8 @@ scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。
 /deny remove tool delete_file     # 移除本会话中的 DENY 规则
 ```
 语法与 `/allow` 相同。DENY 优先级高于 ALLOW（评估顺序：DENY → ALLOW → 会话授权 → 默认模式）。  
+`command` 类 deny 规则匹配包装与串联形态：`cmd /c "ping x"`、`echo hi & ping x` 都命中 `ping*`（引号内数据不误拒；匹配范围与边界详见配置指南"权限规则文件"章节）。  
+deny 规则对会话内**所有 agent 实时生效**——包括正在运行的 spawn 子 agent；trace 中显示为 `rule:<scope>:<pattern> (来源)`。  
 `remove` 只移除当前会话规则表中的规则（scope+pattern+level 精确匹配）；来自 permissions.toml 的规则下次启动仍会加载，需编辑文件本身。
 
 ### /tools

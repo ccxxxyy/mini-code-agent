@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -18,6 +19,7 @@ class InstallSkillParams(BaseModel):
 
 class InstallSkillTool(Tool):
     _name = "install_skill"
+    category = ToolCategory.WRITE
     _description = (
         "Install a skill from a local path or git URL into the user's "
         "skill directory (~/.mini-agent/skills/). The source must contain "
