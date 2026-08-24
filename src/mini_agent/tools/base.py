@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from mini_agent.events.bus import EventBus
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.models.session import Session
 
 if TYPE_CHECKING:
@@ -144,6 +145,19 @@ class Tool(ABC):
     params_model: type | None = None
     _name: str = ""
     _description: str = ""
+    # Side-effect class for the permission mode matrix (mode × category).
+    # Conservative default: tools that don't declare one are treated as
+    # EXTERNAL (plan mode denies them). 权限模式矩阵的副作用类别；未声明的
+    # 工具保守默认 EXTERNAL（plan 模式拒绝）。
+    category: ToolCategory = ToolCategory.EXTERNAL
+    # True for tools that open a user dialog (ask_user, exit_plan_mode):
+    # they must never eager-execute mid-stream -- a dialog cannot interleave
+    # with live rendering (real-run: ask_user's prompt was buried by trace
+    # lines because it fired while the LLM was still streaming).
+    # 会打开用户对话框的工具（ask_user、exit_plan_mode）为 True：绝不能在
+    # 流式期间抢先执行——对话框不能和流式渲染交错（实测：ask_user 在流
+    # 未结束时弹出，提示符被 trace 行淹没）。
+    opens_dialog: bool = False
 
     @property
     def schema(self) -> ToolSchema:

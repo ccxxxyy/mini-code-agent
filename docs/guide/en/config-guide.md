@@ -762,6 +762,10 @@ deny = ["delete_file"]     # Block the entire tool outright
 
 **Precedence**: `deny rules > allow rules > built-in defaults` (dangerous-command confirmation / sensitive-path rejection / inside-project allowance). deny wins above all — even a path inside the project gets blocked.
 
+**What command deny rules match, and their boundary**: a command-scope deny rule matches more than the literal command — wrapped and chained forms hit too: `cmd /c "ping x"` and `echo hi & ping x` both match a `ping*` rule (cmd /c / cmd /k / powershell -Command / sh -c prefixes are unwrapped; segments split on `&;|` after blanking quoted spans; quoted data never false-denies; allow rules are NOT unwrapped). This is defense in depth, not a wall: deep obfuscation (`p^ing` escaping, env-var indirection, base64 encoding) cannot be exhaustively caught at the pattern layer — the layered guarantee is that obfuscation carriers themselves (cmd /c, powershell -EncodedCommand, etc.) sit on the dangerous-command list and always require confirmation, and the OS sandbox is the final wall. Deny rules express policy intent; they do not replace the sandbox.
+
+**Sub-agent boundary**: deny rules bind every agent in the session (spawned sub-agents included, live). Sub-agents have no confirm UI, however — anything that would prompt (dangerous commands etc.) is denied fail-safe rather than asked; if a dangerous operation needs human approval, run it via the main agent.
+
 **Built-in path protection** (PathGuard, no configuration needed, fixed in code):
 
 Evaluation order (first match decides):
@@ -777,7 +781,7 @@ Evaluation order (first match decides):
 
 **Matching syntax**: glob style. `git *` matches `git status` but not `github`; `*secrets*` matches any path containing secrets.
 
-**Verifying it works**: after `/trace on`, trigger a relevant operation; the trace line shows `rule:<pattern>` as the decision basis.
+**Verifying it works**: after `/trace on`, trigger a relevant operation; the trace line shows `rule:<scope>:<pattern>` as the decision basis.
 
 **When changes take effect**: restart mini (loaded once at startup). Or use the `/allow` `/deny` commands at runtime to add rules live — rules with the `--save` flag are written to the project-level permissions.toml and load automatically next startup.
 

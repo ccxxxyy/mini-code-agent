@@ -3133,9 +3133,9 @@ mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions �
 
 **① bash 写命令穿透（已修复）**：`echo HELLO> a.txt`、`mkdir`、`copy`、`move` 都不在危险正则里，plan 下作为普通命令直接放行——实测 LLM 的计划步骤里就写着 `echo HELLO> a.txt`，它不调 exit_plan_mode 也能落盘。修复：`WRITE_COMMAND_PATTERNS`（重定向到真实文件 + 分隔符后的改文件命令）plan 下 DENIED；`>nul`/`>/dev/null`/`2>&1` 是丢弃输出不算写，不误伤 `type x 2>nul` 类只读用法。与危险清单同为减速带诚实边界：混淆仍可逃逸。del/rm 等删除形态同时在危险清单和写清单——plan 下拒绝（强于询问）。
 
-**② spawn_agents 穿透（已修复——禁用）**：`_READ_ONLY_TOOLS` 档案含 bash，且 in-process 子 agent 完全没有权限门（`spawn()` 不传 permission_manager，P82 只接了 pane worker）——plan 下派任何类型的子 agent 都等于绕开只读。限制只读类型不够（其 bash 无门照样写），传播权限栈是中等工程（并发弹窗交错问题），故 plan 下 spawn_agents 直接报错禁用，权限栈传播记 roadmap（B5.1）。
+**② spawn_agents 穿透（已修复——禁用）**：`_READ_ONLY_TOOLS` 档案含 bash，且 in-process 子 agent 完全没有权限门（`spawn()` 不传 permission_manager，P82 只接了 pane worker）——plan 下派任何类型的子 agent 都等于绕开只读。限制只读类型不够（其 bash 无门照样写），传播权限栈是中等工程（并发弹窗交错问题），故 plan 下 spawn_agents 直接报错禁用；权限栈传播后续由 §96 实现，封条改为有门放行/无门禁用。
 
-**③ 非文件写类工具穿透（记 roadmap B5.1）**：`unrestricted_tool` 分支直接放行 install_skill（写磁盘）/task_create（写任务板）/MCP 工具（外部副作用）——需要工具类别税制统一 4 个独立列表后按 模式 × 类别 判定，工作量中，不塞进本条。
+**③ 非文件写类工具穿透（后由 §96 实现）**：`unrestricted_tool` 分支直接放行 install_skill（写磁盘）/MCP 工具（外部副作用）——工具类别税制统一独立列表后按 模式 × 类别 判定，见 §96。
 
 **可观测性补齐**：`PermissionModeChangedEvent`（`set_permission_mode` 发射，启动期无事件循环时跳过）→ trace `mode` 行；`/status` 显示 Permission mode；底部工具栏始终显示 `mode: xxx`（初版仅非 default 显示——实测 approval_mode 配置非法回退 default 时工具栏空白，用户无从确认回退成功，改为始终显示）。**拒绝消息带原因**：`_denied_message()` 把 `last_decision_reason` + 可读提示拼进工具错误（实测光秃的 Permission denied 让 LLM 烧 5 万 token 排查不存在的配置规则）；`_act` 阶段 1 逐工具捕获 `deny_reasons`——`last_decision_reason` 是管理器共享状态，结果构建时已被后续检查覆盖。
 
@@ -3148,3 +3148,63 @@ mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions �
 **剥离引号打开的新洞及其堵法**：`cmd /c "echo x > a.txt"` 的重定向在引号内，剥离后会逃逸——但 `cmd /c` 内联执行本身就是 Windows 版 `sh -c`（引号内任意命令绕过签名匹配），它却不在内联解释器危险清单里（清单收 sh -c/powershell -Command 时漏了它）。补进 `DANGEROUS_COMMAND_PATTERNS`（27→28 条）：`cmd /c` 一律弹确认，引号内重定向经人工确认兜底。安全论证：能把引号内重定向真正执行起来的内联执行器（sh -c / powershell -Command / pwsh -c / cmd /c）现已全部在危险清单内，引号剥离不会放走任何真实写入。
 
 3 个新测试（引号内 `>` 放行 / 不成对引号仍拒 / cmd /c 危险确认）。1098→1101 passed。
+
+## 96. 工具类别税制 + 子 agent 权限栈传播
+
+## 96.1 问题
+
+权限矩阵完整性复查（§95.6）留下的两个结构性缺口：① "工具类别"轴只覆盖 bash + 文件路径——`unrestricted_tool` 分支直接放行 `install_skill`（写磁盘）和 MCP 工具（外部副作用），plan 只读对它们无效；相关工具名单散落 5 处且已漂移（team.py 的本地 `_WRITE_TOOLS` 漏了 delete_file）。② in-process 子 agent 完全没有权限门——`spawn()` 不传 permission_manager（P82 只接了 pane worker），子 agent 的 bash 零检查，任何模式下都是洞。
+
+## 96.2 类别税制
+
+`ToolCategory`（read/write/execute/external）声明在每个 Tool 类上；**未声明默认 EXTERNAL**（保守：plan 拒绝，快照测试强制新工具做一次有意识归类）。矩阵新单元：plan×WRITE 拒绝——类别门在路径检查**之前**，所以无路径参数的 `install_skill` 也逃不掉；plan×EXTERNAL 拒绝——MCP 的进程外副作用无法验证只读，一刀切；bypass×EXTERNAL 显式放行。`task_*` 归 READ 是有意决策：任务板是 agent 的规划笔记本，plan 模式禁它等于禁规划本身。
+
+**类别门必须读 `pm.mode` 而非 `loop.plan_mode`**——子 agent 的 loop 标志是 False，但传播来的权限栈带着父级模式；写在 loop 标志上传播就废了。schema 过滤/流式延迟/act 拦截仍用 loop 标志（它们是主会话的 UX 层），权限层用 pm.mode（它是跨 agent 的真值）。
+
+`_READ_ONLY_TOOLS`（agent_types）**有意保留不合并**：它是类型档案的可用性白名单（explore 该拿到哪些工具），与权限判定（这次调用放不放行）是不同的轴——强行统一会把"能看见"与"能通过"两种语义搅在一起。
+
+## 96.3 权限栈传播
+
+`ChildPermissionManager`（`PermissionManager.child_view()`）的核心是**共享与隔离的边界选择**：规则表/会话授权/写文件集按引用共享（`/allow` `/deny` 实时生效，写后执行检测跨 agent 联动）；`mode` 是委托父级的 property（`/mode` 即时影响运行中子 agent，setter 也写回父级——单一事实源不允许分叉）；`last_decision_reason` 每子实例独立（并行 agent 不互相覆盖 trace 上下文）；**confirm 恒 None**——需要弹窗的一律 `no_ui:default_deny` 安全拒绝，多子 agent 并发弹窗交错问题就此消解而非解决（不弹就不交错）。刻意不调 `super().__init__`：从配置重建会把配置声明的规则重复灌进共享列表。
+
+**联动收益**：B5 的"plan 禁 spawn"封条改为有门放行/无门禁用——子 agent 携带 PLAN 模式，写在权限层被拒，plan 模式恢复派研究 agent 的能力（对齐 Claude Code plan 模式可派 explore agent 的行为）。
+
+**诚实边界**：子 agent 无 confirm 意味着危险命令一律拒绝而非询问——要让子 agent 的危险操作可人工放行需要串行化的跨 loop 确认队列，暂无场景不做。
+
+## 96.4 终端实测暴露的对话框工具流式抢跑（当场修复）
+
+实测 plan 模式下 LLM 调 `ask_user` 问方案调整——弹窗出现时 LLM 流还没结束（trace：`tool ask_user start` 早于 `llm response`），提示符被 trace 行淹没、用户盲打。根因：流式工具执行把 `ask_user` 当普通工具 eager 提交（READ 类别、不弹权限窗，逃过所有延迟判定），但它自己开对话框——对话框不能和流式渲染交错。`exit_plan_mode` 当初按名字特判延迟了，`ask_user` 漏了。修复：Tool ABC 加 `opens_dialog` 声明属性（ask_user/exit_plan_mode 为 True），流式延迟判定按属性而非名字——与类别税制同哲学（声明在工具上，不散落在名单里），新的对话框工具声明即生效。另一个实测确认：plan 模式下 LLM 根本看不到 install_skill（schema 过滤按类别把 4 个 WRITE 工具全滤掉，llm request 显示 16 tools）——类别税制在 schema 层就拦截，比权限层更早；权限层的 mode:plan 拦截作为子 agent（schema 不过滤）和幻觉调用的后备。
+
+## 96.5 传播实测暴露的两个行为缺口（当场修复）
+
+四步终端实测（plan 装技能包/plan 派 explore/plan 派 worker 写文件/deny 规则打子 agent）安全预期 16 项全守住，但暴露两个行为缺口：
+
+**① 子 agent 绕路不熔断**：被 deny 规则拒掉 ping 后，子 agent 连试 9 个工具 10 轮找绕路（cmd /c → python -c → 写脚本再执行→ tool_search），每层都被拦但烧掉大量 token。根因：熔断只计 `user_confirm:no`，子 agent 的拒绝全是自动拒绝不计数。修复：`no_ui:default_deny` 纳入熔断计数——它是"确认拒绝"语义在无头循环中的对应物（本该问人、没人可问、安全拒绝）；策略拒绝（rule:/mode:/敏感路径）仍中性。主会话不受影响（永远有 confirm 回调，不会产生 no_ui）。`_DENY_REASON_HINTS` 的 no_ui 提示同步加"do NOT retry via alternative routes"。
+
+**② 会话规则不可溯源**：主 agent 为查 `rule:ping*` 来源烧了 34 万 token 翻遍源码/配置/事件日志——`/deny` 加的会话规则只存在于内存，无文件可查。修复：拒绝理由带规则来源——`_rule_reason()` 拼 `rule:ping* [/deny session rule, not persisted]`（规则的 reason 字段本就记录来源：config/"permissions.toml(user|project)"/斜杠命令，此前没进判定理由）；运行时规则的 reason 文案同步明确化。LLM 看一眼就知道是会话规则、没有配置文件可找。
+
+4 个新测试（no_ui 触发熔断/策略拒绝中性/规则来源进理由/无 reason 保持原格式）。1120→1124 passed。
+
+## 96.6 复验暴露的两洞（当场修复）
+
+上节两修的复验又抓到两个洞：
+
+**① 方括号来源格式撞 Rich 标记**：`rule:ping* [/deny session rule, not persisted]` 里的 `[/...]` 被 Rich 解析为闭合标记，trace 处理器 MarkupError 崩溃、traceback 刷屏。双重修复：来源格式改圆括号 `rule:ping* (/deny ...)`；trace 渲染器所有动态字段（资源路径/理由/参数预览/用户文字）过 `rich.markup.escape`——含方括号的路径或输入本就是既有崩溃风险，一并堵死。
+
+**② deny 规则被写后执行真实绕过（严重）**：子 agent 被拒 ping 后写 `run_ping.bat` 再**裸文件名执行**——`GRANTED (mode:ask)`，ping 真跑起来了。写后执行检测的正则只认 `./x`、`cmd /c x`、解释器三种形态，Windows 最简单的裸调用漏了。修复：`is_executing_written_script` 新增段首 token 检查（按 `|;&` 切段，每段首 token 解析后查写文件集）——只查首 token，`type run_ping.bat` 这类写后自检的读取不误触发；另补 `call`/`start` 启动形态正则。修复后完整绕过链变为：写脚本（放行）→ 裸调用 → 写后执行确认 → 子 agent 无 UI → 拒绝 + 熔断停。
+
+3 个新测试（裸调用/分隔符/call/start 检出 + 读取不误触发 + 子视图完整链拒绝）。1124→1127 passed。
+
+## 96.7 早停报告带原因与遗留物
+
+四修复验全过后剩两个观察：① 子 agent 熔断报告只有"Stopped early"不带拒绝原因——主 agent 以为是偶发问题**盲目重派了一模一样的子 agent**走同一条死路；② 熔断即停没有清理机会，绕路写的 .bat 留在磁盘（两次重演 = 两个孤儿文件）。一处修复覆盖两者：`SubAgent.run()` 在 `stop_reason == "confirm_denied"` 时，error 消息带上子视图的 `last_decision_reason`（每子实例独立，不会被并行覆盖）+ 明示"Re-spawning will hit the same denial"+ 列出本次 `created` 的文件清单。父级 LLM 看到原因不再重派，看到遗留清单可以清理或告知用户。刻意不自动删：熔断停止的子 agent 也可能留下合法的半成品，删除是父级/用户的判断。1 个新测试（完整链：写 bat→裸调用→no_ui 熔断→报告含原因/劝阻重派/遗留清单）。1127→1128 passed。
+
+**复验再修：报告带全部拒绝原因而非最后一击**——上述修复的复验发现报告取 `last_decision_reason`（熔断那一刻的值 = 最后一次拒绝 `no_ui:default_deny`），而根因 `rule:ping*` 已被覆盖——主 agent 误诊为"缺确认 UI"，建议加白名单/主 agent 代跑（代跑会撞同一规则）。修复：`AgentState.denial_reasons` 累积本轮全部去重拒绝原因（`_check_permission` 每次 DENIED 追加，`run()` 新建 state 自动按轮重置），早停报告列出全序列（根因在前）："Denials encountered: rule:ping* (/deny session rule, not persisted); no_ui:default_deny"。复验通过：主 agent 首次正确点名 deny 规则为根因、不再重派、列出遗留文件——但建议里编造了不存在的 `/permit` 命令、并提议主 agent 代跑（deny 规则对主 agent 同样生效，代跑必撞同一规则）。再补两条事实进报告：拒绝原因含 `rule:` 时附加 "deny rules apply to every agent in this session including the main agent" 与移除命令，让父级不靠猜。
+
+**占位符再修 + 包装绕行真实洞**——上述提示的复验暴露两问题。① 占位符移除命令被错代入：提示写 `/deny remove <command|path|tool> <pattern>`，主 agent 代入成 `/deny remove ping ping*`（scope 填了 "ping"，实际执行会报 Unknown scope）。修复：拒绝理由格式改为内嵌 scope 的 `rule:<scope>:<pattern> (来源)`（如 `rule:command:ping*`），报告从中完整构造可照抄的命令 `/deny remove command "ping*"`——LLM 照抄不会错，占位符会。② 真实规则绕行：子 agent 第二轮试了 `cmd /c "ping -n 2 127.0.0.1"`——trace 显示拒绝原因是 `no_ui:default_deny` 而非 `rule:command:ping*`，即 deny 规则的 glob 匹配没认出包在 cmd /c 里的内层命令，拦住它的只是"cmd /c 属危险命令 → 需确认 → 子 agent 无 UI 兜底拒"这层纵深防御。隐患在主 agent：有 UI 时 `cmd /c "ping x"` 只弹确认框，用户一旦没注意内层是被拒命令就点了同意，规则被实质绕过。修复：deny 匹配引入 `_deny_command_variants`——解包 `cmd /c`/`cmd /k`/`powershell|pwsh -Command`/`sh|bash -c` 包装前缀（递归至 3 层），再对每个变体抹掉成对引号段后按 `&;|` 分段逐段匹配（`echo "a & ping x"` 引号内是数据，不产生 ping 段、不误拒）。allow 规则刻意不解包：扩大 deny 命中面是收紧（fail closed），扩大 allow 授权面是放松（fail open）。5 个新测试（cmd /c 包装、& 串联段、引号数据不误拒、allow 不解包、powershell 包装），1128→1133。
+
+**边界声明（有意不做的部分）**：① 解包匹配是纵深防御非围墙——`p^ing` 转义、`set P=ping & %P%` 变量间接、`powershell -EncodedCommand` 等深度混淆在规则层原理性无法穷尽（完备识别命令最终行为等价于静态分析任意 shell 程序）；分层保证：混淆载体本身在危险命令清单里必弹确认，OS 沙箱是最终围墙；新形态实测暴露一个补一个。② 子 agent 危险操作只能拒不能问——跨 loop 确认队列技术可行（子 agent 挂起 → 确认请求入队 → 主 loop 安全时机弹窗 → 答复回传），但弹窗归属标识、挂起超时、background 完成时用户不在场、打断用户输入等交互成本高，暂无真实场景不做；需要人工放行的危险操作由主 agent 执行。两条边界均已写入 roadmap 遗留行、capabilities、checklist 与配置指南（zh/en）。
+
+## 96.8 验证
+
+19 个新测试（test_tool_categories.py）：20 内置工具类别快照（防漂移）、默认 EXTERNAL、矩阵单元格（plan×WRITE 无路径参数/plan×EXTERNAL/未注册名/bypass×EXTERNAL/default 不变/plan×READ 放行）、子视图（不弹窗拒危险/规则实时共享/mode 双向委托/敏感路径/trace 隔离）、spawn 传播（子视图类型与 mode 跟随/无 pm 无门/plan 有门派生放行）、对话框工具声明快照 + 默认 False。1101→1120 passed。

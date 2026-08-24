@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -27,6 +28,8 @@ class MCPCallTool(Tool):
     调用通过 tool_search 发现的 dispatch 模式 MCP 工具。"""
 
     _name = "mcp_call"
+
+    category = ToolCategory.EXTERNAL
     _description = (
         "Call a dispatch-mode MCP tool by server name and tool name. "
         "Use tool_search first to discover available tools and their parameters."

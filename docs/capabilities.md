@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1101 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1133 个测试全部通过（1 skipped）。
 
 ---
 
@@ -108,7 +108,7 @@
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
-- 权限模式矩阵：`/mode` 运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：写工具禁用 + bash 写形态命令拒绝 + spawn 禁用）/ `bypass`（除安全底线外全免确认）四模式；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
+- 权限模式矩阵：`/mode` 运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：拒绝 WRITE 与 EXTERNAL 类别工具 + bash 写形态命令拒绝；有权限门控传导时允许 spawn 研究型子 Agent——子 Agent 继承 plan 模式、写操作在权限层被拒，无门控时 spawn 仍禁用）/ `bypass`（除安全底线外全免确认，EXTERNAL 类别工具也免确认放行）四模式；矩阵新增**工具类别轴**：每个工具声明 READ/WRITE/EXECUTE/EXTERNAL 类别（未声明的插件工具默认 EXTERNAL 保守处理），类别门控在路径检查之前评估——install_skill 这类无路径参数的工具也被拦住——且读 `permission_manager.mode` 而非循环标志，对子 Agent 同样生效；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
@@ -160,6 +160,7 @@
 - SubAgent：复用 AgentLoop，每个子 Agent 拥有独立对话上下文 + 克隆的工具注册表（可白名单限制）+ 独立工作目录
 - 4 种 Agent 类型（P48）：explore/plan/verify 只读档案 + worker 全能档案，各带专属 prompt/工具白名单/迭代预算；未指定类型回退默认 worker 档案（P80，保留 config 迭代预算）
 - SubAgentManager：spawn（asyncio.create_task 后台启动）/ spawn_parallel（批量并发）/ wait_all（gather 收集）/ cancel / timeout 超时取消
+- 权限栈传导：SubAgentManager 持有主 PermissionManager（app.py 传入），spawn 时经 `child_view()` 给每个进程内子 Agent 注入 ChildPermissionManager 子视图——规则/会话授权/写文件集与父级按引用共享（运行中 /allow /deny 对子 Agent 立即生效）、mode 实时委托父级（/mode 切换即时传导）、需弹窗的请求一律失败安全拒绝（消解并发确认框交错问题；诚实边界：子 Agent 危险操作只能拒不能问——人工放行需跨 loop 确认队列，暂无场景不做）；此前进程内子 Agent 完全没有权限门控（只有 pane worker 有）
 - 失败即数据：子 Agent 异常转 SubAgentResult(success=False)，不炸编排
 - Mailbox 跨 Agent 通信（P58）：共享文件式收件箱，SubAgent 运行中通过 send_message 互发消息、wait_message 阻塞等待；spawn_parallel 预生成 id 让兄弟 Agent 互见（id + 任务摘要）
 - Mailbox 增强（P58.4）：`to='*'` 广播、request/response 结构化协议（request_id 配对 + approve 表态）、名字寻址（spawn_agents names 参数）、会话级审计留痕（drain 标记已读留盘）
@@ -233,7 +234,7 @@
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；28 条危险命令正则（含内联解释器拦截 cmd /c 在内，删除类命令任意形态均拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；确认拒绝熔断（任何确认框被拒——危险命令/项目外路径/hook 确认——连续 `max_consecutive_denials` 次后停止本回合、回问用户，默认 1——拒一次即停，防止被拒后继续找绕过路径；自动策略拒绝如敏感路径/deny 规则不计数、仅跳过继续）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明，无启动警告） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；deny 规则匹配包装与串联命令（解包 cmd /c / cmd /k / powershell -Command / sh -c 前缀 + 抹引号后逐 `&;|` 段匹配，allow 规则不解包——扩大 deny 收紧、扩大 allow 放松；解包是纵深防御非围墙，深度混淆由危险命令确认层与 OS 沙箱兜底）；28 条危险命令正则（含内联解释器拦截 cmd /c 在内，删除类命令任意形态均拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；确认拒绝熔断（任何确认框被拒——危险命令/项目外路径/hook 确认——连续 `max_consecutive_denials` 次后停止本回合、回问用户，默认 1——拒一次即停，防止被拒后继续找绕过路径；自动策略拒绝如敏感路径/deny 规则不计数、仅跳过继续）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明，无启动警告） |
 | 上下文压缩 | 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow），双阈值（75% 软 + 90% 硬绕过熔断器），token 驱动保留窗口，聚合溢写，/compact 手动 |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
@@ -267,7 +268,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1101 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 63 文件 + 集成 5 文件 |
+| 测试 | 1133 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

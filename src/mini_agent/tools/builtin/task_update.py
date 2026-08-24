@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 _VALID_STATUSES = {"pending", "in_progress", "completed", "failed"}
@@ -23,6 +24,7 @@ class TaskUpdateParams(BaseModel):
 
 class TaskUpdateTool(Tool):
     _name = "task_update"
+    category = ToolCategory.READ
     _description = (
         "Update a task's status or description. "
         "Valid statuses: pending, in_progress, completed, failed."

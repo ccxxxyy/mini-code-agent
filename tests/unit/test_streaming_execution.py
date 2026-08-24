@@ -93,12 +93,15 @@ async def test_would_ask_dangerous_command(tmp_path):
 
 
 async def test_would_ask_paths(tmp_path):
+    from mini_agent.models.permissions import ToolCategory
+
     pm, project = make_pm(tmp_path)
-    assert not pm.would_ask("read_file", {"file_path": str(project / "a.py")})
+    read = ToolCategory.READ
+    assert not pm.would_ask("read_file", {"file_path": str(project / "a.py")}, read)
     outside = tmp_path / "outside" / "b.txt"
-    assert pm.would_ask("read_file", {"file_path": str(outside)})
+    assert pm.would_ask("read_file", {"file_path": str(outside)}, read)
     # Sensitive path resolves to DENY without prompting 敏感路径直接 DENY 不弹窗
-    assert not pm.would_ask("read_file", {"file_path": str(Path.home() / ".ssh" / "id_rsa")})
+    assert not pm.would_ask("read_file", {"file_path": str(Path.home() / ".ssh" / "id_rsa")}, read)
 
 
 async def test_would_ask_unrestricted_tool(tmp_path):

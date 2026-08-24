@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -17,6 +18,7 @@ class TaskGetParams(BaseModel):
 
 class TaskGetTool(Tool):
     _name = "task_get"
+    category = ToolCategory.READ
     _description = "Get details of a specific task by its ID or prefix."
     params_model = TaskGetParams
 

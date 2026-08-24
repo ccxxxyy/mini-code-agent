@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 MAX_MATCHES = 200
@@ -37,6 +38,7 @@ class GrepParams(BaseModel):
 
 class GrepTool(Tool):
     _name = "grep"
+    category = ToolCategory.READ
     _description = (
         "Search file contents using a regular expression. "
         "Returns matching lines with file path and line number."

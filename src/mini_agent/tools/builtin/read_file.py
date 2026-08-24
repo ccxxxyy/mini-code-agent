@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -24,6 +25,7 @@ class ReadFileParams(BaseModel):
 
 class ReadFileTool(Tool):
     _name = "read_file"
+    category = ToolCategory.READ
     _description = (
         "Read the contents of a file at the given path. "
         "Returns file content with line numbers. "

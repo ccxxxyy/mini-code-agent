@@ -157,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 63 unit test files, 1101 tests
+│   ├── unit/                        # 64 unit test files, 1133 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -641,6 +641,17 @@ class PermissionMode(StrEnum):
     BYPASS = "bypass"              # everything auto-approved except deny/sensitive
 
 
+class ToolCategory(StrEnum):
+    """Tool category axis of the mode x category permission matrix.
+    工具类别轴——与 PermissionMode 组成 模式×类别 权限矩阵。
+    未声明 category 的插件工具默认 EXTERNAL（保守取向）。"""
+
+    READ = "read"          # read_file / glob / grep / tool_search / task_* / ask_user / exit_plan_mode / load_skill / send_message / wait_message
+    WRITE = "write"        # write_file / edit_file / delete_file / install_skill
+    EXECUTE = "execute"    # bash / spawn_agents
+    EXTERNAL = "external"  # mcp_call + 全部 MCP 适配工具
+
+
 @dataclass(frozen=True)
 class PermissionRule:
     scope: PermissionScope
@@ -932,6 +943,7 @@ class Tool(ABC):
     """Base class for all tools (builtin + MCP-adapted)."""
 
     params_model: type | None = None  # Pydantic BaseModel for auto schema (P46)
+    category: ToolCategory = ToolCategory.EXTERNAL  # 权限矩阵类别轴，未声明默认 EXTERNAL（保守）
 
     @property
     def schema(self) -> ToolSchema:
@@ -1219,6 +1231,15 @@ class PermissionManager:
         TOOL    -> _check_generic (rules -> session grants -> default mode)"""
         ...
 
+    def child_view(self) -> "ChildPermissionManager":
+        """Create a child view for in-process sub-agents. 为进程内子 Agent
+        创建权限栈子视图：规则列表 / 会话授权 / 写文件集与父级**按引用共享**
+        （运行中 /allow /deny 对子 Agent 立即生效）；`mode` 为属性、实时委托
+        父级（/mode 切换即时传导）；确认回调恒为 None——任何需要弹窗的
+        请求一律失败安全拒绝（no_ui:default_deny），从而消解并发确认框
+        交错问题。"""
+        ...
+
     async def check_tool(self, tool_name: str) -> PermissionDecision | None:
         """Tool-level gate: explicit TOOL rules and session grants only.
         None = no match, caller falls through to resource-level checks."""
@@ -1478,6 +1499,7 @@ class SubAgentManager:
         model_name: str = "",
         mailbox: Mailbox | None = None,
         confirm_callback: ConfirmCallback | None = None,
+        permission_manager: PermissionManager | None = None,  # app.py 传入主权限管理器；spawn() 经 child_view() 派生子视图注入每个进程内子 Agent
     ): ...
 
     async def spawn(
@@ -2647,7 +2669,7 @@ class MemoryExtractor:
 +---------------------------------------------------------------+
 ```
 
-**命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。**权限模式矩阵的插入点**：`PermissionMode.PLAN` 在规则判定后立即拒绝写形态命令（`WRITE_COMMAND_PATTERNS`：重定向到真实文件 + mkdir/copy/move/del 等，`>nul`/`>/dev/null`/`2>&1` 丢弃型放行）；敏感文件命令确认排在 bypass 短路**之前**——任何模式都不能静默放行 `type .env`；`PermissionMode.BYPASS` 在其后免确认放行剩余命令（含危险命令）。
+**命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。**权限模式矩阵的插入点**：`PermissionMode.PLAN` 在规则判定后立即拒绝写形态命令（`WRITE_COMMAND_PATTERNS`：重定向到真实文件 + mkdir/copy/move/del 等，`>nul`/`>/dev/null`/`2>&1` 丢弃型放行）；敏感文件命令确认排在 bypass 短路**之前**——任何模式都不能静默放行 `type .env`；`PermissionMode.BYPASS` 在其后免确认放行剩余命令（含危险命令）。**模式×类别矩阵**：每个工具声明 `category: ToolCategory`（READ / WRITE / EXECUTE / EXTERNAL，未声明的插件工具默认 EXTERNAL），`agent_loop._check_permission` 在路径检查**之前**评估类别格——plan×WRITE 拒绝（mode:plan）、plan×EXTERNAL 拒绝（MCP 外部副作用无法核实为只读）、bypass×EXTERNAL 放行（mode:bypass）——因此 install_skill 这类无路径参数的工具也被拦住。类别门控读的是 `permission_manager.mode` 而非循环的 plan_mode 标志，故对子 Agent 同样生效。
 
 **危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 28 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c`/`cmd /c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
 
@@ -2834,7 +2856,7 @@ async def spawn(
     return agent.agent_id
 ```
 
-`SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
+`SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估——`SubAgentManager` 持有主权限管理器，`spawn()` 经 `PermissionManager.child_view()` 给每个进程内子 Agent 派生 `ChildPermissionManager` 子视图：规则/会话授权/写文件集按引用共享、mode 实时委托父级、需弹窗一律失败安全拒绝；此前进程内子 Agent 完全没有权限门控，只有 pane worker 有），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
 
 **后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。默认 `background=false` 保持阻塞语义（需要全部结果再继续的场景）。`/spawn --background <task>` 斜杠命令走 `spawn_background()` 路径，完成后自动投递结果（无需 `/spawn wait`）。
 

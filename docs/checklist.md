@@ -290,7 +290,16 @@
 - [x] 权限模式矩阵——`PermissionMode` 枚举（default/accept-edits/plan/bypass）嵌入 `PermissionManager` 命令/路径管道和 `would_ask()`；deny 规则、敏感路径、敏感文件命令（`type .env` 类）所有模式下有效（bypass 也拦）；`/mode` 运行时切换（bypass 附警告，plan 同步系统提示词）；`/plan`、`exit_plan_mode` 经 `Application.set_permission_mode()` 联动；`[security] approval_mode` 设启动模式（非法值回退 default，`enable_plan_mode` 兼容）
 - [x] exit_plan_mode 用户审批门——LLM 不能自行解除只读限制：弹 yes/no 由用户裁决，拒绝保持 plan 模式，无 UI 回调拒绝退出（安全默认）；流式执行延迟该工具（审批弹窗不与流式渲染交错）；22 个新测试（test_permission_modes.py + test_process_tools.py）
 - [x] plan 只读覆盖 bash 通道——`WRITE_COMMAND_PATTERNS` 写形态命令（重定向到真实文件/mkdir/copy/move/del 等）plan 下直接拒绝；`>nul`/`>/dev/null`/`2>&1` 丢弃型重定向不误伤
-- [x] plan 下 spawn_agents 禁用——in-process 子 agent 不带权限门，任何派生都是只读逃逸口（权限栈传播见 roadmap 后续项）
+- [x] plan 下 spawn_agents 有门放行/无门禁用——权限栈传播后子 agent 携带父级 PLAN 模式（写在权限层被拒），可派研究 agent；无权限栈传播的旧式嵌入场景仍禁用
+- [x] 工具类别税制——`ToolCategory`（read/write/execute/external）声明在每个 Tool 类上（默认 EXTERNAL 保守），统一 5 份独立列表（`_WRITE_TOOLS`×2/路由列表/would_ask 列表/schema 过滤）；矩阵新单元：plan×WRITE 拒绝（覆盖无路径参数的 install_skill）、plan×EXTERNAL 拒绝（MCP）、bypass×EXTERNAL 放行；类别门用 `pm.mode` 而非 loop 标志（子 agent 传播生效关键）；20 个内置工具类别快照测试
+- [x] 子 agent 权限栈传播——`ChildPermissionManager` 共享父级规则/授权/写文件集（引用共享，/deny /mode 实时生效），mode 为委托父级的 property，confirm 恒 None（需弹窗处安全拒绝）；`SubAgentManager.spawn()` 传子视图；`has_permission_gate` 属性
+- [x] 对话框工具不流式抢跑——Tool ABC `opens_dialog` 属性（ask_user/exit_plan_mode），流式延迟按属性判定（实测 ask_user 弹窗被流淹没后修复）
+- [x] 无头熔断——`no_ui:default_deny` 纳入确认拒绝熔断（有门子 agent 被拒后不再无限找绕路；策略拒绝 rule:/mode: 仍中性）
+- [x] 规则来源进拒绝理由——`rule:<scope>:<pattern> (来源)`（圆括号避 Rich 标记；/deny 会话规则/--save/config/permissions.toml），LLM 不再为内存规则翻配置文件，scope 使报告能给出可照抄的移除命令
+- [x] deny 规则匹配包装与串联命令——解包 `cmd /c`/`cmd /k`/`powershell -Command`/`sh -c` 前缀 + 抹引号后逐 `&;|` 段匹配（`cmd /c "ping x"` 曾绕过 `ping*` 规则仅靠危险命令层兜底）；allow 规则不解包（扩大 deny 收紧、扩大 allow 放松）；引号内数据不误拒；**边界已文档化**：解包是纵深防御非围墙，深度混淆（转义/变量间接/base64）由危险命令确认层与 OS 沙箱兜底
+- [x] trace 动态字段全转义——路径/理由/参数/用户文字过 `rich.markup.escape`（实测含 `[/...]` 的理由曾致 MarkupError 崩溃刷屏）
+- [x] 写后执行检测补裸调用——段首 token 查写文件集 + call/start 形态（实测子 agent 写 run_ping.bat 裸执行绕过 deny 规则）；读取写过的文件（type x.bat）不误触发
+- [x] 子 agent 熔断报告带原因与遗留——`confirm_denied` 早停时 error 含**本轮全部去重拒绝原因（根因在前，AgentState.denial_reasons）**（防父级盲目重派或误诊）+ 本次创建文件清单（熔断即停无清理机会，列出而非自动删）；rule 拒绝附带可照抄的移除命令（`/deny remove <scope> "<pattern>"` 完整代入）与"对所有 agent 生效"事实（防父级编造命令或提议代跑——占位符写法实测被错代入）
 - [x] 模式可观测——`PermissionModeChangedEvent` + trace `mode` 行 + `/status` 显示 Permission mode + 底部工具栏始终显示 `mode: xxx`；6 个新测试
 - [x] 权限拒绝消息带原因——`_denied_message()` 把 `last_decision_reason` 和可读提示拼进工具错误（实测：光秃 Permission denied 让 LLM 烧 5 万 token 排查不存在的配置）
 - [x] `inherit_context=true` / `/spawn --fork` 摘要式上下文 fork——父对话 LLM 摘要注入子 agent system prompt

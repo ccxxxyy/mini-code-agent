@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -17,6 +18,7 @@ class LoadSkillParams(BaseModel):
 
 class LoadSkillTool(Tool):
     _name = "load_skill"
+    category = ToolCategory.READ
     _description = (
         "Activate an installed skill by name. The skill's prompt is injected "
         "into the system prompt. Use /skill list to see available skills."

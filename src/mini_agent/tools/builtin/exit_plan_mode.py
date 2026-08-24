@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -17,6 +18,8 @@ class ExitPlanModeParams(BaseModel):
 
 class ExitPlanModeTool(Tool):
     _name = "exit_plan_mode"
+    category = ToolCategory.READ
+    opens_dialog = True
     _description = (
         "Request to exit plan mode after presenting your plan. The USER "
         "must approve -- plan mode stays active until they do. Only call "

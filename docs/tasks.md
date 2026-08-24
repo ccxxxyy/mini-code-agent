@@ -1392,11 +1392,28 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `tools/builtin/exit_plan_mode.py` — 用户审批门：`ask_user_callback` 弹 yes/no，拒绝保持 plan 模式，无 UI 拒绝退出（实测 LLM 曾自批退出同批写文件）；`agent_loop.py` 流式执行延迟该工具
 - [x] 22 个新测试（test_permission_modes.py 20：四模式矩阵单元格 + bypass 底线三不变量 + would_ask 短路 + 枚举解析；test_process_tools.py：审批/拒绝/无 UI 三路径）
 - [x] `security/permission.py` — `WRITE_COMMAND_PATTERNS` + `is_write_command()`：plan 下 bash 写形态命令（重定向/改文件命令）直接拒绝，丢弃型重定向（>nul、>/dev/null、2>&1）放行；`_would_ask_command` 同步
-- [x] `tools/builtin/spawn_agents.py` — plan 模式下报错禁用（子 agent 无权限门，派生即只读逃逸）
+- [x] `tools/builtin/spawn_agents.py` — plan 模式下报错禁用（子 agent 无权限门，派生即只读逃逸；后由权限栈传播改为有门放行/无门禁用）
 - [x] `models/events.py` + `app.py` + `ui/trace.py` — `PermissionModeChangedEvent` 切换时发射（启动期无循环跳过），trace 显示 `mode old -> new` 行
 - [x] `extensions/builtin_commands.py` `/status` 显示 Permission mode；`app.py` 底部工具栏始终显示 `mode: xxx`
 - [x] `core/agent_loop.py` — `_denied_message()` 权限拒绝消息带原因（`last_decision_reason` + 可读提示），逐工具捕获 deny_reasons 防共享状态过期
 - [x] 6 个新测试（plan bash 写拒绝/只读放行/default 不受影响/would_ask 一致；spawn plan 禁用/非 plan 放行）
+
+### 工具类别税制 + 子 agent 权限栈传播
+- [x] `models/permissions.py` — `ToolCategory` StrEnum（read/write/execute/external）
+- [x] `tools/base.py` — Tool ABC 加 `category` 类属性，默认 EXTERNAL（未声明的插件工具保守处理）；20 个内置工具逐一声明 + MCPToolAdapter 显式 EXTERNAL
+- [x] `core/agent_loop.py` — `_category()` 辅助（未注册名字视为 EXTERNAL）；schema 过滤/流式延迟/act 拦截/`_check_permission` 路由全部类别驱动；类别门（plan×WRITE 拒、plan×EXTERNAL 拒、bypass×EXTERNAL 放行）用 `pm.mode` 而非 loop 标志；`_WRITE_TOOLS` 常量删除
+- [x] `core/team.py` — 非写步骤的写工具剥离改按类别派生（原本地清单漂移漏了 delete_file，顺带修复）
+- [x] `security/permission.py` — `would_ask()` 加 category 参数（名字清单删除）；`ChildPermissionManager` + `child_view()`：共享规则/授权/写文件集（引用共享实时生效），mode 委托父级 property，confirm 恒 None 安全拒绝
+- [x] `core/subagent.py` — `SubAgentManager` 接收 permission_manager，`spawn()` 为每个子 agent 创建独立子视图；`has_permission_gate` 属性
+- [x] `app.py` — SubAgentManager 传入主 permission_manager
+- [x] `tools/builtin/spawn_agents.py` — plan 封条条件化：有权限门放行（子 agent 被门住），无门保持禁用
+- [x] 17 个新测试（test_tool_categories.py：20 工具类别快照/默认 EXTERNAL/矩阵单元格×5/子视图不弹窗/规则实时共享/mode 双向委托/敏感路径/trace 隔离/spawn 传播/无门无 gate/plan 有门派生放行）
+- [x] `tools/base.py` — Tool ABC 加 `opens_dialog` 属性；ask_user/exit_plan_mode 声明 True；流式延迟按属性判定（实测 ask_user 弹窗被流式渲染淹没——eager 判定漏了它）；2 个新测试
+- [x] `core/agent_loop.py` — 熔断计数纳入 `no_ui:default_deny`（实测子 agent 被拒 ping 后连试 9 工具 10 轮找绕路）；no_ui 提示加"勿换路重试"
+- [x] `security/permission.py` — `_rule_reason()` 拒绝理由带规则来源（圆括号格式）；`extensions/builtin_commands.py` 运行时规则 reason 明确化（`/deny session rule, not persisted` / `/deny --save`）；4 个新测试
+- [x] `ui/trace.py` — 动态字段（resource/reason/参数预览/用户文字）全部 `rich.markup.escape`（方括号理由曾致 MarkupError）
+- [x] `security/permission.py` — `is_executing_written_script` 段首 token 检查（裸 `run_ping.bat` 调用，实测绕过后修复）+ `call`/`start` 形态正则；3 个新测试
+- [x] `core/subagent.py` + `core/agent_state.py` — `AgentState.denial_reasons` 累积本轮全部去重拒绝原因；熔断早停报告列全序列（根因在前）+ rule 拒绝附带可照抄移除命令（scope 内嵌拒绝理由）与全局生效事实 + created 文件清单（实测四轮：盲目重派+孤儿 .bat → 只带最后一击致误诊 → 编造 /permit 并提议代跑 → 占位符被错代入）；deny 规则解包 cmd /c 等包装并逐段匹配（实测 cmd /c 绕过 ping* 规则）；6 个新测试
 
 ## 会话自动清理 (comparison 9.1)
 

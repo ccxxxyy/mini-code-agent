@@ -9,11 +9,10 @@ from dataclasses import dataclass, field
 
 from mini_agent.core.planner import Plan, Planner
 from mini_agent.core.subagent import SubAgentManager, SubAgentResult
+from mini_agent.models.permissions import ToolCategory
 
 logger = logging.getLogger(__name__)
 
-# Tools stripped from non-writer steps 非写文件步骤被剥夺的工具
-_WRITE_TOOLS = {"write_file", "edit_file"}
 
 # Noise directories excluded from the structure scan 结构扫描排除的噪音目录
 _SCAN_IGNORE = {".git", ".venv", "node_modules", "__pycache__", ".mini-agent", "dist", ".idea"}
@@ -124,14 +123,22 @@ class AgentTeam:
             for step in ready:
                 member = self._match_member(step.role)
                 allowed_tools = member.allowed_tools if member else None
-                # Enforce read-only for non-writer steps: strip write tools
-                # so prompts can't be ignored -- capability removal, not persuasion
-                # 非写文件步骤强制只读：剥夺写工具能力，而非依赖 prompt 自觉
+                # Enforce read-only for non-writer steps: strip write-category
+                # tools so prompts can't be ignored -- capability removal, not
+                # persuasion. Category-derived (was a local name list that had
+                # drifted: it missed delete_file).
+                # 非写文件步骤强制只读：剥夺写类别工具能力，而非依赖 prompt
+                # 自觉。按类别派生（原本地名单已漂移：漏了 delete_file）。
                 if not step.writes_files:
+                    write_names = [
+                        t.schema.name
+                        for t in self._manager._tools.list_tools()
+                        if t.category is ToolCategory.WRITE
+                    ]
                     allowed_tools = [
                         t.schema.name
                         for t in self._manager._tools.filter(
-                            allowed=allowed_tools, denied=list(_WRITE_TOOLS)
+                            allowed=allowed_tools, denied=write_names
                         )
                     ]
                 step.status = "in_progress"

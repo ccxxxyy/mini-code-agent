@@ -313,7 +313,7 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 - `/plan [on|off]` 命令切换 + system prompt 注入只读提示
 - bash 保留只读用途（type/dir/git status 等研究命令可用）；写形态命令（重定向到真实文件、mkdir/copy/move/del 等）由权限矩阵在 plan 下直接拒绝——mewcode 全禁 bash，mini 保留只读能力
 
-**权限模式矩阵 ✅ 已对齐 mewcode `permissions/modes.py`**：`PermissionMode` 四模式（default / accept-edits / plan / bypass）嵌入 `PermissionManager` 命令/路径管道——accept-edits 写免确认（危险命令仍询问）、plan 在权限层加写拒绝第三重锁、bypass 除 deny 规则和敏感路径外全免确认（安全底线所有模式有效）。`/mode` 运行时切换，`[security] approval_mode` 设启动模式，plan 相关三个入口（/plan、/mode、exit_plan_mode 工具）经 `Application.set_permission_mode()` 统一收敛。
+**权限模式矩阵 ✅ 已对齐 mewcode `permissions/modes.py`**：`PermissionMode` 四模式（default / accept-edits / plan / bypass）嵌入 `PermissionManager` 命令/路径管道——accept-edits 写免确认（危险命令仍询问）、plan 在权限层加写拒绝第三重锁、bypass 除 deny 规则和敏感路径外全免确认（安全底线所有模式有效）。`/mode` 运行时切换，`[security] approval_mode` 设启动模式，plan 相关三个入口（/plan、/mode、exit_plan_mode 工具）经 `Application.set_permission_mode()` 统一收敛。**模式×类别矩阵已补全**：每个工具声明 READ / WRITE / EXECUTE / EXTERNAL 四类别之一（未声明的插件工具默认 EXTERNAL 保守处理），类别门控在路径检查之前评估——plan 拒 WRITE 与 EXTERNAL、bypass 放行 EXTERNAL——无路径参数的工具（如 install_skill）也被覆盖；原先散落漂移的五份写工具名单（agent_loop / team / 权限路由 / would_ask / plan schema 过滤）统一从类别推导，消除了 team 侧漏掉 delete_file 的漂移。**进程内子 Agent 继承权限栈**：spawn 时经 `child_view()` 注入父权限管理器的子视图（规则按引用共享、mode 实时委托、需弹窗一律失败安全拒绝），子 Agent 携带父级 plan 模式——plan 下允许派生研究型子 Agent，其写操作在权限层被拒。
 
 ---
 
@@ -612,7 +612,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 **验证**：24 个单测（探测含 wt-window 降级/命令构造/失败路径/WorkerSpec 往返/管理器收集/超时/取消/桩文件拒绝/崩溃护栏/worker MockLLM 全链路/4 进程并发零丢失）+ **真实 LLM 跨进程 E2E**：worker 子进程注册（父进程注册表实时可见）→ send_message 跨进程送达 main → 注销 → 结果文件收集，全链路 PASS；另经六轮交互式真实使用验证（多窗格并发、失败路径、大任务长时等待）
 
-**已知限制**：见 [roadmap.md](roadmap.md) "已知限制"章节。P82 已修复 worker 权限缺口：完整权限栈（PathGuard + PermissionManager + RemoteConfirm 文件协议），危险命令通过文件中转到父进程弹窗确认（超时 120s 安全拒绝）。
+**已知限制**：见 [roadmap.md](roadmap.md) "已知限制"章节。P82 已修复 worker 权限缺口：完整权限栈（PathGuard + PermissionManager + RemoteConfirm 文件协议），危险命令通过文件中转到父进程弹窗确认（超时 120s 安全拒绝）。进程内子 Agent 的权限缺口也已补上——此前只有 pane worker 有权限栈、in-process 子 Agent 完全没有门控；现在 spawn 时经 `PermissionManager.child_view()` 注入子视图（规则/会话授权按引用共享、/mode /allow /deny 对运行中子 Agent 实时生效、需弹窗的请求失败安全拒绝，消解并发确认框交错）。
 
 ### 6.5 Worktree 完善 ✅ 已实现（P54）
 

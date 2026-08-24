@@ -17,6 +17,7 @@ from mini_agent.models.permissions import (
     PermissionMode,
     PermissionRule,
     PermissionScope,
+    ToolCategory,
 )
 from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
@@ -165,8 +166,8 @@ async def test_accept_edits_still_denies_sensitive_write(path_guard, project_dir
 async def test_accept_edits_would_ask_false_for_write(path_guard, tmp_path):
     pm = make_pm(path_guard, PermissionMode.ACCEPT_EDITS)
     outside = str(tmp_path / "other" / "file.txt")
-    assert pm.would_ask("write_file", {"file_path": outside}) is False
-    assert pm.would_ask("read_file", {"file_path": outside}) is True
+    assert pm.would_ask("write_file", {"file_path": outside}, ToolCategory.WRITE) is False
+    assert pm.would_ask("read_file", {"file_path": outside}, ToolCategory.READ) is True
 
 
 # --- plan ---
@@ -267,7 +268,7 @@ async def test_plan_allows_read_in_project(path_guard, project_dir):
 async def test_plan_would_ask_false_for_write(path_guard, tmp_path):
     pm = make_pm(path_guard, PermissionMode.PLAN)
     outside = str(tmp_path / "other" / "file.txt")
-    assert pm.would_ask("write_file", {"file_path": outside}) is False
+    assert pm.would_ask("write_file", {"file_path": outside}, ToolCategory.WRITE) is False
 
 
 # --- default: behavior unchanged ---

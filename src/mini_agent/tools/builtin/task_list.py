@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from mini_agent.models.message import ToolResult
+from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
@@ -17,6 +18,7 @@ class TaskListParams(BaseModel):
 
 class TaskListTool(Tool):
     _name = "task_list"
+    category = ToolCategory.READ
     _description = "List all tasks on the persistent task board."
     params_model = TaskListParams
 
