@@ -73,18 +73,58 @@ async def test_ask_user_free_text(tmp_path):
 # --- exit_plan_mode ---
 
 
-async def test_exit_plan_mode_success(tmp_path):
+async def test_exit_plan_mode_approved(tmp_path):
     state = {"plan_mode": True}
     ref = types.SimpleNamespace(
         get_plan_mode=lambda: state["plan_mode"],
         set_plan_mode=lambda v: state.__setitem__("plan_mode", v),
     )
-    ctx = _ctx(tmp_path, agent_loop_ref=ref)
+
+    async def approve(q, choices):
+        return "yes"
+
+    ctx = _ctx(tmp_path, agent_loop_ref=ref, ask_user_callback=approve)
     tool = ExitPlanModeTool()
     result = await tool.execute(ctx)
     assert not result.is_error
-    assert "Plan mode exited" in result.output
+    assert "Plan approved" in result.output
     assert state["plan_mode"] is False
+
+
+async def test_exit_plan_mode_rejected_stays_in_plan(tmp_path):
+    """User says no -> plan mode stays on, LLM told to revise.
+    用户拒绝 -> 保持 plan 模式，提示 LLM 修改计划。"""
+    state = {"plan_mode": True}
+    ref = types.SimpleNamespace(
+        get_plan_mode=lambda: state["plan_mode"],
+        set_plan_mode=lambda v: state.__setitem__("plan_mode", v),
+    )
+
+    async def reject(q, choices):
+        return "no"
+
+    ctx = _ctx(tmp_path, agent_loop_ref=ref, ask_user_callback=reject)
+    tool = ExitPlanModeTool()
+    result = await tool.execute(ctx)
+    assert not result.is_error
+    assert "did NOT approve" in result.output
+    assert state["plan_mode"] is True
+
+
+async def test_exit_plan_mode_no_ui_stays_in_plan(tmp_path):
+    """No ask_user callback (subagent/script) -> refuse to exit (safe).
+    无提问回调（子 agent/脚本）-> 拒绝退出（安全默认）。"""
+    state = {"plan_mode": True}
+    ref = types.SimpleNamespace(
+        get_plan_mode=lambda: state["plan_mode"],
+        set_plan_mode=lambda v: state.__setitem__("plan_mode", v),
+    )
+    ctx = _ctx(tmp_path, agent_loop_ref=ref, ask_user_callback=None)
+    tool = ExitPlanModeTool()
+    result = await tool.execute(ctx)
+    assert result.is_error
+    assert "Staying in plan mode" in result.output
+    assert state["plan_mode"] is True
 
 
 async def test_exit_plan_mode_not_in_plan(tmp_path):

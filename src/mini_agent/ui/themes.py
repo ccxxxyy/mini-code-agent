@@ -23,7 +23,7 @@ class Theme:
     # User input line: typed text + framing rules. Bright so the line is
     # instantly findable in scrollback. 用户输入行：文字 + 上下横线。
     # 亮色确保滚动历史中一眼可辨。
-    user_input: str = "#ffaf00"
+    user_input: str = "#5fd7ff"
 
 
 THEMES: dict[str, Theme] = {
@@ -37,7 +37,7 @@ THEMES: dict[str, Theme] = {
         menu_bg="#1a1a2e",
         menu_select="#3d5afe",
         heading="#2ecc71",
-        user_input="#ffaf00",
+        user_input="#5fd7ff",  # bright light blue 亮浅蓝
     ),
     "dark": Theme(
         name="dark",
@@ -49,7 +49,7 @@ THEMES: dict[str, Theme] = {
         menu_bg="#16161e",
         menu_select="#ff9e64",
         heading="#ff9e64",  # same as prompt 与提示符同色（橙）
-        user_input="#ff9e64",
+        user_input="#7dcfff",  # tokyo night light blue 亮浅蓝
     ),
     "light": Theme(
         name="light",
@@ -61,7 +61,7 @@ THEMES: dict[str, Theme] = {
         menu_bg="#f6f8fa",
         menu_select="#0550ae",
         heading="#9ece6a",  # dark theme's yellow-green 用 dark 的黄绿
-        user_input="#b35900",
+        user_input="#0969da",  # readable blue on white bg 白底可读蓝
     ),
 }
 

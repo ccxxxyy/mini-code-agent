@@ -98,6 +98,7 @@
 ```
 
 参数说明：
+
 | 参数 | 说明 |
 |---|---|
 | `--pane` | 需要 tmux 会话、Windows Terminal 会话（分屏）或装有 wt.exe 的任意终端（降级为共享窗口 mini-agents 的新标签页）。无可用后端时明确报错 |
@@ -120,7 +121,28 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 ```
 
 ### /plan [on|off]
-切换只读计划模式（写类工具禁用）。无参数显示当前状态。
+切换只读计划模式（写类工具禁用）。无参数显示当前状态。  
+现在通过统一的权限模式切换实现：`on` 等价于 `/mode plan`，`off` 等价于 `/mode default`。
+
+### /mode [name]
+查看或切换会话级权限模式。无参数显示当前模式及全部模式说明。
+```
+/mode                # 显示当前模式 + 四种模式说明
+/mode accept-edits   # 切换到 accept-edits（别名 acceptedits/accept_edits 也可）
+/mode bypass         # 切换到 bypass（别名 bypasspermissions 也可，切换时显示警告）
+```
+四种模式：
+
+| 模式 | 行为 |
+|---|---|
+| `default` | 默认行为：危险命令 / 项目外路径弹窗确认 |
+| `accept-edits` | 文件写入自动放行（项目内外均是）；危险命令仍确认；项目外读取仍确认 |
+| `plan` | 只读计划模式：写类工具禁用 + bash 写形态命令（重定向/mkdir/copy/move/del 等）拒绝 + spawn_agents 禁用，即原 `/plan on` |
+| `bypass` | 全部自动放行——但显式 DENY 规则和敏感路径（`~/.ssh`、`.env` 等）例外 |
+
+注意：DENY 规则和敏感路径在**所有模式**下都生效，bypass 也不例外。  
+切换进出 plan 模式会同步计划模式系统提示词；`exit_plan_mode` 工具需**用户批准计划**（yes/no 提问）后才退出 plan 模式并重置为 default——LLM 不能自行解除只读限制，拒绝则保持 plan 模式。  
+启动时的默认模式可通过 config.toml 的 `[security] approval_mode` 配置（见配置指南）。
 
 ---
 
@@ -244,7 +266,39 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 
 ---
 
-## 八、通用行为
+## 八、命令效果的持久化范围
+
+设置类命令分两档：**会话级**（重启即失效，回到配置文件的启动值）和**持久化**（写盘，跨会话生效）。
+
+会话级（重启失效）：
+
+| 命令 | 说明 |
+|---|---|
+| `/allow` `/deny`（不带 `--save`） | 规则只存会话内存；`/deny remove` 也只删会话内规则——TOML 里的下次启动仍会加载 |
+| `/mode` | 重启回到 `[security] approval_mode` 配置值 |
+| `/plan` | 同上（`enable_plan_mode` 配置控制启动值） |
+| `/trace` `/explain` | 开关不落盘 |
+| `/model` | 切换 LLM Profile 仅本会话 |
+| `/audit on/off` | 开关是会话级（审计日志文件本身持久） |
+| `/skill activate/deactivate` | 激活状态注入 system prompt，仅本会话 |
+| 确认弹窗的 `a`（always） | 会话授权，重启清空 |
+
+持久化（写盘位置）：
+
+| 命令 | 落盘位置 |
+|---|---|
+| `/allow` `/deny` **--save** | 项目 `.mini-agent/permissions.toml`（每次启动自动加载） |
+| `/theme` | `~/.mini-agent/.theme` |
+| `/memory add` | 项目 `.mini-agent/memory.json` / 用户 `~/.mini-agent/memory/` |
+| `/session save/tag` | `~/.mini-agent/sessions/` |
+| `/todo` | 项目 `.mini-agent/tasks.json` |
+| `/record` | `~/.mini-agent/recordings/` |
+
+另有两类启动加载的磁盘扩展（非命令创建，天然持久）：自定义 agent 类型（`./.mini-agent/agents/*.md`、`~/.mini-agent/agents/*.md`）、事件监听插件（`./.mini-agent/listeners/*.py`、`~/.mini-agent/listeners/*.py`）、工具/命令插件（`plugin_dirs`）。**`.mini-agent/` 整个目录在 .gitignore 中**——permissions.toml、memory.json、自定义 agent/listener 等都不会被提交或推送到远程仓库；想与团队共享需主动移出该目录或调整 .gitignore。
+
+---
+
+## 九、通用行为
 
 - 命令在本地执行，输错命令名会提示全部可用命令
 - 命令 handler 抛异常不会杀死会话（显示 "Command failed: ..." 后继续）

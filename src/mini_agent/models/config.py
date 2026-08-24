@@ -106,6 +106,11 @@ class MemoryConfig:
 @dataclass
 class SecurityConfig:
     permission_mode: str = "ask"
+    # Startup permission mode (matrix): default / accept-edits / plan / bypass.
+    # Runtime switch via /mode. Deny rules and sensitive paths hold in every
+    # mode. 启动权限模式（矩阵）：default / accept-edits / plan / bypass，
+    # 运行时用 /mode 切换。deny 规则和敏感路径在所有模式下有效。
+    approval_mode: str = "default"
     allowed_commands: list[str] = field(default_factory=list)
     denied_commands: list[str] = field(
         default_factory=lambda: ["rm -rf /", "sudo", "curl|sh", "wget|sh"]

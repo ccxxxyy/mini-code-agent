@@ -1373,7 +1373,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 3 个新 has_pending 测试（test_mailbox.py：有未读/drain 后无/未注册返回 False）
 
 ### 用户输入行醒目化
-- [x] `ui/themes.py` — Theme 新增 `user_input` 字段：default `#ffaf00` 亮橙 / dark `#ff9e64` / light `#b35900`
+- [x] `ui/themes.py` — Theme 新增 `user_input` 字段：default `#5fd7ff` 亮浅蓝 / dark `#7dcfff` / light `#0969da`
 - [x] `ui/input_handler.py` — `create_prompt_style()` 根样式 `bold {theme.user_input}`，输入文字打字时和回车后均醒目着色（菜单/工具栏/滚动条 noinherit 不受影响）
 - [x] `ui/terminal.py` — `_input_rule()` 输入行上下各一条 `user_input` 色横线（上边线输入前、下边线输入确认后；`_BG_INTERRUPT` 中断不打下边线避免残线）
 
@@ -1381,6 +1381,22 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `ui/terminal.py` — `_prompt_protected(session, message)` 辅助方法：`prompt_async` 外包 `patch_stdout(raw=True)`，等输入期间并发输出重定向到提示行上方；proxy 构建失败（无控制台环境）退回裸 prompt
 - [x] `confirm`/`ask_yes_no`/`ask_structured` 三个临时 PromptSession 输入路径统一接入 `_prompt_protected`
 - [x] 4 个新测试（三路径 patch_stdout 包裹验证 + proxy 不可用兜底，test_windows_rendering.py）
+
+### 权限模式矩阵
+- [x] `models/permissions.py` — `PermissionMode` StrEnum：default / accept-edits / plan / bypass
+- [x] `security/permission.py` — `PermissionManager.mode` 属性；命令管道 bypass 免确认（规则判定之后、危险检查之前）；路径管道 plan 写拒绝（PathGuard 项目内 ALLOW 之前）+ bypass/accept-edits 项目外免确认（敏感路径拒绝之后）；`would_ask()` 按模式同步短路（含写/读操作区分）
+- [x] `models/config.py` — `SecurityConfig.approval_mode` 启动模式字段
+- [x] `app.py` — `set_permission_mode()` 统一切换器（同步 `agent_loop.plan_mode`）；启动解析 approval_mode（非法值告警回退 default，`enable_plan_mode` 兼容优先）；`exit_plan_mode` 工具 lambda 改走切换器
+- [x] `extensions/builtin_commands.py` — `/mode` 命令（无参显示当前+全模式说明，带别名解析，bypass 附警告，plan 切换同步系统提示词）；`/plan on|off` 改走切换器
+- [x] 敏感文件命令所有模式有效——`command_references_sensitive_file` 检查移到 bypass 短路之前（实测 bypass 曾经 `type .env` 泄漏 API key）；`_would_ask_command` 补敏感文件判断
+- [x] `tools/builtin/exit_plan_mode.py` — 用户审批门：`ask_user_callback` 弹 yes/no，拒绝保持 plan 模式，无 UI 拒绝退出（实测 LLM 曾自批退出同批写文件）；`agent_loop.py` 流式执行延迟该工具
+- [x] 22 个新测试（test_permission_modes.py 20：四模式矩阵单元格 + bypass 底线三不变量 + would_ask 短路 + 枚举解析；test_process_tools.py：审批/拒绝/无 UI 三路径）
+- [x] `security/permission.py` — `WRITE_COMMAND_PATTERNS` + `is_write_command()`：plan 下 bash 写形态命令（重定向/改文件命令）直接拒绝，丢弃型重定向（>nul、>/dev/null、2>&1）放行；`_would_ask_command` 同步
+- [x] `tools/builtin/spawn_agents.py` — plan 模式下报错禁用（子 agent 无权限门，派生即只读逃逸）
+- [x] `models/events.py` + `app.py` + `ui/trace.py` — `PermissionModeChangedEvent` 切换时发射（启动期无循环跳过），trace 显示 `mode old -> new` 行
+- [x] `extensions/builtin_commands.py` `/status` 显示 Permission mode；`app.py` 底部工具栏始终显示 `mode: xxx`
+- [x] `core/agent_loop.py` — `_denied_message()` 权限拒绝消息带原因（`last_decision_reason` + 可读提示），逐工具捕获 deny_reasons 防共享状态过期
+- [x] 6 个新测试（plan bash 写拒绝/只读放行/default 不受影响/would_ask 一致；spawn plan 禁用/非 plan 放行）
 
 ## 会话自动清理 (comparison 9.1)
 

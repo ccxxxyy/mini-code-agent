@@ -246,6 +246,7 @@ mini --remote --remote-token "my-secret"
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |
 | `/plan [on\|off]` | Toggle read-only plan mode (write tools disabled) |
+| `/mode [name]` | View/switch permission mode: default / accept-edits / plan / bypass (deny rules & sensitive paths hold in every mode) |
 | `/tools` | List all registered tools (built-in + MCP) |
 | `/spawn <task>` | Dispatch background sub-agent (`--type`, `--pane` visible terminal pane, `--wait` block for result) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
@@ -305,7 +306,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1063 tests, 80%+ coverage
+├── tests/           # 1101 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -326,7 +327,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1063 tests
+uv run pytest tests/           # 1101 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

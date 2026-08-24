@@ -574,8 +574,16 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **问题**（B4.2 终端验证实测暴露）：`background=true` 派发的子 agent 完成后,结果写入 mailbox 但需等用户下一次输入才被消费。
 **✅ 已修复**：`SubAgentCompleteEvent` 订阅者设置 `asyncio.Event` 并调用 `terminal.interrupt_input()` 中断输入等待，主循环将 `get_user_input()` 与该 event 做竞争——event 先触发时返回 `_BG_INTERRUPT` 哨兵。TTY 路径用 `prompt_session.app.exit(_BG_INTERRUPT)` 保存并恢复用户部分输入，非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争 `input()` executor 与 event。主循环收到 `_BG_INTERRUPT` 后调 `_handle_background_delivery()` 注入合成消息、运行 `agent_loop.run()` 处理 mailbox 结果。新增 `Mailbox.has_pending()` 无锁只读查询。提示文案改为 "processing result..."。3 个新测试。
 
-☐ **B5 权限模式矩阵**
-mewcode `permissions/modes.py`：default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。工作量：小。
+✅ **B5 权限模式矩阵**
+**问题**：mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 有 plan 模式和 sandbox_auto_allow，但无 acceptEdits/bypass 等价物。
+**✅ 已实现**：`PermissionMode` 枚举（`models/permissions.py`）：`default`（危险命令/项目外路径询问，原行为）/ `accept-edits`（写文件免确认，危险命令仍询问，项目外读仍询问）/ `plan`（写拒绝——权限层第三重锁，loop 的 schema 过滤和 act 拦截之外）/ `bypass`（除 deny 规则和敏感路径外全部免确认）。**安全底线不被任何模式穿透**：显式 deny 规则、敏感路径（~/.ssh、.env 等）和敏感文件命令（`type .env` 类）在所有模式下拒绝/确认（规则先于模式判定）。矩阵嵌入 `PermissionManager` 命令/路径两条管道 + `would_ask()` 同步更新（流式延迟判定一致）。运行时 `/mode [名称]` 切换（bypass 附警告，plan 切换同步系统提示词）；`/plan on|off` 和 `exit_plan_mode` 工具经 `Application.set_permission_mode()` 与矩阵联动。配置 `[security] approval_mode` 设启动模式（非法值告警回退 default；`enable_plan_mode=true` 兼容等价 plan）。
+**终端实测暴露两洞并当场修复**（详见 tech-notes §95.4）：① bypass 短路曾排在敏感文件命令检查之前——`read_file .env` 被拦后 LLM 换 `type .env` 泄漏了 API key；修复后敏感文件命令在所有模式下弹确认。② `exit_plan_mode` 曾无条件退出——LLM 自批计划后同批调用直接写文件；修复后加用户审批门（yes/no，拒绝保持 plan，无 UI 拒绝退出），流式执行延迟该工具防弹窗交错。22 个新测试，1070→1092。
+**完整性复查补三块**（详见 tech-notes §95.6）：① plan 只读覆盖 bash 通道——`WRITE_COMMAND_PATTERNS`（文件重定向 + mkdir/copy/move/del 等写形态命令）plan 下直接拒绝，`>nul`/`>/dev/null`/`2>&1` 丢弃型重定向不误伤（实测 LLM 曾计划 `echo HELLO> a.txt` 绕锁）；② plan 下 spawn_agents 禁用——in-process 子 agent 不带 PermissionManager（P82 只接了 pane worker），任何派生都是只读逃逸口；③ 可观测性——`PermissionModeChangedEvent`（trace `mode` 行）+ `/status` 显示当前模式 + 底部工具栏始终显示 `mode: xxx`（初版仅非 default 显示，实测配置回退场景看不出当前模式，改为始终显示）。6 个新测试，1092→1098。另：权限拒绝消息带原因——`_denied_message()` 拼入 `last_decision_reason` + 可读提示（实测光秃 Permission denied 让 LLM 烧 5 万 token 排查不存在的配置）。
+**引号误伤修正 + cmd /c 补漏**（详见 tech-notes §95.7）：写形态匹配前剥离成对引号段（`findstr ">" f` 等只读命令不再误拒，不成对引号宁可误拦）；剥离会让 `cmd /c "echo x > f"` 逃逸——顺带发现 `cmd /c` 内联执行不在危险清单（Windows 版 sh -c），补进后 27→28 条，引号内重定向经确认兜底。3 个新测试，1098→1101。
+
+☐ **B5.1 工具类别税制 + 子 agent 权限栈传播**
+**问题**（B5 完整性复查发现）：① 权限矩阵的"工具类别"轴只覆盖 bash + 文件路径两类——`_check_permission` 的 else 分支 `unrestricted_tool` 直接放行，`install_skill`（写磁盘）、`task_create/update`（写任务板）、MCP 工具（外部副作用）在 plan 模式下不受限；现存 4 个独立工具列表未统一（`_WRITE_TOOLS`、`_READ_ONLY_TOOLS`、`_check_permission` 路由列表、`would_ask` 列表）。② in-process 子 agent 完全没有权限门——`SubAgentManager.spawn()` 不传 permission_manager（P82 只给 pane worker 接了权限栈），子 agent 的 bash 可跑任何命令零检查；B5 用"plan 下禁 spawn"临时堵住 plan 逃逸，但 default/accept-edits 模式下子 agent bash 无门是独立的洞。
+**方向**：① Tool ABC 加 `category` 属性（read/write/execute/external），四列表统一到类别，矩阵按 模式 × 类别 判定；② `spawn()` 传共享 permission_manager（需解决多子 agent 并发弹窗交错——子 agent 无 confirm 回调时安全拒绝是现状兜底）。工作量：中。
 
 ☐ **B6 指令文件 @-include**
 mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5）。mini `memory/project_context.py` 只读单文件、8000 字符截断，无引用语法。工作量：小。
@@ -712,7 +720,7 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 **问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。
 **现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
 
-**✅ 已修复**：三件套——① Theme 新增 `user_input` 亮橙色字段（default `#ffaf00`/dark `#ff9e64`/light 白底用深橙 `#b35900`，实测 warning `#f39c12` 黑底偏暗）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮橙；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
+**✅ 已修复**：三件套——① Theme 新增 `user_input` 亮浅蓝字段（default `#5fd7ff`/dark `#7dcfff`/light 白底可读蓝 `#0969da`；不复用 warning——`#f39c12` 黑底偏暗且语义不同）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮浅蓝；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

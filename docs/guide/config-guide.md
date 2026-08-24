@@ -227,13 +227,18 @@ consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并�
 
 [security]
 permission_mode = "ask"      # "allow"（全放行）| "ask"（询问）| "deny"（全拒绝）
+approval_mode = "default"    # 启动时的会话级权限模式："default"（危险命令/项目外路径确认）|
+                             # "accept-edits"（文件写入自动放行，危险命令/项目外读取仍确认）|
+                             # "plan"（只读计划模式）| "bypass"（全放行，DENY 规则和敏感路径除外）。
+                             # 非法值告警并回退 default；运行时用 /mode 切换。
+                             # enable_plan_mode = true 等价于 approval_mode = "plan" 且优先级更高。
 allowed_commands = ["git *", "uv *"]   # 免确认的命令白名单（默认空），命中即放行（含危险命令）
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝列表（默认值），命中即拒绝
-# 注意：denied_commands 是 glob 精确匹配拒绝。另有 27 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
+# 注意：denied_commands 是 glob 精确匹配拒绝。另有 28 条硬编码正则（DANGEROUS_COMMAND_PATTERNS）
 # 用于弹窗确认（删除类 rm/del/rmdir/rd 任意形态均命中——裸 rmdir、rm/del 单文件也算，不限于
 # -rf、/s、/q；另有 sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
 # restore/clean/Windows format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
-# sh -c/bash -c/powershell -Command/pwsh -c）——这些不可配，但可通过
+# sh -c/bash -c/powershell -Command/pwsh -c/cmd /c）——这些不可配，但可通过
 # allowed_commands 放行或 sandbox_auto_allow 免确认。
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
 worktree_max_age_days = 7    # 超过此天数的干净 worktree 启动时自动清理（0 = 禁用）
@@ -264,7 +269,8 @@ max_consecutive_denials = 1  # 确认框连续被拒 N 次后熔断停机、回�
                              # 默认 1 = 拒一次即停；调大可给被拒后修正重试的空间。防止被拒后继续找绕过路径）
 theme = "default"            # "default" | "dark" | "light"
 streaming_tool_execution = true  # 流式期间工具调用一组装完成就开始执行（false 等流结束再执行）
-enable_plan_mode = false     # 启动时进入只读计划模式（/plan on 运行时切换）
+enable_plan_mode = false     # 启动时进入只读计划模式（/plan on 运行时切换）；
+                             # 等价于 [security].approval_mode = "plan" 且优先级更高
 # self_verify = false        # 实验性：LLM 自动验证工具结果
 # planner_profile = ""       # /team Planner 使用的 LLM Profile 名（空 = 用主模型）
 # worker_profile = ""        # SubAgent worker 使用的 LLM Profile 名（空 = 用主模型）
@@ -378,7 +384,7 @@ Budget: {iteration_budget} rounds.
 | `tool_search` | 搜索 MCP 工具 | ✅ |
 | `mcp_call` | 调用 MCP 工具 | 取决于工具 |
 | `ask_user` | 向用户提问 | — |
-| `exit_plan_mode` | 退出计划模式 | — |
+| `exit_plan_mode` | 请求退出计划模式（需用户批准计划，拒绝则保持只读） | — |
 | `task_create` / `task_get` / `task_list` / `task_update` | 任务板 CRUD | — |
 | `load_skill` / `install_skill` | 加载/安装技能 | — |
 
@@ -842,7 +848,7 @@ Linux 上 bwrap 不可用时自动降级到 `unshare --mount --map-root-user`（
   ↓
 ② permissions.toml allow 规则 / session grant？→ 放行
   ↓
-③ 危险命令（27 条正则，含内联解释器）？
+③ 危险命令（28 条正则，含内联解释器）？
      sandbox_auto_allow=true → 放行（沙箱兜底）
      sandbox_auto_allow=false → 弹窗确认
   ↓

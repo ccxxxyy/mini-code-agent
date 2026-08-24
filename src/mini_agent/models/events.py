@@ -101,6 +101,15 @@ class PermissionRuleRemovedEvent(Event):
     level: str = ""
 
 
+@dataclass
+class PermissionModeChangedEvent(Event):
+    """Emitted when the session permission mode switches (/mode, /plan,
+    exit_plan_mode). 会话权限模式切换时发射（/mode、/plan、exit_plan_mode）。"""
+
+    old_mode: str = ""
+    new_mode: str = ""
+
+
 # --- Agent Events ---
 
 

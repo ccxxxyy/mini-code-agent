@@ -358,9 +358,15 @@ class Application:
         # 流程工具：暴露计划模式控制 + 结构化提问回调
         import types as _types
 
+        from mini_agent.models.permissions import PermissionMode
+
         tool_context.agent_loop_ref = _types.SimpleNamespace(
             get_plan_mode=lambda: self.agent_loop.plan_mode,
-            set_plan_mode=lambda v: setattr(self.agent_loop, "plan_mode", v),
+            # Route through the mode switch so leaving plan mode also resets
+            # the permission matrix. 经模式切换器走——退出 plan 同步复位权限矩阵。
+            set_plan_mode=lambda v: self.set_permission_mode(
+                PermissionMode.PLAN if v else PermissionMode.DEFAULT
+            ),
         )
         tool_context.ask_user_callback = self.terminal.ask_structured
 
@@ -409,7 +415,22 @@ class Application:
         )
         self.cost_tracker.attach(self.event_bus)
         self.agent_loop.model_name = config.llm.model
-        self.agent_loop.plan_mode = config.enable_plan_mode
+
+        # Startup permission mode: [security].approval_mode, or plan when
+        # enable_plan_mode is set (back-compat).
+        # 启动权限模式：[security].approval_mode；enable_plan_mode 兼容旧配置。
+        try:
+            _startup_mode = PermissionMode(config.security.approval_mode)
+        except ValueError:
+            logger.warning(
+                "invalid approval_mode %r (valid: %s) — using default",
+                config.security.approval_mode,
+                "/".join(m.value for m in PermissionMode),
+            )
+            _startup_mode = PermissionMode.DEFAULT
+        if config.enable_plan_mode:
+            _startup_mode = PermissionMode.PLAN
+        self.set_permission_mode(_startup_mode)
 
         # Skill system
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
@@ -535,12 +556,15 @@ class Application:
         self.agent_loop.on_tool_end = _on_tool_end
 
     def _toolbar_text(self) -> str:
-        """Bottom toolbar content: current model + switchable model count.
-        底部工具栏内容：当前模型 + 可切换模型数量。
+        """Bottom toolbar content: current model + switchable model count +
+        permission mode (always shown so the active mode is never a guess).
+        底部工具栏内容：当前模型 + 可切换模型数量 + 权限模式
+        （始终显示，当前模式一目了然）。
         """
         text = f"LLM: {self.config.llm.model} ({self.config.llm.provider})"
         if len(self.config.llm_profiles) > 1:
             text += f"  |  {len(self.config.llm_profiles)} models, /model to switch"
+        text += f"  |  mode: {self.permission_manager.mode.value}"
         return text
 
     def switch_llm_profile(self, name: str) -> bool:
@@ -909,6 +933,26 @@ class Application:
             except OSError:
                 logger.debug("stale session mark-clean failed", exc_info=True)
                 pass
+
+    def set_permission_mode(self, mode) -> None:
+        """Switch the session permission mode; keeps the loop's plan-mode
+        flag in sync (schema filtering + act-phase intercept live there).
+        切换会话权限模式；同步 loop 的 plan 标志（schema 过滤和 act 拦截
+        在 loop 层）。"""
+        import asyncio
+
+        from mini_agent.models.events import PermissionModeChangedEvent
+        from mini_agent.models.permissions import PermissionMode
+
+        old = self.permission_manager.mode
+        self.permission_manager.mode = mode
+        self.agent_loop.plan_mode = mode is PermissionMode.PLAN
+        if old is not mode:
+            event = PermissionModeChangedEvent(old_mode=old.value, new_mode=mode.value)
+            try:
+                asyncio.get_running_loop().create_task(self.event_bus.emit(event))
+            except RuntimeError:
+                pass  # startup: no loop yet, initial mode needs no event 启动期无事件循环
 
     async def _handle_turn(self, user_input: str) -> None:
         from mini_agent.ui.input_handler import expand_at_refs

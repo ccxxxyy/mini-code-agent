@@ -42,6 +42,28 @@ ToolEndCallback = Callable[[ToolResult, float], None]
 
 _WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 
+# Human/LLM-readable hints per denial reason: without the WHY the LLM burns
+# tokens investigating configs instead of adapting (real-run: 50K tokens
+# spent hunting a nonexistent rule after a bare "Permission denied").
+# 拒绝原因的可读提示：不带原因 LLM 会烧 token 排查配置而不是调整策略
+# （实测：光秃秃的 Permission denied 后烧了 5 万 token 找不存在的规则）。
+_DENY_REASON_HINTS = {
+    "mode:plan": "read-only plan mode — ask the user to approve exiting plan mode first",
+    "path_guard:sensitive": "sensitive path (keys/credentials), protected in every mode",
+    "user_confirm:no": "the user denied the confirmation",
+    "no_ui:default_deny": "confirmation required but no interactive user is available",
+}
+
+
+def _denied_message(tool_name: str, reason: str) -> str:
+    """Denial message carrying the reason so the LLM can adapt instead of
+    guessing. 带原因的拒绝消息——LLM 能据此调整而不是瞎猜。"""
+    if not reason:
+        return f"Permission denied for {tool_name}"
+    hint = _DENY_REASON_HINTS.get(reason.split(" — ")[0], "")
+    suffix = f" — {hint}" if hint and "—" not in reason else ""
+    return f"Permission denied for {tool_name} (reason: {reason}{suffix})"
+
 
 def _mail_prefix(mail) -> str:
     """Format the injection prefix by message type (P58.4 structured protocol).
@@ -514,6 +536,11 @@ class AgentLoop:
                         # max_tokens 恢复确定最终非截断响应后才执行。
                         # （同时覆盖 plan 模式拒绝，由 _act 处理。）
                         continue
+                    if tc.name == "exit_plan_mode":
+                        # Its user-approval dialog cannot interleave with live
+                        # rendering -> defer to _act.
+                        # 其用户审批弹窗不能和流式渲染交错 -> 延迟到 _act。
+                        continue
                     if self._permissions is not None and self._permissions.would_ask(
                         tc.name, tc.arguments
                     ):
@@ -577,21 +604,30 @@ class AgentLoop:
         self._streaming_tasks = {}
 
         # --- Phase 1: sequential permission pre-check (skip streamed ones) ---
+        # Capture the denial reason per tool: last_decision_reason is shared
+        # manager state and would be stale by result-build time.
+        # 逐工具捕获拒绝原因：last_decision_reason 是共享状态，结果构建时会过期。
         decisions: list[PermissionDecision | None] = []
+        deny_reasons: list[str] = []
         for tc in tool_calls:
             if tc.id in streaming:
                 decisions.append(PermissionDecision.GRANTED)  # already running 已在执行
+                deny_reasons.append("")
                 continue
             if self.plan_mode and tc.name in _WRITE_TOOLS:
                 decisions.append(PermissionDecision.DENIED)
+                deny_reasons.append("mode:plan — read-only plan mode blocks write tools")
                 continue
             if self._cancelled:
                 decisions.append(None)
+                deny_reasons.append("")
                 continue
             if self._permissions is not None:
                 decisions.append(await self._check_permission(tc))
+                deny_reasons.append(self._permissions.last_decision_reason)
             else:
                 decisions.append(PermissionDecision.GRANTED)
+                deny_reasons.append("")
 
         # --- Phase 2: parallel execution / collect streamed results ---
         async def _run_one(i: int) -> ToolResult:
@@ -607,7 +643,7 @@ class AgentLoop:
                 return ToolResult(
                     call_id=tc.id,
                     name=tc.name,
-                    output=f"Permission denied for {tc.name}",
+                    output=_denied_message(tc.name, deny_reasons[i]),
                     is_error=True,
                 )
             return await self._execute_single_tool(tc, skip_permission=True)
@@ -701,7 +737,7 @@ class AgentLoop:
                 return ToolResult(
                     call_id=tc.id,
                     name=tc.name,
-                    output=f"Permission denied for {tc.name}",
+                    output=_denied_message(tc.name, self._permissions.last_decision_reason),
                     is_error=True,
                 )
 

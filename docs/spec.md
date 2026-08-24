@@ -157,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 61 unit test files, 1063 tests
+│   ├── unit/                        # 63 unit test files, 1101 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -541,6 +541,7 @@ class MemoryConfig:
 @dataclass
 class SecurityConfig:
     permission_mode: str = "ask"          # allow | ask | deny
+    approval_mode: str = "default"        # 启动权限模式：default | accept-edits | plan | bypass
     allowed_commands: list[str] = field(default_factory=list)
     denied_commands: list[str] = field(default_factory=lambda: [
         "rm -rf /", "sudo", "curl|sh", "wget|sh"
@@ -627,6 +628,17 @@ class PermissionScope(StrEnum):
     TOOL = "tool"            # Permission for a specific tool
     PATH = "path"            # Permission for a file/directory path
     COMMAND = "command"      # Permission for a bash command pattern
+
+
+class PermissionMode(StrEnum):
+    """Session permission mode (matrix). Deny rules and sensitive paths
+    hold in EVERY mode. 会话权限模式（矩阵）——deny 规则和敏感路径在所有
+    模式下有效。Runtime switch via /mode; startup via [security].approval_mode."""
+
+    DEFAULT = "default"            # dangerous cmds / out-of-project paths prompt
+    ACCEPT_EDITS = "accept-edits"  # writes auto-approved; dangerous cmds still prompt
+    PLAN = "plan"                  # read-only: writes denied (3rd lock behind loop)
+    BYPASS = "bypass"              # everything auto-approved except deny/sensitive
 
 
 @dataclass(frozen=True)
@@ -1164,6 +1176,15 @@ class PermissionManager:
         confirm_callback: ConfirmCallback | None = None,
         event_bus: EventBus | None = None,
     ): ...
+
+    # Session permission mode (matrix): default / accept-edits / plan /
+    # bypass. Evaluated AFTER explicit rules (deny rules and sensitive
+    # paths hold in every mode). Switched via Application.set_permission_mode
+    # (which keeps agent_loop.plan_mode in sync); /mode command at runtime.
+    # 会话权限模式（矩阵）：在显式规则之后判定——deny 规则和敏感路径在
+    # 所有模式下有效。经 Application.set_permission_mode 切换（同步
+    # agent_loop.plan_mode）；运行时用 /mode 命令。
+    mode: PermissionMode = PermissionMode.DEFAULT
 
     def add_rule(self, rule: PermissionRule, *, _silent: bool = False) -> bool:
         """Add a permission rule at runtime. Validates pattern,
@@ -1979,6 +2000,13 @@ class PermissionRuleRemovedEvent(Event):
     pattern: str = ""
     level: str = ""
 
+@dataclass
+class PermissionModeChangedEvent(Event):
+    """Emitted when the session permission mode switches
+    (/mode, /plan, exit_plan_mode). Rendered as a trace `mode` line."""
+    old_mode: str = ""
+    new_mode: str = ""
+
 # --- Agent Events ---
 @dataclass
 class AgentPhaseChangeEvent(Event):
@@ -2283,7 +2311,9 @@ Permission check (若已在 _act 阶段预检过则跳过)
     | 1. 按工具类型路由: bash -> check_command,
     |    read_file/glob/grep -> check_path(read),
     |    write_file/edit_file/delete_file -> check_path(write)
-    | DENIED -> return error ToolResult
+    | DENIED -> return error ToolResult carrying the reason
+    |    (_denied_message: "Permission denied for X (reason: mode:plan
+    |     — read-only plan mode ...)" -- 不带原因 LLM 会烧 token 排查配置)
     v
 HookManager.run(PRE_TOOL, ctx)
     | BLOCK   -> return error ToolResult with hook reason
@@ -2599,8 +2629,8 @@ class MemoryExtractor:
 
 `PermissionManager.check()` 是通用入口，按请求的 `scope` 分发到三条管道（`security/permission.py`）：
 
-- **COMMAND** → 命令管道：显式规则/会话授权 → 危险模式确认 → 默认模式；
-- **PATH** → 路径管道：显式 DENY 规则 → PathGuard → 通用管道；
+- **COMMAND** → 命令管道：显式规则/会话授权 → plan 写形态命令拒绝 → 敏感文件命令确认（**所有模式**含 bypass）→ bypass 免确认 → 危险模式确认 → 默认模式；
+- **PATH** → 路径管道：显式 DENY 规则 → plan 写拒绝 → PathGuard → bypass / accept-edits(写) 免确认 → 通用管道；
 - **TOOL** → 通用管道：显式规则 → 会话授权 → 默认模式。
 
 ```
@@ -2617,9 +2647,9 @@ class MemoryExtractor:
 +---------------------------------------------------------------+
 ```
 
-**命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。
+**命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。**权限模式矩阵的插入点**：`PermissionMode.PLAN` 在规则判定后立即拒绝写形态命令（`WRITE_COMMAND_PATTERNS`：重定向到真实文件 + mkdir/copy/move/del 等，`>nul`/`>/dev/null`/`2>&1` 丢弃型放行）；敏感文件命令确认排在 bypass 短路**之前**——任何模式都不能静默放行 `type .env`；`PermissionMode.BYPASS` 在其后免确认放行剩余命令（含危险命令）。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 27 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 28 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c`/`cmd /c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 
