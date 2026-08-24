@@ -97,6 +97,19 @@ class SpawnAgentsTool(Tool):
         if mgr is None:
             return self.error_result("", "spawn_agents is not available in sub-agent context")
 
+        # Plan mode: spawning is a read-only escape hatch -- sub-agents run
+        # write-capable tools without the parent's permission gate (in-process
+        # spawns carry no PermissionManager), so ANY spawn can write files.
+        # plan 模式：派生是只读逃逸口——子 agent 持有写类工具且不经父级
+        # 权限门（in-process 派生不带 PermissionManager），任何派生都可写文件。
+        if ctx.agent_loop_ref is not None and ctx.agent_loop_ref.get_plan_mode():
+            return self.error_result(
+                "",
+                "Plan mode is read-only: spawn_agents is disabled (sub-agents "
+                "could write files). Present your plan and get user approval "
+                "via exit_plan_mode first.",
+            )
+
         tasks: list[str] = kwargs["tasks"]
         if not tasks:
             return self.error_result("", "No tasks provided")

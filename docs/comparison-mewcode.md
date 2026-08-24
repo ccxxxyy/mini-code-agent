@@ -311,7 +311,9 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 - `_act()` 双保险拦截 → 即使幻觉调用也返回 Permission denied
 - 流式工具执行也延迟写工具到 `_act()` 拦截
 - `/plan [on|off]` 命令切换 + system prompt 注入只读提示
-- bash 保留（由权限系统和沙箱控制危险命令）
+- bash 保留只读用途（type/dir/git status 等研究命令可用）；写形态命令（重定向到真实文件、mkdir/copy/move/del 等）由权限矩阵在 plan 下直接拒绝——mewcode 全禁 bash，mini 保留只读能力
+
+**权限模式矩阵 ✅ 已对齐 mewcode `permissions/modes.py`**：`PermissionMode` 四模式（default / accept-edits / plan / bypass）嵌入 `PermissionManager` 命令/路径管道——accept-edits 写免确认（危险命令仍询问）、plan 在权限层加写拒绝第三重锁、bypass 除 deny 规则和敏感路径外全免确认（安全底线所有模式有效）。`/mode` 运行时切换，`[security] approval_mode` 设启动模式，plan 相关三个入口（/plan、/mode、exit_plan_mode 工具）经 `Application.set_permission_mode()` 统一收敛。
 
 ---
 

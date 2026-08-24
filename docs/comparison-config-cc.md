@@ -207,7 +207,7 @@ CC 的权限规则写在 `settings.json` 的 `permissions` 字段里：
 
 格式：`工具名(参数模式)`。`Read(*)` 表示所有文件可读，`Bash(npm test)` 表示 `npm test` 免确认。运行时权限弹窗选 "Always allow" 时，CC 自动写入 `settings.json`。
 
-CC 的权限模式没有全局开关——默认就是 "ask" 模式（危险操作询问，安全操作放行）。
+CC 另有权限模式（`defaultMode`：default / acceptEdits / plan / bypassPermissions，也可 CLI `--permission-mode` 指定），控制免确认的积极程度。
 
 ### mini 的实现
 
@@ -218,11 +218,12 @@ mini 的权限分两层：
 ```toml
 [security]
 permission_mode = "ask"              # "allow" | "ask" | "deny"
+approval_mode = "default"            # default | accept-edits | plan | bypass
 allowed_commands = ["git *", "uv *"] # 免确认白名单
 denied_commands = ["rm -rf /"]       # 无条件拒绝
 ```
 
-`permission_mode` 控制兜底行为：`allow` 全放行、`ask` 询问、`deny` 全拒绝。CC 没有这个全局开关。
+`permission_mode` 控制兜底行为：`allow` 全放行、`ask` 询问、`deny` 全拒绝——CC 没有这根轴。`approval_mode` 是权限模式矩阵（对齐 CC 的 defaultMode 四模式）：设启动模式，运行时 `/mode` 切换；deny 规则和敏感路径在所有模式下有效。
 
 **② `permissions.toml` 的细粒度规则（独立文件）：**
 
@@ -255,7 +256,7 @@ deny = ["delete_file"]
 |------|-----|------|
 | 规则格式 | `工具名(参数模式)` 统一格式 | 三个 scope 分离：`[commands]` `[paths]` `[tools]` |
 | 存储位置 | 内嵌 `settings.json` | 独立 `permissions.toml` |
-| 全局模式 | 无（固定 ask） | `permission_mode`：allow / ask / deny |
+| 全局模式 | `defaultMode`：default / acceptEdits / plan / bypassPermissions | `approval_mode`（同四模式，`/mode` 运行时切换）+ `permission_mode` 兜底轴（allow / ask / deny，CC 无） |
 | 运行时管理 | 弹窗选 "Always allow" 自动写入 | `/allow` `/deny` 命令 + 弹窗 y/a/n |
 | 工具级控制 | `Read(*)` / `Write(src/**)` | `[tools]` 节按工具名（`deny = ["delete_file"]`） |
 | 路径级控制 | 参数模式里写路径 | 独立 `[paths]` 节，支持项目内路径拦截 |

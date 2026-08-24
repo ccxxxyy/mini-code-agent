@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1063 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1101 个测试全部通过（1 skipped）。
 
 ---
 
@@ -15,7 +15,7 @@
 **实现**：
 - 流式渲染：`ui/renderer.py` — Rich Live 组件 15fps 实时渲染 Markdown（代码高亮/粗体），逐 token"边想边输出"
 - 多轮对话：`models/message.py` 的 Conversation 全量重放历史，LLM 记住上下文
-- 交互细节：`>` 提示符、输入文字 bold 亮橙着色 + 输入行上下同色横线、输入 `/` 弹出命令下拉菜单（上下键选择/Tab 补全/删字符重新过滤）、输入历史跨会话保留（↑ 键翻历史）、底部工具栏实时显示当前 LLM、工具调用 `╭─ ╰─` 连线展示、每轮 token 用量统计
+- 交互细节：`>` 提示符、输入文字 bold 亮浅蓝着色 + 输入行上下同色横线、输入 `/` 弹出命令下拉菜单（上下键选择/Tab 补全/删字符重新过滤）、输入历史跨会话保留（↑ 键翻历史）、底部工具栏实时显示当前 LLM 和权限模式、工具调用 `╭─ ╰─` 连线展示、每轮 token 用量统计
 - 启动体验：`mini` 一个单词全局启动（同 `claude`）
 
 **验证**：真实 API 流式验证；终端交互全部手工验证过
@@ -90,7 +90,7 @@
 
 **实现**（`extensions/slash_commands.py` + `builtin_commands.py`）：
 - 框架：SlashCommandRegistry — 注册/分发/列表，斜杠输入优先于 LLM 对话（本地操作零 token）
-- 26 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /plugins /trace /explain /audit /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /theme /exit
+- 28 个内置命令：/help /clear /status /model /compact /memory /session /tools /skill /plugins /trace /explain /audit /theme /plan /mode /spawn /team /todo /cost /record /replay /undo /fork /allow /deny /quit /exit
 - 自定义：`registry.register(SlashCommand(name=..., handler=...))` 一行注册
 - 体验：输入 `/` 弹出下拉补全菜单（透明背景、实时过滤、上下键选择）
 
@@ -104,10 +104,11 @@
 
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 4 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM），优先级链 + 否决短路；CONFIRM 裁决弹 y/a/n 确认框（a = 本会话同规则不再问），`[[hooks]]` 配置可声明 `action = "confirm"`
-- 危险命令确认：27 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
+- 危险命令确认：28 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh/cmd /c——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
+- 权限模式矩阵：`/mode` 运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：写工具禁用 + bash 写形态命令拒绝 + spawn 禁用）/ `bypass`（除安全底线外全免确认）四模式；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
@@ -232,7 +233,7 @@
 
 | 要求点 | 实现 |
 |---|---|
-| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；27 条危险命令正则（含内联解释器拦截，删除类命令任意形态均拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；确认拒绝熔断（任何确认框被拒——危险命令/项目外路径/hook 确认——连续 `max_consecutive_denials` 次后停止本回合、回问用户，默认 1——拒一次即停，防止被拒后继续找绕过路径；自动策略拒绝如敏感路径/deny 规则不计数、仅跳过继续）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明，无启动警告） |
+| 权限防御 | 评估顺序 DENY→ALLOW→Session→Default；三级 scope（command/path/tool，工具级门先于资源检查）；28 条危险命令正则（含内联解释器拦截 cmd /c 在内，删除类命令任意形态均拦截）+ 写后执行检测（record_written_file + is_executing_written_script）；确认拒绝熔断（任何确认框被拒——危险命令/项目外路径/hook 确认——连续 `max_consecutive_denials` 次后停止本回合、回问用户，默认 1——拒一次即停，防止被拒后继续找绕过路径；自动策略拒绝如敏感路径/deny 规则不计数、仅跳过继续）；三级路径策略；fail-safe 默认拒绝；`check()` 按 scope 分发的通用检查入口；`/allow` `/deny` 运行时动态管理规则（`--save` 持久化到 TOML）；pane worker 跨进程权限审批（RemoteConfirm 文件协议 + PENDING 事件）；OS 沙箱默认开启（Linux bwrap/unshare + macOS seatbelt + Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明，无启动警告） |
 | 上下文压缩 | 四级级联（DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow），双阈值（75% 软 + 90% 硬绕过熔断器），token 驱动保留窗口，聚合溢写，/compact 手动 |
 | token 管理 | tiktoken/CJK 感知估算双路径 + API usage 锚点（P43）+ LRU 缓存 + 每轮界面显示 |
 | 上下文溢写 | 压缩不达标时 SlidingWindow 强制截断兜底 |
@@ -266,7 +267,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1063 个测试全部通过（1 skipped，约 90 秒，零网络依赖），单元 61 文件 + 集成 4 文件 |
+| 测试 | 1101 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 63 文件 + 集成 5 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

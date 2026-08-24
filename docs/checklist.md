@@ -82,7 +82,7 @@
 ### 功能完整性
 - [x] PermissionManager 评估顺序正确（DENY → ALLOW → Session → Default，单测锁定）
 - [x] PathGuard 敏感目录拒绝生效（.ssh/.aws/.gnupg + 敏感文件模式）
-- [x] 危险 bash 命令触发确认弹窗（27 条正则，含内联解释器 + 删除类任意形态，即使 allow 模式也确认）
+- [x] 危险 bash 命令触发确认弹窗（28 条正则，含内联解释器 cmd /c 在内 + 删除类任意形态，即使 allow 模式也确认）
 - [x] 敏感文件经 bash 通道读取触发确认（`type`/`cat`/`Get-Content .env` 弹确认，绕过 read_file 的洞已堵）
 - [x] 用户选择 "always allow" 后同类操作不再弹窗（confirm 支持 y/a/n 三选，"a" 写入会话白名单，单测验证）
 - [x] Hook PRE_TOOL 能阻止工具执行（BLOCK 短路 + reason 回传 LLM）
@@ -285,8 +285,14 @@
 - [x] `background=true` 后台派生立即返回,完成后经 mailbox 通知 main、终端提示(SubAgentCompleteEvent 订阅)
 - [x] `/spawn --background <任务>` 命令入口——后台派发,完成后结果自动投递到主对话（无需 `/spawn wait`）
 - [x] 后台 agent 结果自动投递——`Mailbox.has_pending()` 无锁只读查询 + `Terminal.interrupt_input()` 中断输入等待 + `_BG_INTERRUPT` 哨兵 + `_handle_background_delivery()` while-drain 循环 + `_run_agent_and_report()` 处理 mailbox 结果；3 个新 has_pending 测试（test_mailbox.py）
-- [x] 用户输入行醒目化——Theme 新增 `user_input` 亮橙字段（default `#ffaf00`/dark `#ff9e64`/light `#b35900`）；`create_prompt_style()` 根样式输入文字 bold 亮橙；`get_user_input()` 输入行上下 `_input_rule()` 同色横线（`_BG_INTERRUPT` 中断不打下边线）
+- [x] 用户输入行醒目化——Theme 新增 `user_input` 亮浅蓝字段（default `#5fd7ff`/dark `#7dcfff`/light 白底可读蓝 `#0969da`）；`create_prompt_style()` 根样式输入文字 bold 亮浅蓝；`get_user_input()` 输入行上下 `_input_rule()` 同色横线（`_BG_INTERRUPT` 中断不打下边线）
 - [x] 确认弹窗输入行防并发输出打断——`Terminal._prompt_protected()` 把 `confirm`/`ask_yes_no`/`ask_structured` 的 `prompt_async` 包进 `patch_stdout(raw=True)`，并发输出重定向到提示行上方；proxy 建不出时退回裸 prompt；4 个新测试（test_windows_rendering.py）
+- [x] 权限模式矩阵——`PermissionMode` 枚举（default/accept-edits/plan/bypass）嵌入 `PermissionManager` 命令/路径管道和 `would_ask()`；deny 规则、敏感路径、敏感文件命令（`type .env` 类）所有模式下有效（bypass 也拦）；`/mode` 运行时切换（bypass 附警告，plan 同步系统提示词）；`/plan`、`exit_plan_mode` 经 `Application.set_permission_mode()` 联动；`[security] approval_mode` 设启动模式（非法值回退 default，`enable_plan_mode` 兼容）
+- [x] exit_plan_mode 用户审批门——LLM 不能自行解除只读限制：弹 yes/no 由用户裁决，拒绝保持 plan 模式，无 UI 回调拒绝退出（安全默认）；流式执行延迟该工具（审批弹窗不与流式渲染交错）；22 个新测试（test_permission_modes.py + test_process_tools.py）
+- [x] plan 只读覆盖 bash 通道——`WRITE_COMMAND_PATTERNS` 写形态命令（重定向到真实文件/mkdir/copy/move/del 等）plan 下直接拒绝；`>nul`/`>/dev/null`/`2>&1` 丢弃型重定向不误伤
+- [x] plan 下 spawn_agents 禁用——in-process 子 agent 不带权限门，任何派生都是只读逃逸口（权限栈传播见 roadmap 后续项）
+- [x] 模式可观测——`PermissionModeChangedEvent` + trace `mode` 行 + `/status` 显示 Permission mode + 底部工具栏始终显示 `mode: xxx`；6 个新测试
+- [x] 权限拒绝消息带原因——`_denied_message()` 把 `last_decision_reason` 和可读提示拼进工具错误（实测：光秃 Permission denied 让 LLM 烧 5 万 token 排查不存在的配置）
 - [x] `inherit_context=true` / `/spawn --fork` 摘要式上下文 fork——父对话 LLM 摘要注入子 agent system prompt
 - [x] ContextSummaryStartEvent / ContextSummaryDoneEvent 正确 emit(摘要开始/完成,含耗时和字符数)
 - [x] 摘要期间终端提示"Summarizing conversation for context fork..." + `/trace on` 显示 `ctx` 行(不再零输出)

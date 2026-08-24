@@ -373,7 +373,7 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 **通用检查入口**（P79，扩展点 #15）：`check(request)` 按 `request.scope` 分发到 COMMAND / PATH / 通用管道，任意消费者构造 `PermissionRequest` 一次调用即得正确判定；`check_command` / `check_path` / `check_tool` 是各 scope 的便捷入口，共用内部管道无递归。
 
-**危险命令检测**用 27 条正则覆盖高危模式（原 19 条 → D3 加 7 条内联解释器 + 删除类放宽/新增 `rd`）：
+**危险命令检测**用 28 条正则覆盖高危模式（原 19 条 → 加 7 条内联解释器 + 删除类放宽/新增 `rd` → 权限矩阵完整性复查补 `cmd /c`）：
 
 ```
 rm（任意形态，含裸 rm 删单文件；排除 rm --help/-h）、sudo、chmod 777、mkfs、dd if=、>/dev/sd、
@@ -383,7 +383,7 @@ Windows: del/rmdir/rd（任意形态，含裸 rmdir 删空目录）、format c:�
 D3 内联解释器: python -c / node -e|-p / perl -e / ruby -e / sh -c / bash -c / powershell -Command / pwsh -c
 ```
 
-删除类命令 rm/del/rmdir/rd **任意形态均拦截**（裸 `rmdir` 空目录、`rm`/`del` 单文件也弹确认，不限于 -rf、/s、/q）——见 §90 之前的删除检测放宽记录。另有敏感文件命令检测（D6，§90）不属于这 27 条正则，是独立的 `command_references_sensitive_file()` token 匹配。
+删除类命令 rm/del/rmdir/rd **任意形态均拦截**（裸 `rmdir` 空目录、`rm`/`del` 单文件也弹确认，不限于 -rf、/s、/q）——见 §90 之前的删除检测放宽记录。另有敏感文件命令检测（§90）不属于这 28 条正则，是独立的 `command_references_sensitive_file()` token 匹配。
 
 命令检查的特殊逻辑：危险命令**即使在 allow 模式也要确认**（`check_command` 独立于普通规则流）；普通命令在 ask 模式下自动放行——弹窗只留给真正危险的操作，避免"狼来了"式的确认疲劳。
 
@@ -3063,7 +3063,7 @@ permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_
 
 ## 93.3 细节
 
-- Theme 新增 `user_input` 字段而非复用 `warning`：实测 `#f39c12` 黑底偏暗，输入行需要更亮（default `#ffaf00`/dark `#ff9e64`/light 白底反而要深橙 `#b35900`）——语义也不同（输入标识 vs 警告）
+- Theme 新增 `user_input` 字段而非复用 `warning`：实测 `#f39c12` 黑底偏暗，输入行需要更亮——语义也不同（输入标识 vs 警告）。配色：default `#5fd7ff` 亮浅蓝 / dark `#7dcfff` / light 白底可读蓝 `#0969da`
 - 根样式 `""` 影响所有未声明 noinherit 的元素——补全菜单/工具栏/滚动条早已全部 noinherit，无泄漏
 - `_BG_INTERRUPT` 中断返回时不打下边线：没有用户输入确认，打线会留孤儿横线
 - 非 TTY 朴素 `input()` 路径不经过 prompt_toolkit，保留上下横线
@@ -3083,3 +3083,68 @@ permission.py 新增 `command_references_sensitive_file(command)`：用 `_TOKEN_
 ## 94.3 验证
 
 4 个新测试（test_windows_rendering.py）：三条路径各验证 prompt 在 fake patch_stdout 上下文内执行且正常退出（真 StdoutProxy 需真控制台，pytest 下用记录替身）+ proxy 构建失败时 confirm 仍正常返回。1066→1070 passed。
+
+## 95. 权限模式矩阵
+
+## 95.1 背景
+
+mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions 四模式 × 工具类别决策矩阵。mini 此前只有三块拼图：plan 模式（`AgentLoop.plan_mode` 布尔，双重锁但权限层不知情）、`sandbox_auto_allow`（只覆盖危险命令场景）、`permission_mode`（allow/ask/deny，是"无规则匹配时的默认判定"另一根轴）——没有 acceptEdits/bypass 等价物，也没有统一的模式概念。
+
+## 95.2 设计
+
+`PermissionMode` StrEnum（default / accept-edits / plan / bypass），落在 `PermissionManager.mode` 属性上。矩阵单元不需要新的工具类别税制——权限管道的 scope + operation（命令 / 路径读 / 路径写）已经就是类别轴：
+
+| 模式 | 危险命令 | 项目外写 | 项目内写 | 项目外读 |
+|---|---|---|---|---|
+| default | 询问 | 询问 | 放行 | 询问 |
+| accept-edits | 询问 | **免确认** | 放行 | 询问 |
+| plan | 询问 | **拒绝** | **拒绝** | 询问 |
+| bypass | **免确认** | **免确认** | 放行 | **免确认** |
+
+**判定顺序是安全关键**：显式规则（deny 优先）→ 模式 → 原有流程。bypass 放在规则之后——deny 规则在所有模式下有效（沿用 sandbox_auto_allow 的先例）；路径管道里 bypass/accept-edits 的免确认放在 PathGuard 敏感拒绝**之后**——任何模式都打不开 ~/.ssh 和 .env；plan 的写拒绝放在 PathGuard 项目内 ALLOW **之前**——否则项目内写会被先放行。
+
+**plan 与既有双重锁的关系**：loop 的 schema 过滤（LLM 看不到写工具）和 act 拦截（幻觉调用兜底）保留，权限层的 plan 写拒绝是第三重锁——三层各有独立价值（提示词层/执行层/权限层），且权限层这把锁让 pane worker 等持有独立 PermissionManager 的场景也能受控。
+
+**状态同步**：模式的唯一入口是 `Application.set_permission_mode()`——同时写 `pm.mode` 和 `agent_loop.plan_mode`（后者驱动 schema 过滤）。`/plan on|off`、`/mode`、`exit_plan_mode` 工具三个入口全部收敛到它，不存在两处状态漂移。
+
+`would_ask()` 同步更新（bypass 永不问、accept-edits 写不问、plan 写直接拒不问）——否则流式工具执行的"会弹窗就延迟"预判与实际判定不一致，会造成无谓延迟。
+
+## 95.3 命名
+
+启动配置字段用 `approval_mode` 而非复用 `permission_mode`——后者已被 allow/ask/deny 的默认判定轴占用，语义不同（一个是"模式矩阵"，一个是"无匹配时的兜底决策"），复用会造成两义。
+
+## 95.4 真实运行暴露的两个问题
+
+首版实现终端实测暴露两个安全问题：
+
+**① bypass 经 bash 通道泄漏敏感文件**：`read_file .env` 被 PathGuard 敏感拒绝拦下，但 LLM 立刻换 `type .env`——bypass 短路排在敏感文件命令检查（`command_references_sensitive_file`）**之前**，直接放行泄漏了真实 API key。"敏感路径所有模式有效"的承诺只在路径管道兑现了，命令管道漏了。修复：敏感文件命令检查移到模式短路**之前**——`type .env` 在所有模式下（含 bypass）都弹确认；`_would_ask_command` 同步补上敏感文件判断（此前完全缺失——顺带修了敏感命令可能在流式期间 eager 执行弹窗交错的既有缺口）。
+
+**② plan 模式被 LLM 自批穿透**：`exit_plan_mode` 工具无条件退出 plan 模式——工具描述里"The user will review and approve"是空话，"Do not call any more tools this turn"也被 LLM 无视：实测它在同一批调用里 exit_plan_mode → write_file 直接落盘，用户没批准任何东西。修复三处：工具加**审批门**（`ctx.ask_user_callback` 弹 yes/no，用户拒绝则保持 plan 模式提示 LLM 修改计划；无 UI 回调时拒绝退出——安全默认与权限系统一致）；流式执行把 `exit_plan_mode` 加入延迟名单（审批弹窗不能和流式渲染交错）；工具描述改为如实陈述审批语义。
+
+教训：**"模式只放宽询问"的不变量必须对每条管道逐一核对**——路径管道核对了，命令管道漏了；**任何让 LLM 解除自身限制的工具都必须有人在环**——纯提示词约束（"don't call more tools"）在实测中零约束力。
+
+## 95.5 验证
+
+22 个新测试（test_permission_modes.py 20 + test_process_tools.py 改造 2）：四模式矩阵单元格 × 底线不变量（bypass 下 deny 规则/敏感路径/敏感文件命令仍拦）；exit_plan_mode 批准退出/拒绝保持/无 UI 保持三路径；would_ask 各模式短路含敏感命令。default 行为与改动前完全一致。1070→1092 passed。终端实测：`/mode bypass` 后 `type .env` 弹确认不再泄漏；plan 模式下计划审批 yes/no 由用户裁决。
+
+## 95.6 完整性复查：plan 只读承诺的三个穿透点
+
+修复验证通过后做完整性复查（逐管道核对"模式只放宽询问"不变量），发现 plan 的只读承诺还有三个穿透点，两个当场修复、一个记 roadmap：
+
+**① bash 写命令穿透（已修复）**：`echo HELLO> a.txt`、`mkdir`、`copy`、`move` 都不在危险正则里，plan 下作为普通命令直接放行——实测 LLM 的计划步骤里就写着 `echo HELLO> a.txt`，它不调 exit_plan_mode 也能落盘。修复：`WRITE_COMMAND_PATTERNS`（重定向到真实文件 + 分隔符后的改文件命令）plan 下 DENIED；`>nul`/`>/dev/null`/`2>&1` 是丢弃输出不算写，不误伤 `type x 2>nul` 类只读用法。与危险清单同为减速带诚实边界：混淆仍可逃逸。del/rm 等删除形态同时在危险清单和写清单——plan 下拒绝（强于询问）。
+
+**② spawn_agents 穿透（已修复——禁用）**：`_READ_ONLY_TOOLS` 档案含 bash，且 in-process 子 agent 完全没有权限门（`spawn()` 不传 permission_manager，P82 只接了 pane worker）——plan 下派任何类型的子 agent 都等于绕开只读。限制只读类型不够（其 bash 无门照样写），传播权限栈是中等工程（并发弹窗交错问题），故 plan 下 spawn_agents 直接报错禁用，权限栈传播记 roadmap（B5.1）。
+
+**③ 非文件写类工具穿透（记 roadmap B5.1）**：`unrestricted_tool` 分支直接放行 install_skill（写磁盘）/task_create（写任务板）/MCP 工具（外部副作用）——需要工具类别税制统一 4 个独立列表后按 模式 × 类别 判定，工作量中，不塞进本条。
+
+**可观测性补齐**：`PermissionModeChangedEvent`（`set_permission_mode` 发射，启动期无事件循环时跳过）→ trace `mode` 行；`/status` 显示 Permission mode；底部工具栏始终显示 `mode: xxx`（初版仅非 default 显示——实测 approval_mode 配置非法回退 default 时工具栏空白，用户无从确认回退成功，改为始终显示）。**拒绝消息带原因**：`_denied_message()` 把 `last_decision_reason` + 可读提示拼进工具错误（实测光秃的 Permission denied 让 LLM 烧 5 万 token 排查不存在的配置规则）；`_act` 阶段 1 逐工具捕获 `deny_reasons`——`last_decision_reason` 是管理器共享状态，结果构建时已被后续检查覆盖。
+
+6 个新测试（plan bash 写拒绝/只读放行/default 不受影响/would_ask 一致 + spawn plan 禁用/非 plan 放行）。1092→1098 passed。
+
+## 95.7 写形态检测的引号误伤与 cmd /c 补漏
+
+实测边界确认 `WRITE_COMMAND_PATTERNS` 存在引号误伤：`findstr ">" file`、`git log --pretty="a>b"`、`awk "$1 > 5"` 等只读命令里引号内的 `>` 被当作重定向，plan 下误拒。修复：`is_write_command()` 匹配前剥离成对引号段（`_QUOTED_SEGMENT_RE`）——引号内的 `>` 是数据不是重定向；不成对引号不剥离，宁可误拦。
+
+**剥离引号打开的新洞及其堵法**：`cmd /c "echo x > a.txt"` 的重定向在引号内，剥离后会逃逸——但 `cmd /c` 内联执行本身就是 Windows 版 `sh -c`（引号内任意命令绕过签名匹配），它却不在内联解释器危险清单里（清单收 sh -c/powershell -Command 时漏了它）。补进 `DANGEROUS_COMMAND_PATTERNS`（27→28 条）：`cmd /c` 一律弹确认，引号内重定向经人工确认兜底。安全论证：能把引号内重定向真正执行起来的内联执行器（sh -c / powershell -Command / pwsh -c / cmd /c）现已全部在危险清单内，引号剥离不会放走任何真实写入。
+
+3 个新测试（引号内 `>` 放行 / 不成对引号仍拒 / cmd /c 危险确认）。1098→1101 passed。

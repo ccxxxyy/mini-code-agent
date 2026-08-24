@@ -130,6 +130,15 @@ def register_builtin_commands(app: Application) -> None:
     )
     reg.register(
         SlashCommand(
+            name="mode",
+            description=(
+                "Show/switch permission mode (usage: /mode [default|accept-edits|plan|bypass])"
+            ),
+            handler=_make_mode(app),
+        )
+    )
+    reg.register(
+        SlashCommand(
             name="spawn",
             description="SubAgent dispatch (usage: /spawn <task> | /spawn list|wait|cancel)",
             handler=_make_spawn(app),
@@ -628,6 +637,7 @@ def _make_status(app: Application) -> HandlerFn:
             "**Session Status 会话状态：**",
             f"  Model: {meta.model}",
             f"  Provider: {app.config.llm.provider}",
+            f"  Permission mode: {app.permission_manager.mode.value}",
             f"  Platform: {platform}",
             f"  Turns: {meta.total_turns}",
             f"  Tokens used: {meta.total_tokens_used}",
@@ -1155,24 +1165,91 @@ _PLAN_MODE_PROMPT = (
 
 def _make_plan(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
-        loop = app.agent_loop
+        from mini_agent.models.permissions import PermissionMode
+
         sub = args.strip().lower()
 
         if sub in ("", "on"):
-            loop.plan_mode = True
+            app.set_permission_mode(PermissionMode.PLAN)
             conv = app.session.conversation
             if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
                 conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
             return "Plan mode **ON** — write tools disabled (read-only)."
 
         if sub == "off":
-            loop.plan_mode = False
+            app.set_permission_mode(PermissionMode.DEFAULT)
             conv = app.session.conversation
             if conv.system_prompt:
                 conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
             return "Plan mode **OFF** — all tools re-enabled."
 
         return "Usage: `/plan [on|off]` — toggle read-only planning mode."
+
+    return handler
+
+
+_MODE_DESCRIPTIONS = {
+    "default": "dangerous commands / out-of-project paths prompt (标准：危险命令/项目外路径询问)",
+    "accept-edits": "file writes auto-approved, dangerous commands still prompt "
+    "(写文件免确认，危险命令仍询问)",
+    "plan": "read-only: write tools disabled (只读：写工具禁用)",
+    "bypass": "everything auto-approved except deny rules and sensitive paths "
+    "(除 deny 规则和敏感路径外全部免确认)",
+}
+
+# Accepted spellings per mode 每个模式接受的写法
+_MODE_ALIASES = {
+    "default": "default",
+    "accept-edits": "accept-edits",
+    "acceptedits": "accept-edits",
+    "accept_edits": "accept-edits",
+    "plan": "plan",
+    "bypass": "bypass",
+    "bypasspermissions": "bypass",
+}
+
+
+def _make_mode(app: Application) -> HandlerFn:
+    async def handler(args: str, ctx: Any) -> str:
+        from mini_agent.models.permissions import PermissionMode
+
+        sub = args.strip().lower()
+        current = app.permission_manager.mode.value
+
+        if not sub:
+            lines = [f"Permission mode: **{current}**", ""]
+            for name, desc in _MODE_DESCRIPTIONS.items():
+                marker = "→" if name == current else " "
+                lines.append(f"{marker} `{name}` — {desc}")
+            lines.append("")
+            lines.append(
+                "Switch: `/mode <name>`. Deny rules and sensitive paths hold in every mode."
+            )
+            return "\n".join(lines)
+
+        target = _MODE_ALIASES.get(sub)
+        if target is None:
+            valid = ", ".join(f"`{m.value}`" for m in PermissionMode)
+            return f"Unknown mode `{sub}`. Valid: {valid}"
+
+        mode = PermissionMode(target)
+        # Keep the plan-mode system prompt in sync with the matrix switch
+        # plan 提示词与矩阵切换保持同步
+        conv = app.session.conversation
+        if mode is PermissionMode.PLAN:
+            if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
+                conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
+        elif conv.system_prompt:
+            conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
+        app.set_permission_mode(mode)
+
+        msg = f"Permission mode: **{target}** — {_MODE_DESCRIPTIONS[target]}"
+        if mode is PermissionMode.BYPASS:
+            msg += (
+                "\n⚠ Bypass grants everything without prompting. Deny rules and "
+                "sensitive paths (~/.ssh, .env ...) still hold."
+            )
+        return msg
 
     return handler
 

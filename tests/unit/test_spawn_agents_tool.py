@@ -198,3 +198,34 @@ async def test_trace_renderer_ctx_summary(tmp_path):
     assert any("summary ready" in c for c in calls)
 
     renderer.detach(bus)
+
+
+# --- plan mode blocks spawning (read-only escape via ungated sub-agents) ---
+# plan 模式禁止派生（子 agent 不经权限门，任何派生都是只读逃逸口）
+
+
+async def test_spawn_agents_denied_in_plan_mode(tmp_path):
+    import types
+
+    ctx = make_ctx(tmp_path)
+    ctx.agent_loop_ref = types.SimpleNamespace(
+        get_plan_mode=lambda: True,
+        set_plan_mode=lambda v: None,
+    )
+    tool = SpawnAgentsTool()
+    result = await tool.execute(ctx, tasks=["do research"])
+    assert result.is_error
+    assert "Plan mode is read-only" in result.output
+
+
+async def test_spawn_agents_allowed_outside_plan_mode(tmp_path):
+    import types
+
+    ctx = make_ctx(tmp_path)
+    ctx.agent_loop_ref = types.SimpleNamespace(
+        get_plan_mode=lambda: False,
+        set_plan_mode=lambda v: None,
+    )
+    tool = SpawnAgentsTool()
+    result = await tool.execute(ctx, tasks=["say done"])
+    assert not result.is_error

@@ -19,6 +19,7 @@ from mini_agent.models.events import (
 from mini_agent.models.permissions import (
     PermissionDecision,
     PermissionLevel,
+    PermissionMode,
     PermissionRequest,
     PermissionRule,
     PermissionScope,
@@ -90,7 +91,33 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"\b(ba)?sh\s+-c\b",  # sh -c "..." / bash -c "..."
     r"\bpowershell\s+-(Command|c)\b",  # powershell -Command "..."
     r"\bpwsh\s+-(Command|c)\b",  # pwsh -c "..."
+    # cmd /c "..." is the Windows equivalent of sh -c: arbitrary inline
+    # command inside quotes bypasses signature matching (incl. quoted
+    # redirects that quote-stripping in is_write_command would miss).
+    # cmd /c 是 Windows 版 sh -c：引号内任意内联命令绕过签名匹配
+    # （含 is_write_command 引号剥离会漏掉的引号内重定向）。
+    r"\bcmd(\.exe)?\s+/c\b",
 ]
+
+# Write-form commands, used by plan mode's read-only guarantee: file
+# redirects and file-mutating commands must not slip through the bash
+# channel while write TOOLS are locked. A speed bump, not a wall (same
+# honest boundary as the dangerous list): obfuscation can escape.
+# 写形态命令——plan 模式只读保证使用：写工具被锁时，文件重定向和改文件
+# 命令不能从 bash 通道溜走。与危险清单同为减速带而非围墙：混淆仍可逃逸。
+WRITE_COMMAND_PATTERNS = [
+    # Redirect to a real file; >nul / >/dev/null / >&fd discard, not writes
+    # 重定向到真实文件；>nul / >/dev/null / >&fd 是丢弃输出不算写
+    r">\s*(?!nul\b|/dev/null\b|&)",
+    # File-mutating command at start or after a separator (; & |)
+    # 位于开头或分隔符（; & |）之后的改文件命令
+    r"(?:^|[;&|]\s*)\s*(mkdir|md|copy|xcopy|robocopy|move|ren|rename"
+    r"|del|erase|rd|rmdir|rm|mv|cp|touch|tee|truncate|dd)\s",
+]
+
+# Balanced quoted segments, stripped before write-pattern matching
+# 成对引号段——写形态匹配前剥离
+_QUOTED_SEGMENT_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
 
 # Matches script execution to detect write-then-execute bypass:
 #   python script.py / node app.js / perl x.pl / ruby x.rb
@@ -168,6 +195,11 @@ class PermissionManager:
         # OS sandbox auto-allows normal commands (kernel provides isolation)
         # OS 沙箱自动放行普通命令（内核提供隔离）
         self.sandbox_auto_allow: bool = False
+        # Session permission mode (matrix): relaxes/tightens what would
+        # otherwise prompt. Deny rules and sensitive paths hold in every mode.
+        # 会话权限模式（矩阵）：放宽/收紧原本要询问的部分。deny 规则和
+        # 敏感路径在所有模式下有效。
+        self.mode: PermissionMode = PermissionMode.DEFAULT
         # Why the last decision was made (for /trace) 最近一次判定的依据（用于 /trace）
         self.last_decision_reason: str = ""
         self.last_matched_rule: str = ""
@@ -423,12 +455,30 @@ class PermissionManager:
         path = Path(request.resource)
         if self._deny_rule_matches(PermissionScope.PATH, str(path)):
             return PermissionDecision.DENIED
+        # Plan mode: writes denied outright, BEFORE PathGuard's project-dir
+        # ALLOW would grant them (third lock behind schema filtering and the
+        # act-phase intercept in the loop).
+        # plan 模式：写操作直接拒绝——须在 PathGuard 项目内 ALLOW 放行前判定
+        # （loop 的 schema 过滤和 act 拦截之外的第三重锁）。
+        if self.mode is PermissionMode.PLAN and operation == "write":
+            self.last_decision_reason = "mode:plan"
+            return PermissionDecision.DENIED
         level = self._path_guard.check(path, operation)
         if level == PermissionLevel.DENY:
             self.last_decision_reason = "path_guard:sensitive"
             return PermissionDecision.DENIED
         if level == PermissionLevel.ALLOW:
             self.last_decision_reason = "path_guard:project_dir"
+            return PermissionDecision.GRANTED
+        # Out-of-project path (PathGuard ASK). Sensitive paths were already
+        # denied above -- bypass/accept-edits never open those.
+        # 项目外路径（PathGuard ASK）。敏感路径已在上方拒绝——
+        # bypass/accept-edits 不会打开它们。
+        if self.mode is PermissionMode.BYPASS:
+            self.last_decision_reason = "mode:bypass"
+            return PermissionDecision.GRANTED
+        if self.mode is PermissionMode.ACCEPT_EDITS and operation == "write":
+            self.last_decision_reason = "mode:accept-edits"
             return PermissionDecision.GRANTED
         return await self._check_generic(request)
 
@@ -463,21 +513,47 @@ class PermissionManager:
         if decision is not None:
             return decision
 
+        # Plan mode: write-form commands denied outright -- the read-only
+        # guarantee must cover the bash channel too (real-run verified: the
+        # LLM planned `echo HELLO> a.txt` to write around the locked tools).
+        # plan 模式：写形态命令直接拒绝——只读保证必须覆盖 bash 通道
+        # （真实运行实测：LLM 计划用 `echo HELLO> a.txt` 绕开被锁的写工具）。
+        if self.mode is PermissionMode.PLAN and self.is_write_command(command):
+            self.last_decision_reason = "mode:plan"
+            return PermissionDecision.DENIED
+
+        # Sensitive-file commands hold in EVERY mode, bypass included --
+        # a mode switch must never silently open `type .env` / `cat id_rsa`
+        # (real-run verified: bypass leaked an API key via this channel
+        # before this check was ordered ahead of the mode short-circuit).
+        # 敏感文件命令在所有模式下有效（含 bypass）——模式切换绝不能静默
+        # 放行 `type .env` 这类读取（真实运行实测：此检查排在模式短路
+        # 之前的排序修正前，bypass 曾经此通道泄漏 API key）。
+        if command_references_sensitive_file(command):
+            if self.sandbox_auto_allow:
+                self.last_decision_reason = "sandbox_auto_allow"
+                return PermissionDecision.GRANTED
+            request.context = "command references a sensitive file (.env / key / credentials)"
+            self.last_decision_reason = "sensitive_file_command"
+            return await self._ask_user(request)
+
+        # Bypass mode: everything else not caught by a deny rule is
+        # auto-granted. bypass 模式：其余未被 deny 规则拦下的命令自动放行。
+        if self.mode is PermissionMode.BYPASS:
+            self.last_decision_reason = "mode:bypass"
+            return PermissionDecision.GRANTED
+
         # Dangerous pattern or executing a script written this session -> confirm
         # 危险模式 或 执行本会话写过的脚本 -> 确认
         is_dangerous = self.is_dangerous_command(command)
         is_written_script = self.is_executing_written_script(command, self.working_dir)
-        is_sensitive_file = command_references_sensitive_file(command)
-        if is_dangerous or is_written_script or is_sensitive_file:
+        if is_dangerous or is_written_script:
             if self.sandbox_auto_allow:
                 self.last_decision_reason = "sandbox_auto_allow"
                 return PermissionDecision.GRANTED
             if is_written_script:
                 request.context = "executing script written by agent this session"
                 self.last_decision_reason = "written_script_execution"
-            elif is_sensitive_file:
-                request.context = "command references a sensitive file (.env / key / credentials)"
-                self.last_decision_reason = "sensitive_file_command"
             else:
                 request.context = "dangerous command detected"
                 self.last_decision_reason = "dangerous_command"
@@ -521,6 +597,23 @@ class PermissionManager:
     @staticmethod
     def is_dangerous_command(command: str) -> bool:
         return any(re.search(p, command, re.IGNORECASE) for p in DANGEROUS_COMMAND_PATTERNS)
+
+    @staticmethod
+    def is_write_command(command: str) -> bool:
+        """Write-form bash command (file redirect / file-mutating command).
+        Quoted segments are stripped first: a `>` inside quotes is data, not
+        a redirect (`findstr ">" f` / `git log --pretty="a>b"` are reads).
+        Safe because every inline executor that could smuggle a quoted
+        redirect (sh -c / powershell -Command / cmd /c) is in the dangerous
+        list and prompts regardless. Unbalanced quotes are left in place,
+        erring toward deny.
+        写形态 bash 命令（文件重定向 / 改文件命令）。先剥离引号段：引号内
+        的 `>` 是数据不是重定向（findstr/git pretty 等只读用法）。安全性由
+        危险清单兜底——能把引号内重定向真正执行起来的内联执行器
+        （sh -c / powershell -Command / cmd /c）全部在清单内必弹确认。
+        不成对引号不剥离，宁可误拦。"""
+        stripped = _QUOTED_SEGMENT_RE.sub("", command)
+        return any(re.search(p, stripped, re.IGNORECASE) for p in WRITE_COMMAND_PATTERNS)
 
     def record_written_file(self, path: str) -> None:
         """Track a file written by the agent this session.
@@ -587,25 +680,40 @@ class PermissionManager:
             path = arguments.get("file_path") or arguments.get("path")
             if not path:
                 return False
-            return self._would_ask_path(Path(str(path)))
+            writes = tool_name in ("write_file", "edit_file", "delete_file")
+            return self._would_ask_path(Path(str(path)), "write" if writes else "read")
         return False  # unrestricted tools never prompt 非受限工具永不弹窗
 
     def _would_ask_command(self, command: str) -> bool:
         request = PermissionRequest(scope=PermissionScope.COMMAND, resource=command)
         if self._rules_would_resolve(request):
             return False
+        if self.mode is PermissionMode.PLAN and self.is_write_command(command):
+            return False  # denied outright, no prompt plan 直接拒绝不弹窗
+        if command_references_sensitive_file(command):
+            # Prompts in every mode (bypass included) unless the sandbox
+            # auto-allows. 所有模式下都弹窗（含 bypass），除非沙箱自动放行。
+            return not self.sandbox_auto_allow
+        if self.mode is PermissionMode.BYPASS:
+            return False  # bypass auto-grants, never prompts bypass 自动放行不弹窗
         if self.is_dangerous_command(command) or self.is_executing_written_script(
             command, self.working_dir
         ):
             return True
         return False
 
-    def _would_ask_path(self, path: Path) -> bool:
+    def _would_ask_path(self, path: Path, operation: str = "read") -> bool:
         if self._deny_rule_matches(PermissionScope.PATH, str(path)):
             return False  # explicit deny resolves without prompting 显式拒绝不弹窗
+        if self.mode is PermissionMode.PLAN and operation == "write":
+            return False  # plan denies writes outright plan 直接拒绝写，不弹窗
         level = self._path_guard.check(path)
         if level != PermissionLevel.ASK:
             return False  # ALLOW / DENY resolve without prompting
+        if self.mode is PermissionMode.BYPASS:
+            return False
+        if self.mode is PermissionMode.ACCEPT_EDITS and operation == "write":
+            return False
         request = PermissionRequest(scope=PermissionScope.PATH, resource=str(path))
         if self._rules_would_resolve(request):
             return False

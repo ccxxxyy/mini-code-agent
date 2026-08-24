@@ -19,6 +19,7 @@ from mini_agent.models.events import (
     LLMRequestEvent,
     LLMResponseEvent,
     PermissionCheckEvent,
+    PermissionModeChangedEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
     TurnCompleteEvent,
@@ -54,6 +55,7 @@ class TraceRenderer:
         bus.on(UserMessageEvent, self._on_user_message)
         bus.on(ContextSummaryStartEvent, self._on_ctx_summary_start)
         bus.on(ContextSummaryDoneEvent, self._on_ctx_summary_done)
+        bus.on(PermissionModeChangedEvent, self._on_mode_changed)
 
     def detach(self, bus: EventBus) -> None:
         """Unsubscribe all handlers. 取消所有订阅。"""
@@ -67,6 +69,7 @@ class TraceRenderer:
         bus.off(UserMessageEvent, self._on_user_message)
         bus.off(ContextSummaryStartEvent, self._on_ctx_summary_start)
         bus.off(ContextSummaryDoneEvent, self._on_ctx_summary_done)
+        bus.off(PermissionModeChangedEvent, self._on_mode_changed)
 
     def _line(self, kind: str, body: str) -> None:
         """Print one trace line. 输出一行 trace。"""
@@ -84,6 +87,12 @@ class TraceRenderer:
             f"[dim]{e.iteration}[/dim]  [{p}]{e.old_phase}[/{p}] "
             f"[dim]->[/dim] [{p}]{e.new_phase}[/{p}]",
         )
+
+    async def _on_mode_changed(self, e: PermissionModeChangedEvent) -> None:
+        if not self.enabled:
+            return
+        w = self.theme.warning
+        self._line("mode", f"[{w}]{e.old_mode}[/{w}] [dim]->[/dim] [{w}]{e.new_mode}[/{w}]")
 
     async def _on_permission(self, e: PermissionCheckEvent) -> None:
         if not self.enabled:

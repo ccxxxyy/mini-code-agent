@@ -227,6 +227,13 @@ consolidation_threshold = 20 # Automatically run LLM semantic consolidation when
 
 [security]
 permission_mode = "ask"      # "allow" (allow everything) | "ask" (prompt) | "deny" (deny everything)
+approval_mode = "default"    # Session-level permission mode at startup: "default" (dangerous commands /
+                             # paths outside the project prompt) | "accept-edits" (file writes auto-approved;
+                             # dangerous commands / out-of-project reads still prompt) | "plan" (read-only
+                             # plan mode) | "bypass" (everything auto-approved except DENY rules and
+                             # sensitive paths). Invalid values warn and fall back to default; switch at
+                             # runtime with /mode. enable_plan_mode = true is equivalent to
+                             # approval_mode = "plan" and takes precedence.
 allowed_commands = ["git *", "uv *"]   # Confirmation-free command whitelist (default empty); a match is allowed through (including dangerous commands)
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional deny list (default values); a match is rejected
 # Note: denied_commands is glob exact-match rejection. There are also 26 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
@@ -264,7 +271,8 @@ max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutiv
                              # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
 streaming_tool_execution = true  # During streaming, start executing a tool call as soon as it is fully assembled (false waits for the stream to end)
-enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on toggles at runtime)
+enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on toggles at runtime);
+                             # equivalent to [security].approval_mode = "plan" and takes precedence
 # self_verify = false        # Experimental: LLM automatically verifies tool results
 # planner_profile = ""       # LLM Profile name used by the /team Planner (empty = use the main model)
 # worker_profile = ""        # LLM Profile name used by SubAgent workers (empty = use the main model)
@@ -378,7 +386,7 @@ Budget: {iteration_budget} rounds.
 | `tool_search` | Search MCP tools | Yes |
 | `mcp_call` | Call an MCP tool | Depends |
 | `ask_user` | Ask the user a question | — |
-| `exit_plan_mode` | Exit plan mode | — |
+| `exit_plan_mode` | Request to exit plan mode (requires user approval; rejection stays read-only) | — |
 | `task_create` / `task_get` / `task_list` / `task_update` | Task board CRUD | — |
 | `load_skill` / `install_skill` | Load/install skills | — |
 

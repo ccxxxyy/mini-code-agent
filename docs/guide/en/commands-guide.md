@@ -98,6 +98,7 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 ```
 
 Parameter details:
+
 | Parameter | Description |
 |---|---|
 | `--pane` | Requires a tmux session, a Windows Terminal session (split pane), or any terminal with wt.exe installed (falls back to a new tab in the shared mini-agents window). Fails with a clear error when no backend is available |
@@ -121,6 +122,27 @@ LLM automatically decomposes the task → matches team members by role → execu
 
 ### /plan [on|off]
 Toggle read-only plan mode (write-type tools disabled). Without parameters, shows the current state.
+Now implemented via the unified permission mode switch: `on` is equivalent to `/mode plan`, `off` to `/mode default`.
+
+### /mode [name]
+View or switch the session-level permission mode. Without parameters, shows the current mode and descriptions of all modes.
+```
+/mode                # Show the current mode + descriptions of the four modes
+/mode accept-edits   # Switch to accept-edits (aliases acceptedits/accept_edits also work)
+/mode bypass         # Switch to bypass (alias bypasspermissions also works; shows a warning on switch)
+```
+The four modes:
+
+| Mode | Behavior |
+|---|---|
+| `default` | Default behavior: dangerous commands / paths outside the project prompt for confirmation |
+| `accept-edits` | File writes auto-approved (both inside and outside the project); dangerous commands still prompt; reads outside the project still prompt |
+| `plan` | Read-only plan mode: write tools disabled + write-form bash commands (redirects/mkdir/copy/move/del ...) denied + spawn_agents disabled, i.e. the former `/plan on` |
+| `bypass` | Everything auto-approved — except explicit DENY rules and sensitive paths (`~/.ssh`, `.env`, etc.) |
+
+Note: DENY rules and sensitive paths hold in **every mode** — bypass is no exception.
+Switching to/from plan mode syncs the plan-mode system prompt; the `exit_plan_mode` tool requires **user approval of the plan** (a yes/no question) before exiting plan mode and resetting to default — the LLM cannot lift its own read-only restriction, and a rejection keeps plan mode active.
+The startup mode can be set via `[security] approval_mode` in config.toml (see the configuration guide).
 
 ---
 
@@ -244,7 +266,39 @@ List all commands (alphabetically sorted).
 
 ---
 
-## 8. General Behavior
+## 8. Persistence Scope of Command Effects
+
+Setting-type commands fall into two tiers: **session-level** (lost on restart, reverting to the config-file startup value) and **persistent** (written to disk, effective across sessions).
+
+Session-level (lost on restart):
+
+| Command | Notes |
+|---|---|
+| `/allow` `/deny` (without `--save`) | Rules live in session memory only; `/deny remove` also only removes in-session rules — TOML-loaded ones return on next startup |
+| `/mode` | Reverts to the `[security] approval_mode` config value on restart |
+| `/plan` | Same (startup value controlled by `enable_plan_mode`) |
+| `/trace` `/explain` | Toggles are not written to disk |
+| `/model` | LLM profile switch is per-session |
+| `/audit on/off` | The toggle is session-level (the audit log file itself is persistent) |
+| `/skill activate/deactivate` | Activation injects into the system prompt, per-session |
+| The `a` (always) answer in confirmation dialogs | Session grant, cleared on restart |
+
+Persistent (disk location):
+
+| Command | Written to |
+|---|---|
+| `/allow` `/deny` **--save** | Project `.mini-agent/permissions.toml` (auto-loaded on every startup) |
+| `/theme` | `~/.mini-agent/.theme` |
+| `/memory add` | Project `.mini-agent/memory.json` / user `~/.mini-agent/memory/` |
+| `/session save/tag` | `~/.mini-agent/sessions/` |
+| `/todo` | Project `.mini-agent/tasks.json` |
+| `/record` | `~/.mini-agent/recordings/` |
+
+Two further kinds of disk extensions load at startup (not created by commands, inherently persistent): custom agent types (`./.mini-agent/agents/*.md`, `~/.mini-agent/agents/*.md`), event listener plugins (`./.mini-agent/listeners/*.py`, `~/.mini-agent/listeners/*.py`), and tool/command plugins (`plugin_dirs`). **The entire `.mini-agent/` directory is in .gitignore** — permissions.toml, memory.json, custom agents/listeners etc. are never committed or pushed to the remote; to share them with a team, move them out of that directory or adjust .gitignore.
+
+---
+
+## 9. General Behavior
 
 - Commands execute locally; mistyping a command name shows all available commands
 - An exception thrown by a command handler does not kill the session (shows "Command failed: ..." and continues)
