@@ -161,7 +161,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Output | Source | Trigger |
 |---|---|---|
 | Welcome banner `Mini-Code-Agent vX.X.X` | `terminal.py` `show_welcome` | At startup |
-| `context: loaded <filename>` | `app.py` startup | When the project instruction file (AGENT.md/CLAUDE.md) is injected successfully |
+| `context: loaded <filename>` | `app.py` startup | When the project instruction file (AGENT.md/CLAUDE.md) is injected successfully (`@./path` / `@~/path` @-include directives are recursively expanded) |
 | `Loaded N hook rule(s) from config` | `app.py` startup | When config.toml contains `[[hooks]]` rules |
 | `Loaded N event listener(s): xxx` | `app.py` startup | When listener_dirs contains *.py plugins |
 | `Loaded N plugin(s): xxx` | `app.py` startup | When plugin_dirs contains *.py plugins or packages with the `mini_agent.plugins` entry point are installed (P83); use `/plugins` for details |

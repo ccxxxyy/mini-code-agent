@@ -151,6 +151,7 @@ class ContextConfig:
     )
     user_instructions_file: str = "~/.mini-agent/instructions.md"
     max_chars: int = 8000
+    max_include_depth: int = 5  # @-include recursive expansion depth; 0 disables
 
 
 @dataclass

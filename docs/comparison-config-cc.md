@@ -167,9 +167,12 @@ AGENT.md > CLAUDE.md > .mini-agent/instructions.md
 [context]
 instruction_files = ["CLAUDE.md", "AGENT.md"]   # 改优先级
 max_chars = 8000                                  # 截断长度
+max_include_depth = 5                             # @-include 递归深度（0 禁用）
 ```
 
 修改后需**重启 mini**（无热重载）。
+
+**@-include 递归引用**：指令文件中整行 `@./path` 或 `@~/path` 被替换为引用文件内容（相对路径按引用方目录解析），递归展开至深度 5，循环引用/缺失文件注释降级，展开后整体截断。适合把分散的规范文件组合进一个入口。CC 无此功能。
 
 ### 关键差异
 
@@ -177,8 +180,9 @@ max_chars = 8000                                  # 截断长度
 |------|-----|------|
 | 项目文件名 | 固定 `CLAUDE.md` | 可配，默认三选一（`AGENT.md` > `CLAUDE.md` > `instructions.md`） |
 | 子目录指令 | 支持（子目录 `CLAUDE.md` 进入时追加） | 不支持 |
+| @-include 递归引用 | 不支持 | 支持（`@./path` / `@~/path`，深度 5 可配） |
 | 热重载 | `/refresh` 命令重载 | 不支持，需重启 |
-| 截断 | 无明确限制（但有 context window 约束） | 可配 `max_chars`（默认 8000 字符） |
+| 截断 | 无明确限制（但有 context window 约束） | 可配 `max_chars`（默认 8000 字符，展开后截断） |
 | 兼容性 | — | 兼容 CC 的 `CLAUDE.md`，迁移零改动 |
 
 ---

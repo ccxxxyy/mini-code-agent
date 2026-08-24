@@ -188,7 +188,7 @@ while True:
 
 **为什么需要**：System prompt 应该是多个片段的运行时拼接——基础身份 + 工具描述 + 项目指令 + 记忆 + 技能 prompt。不同会话、不同项目、不同技能激活状态下，prompt 内容不同。
 
-**本项目实现**：`app.py` SYSTEM_PROMPT 模板（{model}/{working_dir}/{platform}/{shell} 占位符）+ `memory/project_context.py` 项目指令注入（AGENT.md > CLAUDE.md > .mini-agent/instructions.md 三选一 + 用户级 instructions.md 共存，P25）+ 记忆注入（PRE_LLM hook）+ 技能 prompt（activate 时拼接）。
+**本项目实现**：`app.py` SYSTEM_PROMPT 模板（{model}/{working_dir}/{platform}/{shell} 占位符）+ `memory/project_context.py` 项目指令注入（AGENT.md > CLAUDE.md > .mini-agent/instructions.md 三选一 + 用户级 instructions.md 共存，P25；支持 @-include 递归引用——指令文件中整行 `@./path` / `@~/path` 展开为引用文件内容，深度 5 可配）+ 记忆注入（PRE_LLM hook）+ 技能 prompt（activate 时拼接）。
 
 **判断标准**：System prompt 是硬编码的还是运行时组装的？能不能根据上下文动态变化？
 

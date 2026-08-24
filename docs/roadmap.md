@@ -591,8 +591,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 **复验又一修**：报告曾只带熔断"最后一击"（no_ui）而丢了根因（rule:ping*）——主 agent 误诊为缺确认 UI。`AgentState.denial_reasons` 累积本轮全部去重拒绝原因，报告列全序列根因在前；复验后再补：rule 拒绝附带"对会话内所有 agent 生效"事实与可照抄的移除命令——占位符写法实测被错代入成 `/deny remove ping ping*`，现在从拒绝理由内嵌的 scope（格式改为 `rule:<scope>:<pattern>`）完整构造。同轮复验还暴露真实洞：`cmd /c "ping x"` 绕过 `ping*` deny 规则仅靠危险命令确认层兜底（交互会话用户可能没注意确认框里包着被拒命令）——deny 匹配现解包 cmd /c、powershell -Command、sh -c 包装前缀并抹引号后逐 `&;|` 段匹配；allow 规则不解包（扩大 deny 收紧、扩大 allow 放松）。5 个新测试，1128→1133。
 **遗留（诚实边界）**：① 子 agent 无 confirm 回调意味着危险命令一律拒绝而非询问——想让子 agent 的危险操作也能人工放行需要串行化的跨 loop 确认队列（弹窗归属、挂起超时、background 完成时用户不在场等交互问题），技术可行但暂无场景不做。② deny 规则的解包匹配是纵深防御而非围墙——解包 3 层、wrapper 清单有限（cmd /c、cmd /k、powershell -Command、sh -c），`p^ing` 转义/环境变量间接调用/base64 编码等深度混淆在规则层原理性无法穷尽（完备识别等价于静态分析任意 shell 程序）；安全保证靠分层：混淆载体本身（cmd /c、powershell -e、for /f 等）在危险命令清单里必弹确认，OS 沙箱是最终围墙。新混淆形态实测暴露一个补一个。
 
-☐ **B6 指令文件 @-include**
-mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5）。mini `memory/project_context.py` 只读单文件、8000 字符截断，无引用语法。工作量：小。
+✅ **B6 指令文件 @-include**
+mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5）。mini `memory/project_context.py` 只读单文件、8000 字符截断，无引用语法。
+**✅ 已实现**：`project_context.py` 的 `_expand_includes` 递归展开 @-include 指令（整行 `@./path` 或 `@~/path`），相对路径随被引用文件的目录解析（非项目根），最大深度 5（`ContextConfig.max_include_depth`，0 禁用），循环引用与文件缺失生成注释标记温和降级，展开后整体受 `max_chars` 截断。行内 `@./` 不误触。用户级指令同样支持。10 个新测试，1133→1143。
 
 ☐ **B7 远程模式 SessionStore 接入**
 mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。

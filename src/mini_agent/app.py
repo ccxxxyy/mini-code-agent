@@ -144,13 +144,14 @@ class Application:
         self._context_file_loaded: str | None = None
         _marker = "\n\n--- Project instructions ---\n"
         _parts: list[str] = []
+        _depth = config.context.max_include_depth
         _user_inst = load_user_instructions(
-            config.context.user_instructions_file, config.context.max_chars
+            config.context.user_instructions_file, config.context.max_chars, _depth
         )
         if _user_inst:
             _parts.append("[user instructions]\n" + _user_inst)
         _proj = load_project_instructions(
-            working_dir, config.context.instruction_files, config.context.max_chars
+            working_dir, config.context.instruction_files, config.context.max_chars, _depth
         )
         if _proj:
             self._context_file_loaded = _proj[0]
