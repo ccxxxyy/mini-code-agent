@@ -41,6 +41,17 @@ class ContextManager:
         # 本会话已读文件（保序去重）——压缩后重新注入，防 LLM 忘记后重读
         self._read_files: dict[str, str | None] = {}
         self._last_user_request: str = ""
+        # Skill state provider: returns (invoked_names, active_names).
+        # A callback keeps the dependency direction clean -- the memory
+        # layer must not import the extensions layer.
+        # 技能状态提供者：返回（调用历史, 当前激活）。用回调保持依赖方向
+        # 干净——记忆层不 import 扩展层。
+        self._skill_provider = None
+        # Skill state read from an adopted boundary, for the app layer to
+        # push back into SkillRegistry (this class never touches the registry)
+        # 从边界恢复的技能状态，供 app 层写回 SkillRegistry
+        # （本类不反向操作 registry）
+        self._adopted_skills: tuple[list[str], list[str]] | None = None
         # API usage anchor: the LLM-reported total is authoritative for the
         # whole conversation up to the anchored message (it even includes
         # tool schemas, which estimation cannot see). Messages after the
@@ -56,6 +67,26 @@ class ContextManager:
         """Inject the compressor (avoids circular import at init time).
         注入压缩器（避免初始化时的循环导入）。"""
         self._compressor = compressor
+
+    def set_skill_provider(self, provider) -> None:
+        """Inject a callable returning (invoked_names, active_names).
+        注入返回（技能调用历史, 当前激活技能）的可调用对象。"""
+        self._skill_provider = provider
+
+    def _skill_state(self) -> tuple[list[str], list[str]]:
+        if self._skill_provider is None:
+            return [], []
+        try:
+            invoked, active = self._skill_provider()
+            return list(invoked), list(active)
+        except Exception:
+            return [], []
+
+    @property
+    def adopted_skills(self) -> tuple[list[str], list[str]] | None:
+        """Skill state restored from a compact boundary, or None.
+        从压缩边界恢复的技能状态（调用历史, 激活集合），无则 None。"""
+        return self._adopted_skills
 
     def record_file_read(self, path: str, content: str = "") -> None:
         if content:
@@ -161,20 +192,30 @@ class ContextManager:
     def needs_hard_compression(self) -> bool:
         return self.usage_ratio >= self._hard_threshold
 
-    async def check_and_compress(self, conversation: Conversation) -> bool:
+    async def check_and_compress(self, conversation: Conversation, force: bool = False) -> bool:
         """Check if compression is needed and perform it.
         检查是否需要压缩并执行压缩。
+
+        force=True skips the threshold and breaker checks (manual /compact) --
+        the manual path must still go through THIS pipeline: calling the
+        compressor directly skips the recovery attachment and every boundary
+        field (read files / last user request / skill state), real-run:
+        a manually compacted then saved session restored with no skill state.
+        force=True 跳过阈值与熔断检查（手动 /compact）——手动路径也必须走
+        本管道：直接调 compressor 会跳过恢复附件和全部边界字段（已读文件/
+        用户请求/技能状态），实测手动压缩后保存的会话恢复时技能状态全丢。
 
         Returns True if compression was performed.
         若执行了压缩则返回 True。
         """
         self.update_total(conversation)
-        if not self.needs_compression:
+        if not force and not self.needs_compression:
             return False
         if self._compressor is None:
             return False
         if (
-            self._max_compress_failures > 0
+            not force
+            and self._max_compress_failures > 0
             and self._compress_failures >= self._max_compress_failures
             and not self.needs_hard_compression
         ):
@@ -236,6 +277,11 @@ class ContextManager:
                 conversation.compact_boundary["file_contents"] = file_contents
             if self._last_user_request:
                 conversation.compact_boundary["last_user_request"] = self._last_user_request
+            invoked, active = self._skill_state()
+            if invoked:
+                conversation.compact_boundary["skill_invocations"] = invoked
+            if active:
+                conversation.compact_boundary["active_skills"] = active
         self.update_total(conversation)
         if self._total_tokens >= old_total:
             self._compress_failures += 1
@@ -282,6 +328,26 @@ class ContextManager:
                 "[Files already read this session -- do NOT re-read unless "
                 "their content changed: " + ", ".join(self._read_files) + "]"
             )
+        # 2b. Skill state -- same anti-repeat pattern as read files: active
+        # skill prompts survive in the system prompt (it is never compressed),
+        # but the ACTIVATION history lives in messages that the summary just
+        # swallowed -- without this line the LLM re-activates or forgets.
+        # 技能状态——与已读文件同一防重复模式：激活的 skill prompt 在
+        # system prompt 里存活（不被压缩），但激活历史在刚被摘要吞掉的
+        # 消息里——没有这行 LLM 会重复激活或遗忘。
+        invoked, active = self._skill_state()
+        if active:
+            parts.append(
+                "[Skills active (their prompts remain in the system prompt "
+                "-- do NOT re-activate): " + ", ".join(active) + "]"
+            )
+        used_only = [n for n in invoked if n not in active]
+        if used_only:
+            parts.append(
+                "[Skills previously used this session (now deactivated): "
+                + ", ".join(used_only)
+                + "]"
+            )
         # 3. Truncated contents of the most recent files (up to 5).
         # Total budget scales with the window: the absolute 5x5000-token
         # attachment exceeds a small window entirely (observed at window=20K:
@@ -308,12 +374,14 @@ class ContextManager:
         note = "\n\n".join(parts)
         marker = "[Files already read this session"
         user_marker = "[User's most recent request"
+        skill_marker = "[Skills active ("
+        used_marker = "[Skills previously used this session"
         for msg in reversed(conversation.messages):
             if msg.role == Role.SYSTEM and msg.compressed:
                 content = msg.content or ""
-                # Strip old recovery block (either marker may come first)
-                # 剥离旧恢复块（两个标记可能任一在前）
-                for m in (user_marker, marker):
+                # Strip old recovery block (any marker may come first)
+                # 剥离旧恢复块（任一标记可能在前）
+                for m in (user_marker, marker, skill_marker, used_marker):
                     if m in content:
                         content = content[: content.index(m)].rstrip()
                 msg.content = (content + "\n" + note) if content else note
@@ -331,6 +399,10 @@ class ContextManager:
         for path in boundary.get("read_files", []):
             self._read_files[path] = file_contents.get(path)
         self._last_user_request = boundary.get("last_user_request", "")
+        invoked = boundary.get("skill_invocations", [])
+        active = boundary.get("active_skills", [])
+        if invoked or active:
+            self._adopted_skills = (list(invoked), list(active))
 
     async def ensure_fits(self, conversation: Conversation, max_tokens: int) -> bool:
         """Last-resort guard: force-truncate if conversation exceeds max_tokens.

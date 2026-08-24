@@ -157,7 +157,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 64 unit test files, 1143 tests
+│   ├── unit/                        # 64 unit test files, 1155 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2565,7 +2565,7 @@ class Compressor:
 
 ### 10.3 压缩后恢复注入与溢写缓存
 
-**恢复注入**（`context.py _inject_read_files`）：每次压缩后向摘要消息追加恢复上下文——(1) 用户最近一次请求（防 agent 压缩后忘记任务）；(2) 本会话已读文件路径清单（防重读）；(3) 最近至多 5 个文件的截断内容，总预算 `min(5*5000 token, window//4)` 随窗口缩放。旧恢复块先剥离再追加（防重复膨胀）。压缩边界 `compact_boundary`（摘要 + 已读文件 + 最近请求）随会话持久化，`/session load` 后通过 `adopt_boundary()` 恢复。
+**恢复注入**（`context.py _inject_read_files`）：每次压缩后向摘要消息追加恢复上下文——(1) 用户最近一次请求（防 agent 压缩后忘记任务）；(2) 本会话已读文件路径清单（防重读）；(3) 最近至多 5 个文件的截断内容，总预算 `min(5*5000 token, window//4)` 随窗口缩放。旧恢复块先剥离再追加（防重复膨胀）。压缩边界 `compact_boundary`（摘要 + 已读文件 + 最近请求）随会话持久化，`/session load` 后通过 `adopt_boundary()` 恢复。（4）skill 调用记录——激活中的标注 "do NOT re-activate"（prompt 在不被压缩的 system prompt 中存活，丢的是激活历史），已停用的单列；经 `set_skill_provider()` 回调获取（memory 层不 import extensions 层）。`compact_boundary` 持久化 `skill_invocations`/`active_skills`，会话恢复经 `SkillRegistry.restore_state()` 重建激活集合（不重注入 prompt）。
 
 **溢写缓存**（`memory/tool_result_cache.py`）：压缩-重读膨胀问题的根治。超大工具结果不进对话，落盘到 `~/.mini-agent/cache/results/`，对话中只留 `PREVIEW_CHARS=2000` 字符预览 + 完整文件路径。两层防护：单条阈值 `spill_threshold_chars=50_000`；聚合预算 `aggregate_spill_chars=200_000`（单条都不超但合计撑爆时按大小降序强制溢写）。LLM 读回溢写文件的调用由 `is_spill_readback()` 识别并豁免（PathGuard 对缓存目录只读自动放行，见 §11.2）。
 

@@ -1570,6 +1570,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `memory/context.py` — `_inject_read_files()` 增强：注入三段恢复上下文（用户最近请求 + 已读文件路径 + 最近 5 个文件内容）
 - [x] `memory/context.py` — `_last_user_request`：压缩前捕获最近 USER 消息（≤2000 字符），防压缩后 agent 丢失任务
 - [x] `compact_boundary` 新增 `file_contents` + `last_user_request` 字段，`adopt_boundary()` 恢复，向后兼容旧格式
+- [x] 恢复附件含 skill 调用记录——`SkillRegistry._invocations` 激活历史 + `ContextManager.set_skill_provider()` 回调 + 恢复附件技能行（do NOT re-activate）+ boundary 持久化 `skill_invocations`/`active_skills` + `restore_state()` 会话恢复不重注入 prompt + 手动 /compact 改走 `check_and_compress(force=True)` 全管道（复验暴露直调 compressor 跳过全部边界字段的既有缺陷）；12 个新测试（1143→1155）
 - [x] 模块常量提取：`_MAX_RECOVERY_FILES=5`、`_RECOVERY_TOKENS_PER_FILE=5000`、`_MAX_TASK_CHARS=2000`
 
 ### P63.2 测试

@@ -140,7 +140,7 @@ while True:
 
 **为什么需要**：按需加载——Agent 知道有哪些技能可用（manifest），需要时再展开注入。节省 token 且提高命中率。
 
-**本项目实现**：`extensions/skills.py` SkillRegistry，扫描 SKILL.md 文件，trigger 关键词自动匹配或 `/skill activate` 手动激活。4 个内置技能（code-review / init-project / offline-ollama / teach-mode）。
+**本项目实现**：`extensions/skills.py` SkillRegistry，扫描 SKILL.md 文件，trigger 关键词自动匹配或 `/skill activate` 手动激活。4 个内置技能（code-review / init-project / offline-ollama / teach-mode）。激活历史（`_invocations`）进压缩恢复附件与压缩边界——压缩后 LLM 不重复激活、会话恢复后注册表激活状态经 `restore_state()` 重建（不重注入 prompt）。
 
 **判断标准**：知识/指令是塞在 system prompt 里的还是按需加载的？有没有技能发现+激活机制？
 

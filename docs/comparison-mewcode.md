@@ -342,7 +342,7 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 
 | | mini | mewcode |
 |---|---|---|
-| 压缩后状态恢复 | ✅ **压缩后在摘要注入已读文件清单**（`ContextManager._inject_read_files()`，二次压缩自动替换旧清单） | 摘要后重新挂载最近读过的文件列表和激活的 skill |
+| 压缩后状态恢复 | ✅ **压缩后在摘要注入已读文件清单 + skill 调用记录**（`ContextManager._inject_read_files()`，二次压缩自动替换旧清单） | 摘要后重新挂载最近读过的文件列表和激活的 skill |
 
 **原差距**：压缩后 LLM 不知道自己读过哪些文件，导致重读。P36 已修复，实现见 tech-notes §36。
 
@@ -719,8 +719,8 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 | | mini | mewcode |
 |---|---|---|
-| 恢复压缩后的会话 | ✅ **压缩边界标记**——恢复时只加载边界后的消息 + 摘要，同时恢复已读文件状态 | **压缩边界标记**——恢复时只加载边界后的消息 + 摘要 |
-| 边界数据结构 | `compact_boundary` dict（summary + timestamp + read_files） | `CompactBoundary(summary, keep)` + `CompactEvent` |
+| 恢复压缩后的会话 | ✅ **压缩边界标记**——恢复时只加载边界后的消息 + 摘要，同时恢复已读文件状态与技能激活状态 | **压缩边界标记**——恢复时只加载边界后的消息 + 摘要 |
+| 边界数据结构 | `compact_boundary` dict（summary + timestamp + read_files + file_contents + last_user_request + skill_invocations/active_skills） | `CompactBoundary(summary, keep)` + `CompactEvent` |
 | 存储格式 | JSON conversation 段中的 `compact_boundary` 字段（覆写式） | JSONL 中 `type=compact_boundary` 记录（追加式） |
 | 已读文件恢复 | ✅ `adopt_boundary()` 恢复文件路径 + **内容**到 `_read_files`；`_inject_read_files()` 烤入最近 5 文件内容（5000 tokens/个）（9.2a） | `RecoveryState` 烤入摘要附件（含文件**内容**截断到 5000 tokens/个） |
 | keep 消息处理 | 尾部消息作为普通消息存在 messages 数组中 | `keep` 消息序列化到边界记录内，自包含 |
@@ -748,7 +748,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 | | mini | mewcode |
 |---|---|---|
-| 恢复附件 | ✅ `_inject_read_files()` 烤入最近 5 个已读文件的实际内容（`truncate_to_tokens` 截断到 5000 tokens/个）+ 用户最近请求 | `build_recovery_attachment()` 烤入最近 5 文件内容 + skill + 工具列表 |
+| 恢复附件 | ✅ `_inject_read_files()` 烤入最近 5 个已读文件的实际内容（`truncate_to_tokens` 截断到 5000 tokens/个）+ 用户最近请求 + **skill 调用记录**（激活中标注勿重复激活、已停用单列历史） | `build_recovery_attachment()` 烤入最近 5 文件内容 + skill + 工具列表 |
 | 内容捕获时机 | `record_file_read(path, content)` 在 spill **之前**立即截断存储（防溢写后丢失原始内容） | 压缩时从磁盘重读 |
 | 用户请求保留 | ✅ 压缩前捕获最近 USER 消息（≤2000 字符），烤入摘要 + 持久化到 boundary | 无对应（mewcode 靠 keep 消息） |
 | 边界持久化 | `compact_boundary["file_contents"]` + `["last_user_request"]`，`adopt_boundary()` 恢复 | 烤入摘要文本 |

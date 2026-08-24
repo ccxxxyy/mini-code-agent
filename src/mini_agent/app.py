@@ -438,6 +438,11 @@ class Application:
         self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
         self.skill_registry.load_all()
         self._tool_context.skill_registry = self.skill_registry
+        # Recovery attachment includes skill state after compression
+        # 压缩恢复附件包含技能状态
+        self.context_manager.set_skill_provider(
+            lambda: (self.skill_registry.invoked_names, self.skill_registry.active_names)
+        )
 
         # Custom agent types: load *.md definitions from agent_dirs
         # 自定义 Agent 类型：从 agent_dirs 加载 *.md 定义
@@ -890,6 +895,13 @@ class Application:
         self.session = loaded
         self._tool_context.session = loaded
         self.context_manager.adopt_boundary(loaded.conversation)
+        # Restore skill registry state from the boundary -- WITHOUT
+        # re-injecting prompts (the restored system_prompt already has them)
+        # 从边界恢复技能注册表状态——不重注入 prompt
+        # （恢复的 system_prompt 已含）
+        adopted = self.context_manager.adopted_skills
+        if adopted:
+            self.skill_registry.restore_state(*adopted)
         self.context_manager.update_total(loaded.conversation)
 
     async def _maybe_restore_session(self) -> None:

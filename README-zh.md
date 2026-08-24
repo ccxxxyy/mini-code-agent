@@ -279,7 +279,7 @@ mini-code-agent/
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 1143 个测试（64 单元 + 5 集成），80%+ 覆盖率
+├── tests/                      # 1155 个测试（64 单元 + 5 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -386,7 +386,7 @@ mini-code-agent/
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 - [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，1143 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，1155 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 

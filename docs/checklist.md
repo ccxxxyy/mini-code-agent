@@ -1251,6 +1251,20 @@
 - [x] 真实 LLM 验证（DeepSeek，context_window=14000）：压缩后 agent 不重读、不丢任务、能引用文件细节
 - [x] 793 个测试全过，ruff lint + format clean
 
+## 恢复附件含 skill 调用记录 检查项
+
+### 功能完整性
+- [x] `SkillRegistry._invocations` 保序去重激活历史（deactivate 不抹除——调用记录非当前状态）+ `active_names`/`invoked_names` 属性
+- [x] `ContextManager.set_skill_provider()` 回调注入（memory 层不 import extensions 层）；provider 崩溃静默吞掉不破坏压缩
+- [x] 恢复附件技能行：激活中的标注 "do NOT re-activate"（prompt 在 system prompt 中存活），已停用单列历史行；二次压缩替换旧块不堆叠
+- [x] `compact_boundary` 持久化 `skill_invocations`/`active_skills`；`adopt_boundary()` 暂存 `adopted_skills`
+- [x] app 层 `_adopt_session` 经 `SkillRegistry.restore_state()` 写回——不重注入 prompt（恢复的 system_prompt 已含）；会话恢复后 is_active/deactivate/match_triggers/reload 恢复正常
+- [x] 向后兼容：旧 boundary 无技能字段时 `adopted_skills` 为 None；无 provider 时附件不变
+
+### 测试
+- [x] 手动 /compact 走 `check_and_compress(force=True)` 同一管道——修复直调 compressor 跳过恢复附件与全部边界字段的既有缺陷（复验实测暴露）；空对话+激活技能时也能建边界
+- [x] 12 个新测试（3 skills + 9 context：历史记录/停用保留/restore 不动 prompt/附件行/停用单列/无 provider/二次压缩替换/provider 崩溃/adopt 暂存/向后兼容/端到端 boundary/force 全管道）
+
 ## Phase 64 检查项：聚合工具结果预算（①）
 
 ### 功能完整性
