@@ -84,6 +84,8 @@ class RemoteServer:
             print(f"  Browser:   http://{self._host}:{self._port}")
         print("  Waiting for browser connection...")
 
+        await self._restore_last_session()
+
         async with websockets.serve(
             self._handler,
             self._host,
@@ -91,7 +93,50 @@ class RemoteServer:
             process_request=self._process_http,
         ):
             asyncio.create_task(self._ping_loop())
-            await asyncio.Future()
+            try:
+                await asyncio.Future()
+            finally:
+                await self._save_on_shutdown()
+
+    async def _restore_last_session(self) -> None:
+        """Auto-restore the newest crashed session of this project. No prompt:
+        the server starts with no client to ask (terminal mode asks instead).
+        Unwanted restore: /session load <id> switches away losslessly;
+        /fork + /clear starts fresh keeping the history (a bare /clear would
+        let autosave overwrite the old history under the same session id).
+        自动恢复本项目最新未正常关闭的会话。不询问：服务器启动时无客户端
+        可问（终端模式是询问式）。误恢复：/session load 无损切走；
+        /fork + /clear 保留历史另起（裸 /clear 会让自动保存以同会话 ID
+        覆盖旧历史）。"""
+        app = self._app
+        if app.config.memory.session_cleanup_days > 0:
+            try:
+                await app.session_store.cleanup_stale(app.config.memory.session_cleanup_days)
+            except Exception:
+                logger.debug("stale session cleanup failed", exc_info=True)
+        latest = await app._find_crashed_session()
+        if latest is None:
+            return
+        loaded = await app.session_store.load(latest["session_id"])
+        if loaded is None:
+            return
+        loaded.metadata.closed_cleanly = False  # live again 恢复后重新算进行中
+        app._adopt_session(loaded)
+        print(
+            f"  Restored session {latest['session_id'][:12]}... "
+            f"({len(loaded.conversation.messages)} messages)",
+            flush=True,
+        )
+
+    async def _save_on_shutdown(self) -> None:
+        """Mark the session cleanly closed and persist it (mirrors the
+        terminal path in Application.run()'s finally).
+        标记会话正常关闭并持久化（镜像 Application.run() finally 的终端路径）。"""
+        self._app.session.metadata.closed_cleanly = True
+        try:
+            await self._app._autosave(force=True)
+        except Exception:
+            logger.debug("shutdown session save failed", exc_info=True)
 
     def _process_http(self, connection: Any, request: Any) -> Any:
         """Serve HTML for GET /, let /ws proceed to WebSocket upgrade."""
@@ -206,6 +251,7 @@ class RemoteServer:
                         await self._ws_send("info", message="Goodbye!")
                         break
                     if self._app.slash_commands.is_slash_command(text):
+                        session_before = self._app.session
                         try:
                             result = await self._app.slash_commands.execute(text, self._app)
                             if result:
@@ -223,6 +269,16 @@ class RemoteServer:
                                     await self._ws_send("theme", theme=t)
                         except SystemExit:
                             break
+                        await self._app._autosave()
+                        # /session load or /fork swapped the session: reset the
+                        # browser chat area and replay the adopted history
+                        # (connect-time replay never reruns on its own).
+                        # /session load 或 /fork 换了会话：重置浏览器聊天区并
+                        # 重放采用的历史（连接时的重放不会自己重跑）。
+                        if self._app.session is not session_before:
+                            await self._ws_send("history_reset")
+                            for ws in list(self._clients):
+                                await self._replay_history(ws)
                         continue
                     await self._ws_send("user_message", text=text)
                     await self._ws_send("turn_start")
@@ -240,6 +296,10 @@ class RemoteServer:
                             iterations=al._state.iteration,
                             elapsed=elapsed,
                         )
+                        # Mirror the terminal path: force-save after every
+                        # turn so a hard kill never loses the last exchange
+                        # 镜像终端路径：每轮强制保存，硬杀不丢最后一轮
+                        await self._app._autosave(force=True)
 
                 elif msg_type == "cancel":
                     self._app.agent_loop.cancel()

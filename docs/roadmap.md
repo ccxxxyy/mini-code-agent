@@ -160,7 +160,7 @@
 
 **远程/浏览器模式（`--remote`）：**
 - 无 TLS（明文 `ws://`），可选 token 认证（`--remote-token`）但不加密传输
-- 服务器重启后丢失会话（远程模式未接入 SessionStore）
+- 会话已持久化（每轮自动保存 + 启动自动恢复本项目最新未关闭会话）；与终端模式的差异：恢复不询问（启动时无客户端可问），正常关闭后重启从新会话开始（可 /session load 手动恢复）
 - 浏览器图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
 - 所有客户端共享同一会话（无独立会话隔离）
 
@@ -428,7 +428,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 #### 仍存在的已知局限
 
-见本文档第六节"已知限制"章节（远程模式：无 TLS / 服务器重启丢失 / 图片仅公网 URL / 共享会话）。
+见本文档第六节"已知限制"章节（远程模式：无 TLS / 图片仅公网 URL / 共享会话；会话持久化已接入）。
 
 #### 建议改进优先级
 1. ~~刷新时重放历史~~ ✅ 已完成（`_replay_history()`）
@@ -595,8 +595,9 @@ mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、
 mewcode `memory/instructions.py` 支持 `@./path @~/path` 递归引用（深度 5）。mini `memory/project_context.py` 只读单文件、8000 字符截断，无引用语法。
 **✅ 已实现**：`project_context.py` 的 `_expand_includes` 递归展开 @-include 指令（整行 `@./path` 或 `@~/path`），相对路径随被引用文件的目录解析（非项目根），最大深度 5（`ContextConfig.max_include_depth`，0 禁用），循环引用与文件缺失生成注释标记温和降级，展开后整体受 `max_chars` 截断。行内 `@./` 不误触。用户级指令同样支持。10 个新测试，1133→1143。
 
-☐ **B7 远程模式 SessionStore 接入**
+✅ **B7 远程模式 SessionStore 接入**
 mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/server.py` 零 SessionStore 引用，重启丢失会话（roadmap 已知限制已承认）。工作量：小-中。
+**✅ 已实现**：远程模式复用终端模式的全套持久化基础设施（`session_store`/`_autosave`/`_adopt_session` 在 Application 上已存在且 UI 无关，只需接线）。四个接线点（`remote/server.py`）：① 启动时 `cleanup_stale` + 自动恢复本项目最新未关闭会话（`_find_crashed_session` 助手从 `_maybe_restore_session` 提取、两模式共用过滤逻辑；远程不询问——启动时无客户端可问，终端保持询问式）；② 每轮 turn 结束 `_autosave(force=True)`（硬杀不丢最后一轮）；③ 斜杠命令后节流保存；④ 服务器退出 finally 标记 `closed_cleanly=True` 并保存。附带修复既有盲区：`/session load`/`/fork` 换会话后浏览器不知情——现广播新 WS 事件 `history_reset`（web_ui 清空聊天区）并对所有客户端重放历史。诚实边界：恢复不询问与终端语义不同；正常关闭后重启从新会话开始（手动 /session load 可恢复）。复验补修：新增 `/session new` 安全另起（裸 /clear 不换会话 ID、自动保存会覆盖盘上旧历史——终端既有坑，本次文档化）；修复采用无边界会话继承上一会话已读文件缓存与技能状态的既有陈旧状态 bug（`ContextManager.reset_state()`）。13 个新测试，1166→1179。真实验证双通道全过：WS 脚本取证（硬杀恢复 + /session new 落盘）+ 用户终端日常动作四场景（远程关窗口/Ctrl+C、终端关窗口/exit）与 /session new 全流程人工确认。详见 tech-notes §102。
 
 ✅ **B8 恢复附件含 skill 调用记录**
 mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。
@@ -729,6 +730,16 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 **现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
 
 **✅ 已修复**：三件套——① Theme 新增 `user_input` 亮浅蓝字段（default `#5fd7ff`/dark `#7dcfff`/light 白底可读蓝 `#0969da`；不复用 warning——`#f39c12` 黑底偏暗且语义不同）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮浅蓝；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
+
+☐ **D8【存储·低】崩溃/硬杀会话永久积累——加默认 40 天启动清理**
+现状：`SessionStore.cleanup_stale()` 只删"已正常关闭 + 超龄"的会话，`closed_cleanly=False` 的一律跳过（崩溃恢复候选不能删）。但恢复只取本项目**最新**一个崩溃会话——非最新的崩溃会话、以及再也不启动的项目的崩溃会话**永久留盘**（`~/.mini-agent/sessions/`），只能 `/session delete` 或手动删文件。远程模式会话持久化接入后暴露此积累风险（终端模式既有行为，非新引入）。
+方案：`MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`（0 = 禁用）；`cleanup_stale()` 增加崩溃会话清理逻辑——`closed_cleanly=False` 且超过 40 天的也删除（默认 40 天比正常会话的 30 天更宽松：崩溃会话有恢复价值，多留 10 天缓冲）。清理时机保持启动时、且在崩溃恢复检测**之前**执行——40 天前的崩溃会话直接清掉不再进入恢复候选（正是意图：这么久之前的会话不值得自动恢复）。`config.toml.example` 补 `[memory]` 两个清理配置的文档（`session_cleanup_days` 目前也未记录）。
+验证要点：超龄崩溃会话被删 / 40 天内的保留且仍可恢复 / 0 禁用 / 正常会话 30 天逻辑不受影响。工作量：小。
+
+☐ **D9【UX·低】/session list 无分页无条数限制——上百会话整屏刷过**
+现状（远程会话持久化真实验证实测暴露）：`/session list` 把 `list_sessions()` 的全部结果逐行输出——实测 159 个会话（6.8MB）一次刷 159 行，把之前的终端内容全部顶出屏幕；用户实际只关心最近几个。远程模式浏览器里同样一大坨。`--tag` 过滤是唯一的收窄手段，但没打过标签的会话无法过滤。
+方案：默认只显示**最近 20 条**（list 已按 last_active 降序，直接切片即可）；尾行提示总数与查看方式：`共 159 个会话，显示最近 20 个 —— /session list --all 查看全部`；新增 `--all` 参数显示全部；`--tag` 过滤后同样默认截断 20 条（过滤+截断组合）。数字 20 定为常量（如 `_SESSION_LIST_LIMIT`），不进配置——没有配置价值，`--all` 已是出口。
+验证要点：>20 个会话默认只显示 20 行+尾行提示 / `--all` 显示全部 / ≤20 个不显示尾行提示 / `--tag` 与 `--all` 组合正常。工作量：小（一个切片+一行提示+参数解析）。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

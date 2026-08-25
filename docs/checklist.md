@@ -1264,6 +1264,23 @@
 - [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
 - [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
 
+## 远程模式会话持久化 检查项
+
+- [x] `app.py` — `_find_crashed_session()` 助手提取（closed_cleanly==False + 同项目 + 非当前会话，返回最新），终端 `_maybe_restore_session` 改用助手行为不变（询问式保留）
+- [x] `remote/server.py` — 启动时 `cleanup_stale` + `_restore_last_session()` 自动恢复（不询问——启动时无客户端可问；恢复后 closed_cleanly=False 重新算进行中）
+- [x] `remote/server.py` — turn 结束 finally `_autosave(force=True)`（镜像终端，硬杀不丢最后一轮）
+- [x] `remote/server.py` — 斜杠命令后节流 `_autosave()`（镜像终端）
+- [x] `remote/server.py` — serve 块 try/finally 退出保存（closed_cleanly=True；空会话跳过不落垃圾文件）
+- [x] `/session load`/`/fork` 换会话后广播 `history_reset` + 对所有客户端重放历史（修复既有盲区：浏览器不知会话已换）
+- [x] `web_ui.py` — `history_reset` 事件清空聊天区与流式状态
+- [x] 诚实边界：自动恢复只针对崩溃/硬杀；正常关闭重启从新会话开始（/session load 可手动恢复）；多客户端仍共享会话
+- [x] `/session new` 安全另起：旧会话完整存盘标记正常关闭（空会话跳过）、新 ID、保留 system prompt、继承 model/project_dir——堵住裸 /clear 的同 ID 覆盖坑（终端既有，本次文档化）
+- [x] `ContextManager.reset_state()` 陈旧状态修复（既有 bug）：采用无边界会话不再继承上一会话的已读文件缓存与技能状态，`_adopt_session` 每次采用前复位
+- [x] 13 个新测试（test_remote_session.py），1166→1179
+- [x] 真实运行验证（experiments/verify_remote_session.py，WS 客户端驱动真实服务器+真实 LLM）：对话一轮 → 硬杀服务器 → 会话文件 closed_cleanly=False 存 2 条消息 → 重启 → 重连收到 history_user/history_assistant 完整重放，VERDICT: PASS
+- [x] `/session new` 真实运行验证：真实 LLM 对话一轮 → WS 发 /session new → 收到新会话 ID + "Previous session ... saved" 提示 + `history_reset` 广播；落盘检查旧会话 closed_cleanly=True 消息完整，VERDICT: PASS
+- [x] 用户终端人工验证（日常动作级四场景 + /session new 全流程）全部通过：① 远程关窗口硬杀 → 重启自动恢复历史；② 远程 Ctrl+C 善终 → 重启空白新会话；③ 终端关窗口 → 重启弹询问（y 恢复接上文 / n 拒绝后不再问、落盘 closed_cleanly=true）；④ 终端 exit → 重启不弹询问；⑤ /session new 后新会话隔离（答不出旧词）、list 可见旧会话、load 回去历史无损（答出"苹果"）
+
 ## on/off 模式命令无参数行为统一 检查项
 
 - [x] `/trace`、`/explain`、`/audit` 无参数从 toggle 改为只显示当前状态不改变

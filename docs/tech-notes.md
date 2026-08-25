@@ -2012,7 +2012,7 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 P57 是大功能（WebSocket 服务器 + 嵌入式浏览器 UI + 11 项增强），实现细节和设计决策记录在以下位置：
 
 - 架构与协议设计：[comparison-mewcode.md §5.2](comparison-mewcode.md)（NDJSON 协议 12 种事件 + 3 种客户端消息、浏览器 UI 功能清单、安全与容错、测试覆盖）
-- 已知限制与后续改进：[roadmap.md "已知限制"](roadmap.md)（无 TLS、服务器重启丢会话、共享会话）
+- 已知限制与后续改进：[roadmap.md "已知限制"](roadmap.md)（无 TLS、共享会话；重启丢会话后经 §102 接入 SessionStore 已修复）
 - P82 断连排队增强：[roadmap.md 第八节 扩展点 #8](roadmap.md)（PermissionDecision.PENDING 跨连接持久化）
 
 # 第五十八部分：Mailbox 跨 Agent 通信（P58）
@@ -3314,3 +3314,43 @@ ANSI 级取证（force_terminal=True）：旧行为每碎片后跟 `\r\x1b[2K` �
 ## 101.3 验证
 
 4 个新测试（test_slash_commands.py）：每个命令初始状态 → 无参数调用 → 断言状态不变 + 返回包含当前状态描述。全量 1162→1166。
+
+# §102 远程模式 SessionStore 接入
+
+## 102.1 问题
+
+远程模式（`--remote`）跑 `RemoteServer.start()` 而非 `Application.run()`，绕过了终端模式的全套会话持久化：每轮 `_autosave`、启动崩溃恢复、退出 `closed_cleanly` 标记、`cleanup_stale` 全部被跳过。结果：服务器重启丢失所有会话（roadmap 已知限制承认过；浏览器刷新的 `_replay_history` 只重放内存里的对话）。而 `app.session_store`、`_autosave()`、`_adopt_session()` 在 Application 构造时已存在且 UI 无关——远程模式缺的只是接线。
+
+## 102.2 方案
+
+**app.py**：从 `_maybe_restore_session()` 提取 `_find_crashed_session() -> dict | None`（列 sessions、过滤 closed_cleanly==False 且 project_dir==cwd 且非当前会话、返回最新），终端询问式恢复与远程自动恢复共用同一份过滤逻辑。
+
+**remote/server.py 四个接线点**：
+① `start()` 开头：`cleanup_stale`（镜像终端启动）+ `_restore_last_session()`——自动采用最新未关闭会话（`closed_cleanly=False` 恢复后重新算进行中），浏览器随后连接时 `_replay_history` 自然重放恢复的对话；
+② turn 执行 finally：`_autosave(force=True)`（镜像终端每轮强制保存，硬杀不丢最后一轮）；
+③ 斜杠命令后：节流 `_autosave()`（镜像终端）；
+④ serve 块 try/finally：退出时 `closed_cleanly=True` + 强制保存（Ctrl+C 取消时 finally 仍执行；`_autosave` 对空会话跳过，全新服务器不落垃圾文件）。
+
+**附带修复既有盲区**：远程模式下 `/session load`/`/fork` 换掉会话后浏览器不知情（连接时的重放不会重跑）。斜杠命令执行前后对比 `app.session` 对象身份，变化则广播新 WS 事件 `history_reset`（web_ui.py 清空聊天区与流式状态）并对所有客户端重放历史。
+
+备选方案（未采用）：首个客户端连接时询问恢复——语义与终端一致但需新 WS 消息类型 + 前端弹窗 + 多客户端竞争处理，工作量明显更大；只持久化不自动恢复——"重启丢会话"体感只解决一半。
+
+**复验补修**（核查"误恢复怎么处置"时暴露两洞，当场修复）：
+① **无安全的"另起新会话"命令**——原表述"误恢复可用 /session 命令另起"不成立：/session 没有 new 子命令，裸 `/clear` 有数据覆盖坑（不换会话 ID，之后自动保存覆盖盘上旧历史——终端模式同样存在的既有坑）。新增 `/session new`：旧会话完整存盘并标记正常关闭（主动离开不是崩溃，不标记会被下次启动的崩溃检测误判；空会话跳过存盘防垃圾文件）、新会话换 ID 写另一个文件（旧文件从此不被碰——与 /clear 的本质区别）、保留 system prompt（与 /clear 语义一致）、继承 model/project_dir。三命令定位：/clear 擦黑板（同 ID，盘上旧历史会被覆盖）、/fork 复印一份接着写（新 ID + 深拷贝历史）、/session new 旧本子收进抽屉开新本子（新 ID + 空白）——用法详见 commands-guide /session 节。
+② **`_adopt_session` 陈旧状态 bug（既有）**——ContextManager 持有三份会话级状态，都服务于压缩恢复附件：`_read_files`（本会话读过的文件，压缩后提醒 LLM"这些读过、变了要重读"）、`_last_user_request`（最近用户请求，压缩后防丢任务）、`_adopted_skills`（从边界恢复的技能激活状态，供 app 层写回 SkillRegistry）。`adopt_boundary` 的逻辑是"**有**压缩边界才写入，**没有**边界直接 return"——不清空。于是：load 带边界的会话 A（读过 a.py、激活 skill-x）→ 状态 = A 的；再 load 无边界的会话 B（从没压缩过的旧会话）→ adopt_boundary 直接 return 状态没动 → B 顶着 A 的状态跑——压缩恢复附件谎称"读过 a.py"，技能恢复把 A 的 skill-x 错误写回 registry。`/session new` 的全新空会话正是无边界路径，同一个洞的两面。修复：ContextManager 新增 `reset_state()`（三份状态全清空），`_adopt_session` 采用前**先复位再 adopt_boundary**——被采用会话永远从干净状态开始，有边界用边界重建，无边界就是真空白。代价：无边界会话（含 /fork 无边界分支）采用后压缩恢复附件的已读文件清单从零重建——正确性优先于恢复清单完整性。
+
+## 102.3 诚实边界
+
+- 恢复不询问，与终端模式的询问式语义不同（启动时无客户端可问）。误恢复处置（详见 commands-guide /session 节）：`/session new` 一条命令安全另起（误恢复会话完整存盘）；或 `/session load` 无损切走；**不要**直接 `/clear` 后继续对话——同一会话 ID 的自动保存会覆盖盘上旧历史（/clear 不换会话 ID，此坑终端模式同样存在，本次文档化并以 /session new 提供安全出口）
+- 正常关闭（Ctrl+C）后会话标记 `closed_cleanly=True`，重启从新会话开始——自动恢复只针对崩溃/硬杀，与终端语义一致；旧会话可 `/session list` + `load` 手动恢复
+- 多客户端仍共享同一会话（既有限制，不在本条目范围）
+
+## 102.4 验证
+
+13 个新测试（test_remote_session.py，FakeApp 借用真实 Application 方法 + 裸 RemoteServer 模式）：`_find_crashed_session` 三条件过滤/空库/排除当前 3 个；启动自动恢复 adopt+live-again/无候选不恢复 2 个；退出保存标记 closed_cleanly 1 个；WS 消息循环 turn 后强制保存/换会话广播 history_reset+重放/未换会话不广播 3 个；终端 `_maybe_restore_session` 仍询问式（提取助手后回归）1 个；`/session new` 旧会话存盘+新会话空历史保留 system prompt/空会话跳过存盘 2 个；`reset_state` 清陈旧状态 1 个。全量 1166→1179。
+
+真实运行验证已通过（experiments/verify_remote_session.py，WS 客户端两阶段驱动真实服务器+真实 LLM）：对话一轮（"9.9 和 9.11 哪个大"）→ 硬杀服务器进程 → 检查会话文件 closed_cleanly=False 且存 2 条消息（每轮强制保存生效）→ 重启服务器 → WS 重连收到 history_user/history_assistant 完整重放上一轮对话（启动自动恢复生效），VERDICT: PASS。顺带发现启动横幅 print 在 stdout 为管道时被缓冲不可见，恢复提示行加 flush=True。
+
+`/session new` 真实运行验证已通过：真实 LLM 对话一轮 → WS 发 `/session new` → 收到 "New session started: <新ID> / Previous session <旧ID> saved -- return with /session load <前缀>" 提示与 `history_reset` 广播（浏览器聊天区清空）；落盘检查旧会话 closed_cleanly=True、消息完整，VERDICT: PASS。
+
+用户终端人工验证（日常动作级）全部通过：远程模式关窗口硬杀→重启自动恢复 / 远程 Ctrl+C 善终→重启空白新会话 / 终端关窗口→重启弹询问（y 恢复接上文、n 拒绝后标记 closed_cleanly=true 不再问）/ 终端 exit→重启不弹询问 / `/session new` 全流程（新会话隔离、旧会话 list 可见、load 回去历史与 LLM 上下文无损）。验证方法论教训：留给用户的验证只含日常动作（关窗口/Ctrl+C/聊天/刷新），文件取证类步骤由开发侧脚本完成，不混入用户步骤。

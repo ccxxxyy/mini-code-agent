@@ -16,6 +16,7 @@ Output: model, provider, platform, turn count, token usage, cost/budget, context
 
 ### /clear
 Clear conversation history (system prompt and memory injection are preserved). No parameters.
+**Note**: /clear does NOT change the session ID — if you keep chatting after clearing, autosave will **overwrite** this session's old history on disk. To start fresh while keeping the current session's full history, use `/session new` (one command: saves the old session intact and starts under a new ID).
 
 ### /compact
 Manually compress conversation history (triggers the four-level compression cascade: DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow). No parameters. **Calls the LLM** (when using the LLM summarization strategy).
@@ -24,6 +25,7 @@ Manual compaction goes through the same pipeline as auto-compression — the rec
 ### /session — Session Management
 ```
 /session save              # Save the current session
+/session new               # Start a fresh session (current one saved intact, load to return)
 /session list              # List saved sessions (newest first)
 /session list --tag <name> # Filter saved sessions by tag
 /session load <id>         # Load a session (id may be a prefix from list)
@@ -33,7 +35,27 @@ Manual compaction goes through the same pipeline as auto-compression — the rec
 /session tags              # Show all tags of the current session
 ```
 `load` restores the full conversation (tool calls included) and the system prompt; if the session has been compressed (a compact boundary exists), the read-file list, the last user request and the **skill activation state** are restored too (`/skill`'s `[ACTIVE]` markers and deactivate work again; prompts are not re-injected).
-Shows usage when called without parameters. Tags can be used to categorize sessions (e.g. `#bug-fix`, `#refactor`); use `--tag` with list to filter by tag. Sessions are stored in `~/.mini-agent/sessions/`; normally closed sessions older than `session_cleanup_days` (default 30 days) are automatically cleaned up at startup.
+Shows usage when called without parameters. Tags can be used to categorize sessions (e.g. `#bug-fix`, `#refactor`); use `--tag` with list to filter by tag. Sessions are stored in `~/.mini-agent/sessions/`; normally closed sessions older than `session_cleanup_days` (default 30 days) are automatically cleaned up at startup (uncleanly closed ones are kept — they are crash-recovery candidates).
+
+**How `/session new` works**: three things happen to the current session — ① **saved intact**: all messages/tool records/system prompt/compact boundary are written to its own JSON file; the new session uses a **new ID** and writes to a **different file**, so the old file is never touched again; ② **marked cleanly closed** (closed_cleanly=True): you are leaving deliberately, not crashing — without the marker the next startup's crash detection would wrongly offer to restore it; ③ **empty sessions skip the save** (no junk empty JSON files), but a fresh session still starts. The fresh session keeps the system prompt (instructions/memory injection, same semantics as /clear) and inherits model and project_dir. The return message includes the old session's ID — `/session load <prefix>` brings it back anytime.
+
+**The three "start over" commands compared**:
+
+| Command | Behavior | When to use |
+|---|---|---|
+| `/session new` | Old session saved & closed → blank start under a new ID | Starting from scratch (incl. unwanted-restore handling) — recommended |
+| `/fork [N]` | Old session saved & closed → new ID but **deep-copies the full history** (optionally rolling back N turns) | Branching to try another path WITH the history |
+| `/clear` | **Keeps the ID**, empties in-memory messages in place | Just clearing the screen within the same session — mind the overwrite footgun (see /clear) |
+
+In one line: `/clear` wipes the blackboard (same board — the old photo on disk gets overwritten by the new one), `/fork` photocopies and continues writing, `/session new` puts the old notebook in the drawer and opens a new one.
+
+**Crash recovery**: at startup, if this project's newest uncleanly-closed session is detected — terminal mode asks yes/no (declining marks it closed so it won't ask again); **remote mode (--remote) auto-restores without asking** (no client is connected yet to ask), and the browser sees the full history on connect.
+**Handling an unwanted auto-restore in remote mode**:
+- To start fresh: `/session new` — the unwanted session is saved intact, one safe command
+- To switch to another session: `/session load <id>` — equally lossless
+- **Do NOT just `/clear` and keep chatting**: /clear keeps the session ID, so autosave overwrites the old history on disk (see the /clear note)
+
+**Remote-mode UI sync**: after `/session new`, `/session load` or `/fork` swaps the session, the server detects the session-object change and broadcasts a `history_reset` event to all browsers (clearing the chat area), then replays the adopted session's history — what the browser shows and what the server works on always match.
 
 ### /undo [N]
 Roll back the most recent N turns (default 1) — **both conversation and files are rolled back** (file snapshots are only kept for the last 5 turns; files modified by bash commands cannot be recovered).

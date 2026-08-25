@@ -894,6 +894,7 @@ class Application:
         切换到已加载的会话（同步修复 ToolContext 的过期引用）。"""
         self.session = loaded
         self._tool_context.session = loaded
+        self.context_manager.reset_state()
         self.context_manager.adopt_boundary(loaded.conversation)
         # Restore skill registry state from the boundary -- WITHOUT
         # re-injecting prompts (the restored system_prompt already has them)
@@ -904,13 +905,13 @@ class Application:
             self.skill_registry.restore_state(*adopted)
         self.context_manager.update_total(loaded.conversation)
 
-    async def _maybe_restore_session(self) -> None:
-        """On startup, offer to restore the most recent crashed session.
-        启动时检测最近未正常关闭的会话并提示恢复。"""
+    async def _find_crashed_session(self) -> dict | None:
+        """Find the newest crashed session of this project (metadata dict).
+        查找本项目最新的未正常关闭会话（返回元数据 dict，无则 None）。"""
         try:
             sessions = await self.session_store.list_sessions()
         except OSError:
-            return
+            return None
         cwd = str(Path.cwd())
         crashed = [
             s
@@ -919,9 +920,14 @@ class Application:
             and str(s.get("project_dir", "")) == cwd
             and s["session_id"] != self.session.metadata.session_id
         ]
-        if not crashed:
+        return crashed[0] if crashed else None  # newest first 已按最新在前排序
+
+    async def _maybe_restore_session(self) -> None:
+        """On startup, offer to restore the most recent crashed session.
+        启动时检测最近未正常关闭的会话并提示恢复。"""
+        latest = await self._find_crashed_session()
+        if latest is None:
             return
-        latest = crashed[0]  # newest first 已按最新在前排序
         prompt = (
             f"检测到未正常关闭的会话（{latest['total_turns']} 轮, "
             f"{str(latest['last_active'])[:19]}）。恢复它吗？"
