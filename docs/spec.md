@@ -149,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 64 unit test files, 1189 tests
+│   ├── unit/                        # 64 unit test files, 1193 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2850,7 +2850,7 @@ async def spawn(
 
 `SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估——`SubAgentManager` 持有主权限管理器，`spawn()` 经 `PermissionManager.child_view()` 给每个进程内子 Agent 派生 `ChildPermissionManager` 子视图：规则/会话授权/写文件集按引用共享、mode 实时委托父级、需弹窗一律失败安全拒绝；此前进程内子 Agent 完全没有权限门控，只有 pane worker 有），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
 
-**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。默认 `background=false` 保持阻塞语义（需要全部结果再继续的场景）。`/spawn --background <task>` 斜杠命令走 `spawn_background()` 路径，完成后自动投递结果（无需 `/spawn wait`）。
+**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。`spawn_agents` 工具默认 `background=false` 保持阻塞语义（LLM 调用方需要全部结果再继续是常态）。**`/spawn` 斜杠命令则默认走 `spawn_background()` 路径**（完成后自动投递结果，无需 `/spawn wait`）；`--wait` 为阻塞式 opt-in（进度面板+内联完整结果），`--background` 保留为 no-op 别名。
 
 **摘要式上下文 fork**：`spawn_agents` 工具的 `inherit_context=true` 或 `/spawn --fork` 把父对话的 LLM 摘要注入子 agent system prompt 的 `[Inherited context ...]` 段——子 agent 出生时"知道"之前的讨论。摘要经 `memory/compressor.py` 的公开函数 `summarize_conversation()` 生成（复用 P67 的 9 节结构化摘要，LLM 失败回退提取式 digest），每次 spawn 调用生成一次、同批 agent 共享（冻结快照，回避 fork 一致性问题）。`context_summary` 参数透传 `spawn/spawn_parallel/spawn_background` 三层，与 `background` 模式可组合。摘要生成前后 `build_context_summary()` 发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`——app.py 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready"），TraceRenderer 订阅在 `/trace on` 下显示 `ctx` 行。`background=true + inherit_context=true` 时摘要+spawn 整体放进后台 `asyncio.Task`，`execute()` 立即返回（消息列表浅拷贝防竞态）。`spawn_pane` 与 `/team` 未纳入。
 

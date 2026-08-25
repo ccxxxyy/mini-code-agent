@@ -170,7 +170,7 @@
 | 恢复提示 `检测到未正常关闭的会话...` | `app.py` `_maybe_restore_session` | 启动时检测到崩溃会话 |
 | 用户输入行 bold 亮浅蓝着色 + 上下亮浅蓝横线 | `input_handler.py` `create_prompt_style` 根样式 + `terminal.py` `_input_rule` | `> 输入文字` 行打字时和回车后均为 bold 亮浅蓝（theme.user_input），回车后上下各一条同色横线框住输入行，滚动历史中与 dim 的 trace/工具输出直接可辨 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串；默认纯文本原样打印，带 `MARKDOWN_RESULT` 哨兵的（spawn 报告）走 Markdown 渲染，行内代码（文件名/agent id）亮橙色 | 输入 `/xxx` 时 |
-| SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn wait` 或 `/team` 期间 |
+| SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn --wait`、`/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
 | `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | LLM 以 `spawn_agents background=true` 派发的后台 agent 完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果 |

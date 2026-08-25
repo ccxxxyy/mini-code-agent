@@ -746,10 +746,11 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 - **多客户端会话隔离**：mewcode 同样单 agent 广播（remote.py:91）无隔离——非差距
 - **常驻队友 transcript 恢复**：mewcode `teams/transcript.py` 独有；mini 一次性 worker 适配论证基本成立，若走向常驻队友需重评估
 
-☐ **D10【UX·中】/spawn 默认改为后台模式（自动投递）**
+✅ **D10【UX·中】/spawn 默认改为后台模式（自动投递，已实现）**
 现状：`/spawn <task>` 默认是前台模式——子 agent 跑完结果静悄悄存到文件，用户需手动 `/spawn wait` 取。后台模式 `/spawn --background <task>` 已实现完整的自动投递（子 agent 完成后中断用户输入等待、自动弹出结果），但需显式加 `--background` 参数。两者功能实质重叠：前台模式除了"需要手动 wait"之外无任何额外价值——它是后台投递实现前的权宜设计，投递做好后没把默认行为跟着改。
 方案：把 `/spawn <task>`（无 flag）的默认行为改为后台模式（等同于现在的 `--background`）——跑完自动投递，不需要 wait。保留 `--wait` 参数用于"我就等这一个结果、阻塞到完成"的少数场景（语义反转：现在 --background 是 opt-in，改后 --wait 是 opt-in）。`--background` 参数保留为 no-op 别名（向后兼容，不报错）。
 影响面：`extensions/builtin_commands.py` _make_spawn handler 的默认分支、`core/subagent.py` SubAgentManager.spawn 调用方式、app.py 的 `_run_agent_and_report` 接线。涉及真实 LLM 验证（spawn 后不输 wait、结果是否自动弹出）。工作量：小-中。
+**✅ 已实现**：改动只需 `_make_spawn` 一个函数——单任务与 `-p` 并行的默认分支统一改调 `spawn_background`（原 background 专用分支合并删除；`spawn_background` 签名本就支持 isolation/agent_type/context_summary 透传，subagent.py 零改动）；`--background` 解析保留但变 no-op（向后兼容）；`--wait` 保持阻塞式 opt-in（进度面板+内联完整格式化结果）；`--pane` 与 `wait`/`list`/`cancel` 子命令不变（wait 仍服务 pane 收集与手动阻塞）。usage 文本与注册 description 同步。诚实边界：后台投递结果经 LLM 转述且 4000 字符截断，`--wait` 返回未截断的完整格式化输出（8000 字符 cap）——需要完整结果时用 `--wait`。4 个新测试（默认走 spawn_background / -p 默认后台 / --background no-op / --wait 阻塞回归），1189→1193。详见 tech-notes §106。
 
 ---
 

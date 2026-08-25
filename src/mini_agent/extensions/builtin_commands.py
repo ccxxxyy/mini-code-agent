@@ -140,7 +140,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="spawn",
-            description="SubAgent dispatch (usage: /spawn <task> | /spawn list|wait|cancel)",
+            description="SubAgent dispatch, auto-delivers result (/spawn <task>, --wait blocks)",
             handler=_make_spawn(app),
         )
     )
@@ -1331,22 +1331,25 @@ def _make_spawn(app: Application) -> HandlerFn:
         if not raw:
             return (
                 "Usage:\n"
-                "  `/spawn <task>` — dispatch a single SubAgent\n"
-                "  `/spawn -p <task1> | <task2>` — parallel dispatch\n"
+                "  `/spawn <task>` — dispatch a SubAgent; result is "
+                "auto-delivered when it completes (no need for `/spawn wait`)\n"
+                "  `/spawn -p <task1> | <task2>` — parallel dispatch "
+                "(results auto-delivered)\n"
+                "  `/spawn --wait <task>` — dispatch a NEW task AND block for "
+                "its result with a live progress board (combines with --pane)\n"
                 "  `/spawn --isolated <task>` — run in git worktree\n"
                 "  `/spawn --pane <task>` — run in a visible terminal pane "
                 "(tmux/WT session: split pane; wt installed elsewhere: tab in "
-                "a shared window)\n"
-                "  `/spawn --wait <task>` — dispatch AND block for the result "
-                "in one command (combines with --pane)\n"
+                "a shared window); collect with `/spawn wait` or use --wait\n"
                 "  `/spawn --type <name> <task>` — use agent type "
                 "(explore/plan/worker/verify)\n"
-                "  `/spawn --background <task>` — dispatch and auto-deliver "
-                "result via mailbox when done (no need for `/spawn wait`)\n"
                 "  `/spawn --fork <task>` — inherit a summary of the current "
                 "conversation (for tasks that refer to the discussion)\n"
+                "  `/spawn --background <task>` — no-op alias (auto-delivery "
+                "is the default now)\n"
                 "  `/spawn list` — show active agents\n"
-                "  `/spawn wait [id]` — wait for result\n"
+                "  `/spawn wait [id]` — wait for an ALREADY-running agent, "
+                "dispatches nothing (mainly to collect --pane results)\n"
                 "  `/spawn cancel [id]` — cancel agent(s)"
             )
 
@@ -1407,9 +1410,10 @@ def _make_spawn(app: Application) -> HandlerFn:
             auto_wait = True
             task_text = task_text.replace("--wait", "").strip()
 
-        background = False
+        # --background is a no-op alias: auto-delivery IS the default now.
+        # Kept for backward compatibility (scripts/muscle memory won't break).
+        # --background 是 no-op 别名：自动投递已是默认，保留只为向后兼容。
         if "--background" in task_text:
-            background = True
             task_text = task_text.replace("--background", "").strip()
 
         agent_type_name: str | None = None
@@ -1460,19 +1464,7 @@ def _make_spawn(app: Application) -> HandlerFn:
                 tasks = [t.strip() for t in task_text[3:].split("|") if t.strip()]
                 if not tasks:
                     return "No tasks provided. Use: `/spawn -p task1 | task2`"
-                if background:
-                    ids = await mgr.spawn_background(
-                        tasks,
-                        isolation=isolation,
-                        agent_type=agent_type_name,
-                        context_summary=context_summary,
-                    )
-                    lines = [f"Spawned {len(ids)} background SubAgents:"]
-                    for aid, task in zip(ids, tasks):
-                        lines.append(f"  `{aid}` — {task[:60]}")
-                    lines.append("Results will be auto-delivered when each completes.")
-                    return "\n".join(lines)
-                ids = await mgr.spawn_parallel(
+                ids = await mgr.spawn_background(
                     tasks,
                     isolation=isolation,
                     agent_type=agent_type_name,
@@ -1481,30 +1473,13 @@ def _make_spawn(app: Application) -> HandlerFn:
                 lines = [f"Spawned {len(ids)} SubAgents:"]
                 for aid, task in zip(ids, tasks):
                     lines.append(f"  `{aid}` — {task[:60]}")
-                lines.append("Use `/spawn wait` to collect results.")
+                lines.append("Results will be auto-delivered when each completes.")
                 return "\n".join(lines)
 
             if not task_text:
                 return "No task provided."
-            if background:
-                ids = await mgr.spawn_background(
-                    [task_text],
-                    isolation=isolation,
-                    agent_type=agent_type_name,
-                    context_summary=context_summary,
-                )
-                type_info = f"  Type: {agent_type_name}\n" if agent_type_name else ""
-                fork_info = "  Context: inherited (fork)\n" if context_summary else ""
-                return (
-                    f"Background SubAgent spawned: `{ids[0]}`\n"
-                    f"  Task: {task_text[:80]}\n"
-                    f"{type_info}"
-                    f"{fork_info}"
-                    f"  Isolation: {isolation}\n"
-                    "Result will be auto-delivered when it completes."
-                )
-            agent_id = await mgr.spawn(
-                task_text,
+            ids = await mgr.spawn_background(
+                [task_text],
                 isolation=isolation,
                 agent_type=agent_type_name,
                 context_summary=context_summary,
@@ -1512,12 +1487,13 @@ def _make_spawn(app: Application) -> HandlerFn:
             type_info = f"  Type: {agent_type_name}\n" if agent_type_name else ""
             fork_info = "  Context: inherited (fork)\n" if context_summary else ""
             return (
-                f"SubAgent spawned: `{agent_id}`\n"
+                f"SubAgent spawned: `{ids[0]}`\n"
                 f"  Task: {task_text[:80]}\n"
                 f"{type_info}"
                 f"{fork_info}"
                 f"  Isolation: {isolation}\n"
-                "Use `/spawn wait {id}` or `/spawn wait` to collect result."
+                "Result will be auto-delivered when it completes "
+                "(use `/spawn --wait <task>` next time to block instead)."
             )
         except ValueError as e:
             return str(e)

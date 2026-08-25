@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1189%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1193%20passed-brightgreen)]()
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
@@ -248,7 +248,7 @@ mini --remote --remote-token "my-secret"
 | `/plan [on\|off]` | Read-only plan mode; no args = show status (write tools disabled) |
 | `/mode [name]` | View/switch permission mode: default / accept-edits / plan / bypass (deny rules & sensitive paths hold in every mode) |
 | `/tools` | List all registered tools (built-in + MCP) |
-| `/spawn <task>` | Dispatch background sub-agent (`--type`, `--pane` visible terminal pane, `--wait` block for result) |
+| `/spawn <task>` | Dispatch sub-agent, result auto-delivered on completion (`--wait` blocks, `--type`, `--pane` visible terminal pane) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
 | `/trace [on\|off]` | Agent internals (phases, permissions, timing); no args = show status |
 | `/explain [on\|off]` | Tool usage explanations; no args = show status |
@@ -306,7 +306,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1189 tests, 80%+ coverage
+├── tests/           # 1193 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -327,7 +327,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1189 tests
+uv run pytest tests/           # 1193 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```
