@@ -707,12 +707,12 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 | | mini | mewcode |
 |---|---|---|
-| 旧会话清理 | ✅ **N 天自动清理**（默认 30 天，可配 `session_cleanup_days`），跳过未正常关闭的会话（崩溃恢复保留） | **30 天自动清理**（可配） |
+| 旧会话清理 | ✅ **N 天自动清理**（正常 30 天 `session_cleanup_days` + 崩溃 40 天 `crashed_session_cleanup_days`，均可配 0 禁用） | **30 天自动清理**（可配） |
 
 **已完成**：
-1. `SessionStore.cleanup_stale(max_age_days)` — 启动时扫描 `~/.mini-agent/sessions/`，删除超过 N 天且 `closed_cleanly=True` 的会话文件；未正常关闭的跳过（可能需要崩溃恢复）
-2. `MemoryConfig.session_cleanup_days = 30`（0 = 禁用），可通过 `config.toml` 的 `[memory]` 段配置
-3. `app.py` 启动时调用（在崩溃恢复检查之前），清理后显示 "Cleaned N stale session(s)"
+1. `SessionStore.cleanup_stale(max_age_days, crashed_max_age_days)` — 启动时扫描 `~/.mini-agent/sessions/`，正常关闭超 N 天的删除；崩溃会话超 M 天的也删除（0 = 永久保留）
+2. `MemoryConfig.session_cleanup_days = 30`（正常会话）+ `crashed_session_cleanup_days = 40`（崩溃会话，比正常更宽松），均可通过 `config.toml` 的 `[memory]` 段配置（0 = 禁用）
+3. `app.py` + `remote/server.py` 启动时调用（在崩溃恢复检查之前），清理后显示 "Cleaned N stale session(s)"
 4. 4 个测试：过期删除 / 未正常关闭跳过 / 0 禁用 / 空目录
 
 ### 9.2 会话压缩边界记录 ✅ 已实现

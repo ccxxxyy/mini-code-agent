@@ -91,7 +91,9 @@ async def test_find_crashed_session_excludes_current(tmp_path):
 
 async def test_restore_last_session_adopts(tmp_path):
     app = FakeApp(tmp_path)
-    app.config = SimpleNamespace(memory=SimpleNamespace(session_cleanup_days=0))
+    app.config = SimpleNamespace(
+        memory=SimpleNamespace(session_cleanup_days=0, crashed_session_cleanup_days=0)
+    )
     crashed = make_session(closed=False, project_dir=Path.cwd())
     await app.session_store.save(crashed)
 
@@ -106,7 +108,9 @@ async def test_restore_last_session_adopts(tmp_path):
 
 async def test_restore_last_session_no_candidate(tmp_path):
     app = FakeApp(tmp_path)
-    app.config = SimpleNamespace(memory=SimpleNamespace(session_cleanup_days=0))
+    app.config = SimpleNamespace(
+        memory=SimpleNamespace(session_cleanup_days=0, crashed_session_cleanup_days=0)
+    )
     clean = make_session(closed=True, project_dir=Path.cwd())
     await app.session_store.save(clean)
 
@@ -179,7 +183,7 @@ def make_handler_server(app: FakeApp):
     app.config = SimpleNamespace(
         llm=SimpleNamespace(provider="openai"),
         llm_profiles={},
-        memory=SimpleNamespace(session_cleanup_days=0),
+        memory=SimpleNamespace(session_cleanup_days=0, crashed_session_cleanup_days=0),
     )
     return server
 

@@ -61,7 +61,7 @@
 | `~/.mini-agent/.theme` | 用户级 | `/theme` 命令写入的主题偏好 |
 | `~/.mini-agent/memory/user_memory.json` | 用户级 | 跨项目记忆（SESSION_END 自动提取 + `/memory add`） |
 | `<项目>/.mini-agent/memory.json` | 项目级 | 项目记忆 |
-| `~/.mini-agent/sessions/` | 用户级 | 会话持久化（自动保存/崩溃恢复），超过 `session_cleanup_days` 天的已正常关闭会话启动时自动清理 |
+| `~/.mini-agent/sessions/` | 用户级 | 会话持久化（自动保存/崩溃恢复），正常关闭超 `session_cleanup_days`（默认 30）天、崩溃会话超 `crashed_session_cleanup_days`（默认 40）天的启动时自动清理 |
 | `~/.mini-agent/audit.jsonl` | 用户级 | 审计日志（`/audit on` 开启后） |
 | `~/.mini-agent/recordings/` | 用户级 | 工具链录制（`/record` 保存，`/replay` 读取） |
 | `~/.mini-agent/cost_ledger.json` | 用户级 | 成本累计总账（每轮自动写入；`/cost reset` 确认后清零并重置起始日期，删文件等效） |
@@ -216,7 +216,8 @@ hard_compression_threshold = 0.90 # 硬阈值（90% 时强制压缩，绕过熔�
 auto_extract = true          # 会话结束自动提取记忆
 spill_threshold_chars = 50000 # 工具结果超过此字符数溢写磁盘只留预览（0 = 禁用）——防大文件撑爆上下文
 aggregate_spill_chars = 200000 # 单轮工具结果累计字符预算：超出时按大小降序强制溢写（0 = 禁用）——防"每条不超、合计撑爆"
-session_cleanup_days = 30    # 超过此天数的旧会话启动时自动清理（0 = 禁用）——未正常关闭的保留供崩溃恢复
+session_cleanup_days = 30    # 正常关闭超过此天数的会话启动时自动清理（0 = 禁用）
+crashed_session_cleanup_days = 40  # 崩溃会话超过此天数也清理（0 = 永久保留）——比正常 30 天更宽松（崩溃有恢复价值）
 compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳过（0 = 禁用）——防已读文件列表过长时的死循环
 llm_summarize = true         # LLM 语义摘要压缩（默认开启）；false 退回提取式截断（无 LLM 调用）
 recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入）

@@ -1264,6 +1264,14 @@
 - [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
 - [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
 
+## 崩溃会话启动清理 检查项
+
+- [x] `MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`（0 = 永久保留）
+- [x] `SessionStore.cleanup_stale()` 新增 `crashed_max_age_days` 参数：超龄崩溃会话也删除；正常会话 30 天逻辑不受影响
+- [x] app.py + remote/server.py 两个调用点同步传入新参数
+- [x] `config.toml.example` 补 `[memory]` 两个清理配置文档（`session_cleanup_days` 之前也未记录）
+- [x] 3 个新测试：超龄崩溃被删 / 40 天内保留 / 0 禁用 + 正常 30 天不受影响回归，1179→1182
+
 ## 远程模式会话持久化 检查项
 
 - [x] `app.py` — `_find_crashed_session()` 助手提取（closed_cleanly==False + 同项目 + 非当前会话，返回最新），终端 `_maybe_restore_session` 改用助手行为不变（询问式保留）

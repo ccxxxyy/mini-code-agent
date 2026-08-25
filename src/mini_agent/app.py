@@ -627,9 +627,12 @@ class Application:
                 pass
         # Stale session cleanup (9.1): remove sessions older than N days
         # 过期会话清理：删除超龄的已正常关闭会话
-        if self.config.memory.session_cleanup_days > 0:
+        mem = self.config.memory
+        if mem.session_cleanup_days > 0 or mem.crashed_session_cleanup_days > 0:
             try:
-                n = await self.session_store.cleanup_stale(self.config.memory.session_cleanup_days)
+                n = await self.session_store.cleanup_stale(
+                    mem.session_cleanup_days, mem.crashed_session_cleanup_days
+                )
                 if n:
                     self.terminal.show_info(f"Cleaned {n} stale session(s)")
             except Exception:
