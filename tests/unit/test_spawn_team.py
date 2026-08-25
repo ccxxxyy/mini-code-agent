@@ -189,6 +189,70 @@ async def test_spawn_command_list_empty(tmp_path):
     assert "No active" in result
 
 
+# --- background-by-default 默认后台自动投递 ---
+
+
+async def test_spawn_default_is_background(tmp_path):
+    """No-flag spawn goes through spawn_background (auto-delivery).
+    无 flag 派发走 spawn_background（自动投递）。"""
+    from mini_agent.extensions.builtin_commands import _make_spawn
+
+    app = _make_mock_app(tmp_path)
+    handler = _make_spawn(app)
+    result = await handler("say hello", None)
+
+    assert "auto-delivered" in result
+    # The background watcher is registered 后台通知 watcher 已注册
+    mgr = app.subagent_manager
+    assert len(mgr._background_ids) == 1
+    await mgr.wait_all(timeout=10)
+
+
+async def test_spawn_parallel_default_is_background(tmp_path):
+    from mini_agent.extensions.builtin_commands import _make_spawn
+
+    app = _make_mock_app(tmp_path)
+    handler = _make_spawn(app)
+    result = await handler("-p task one | task two", None)
+
+    assert "auto-delivered" in result
+    assert len(app.subagent_manager._background_ids) == 2
+    await app.subagent_manager.wait_all(timeout=10)
+
+
+async def test_spawn_background_flag_is_noop_alias(tmp_path):
+    """--background must not error and behaves like the default.
+    --background 是 no-op 别名：不报错，行为与默认一致。"""
+    from mini_agent.extensions.builtin_commands import _make_spawn
+
+    app = _make_mock_app(tmp_path)
+    handler = _make_spawn(app)
+    result = await handler("--background say hello", None)
+
+    assert "auto-delivered" in result
+    assert len(app.subagent_manager._background_ids) == 1
+    await app.subagent_manager.wait_all(timeout=10)
+
+
+async def test_spawn_wait_flag_still_blocks(tmp_path):
+    """--wait remains the blocking opt-in path (returns the formatted result).
+    --wait 仍是阻塞式 opt-in（直接返回格式化结果）。"""
+    from types import SimpleNamespace
+
+    from mini_agent.extensions.builtin_commands import _make_spawn
+
+    app = _make_mock_app(tmp_path)
+    app.terminal = SimpleNamespace(console=None, theme=None)
+    handler = _make_spawn(app)
+    result = await handler("--wait say hello", None)
+
+    # Blocking path returns the agent's result inline, not a dispatch notice
+    # 阻塞路径直接内联返回结果，而非派发提示
+    assert "auto-delivered" not in result
+    assert "Done." in result
+    assert app.subagent_manager._background_ids == set()
+
+
 # --- /team command handler ---
 
 

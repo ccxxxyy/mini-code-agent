@@ -110,16 +110,37 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 /spawn --type <t> <task>          # Specify type: explore/plan/worker(default)/verify
 /spawn --fork <task>              # Inherit a summary of the current conversation (for tasks referring to the discussion)
 /spawn --pane <task>              # Run in a visible terminal pane (separate process, watch live)
-/spawn --wait <task>              # Dispatch + progress panel + result in one command
-/spawn --background <task>        # Dispatch in the background; result auto-delivered when complete (no /spawn wait needed)
+/spawn --wait <task>              # Blocking: dispatch + progress panel + result in one command
+/spawn --background <task>        # No-op alias (auto-delivery is the default now)
 /spawn --pane --wait <task>       # Combined: open a pane + block for the result
 ```
+
+**Background auto-delivery is the default**: `/spawn <task>` returns immediately; when the agent finishes, its result is auto-delivered to the main conversation (interrupts input wait, drains mailbox, triggers the agent loop) — no `/spawn wait` needed. Use `--wait` to block for the result instead.
+
+**The two ways of getting results compared** (neither requires manual collection afterwards — they differ in how you wait and what the output looks like):
+
+| | What you can do meanwhile | How the result appears | Output form | Enters conversation history? |
+|---|---|---|---|---|
+| Default (auto-delivery) | Keep typing, do other things | Pops up automatically on completion | Relayed by the main LLM (delivery capped at 4000 chars) | **Yes** — you can follow up and have the LLM act on it |
+| `--wait` / `/spawn wait` | Nothing — the terminal blocks (progress board shown) | Printed the moment the wait ends | Raw untruncated output (up to 8000 chars, not LLM-relayed) | **No** — slash commands run locally; the LLM does not see this result |
+
+Rule of thumb: want the LLM to keep working with the result → use the default; just want to read the full raw output yourself → use `--wait`.
+
+**`--wait` (flag) and `wait` (subcommand) are NOT the same thing** — one dispatches a new task, the other dispatches nothing:
+
+| | `/spawn --wait <task>` | `/spawn wait [id]` |
+|---|---|---|
+| What follows it | **A task is required** | No task (optionally an agent id) |
+| What it does | Dispatches a **new** agent and blocks for it in one step | **Dispatches nothing** — waits for an agent that was dispatched earlier and is still running |
+| When to use | You know at dispatch time that you can't proceed without the result | ① Collecting `--pane` results (the hard requirement: pane agents run in a separate process and do NOT auto-deliver) ② Changing your mind mid-flight after a default dispatch — works, but the result will appear twice (auto-delivery still fires), not recommended |
+
+Analogy: default = **takeout delivery** (order and walk away, it knocks when it arrives); `--wait` = **dining in** (order and sit there); the `wait` subcommand = **ordering takeout and then going to the counter to wait for it anyway**. Day to day you only need the default and `--wait`; the `wait` subcommand is essentially only needed after `--pane`.
 
 **Collection and management**:
 ```
 /spawn list                       # List active SubAgents (id + phase)
-/spawn wait                       # Wait for all to finish (multiple results show an overview table + numbered sections)
-/spawn wait <id>                  # Wait for a specific agent
+/spawn wait                       # Wait for ALREADY-running agents (dispatches nothing; multiple results show an overview table)
+/spawn wait <id>                  # Wait for a specific already-running agent (mainly for collecting --pane results)
 /spawn cancel [id]                # Cancel a specific agent / all agents
 ```
 
@@ -128,9 +149,9 @@ Parameter details:
 | Parameter | Description |
 |---|---|
 | `--pane` | Requires a tmux session, a Windows Terminal session (split pane), or any terminal with wt.exe installed (falls back to a new tab in the shared mini-agents window). Fails with a clear error when no backend is available |
-| `--wait` | Blocks until completion (900-second cap) while showing a progress panel; without it, use the two-stage collection via `/spawn wait` |
+| `--wait` | Blocks until completion (900-second cap) while showing a progress panel, returning the full formatted result inline; without it, results auto-deliver in the background |
 | `--isolated` | Each agent gets its own dedicated worktree; results come with merge hints |
-| `--background` | Dispatches in the background; when the agent finishes, its result is auto-delivered to the main conversation (interrupts input wait, drains mailbox, triggers agent loop); no need to collect via `/spawn wait` |
+| `--background` | **No-op alias** (kept for backward compatibility): auto-delivery is already the no-flag default |
 | `--type` | explore/plan/verify use a read-only toolset, worker gets all tools. When unspecified, falls back to the default worker type profile (P80) but keeps the configured `max_agent_iterations` iteration budget; when explicitly specified, adopts the type profile's budget (worker=50/verify=20, etc.) |
 
 Notes:
@@ -332,5 +353,5 @@ Two further kinds of disk extensions load at startup (not created by commands, i
 
 - Commands execute locally; mistyping a command name shows all available commands
 - An exception thrown by a command handler does not kill the session (shows "Command failed: ..." and continues)
-- Report-style output (/spawn wait) goes through Markdown rendering (tables/headings/bright-orange filenames); status-style output (/status /cost) keeps plain-text aligned layout
+- Report-style output (/spawn --wait, /spawn wait) goes through Markdown rendering (tables/headings/bright-orange filenames); status-style output (/status /cost) keeps plain-text aligned layout
 - All commands are equally available in remote browser mode (`--remote`)

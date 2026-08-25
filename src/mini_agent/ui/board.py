@@ -1,9 +1,10 @@
 """SubAgent progress board -- live table of active sub-agents.
 SubAgent 进度面板——活跃 SubAgent 的实时表格。
 
-Shown while /spawn wait and /team block on background agents; collapses
-automatically when the awaited work finishes.
-在 /spawn wait 和 /team 阻塞等待后台 agent 期间显示；等待结束后自动收起。
+Shown while /spawn --wait, /spawn wait and /team block on running agents;
+collapses automatically when the awaited work finishes.
+在 /spawn --wait、/spawn wait 和 /team 阻塞等待 agent 期间显示；
+等待结束后自动收起。
 """
 
 from __future__ import annotations

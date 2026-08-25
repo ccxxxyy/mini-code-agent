@@ -1264,6 +1264,16 @@
 - [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
 - [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
 
+## /spawn 默认后台自动投递 检查项
+
+- [x] 单任务与 `-p` 并行默认分支统一改调 `spawn_background`（原 background 专用分支合并删除）
+- [x] `--background` 解析保留但变 no-op 别名（向后兼容不报错）
+- [x] `--wait` 保持阻塞式 opt-in（进度面板+内联完整结果）；`--pane`、`wait`/`list`/`cancel` 子命令不变
+- [x] usage 文本与注册 description 同步新默认
+- [x] 诚实边界：自动投递结果经 LLM 转述且 4000 字符截断 vs --wait 完整格式化输出（8000 cap）
+- [x] 4 个新测试（默认后台 / -p 默认后台 / --background no-op / --wait 阻塞回归），1189→1193
+- [x] 真实 LLM 验证通过：/spawn 派发后零手动输入，终端自动弹 "Background agent ... finished" 并由主 LLM 转述结果（还主动 glob 复核了子 agent 的计数）；/spawn --wait 阻塞内联返回完整原始输出（回归）
+
 ## 模糊确认不算授权 + 子 agent 反幻觉守则 检查项
 
 - [x] `app.py` SYSTEM_PROMPT Guidelines 新增 `IMPORTANT:` 规则：用户明确表示只讨论时约束持续有效，模糊确认不解除，不确定时主动问

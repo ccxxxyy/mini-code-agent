@@ -3414,3 +3414,31 @@ prompt 守则是**提示非强制**——LLM 仍可能违反（尤其模型能�
 ## 105.4 验证
 
 无新测试（prompt 字符串改动不改变代码行为路径，全量 1189 回归通过）。真实 LLM 验证（可选但推荐）：说"先不要动手只讨论" → 给方案 → 回"对" → 看 agent 是否问"现在可以动手了吗"而非直接改文件。
+
+# §106 /spawn 默认后台自动投递
+
+## 106.1 问题
+
+`/spawn <task>` 默认前台模式：子 agent 跑完后结果只存在于内存 task handle 里，用户必须手动 `/spawn wait` 收集——不输就永远看不到。后台模式 `--background` 已实现完整自动投递链（spawn_background → _notify_on_complete watcher → mailbox 投递 → SubAgentCompleteEvent(background=True) → terminal.interrupt_input() → _handle_background_delivery 触发 agent loop），但需显式加参。两模式功能实质重叠：前台除"需要手动 wait"外无任何额外价值——它是自动投递实现前的权宜设计，投递做好后默认行为没跟着改。真实使用中用户 spawn 后总要多输一步 wait（本任务即由用户实际使用时的困惑触发："我记得有一个问题是 spawn 的时候可以让结果主动返回……难道还没解决掉吗"——功能其实早已存在，只是没成为默认）。
+
+## 106.2 方案
+
+语义反转，改动收敛在 `_make_spawn` 一个函数：
+
+- 单任务与 `-p` 并行的默认分支统一改调 `spawn_background`（原 background 专用分支合并删除）。`spawn_background` 签名本就支持 isolation/agent_type/context_summary 透传——subagent.py 零改动
+- `--background` 解析保留但变 no-op 别名：向后兼容，脚本/肌肉记忆不炸
+- `--wait` 保持阻塞式 opt-in：进度面板（SubAgentBoard）+ 内联返回完整格式化结果——语义反转前 --background 是 opt-in，反转后 --wait 是 opt-in
+- 不变：`--pane`（独立进程模式，结果仍走 /spawn wait 或 --wait 收集）、`wait`/`list`/`cancel` 子命令（wait 仍服务 pane 收集与手动阻塞）、`--type`/`--fork`/`--isolated` 全部透传
+- usage 文本与注册 description 同步新默认
+
+## 106.3 诚实边界
+
+两条路径的**输出保真度不同**：自动投递的结果经 mailbox 消息进入对话、由 LLM 转述给用户，且投递内容截断 4000 字符（NOTIFY_MAX_CHARS）；`--wait` 直接内联返回未经 LLM 转述的完整格式化结果（8000 字符 cap + worktree 合并提示 + deliverable 提取）。需要完整/精确输出时用 `--wait`。spawn_agents LLM 工具的 background 参数不在本次范围（工具默认仍阻塞——LLM 调用方语义不同，等结果是常态）。
+
+**远程模式的投递差异**：主动弹出依赖终端输入循环的 `interrupt_input()` 中断机制，远程模式（--remote）没有该循环——`RemoteTerminalAdapter.__getattr__` 委托到原 Terminal 安全无效，结果退化为"用户下一条消息时经 mailbox drain 送达对话"（`--background` 时代的既有行为，非本次引入；远程主动推送需 WS 层新事件类型，另行考虑）。
+
+## 106.4 验证
+
+4 个新测试（test_spawn_team.py，handler 级 + 真实 SubAgentManager/MockLLM）：无 flag 单任务走 spawn_background（_background_ids 注册+消息含 auto-delivered）/ -p 并行默认后台 / --background no-op 别名行为与默认一致 / --wait 仍阻塞内联返回结果（回归）。全量 1189→1193。
+
+真实 LLM 终端验证已通过（日常动作级）：`/spawn 数一下项目里有几个md` 派发后**零手动输入**，终端自动弹 "Background agent 08501734 finished — processing result..."，主 LLM 转述结果并主动 glob 复核子 agent 计数（44 个 .md，还纠正了其分类明细的出入——自动投递路径"LLM 转述"的增值面）；`/spawn --wait 输出<随机串>` 阻塞后内联返回完整原始输出（回归）。

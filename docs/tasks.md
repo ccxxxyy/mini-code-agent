@@ -2125,3 +2125,10 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 - [x] `app.py` — SYSTEM_PROMPT Guidelines 新增 `IMPORTANT:` 规则：用户表示只讨论时约束持续有效直到显式动手指令，模糊确认只确认理解不解除约束，不确定时主动问
 - [x] `core/subagent.py` — SubAgent 初始化根据 context_summary 有无条件注入反幻觉提示（无继承上下文时追加 `[IMPORTANT: You have NOT been given any context...]`，有时不触发）
+
+---
+
+## /spawn 默认后台自动投递（tech-notes §106）
+
+- [x] `extensions/builtin_commands.py` — `_make_spawn` 单任务与 `-p` 并行默认分支统一改调 `spawn_background`（原 background 专用分支合并删除，subagent.py 零改动）；`--background` 变 no-op 别名；`--wait` 保持阻塞式 opt-in；usage 文本与注册 description 同步
+- [x] 4 个新测试（test_spawn_team.py：默认后台 / -p 默认后台 / --background no-op / --wait 阻塞回归），1189→1193
