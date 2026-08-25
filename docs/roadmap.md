@@ -735,10 +735,11 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 现状：`SessionStore.cleanup_stale()` 只删"已正常关闭 + 超龄"的会话，`closed_cleanly=False` 的一律跳过（崩溃恢复候选不能删）。但恢复只取本项目**最新**一个崩溃会话——非最新的崩溃会话、以及再也不启动的项目的崩溃会话**永久留盘**（`~/.mini-agent/sessions/`），只能 `/session delete` 或手动删文件。远程模式会话持久化接入后暴露此积累风险（终端模式既有行为，非新引入）。
 **已修复**：`MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`（0 = 永久保留）；`cleanup_stale()` 增加 `crashed_max_age_days` 参数——`closed_cleanly=False` 且超过 40 天的也删除（比正常 30 天更宽松：崩溃会话有恢复价值多留 10 天）。清理在崩溃恢复检测之前执行——40 天前的崩溃会话直接清掉不进恢复候选。`config.toml.example` 补 `[memory]` 两个清理配置的文档。app.py 和 remote/server.py 两个调用点同步传入新参数。3 个新测试（超龄崩溃被删/40 天内保留/0 禁用/正常 30 天不受影响），1179→1182。详见 tech-notes §103。
 
-☐ **D9【UX·低】/session list 无分页无条数限制——上百会话整屏刷过**
+✅ **D9【UX·低】/session list 无分页无条数限制——上百会话整屏刷过（已修复）**
 现状（远程会话持久化真实验证实测暴露）：`/session list` 把 `list_sessions()` 的全部结果逐行输出——实测 159 个会话（6.8MB）一次刷 159 行，把之前的终端内容全部顶出屏幕；用户实际只关心最近几个。远程模式浏览器里同样一大坨。`--tag` 过滤是唯一的收窄手段，但没打过标签的会话无法过滤。
 方案：默认只显示**最近 20 条**（list 已按 last_active 降序，直接切片即可）；尾行提示总数与查看方式：`共 159 个会话，显示最近 20 个 —— /session list --all 查看全部`；新增 `--all` 参数显示全部；`--tag` 过滤后同样默认截断 20 条（过滤+截断组合）。数字 20 定为常量（如 `_SESSION_LIST_LIMIT`），不进配置——没有配置价值，`--all` 已是出口。
 验证要点：>20 个会话默认只显示 20 行+尾行提示 / `--all` 显示全部 / ≤20 个不显示尾行提示 / `--tag` 与 `--all` 组合正常。工作量：小（一个切片+一行提示+参数解析）。
+**✅ 已修复**：`_SESSION_LIST_LIMIT = 20` 模块常量（不进配置，`--all` 已是出口）；list 参数解析改 token 扫描（`--all` / `--page N` / `--tag <name>`，任意顺序组合）；**真分页**：`--page N` 显示第 (N-1)*20+1 ~ N*20 条，尾行双语提示 `Page N/M (总数) —— --page N+1 下一页 / --all 全部`（末页无下一页提示），页码超范围报错并提示总页数，`--all` 优先于 `--page`。7 个新测试（>20 截断+尾行 / --all 全量无尾行 / ≤20 无尾行 / --tag 组合 / --page 2 末页 / 页码超范围 / --all 优先），1182→1189。详见 tech-notes §104。
 
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距

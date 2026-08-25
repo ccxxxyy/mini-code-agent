@@ -26,8 +26,10 @@ Manual compaction goes through the same pipeline as auto-compression — the rec
 ```
 /session save              # Save the current session
 /session new               # Start a fresh session (current one saved intact, load to return)
-/session list              # List saved sessions (newest first)
-/session list --tag <name> # Filter saved sessions by tag
+/session list              # List saved sessions (newest first, latest 20 by default)
+/session list --page 2     # Paginate: rows 21-40 (footer shows page/total/next)
+/session list --all        # Show everything (no truncation, wins over --page)
+/session list --tag <name> # Filter by tag (combines with --page / --all)
 /session load <id>         # Load a session (id may be a prefix from list)
 /session delete <id>       # Delete a session
 /session tag <name>        # Add a tag to the current session

@@ -68,7 +68,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="session",
-            description="Session management (/session [list|save|load|delete|tag|untag|tags])",
+            description="Session management (/session [save|new|list|load|delete|tag|untag|tags])",
             handler=_make_session(app),
         )
     )
@@ -875,6 +875,11 @@ def _make_memory(app: Application) -> HandlerFn:
     return handler
 
 
+# /session list default row cap; --all is the escape hatch (not configurable
+# -- no config value here). /session list 默认显示条数上限，--all 查看全部。
+_SESSION_LIST_LIMIT = 20
+
+
 def _make_session(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         store = app.session_store
@@ -937,10 +942,22 @@ def _make_session(app: Application) -> HandlerFn:
 
         if subcmd == "list":
             filter_tag = ""
-            if len(parts) > 1 and parts[1].strip().startswith("--tag"):
-                tag_parts = parts[1].strip().split(maxsplit=1)
-                if len(tag_parts) > 1:
-                    filter_tag = tag_parts[1].strip().lstrip("#")
+            show_all = False
+            page = 1
+            if len(parts) > 1:
+                tokens = parts[1].split()
+                i = 0
+                while i < len(tokens):
+                    if tokens[i] == "--all":
+                        show_all = True
+                    elif tokens[i] == "--tag" and i + 1 < len(tokens):
+                        filter_tag = tokens[i + 1].lstrip("#")
+                        i += 1
+                    elif tokens[i] == "--page" and i + 1 < len(tokens):
+                        if tokens[i + 1].isdigit() and int(tokens[i + 1]) > 0:
+                            page = int(tokens[i + 1])
+                        i += 1
+                    i += 1
             sessions = await store.list_sessions()
             if filter_tag:
                 sessions = [s for s in sessions if filter_tag in s.get("tags", [])]
@@ -948,13 +965,32 @@ def _make_session(app: Application) -> HandlerFn:
                 if filter_tag:
                     return f"No sessions with tag #{filter_tag}."
                 return "No saved sessions."
+            total = len(sessions)
+            max_page = (total + _SESSION_LIST_LIMIT - 1) // _SESSION_LIST_LIMIT
+            if show_all:
+                shown = sessions
+            else:
+                if page > max_page:
+                    return (
+                        f"Page {page} out of range ({max_page} page(s), {total} sessions). "
+                        f"页码超出范围（共 {max_page} 页 {total} 个会话）。"
+                    )
+                start = (page - 1) * _SESSION_LIST_LIMIT
+                shown = sessions[start : start + _SESSION_LIST_LIMIT]
             lines = ["**Saved Sessions 已保存的会话：**"]
-            for s in sessions:
+            for s in shown:
                 tag_str = f" #{' #'.join(s['tags'])}" if s.get("tags") else ""
                 lines.append(
                     f"  {s['session_id'][:12]}... "
                     f"model={s['model']} turns={s['total_turns']} "
                     f"last={s['last_active'][:19]}{tag_str}"
+                )
+            if not show_all and total > _SESSION_LIST_LIMIT:
+                nav = f"`/session list --page {page + 1}` 下一页 / " if page < max_page else ""
+                lines.append(
+                    f"  ... Page {page}/{max_page} 第 {page}/{max_page} 页 "
+                    f"({total} sessions 共 {total} 个) —— "
+                    f"{nav}`/session list --all` 查看全部"
                 )
             return "\n".join(lines)
 
@@ -995,7 +1031,8 @@ def _make_session(app: Application) -> HandlerFn:
             return f"Deleted: {sid}" if deleted else f"Not found: {sid}"
 
         return (
-            "Usage: /session save | /session new | /session list [--tag <name>] | "
+            "Usage: /session save | /session new | "
+            "/session list [--tag <name>] [--page N] [--all] | "
             "/session load <id> | /session delete <id> | "
             "/session tag <name> | /session untag <name> | /session tags"
         )

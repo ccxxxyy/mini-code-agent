@@ -26,8 +26,10 @@
 ```
 /session save              # 保存当前会话
 /session new               # 另起全新会话（当前会话完整存盘，可 load 回来）
-/session list              # 列出已保存会话（最新在前）
-/session list --tag <name> # 按标签过滤已保存会话
+/session list              # 列出已保存会话（最新在前，默认只显示最近 20 条）
+/session list --page 2     # 翻页：显示第 21~40 条（尾行提示当前页/总页数/下一页）
+/session list --all        # 显示全部（不截断，优先于 --page）
+/session list --tag <name> # 按标签过滤（可与 --page / --all 组合）
 /session load <id>         # 加载指定会话（id 可用 list 里的前缀）
 /session delete <id>       # 删除指定会话
 /session tag <name>        # 给当前会话添加标签

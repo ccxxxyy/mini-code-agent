@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-1182%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1189%20passed-brightgreen)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
@@ -279,7 +279,7 @@ mini-code-agent/
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 1182 个测试（64 单元 + 5 集成），80%+ 覆盖率
+├── tests/                      # 1189 个测试（64 单元 + 5 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -386,7 +386,7 @@ mini-code-agent/
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 - [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，1182 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，1189 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -942,7 +942,7 @@ reason = "spec.md 是项目策略只读文件"
 | `/clear` | 清空当前对话 |
 | `/compact` | 手动压缩对话历史 |
 | `/memory [add\|delete\|consolidate\|export\|import]` | 查看、添加、删除、合并、导出或导入持久记忆 |
-| `/session save\|new\|list\|load\|delete\|tag\|untag\|tags` | 会话管理（new 安全另起新会话，tag 分类标签，list --tag 按标签过滤） |
+| `/session save\|new\|list\|load\|delete\|tag\|untag\|tags` | 会话管理（new 安全另起新会话，tag 分类标签，list 默认最近 20 条 / --page N 翻页 / --all 全部 / --tag 过滤） |
 | `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |

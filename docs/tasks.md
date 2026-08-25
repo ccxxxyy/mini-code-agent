@@ -2111,3 +2111,10 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `app.py` + `remote/server.py` — 两个调用点同步传入新参数
 - [x] `config.toml.example` — `[memory]` 补 `session_cleanup_days` 和 `crashed_session_cleanup_days` 两个配置文档
 - [x] 3 个新测试（test_session_store.py：超龄崩溃被删 / 40 天内保留+0 禁用 / 正常 30 天不受影响），1179→1182
+
+---
+
+## /session list 分页（tech-notes §104）
+
+- [x] `extensions/builtin_commands.py` — `_SESSION_LIST_LIMIT = 20` 常量；list 参数 token 扫描解析（`--all` / `--page N` / `--tag <name>` 任意组合）；超限截断 + 尾行双语提示（页码/总数/下一页/--all）；`--page N` 真分页（末页无下一页提示、超范围报错、--all 优先）；usage 补 `[--page N] [--all]`
+- [x] 7 个新测试（test_slash_commands.py：截断+尾行 / --all 全量 / ≤20 无尾行 / --tag 组合 / --page 2 末页 / 超范围 / --all 优先），1182→1189
