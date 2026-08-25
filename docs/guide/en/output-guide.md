@@ -115,7 +115,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 |---|---|
 | Source | `ui/terminal.py` `feed_thinking` (triggered by the `agent_loop.on_thinking_delta` callback) |
 | Trigger | When the LLM returns reasoning_content / thinking deltas (reasoning models such as DeepSeek R1, o1/o3) |
-| Style | dim italic (faint italics), written token-by-token directly to the terminal (bypassing the Live buffer) |
+| Style | dim italic (faint italics), written token-by-token directly to the terminal; no Live is active during thinking — Live start is deferred to the first answer delta, otherwise prints get intercepted by Live and fragment into broken lines (tech-notes §100) |
 | How to disable | Set `self.agent_loop.on_thinking_delta` to `None` in `app.py` |
 
 ### ⑨ LLM Streaming Reply (Markdown Rendering)
@@ -124,7 +124,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 |---|---|
 | Source | `ui/renderer.py` `StreamRenderer` (Rich Live + Markdown) |
 | Trigger | When the LLM returns text deltas (text output that is not a tool_call) |
-| Mechanism | `on_stream_start` → Live starts; `on_stream_delta` → chunk-by-chunk commit-style rendering; `on_stream_end(full_text)` → Live closes |
+| Mechanism | `on_stream_start` → prints the separator line (Live does NOT start); first answer delta (`feed_stream`) → Live starts lazily (starting it during the thinking stream intercepts prints and fragments them, tech-notes §100); `on_stream_delta` → chunk-by-chunk commit-style rendering; `on_stream_end(full_text)` → Live closes |
 | How to disable | Cannot be disabled (you would not see the LLM's answer) |
 
 ### ⑩ File Change Summary

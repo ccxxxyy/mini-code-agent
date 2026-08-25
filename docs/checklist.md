@@ -1252,6 +1252,18 @@
 - [x] 真实 LLM 验证（DeepSeek，context_window=14000）：压缩后 agent 不重读、不丢任务、能引用文件细节
 - [x] 793 个测试全过，ruff lint + format clean
 
+## 思考流渲染碎行修复 检查项
+
+- [x] 真因确证（第一次 soft_wrap 修复真实运行验证失败后重查）：Live 拦截——agent_loop 首个 thinking chunk 即启动 Live，之后 `feed_thinking` 的 print 被拦截为独立行块（`end=""` 失效）且每碎片后跟 `\r\x1b[2K` 整行擦除
+- [x] Live 延迟启动：`start_stream` 不再启动 Live，`feed_stream` 首个正文 delta 才启动（有思考文本先收尾+空行分隔）；思考期间直连顺序写入
+- [x] `soft_wrap=True` 保留（管无 Live 路径的逐 print 宽度折行，次要机制）
+- [x] ANSI 级取证（force_terminal=True）：旧行为每碎片后跟擦除码，新行为思考文本连续完整
+- [x] 思考仅无正文（后接工具调用）时 finish_stream 不崩（Live 未启动安全跳过）
+- [x] esc_watcher 仍在首个 thinking chunk 启动，双 Esc 中断思考不受影响
+- [x] reasoning 自带换行原样保留（真内容不受影响）
+- [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
+- [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
+
 ## 恢复附件含 skill 调用记录 检查项
 
 ### 功能完整性

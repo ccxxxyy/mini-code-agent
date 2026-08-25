@@ -52,6 +52,8 @@ class Terminal:
         self._bg_interrupt_event: asyncio.Event | None = None
         self._saved_buffer_text: str = ""
         self._pending_input_task: asyncio.Task | None = None
+        self._live_started = False
+        self._thinking_written = False
 
     def set_working_dir(self, working_dir: Path) -> None:
         self._working_dir = working_dir
@@ -319,16 +321,41 @@ class Terminal:
         return raw
 
     def start_stream(self) -> None:
+        # Live start is deferred to the first ANSWER delta (feed_stream):
+        # thinking deltas arrive first, and console.print during an active
+        # Live is intercepted -- each print becomes its own line block above
+        # the Live area, end="" is lost, every tiny delta lands on its own
+        # line (the fragmented-lines bug). No Live during thinking = direct
+        # sequential writes, the terminal tracks the real cursor column.
+        # Live 延迟到第一个正文 delta（feed_stream）才启动：thinking 先到，
+        # 而 Live 活跃期间 console.print 会被拦截——每次 print 成为 Live 区
+        # 上方的独立行块，end="" 失效，每个小增量各自成行（碎行 bug）。
+        # 思考期间无 Live = 直连顺序写入，终端保持真实光标列位。
         self.console.print()
-        self.renderer.start()
+        self._live_started = False
+        self._thinking_written = False
 
     def feed_stream(self, delta: str) -> None:
+        if not self._live_started:
+            self._live_started = True
+            if self._thinking_written:
+                # End the dangling thinking line + blank separator before answer
+                # 收尾思考行 + 空行分隔，再开始正文
+                self.console.print("\n")
+            self.renderer.start()
         self.renderer.feed(delta)
 
     def feed_thinking(self, delta: str) -> None:
-        """Write thinking delta to terminal in dim style (no Live buffering).
-        将思考增量以 dim 样式写入终端（不走 Live 缓冲）。"""
-        self.console.print(delta, end="", style="dim italic", highlight=False)
+        """Write thinking delta directly in dim style -- no Live is active
+        during thinking (see start_stream). soft_wrap=True keeps Rich from
+        word-wrapping each tiny delta as an independent render unit against
+        console.width; line-breaking is left to the terminal. Trade-off:
+        over-wide thinking text hard-wraps at the terminal edge.
+        思考增量以 dim 样式直连写入——思考期间无 Live（见 start_stream）。
+        soft_wrap=True 防止 Rich 把每个小增量当独立渲染单元按宽度折行，
+        折行交给终端。代价：超宽思考文本按终端边缘硬折行。"""
+        self._thinking_written = True
+        self.console.print(delta, end="", style="dim italic", highlight=False, soft_wrap=True)
 
     def finish_stream(self) -> str:
         result = self.renderer.finish()
