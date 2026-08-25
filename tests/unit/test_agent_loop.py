@@ -8,14 +8,16 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, Field
 
 from mini_agent.core.agent_loop import VERIFY_NUDGE, AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
 from mini_agent.models.config import AgentConfig
-from mini_agent.models.message import Conversation, Role
-from mini_agent.tools.base import ToolRegistry
+from mini_agent.models.message import Conversation, Role, ToolResult
+from mini_agent.models.permissions import ToolCategory
+from mini_agent.tools.base import Tool, ToolRegistry
 from mini_agent.tools.builtin import EditFileTool, ReadFileTool, WriteFileTool
 
 pytestmark = pytest.mark.asyncio
@@ -462,13 +464,13 @@ async def test_write_tool_not_double_executed_on_truncation_retry(tool_context):
     registry.register(ReadFileTool())
 
     scripts = [
-        # attempt 1: truncated; write (A1) flushes mid-stream when index 1 opens
+        # attempt 1: truncated; write (content="A1") flushes mid-stream when index 1 opens
         [
             StreamChunk(tool_call_deltas=[_write_delta("w1", "A1")]),
             StreamChunk(tool_call_deltas=[ToolCallDelta(index=1, id="r1", name="read_file")]),
             StreamChunk(finish_reason="length"),
         ],
-        # retry: same write, distinct content (A2), normal finish
+        # retry: same write, distinct content (content="A2"), normal finish
         [
             StreamChunk(tool_call_deltas=[_write_delta("w2", "A2")]),
             StreamChunk(finish_reason="tool_calls"),
@@ -487,9 +489,188 @@ async def test_write_tool_not_double_executed_on_truncation_retry(tool_context):
     await loop.run(conv)
     await asyncio.sleep(0)  # let any leaked eager task settle so it would count
 
-    # Exactly one execution -- the retry's (A2), via _act. The truncated
-    # attempt's write (A1) must never have run. 恰好一次执行（重试的 A2）。
+    # Exactly one execution -- the retry's content="A2", via _act. The
+    # truncated attempt's content="A1" must never have run.
+    # 恰好一次执行（重试的 content="A2"）。
     assert executed == ["A2"], f"expected single execute ['A2'], got {executed}"
+
+
+# --- cross-attempt eager result cache (bash double-execution fix) ---
+
+
+class _BashParams(BaseModel):
+    command: str = Field(default="")
+
+
+class FakeBashTool(Tool):
+    """Non-dangerous bash stub that records execute() calls.
+    记录 execute() 调用的非危险 bash 桩。"""
+
+    _name = "bash"
+    _description = "run shell command"
+    category = ToolCategory.EXECUTE
+    params_model = _BashParams
+
+    def __init__(self, log: list[str]) -> None:
+        self._log = log
+
+    async def execute(self, ctx: Any, **kwargs: Any) -> ToolResult:
+        cmd = kwargs.get("command", "")
+        self._log.append(cmd)
+        return ToolResult(call_id="", name="bash", output=f"ok:{cmd}")
+
+
+def _bash_delta(cid: str, command: str, index: int = 0) -> ToolCallDelta:
+    return ToolCallDelta(
+        index=index,
+        id=cid,
+        name="bash",
+        arguments_delta=json.dumps({"command": command}),
+    )
+
+
+async def test_bash_not_double_executed_on_truncation_retry(tool_context):
+    """An eagerly executed bash command whose task completed before
+    truncation cancellation must NOT re-execute on retry -- the cached
+    result is reused instead.
+    截断取消前已 eager 完成的 bash 命令不再重跑——复用缓存结果。"""
+    executed: list[str] = []
+
+    registry = ToolRegistry()
+    registry.register(FakeBashTool(executed))
+    registry.register(ReadFileTool())
+
+    scripts = [
+        # attempt 1: truncated; bash flushes mid-stream (index 1 opens)
+        [
+            StreamChunk(tool_call_deltas=[_bash_delta("b1", "mkdir testdir")]),
+            StreamChunk(tool_call_deltas=[ToolCallDelta(index=1, id="r1", name="read_file")]),
+            StreamChunk(finish_reason="length"),
+        ],
+        # retry: same bash command, new tool_call id, normal finish
+        [
+            StreamChunk(tool_call_deltas=[_bash_delta("b2", "mkdir testdir")]),
+            StreamChunk(finish_reason="tool_calls"),
+        ],
+        text_response("done"),
+    ]
+
+    loop = AgentLoop(
+        llm=YieldingMockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+    await asyncio.sleep(0)
+
+    assert executed == ["mkdir testdir"], f"expected 1 execution, got {executed}"
+
+
+async def test_different_bash_on_retry_no_false_cache_hit(tool_context):
+    """Different commands on retry: attempt 1 eagerly completes `mkdir a`,
+    retry produces `mkdir b` (different args). Both execute -- the cache
+    is keyed by (name, args) so `mkdir b` is a miss.
+    不同命令不命中缓存：attempt 1 eager 完成 mkdir a，重试产出 mkdir b。"""
+    executed: list[str] = []
+
+    registry = ToolRegistry()
+    registry.register(FakeBashTool(executed))
+    registry.register(ReadFileTool())
+
+    scripts = [
+        # attempt 1: bash flushed mid-stream (index 1 opens), then truncated
+        [
+            StreamChunk(tool_call_deltas=[_bash_delta("b1", "mkdir a")]),
+            StreamChunk(tool_call_deltas=[ToolCallDelta(index=1, id="r1", name="read_file")]),
+            StreamChunk(finish_reason="length"),
+        ],
+        # retry: different command, normal finish
+        [
+            StreamChunk(tool_call_deltas=[_bash_delta("b2", "mkdir b")]),
+            StreamChunk(finish_reason="tool_calls"),
+        ],
+        text_response("done"),
+    ]
+
+    loop = AgentLoop(
+        llm=YieldingMockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+    await asyncio.sleep(0)
+
+    assert "mkdir a" in executed
+    assert "mkdir b" in executed
+    assert len(executed) == 2
+
+
+async def test_write_tool_still_deferred_not_cached(tool_context):
+    """WRITE-category tools must still be deferred by the category gate,
+    never entering the eager cache path -- regression guard.
+    WRITE 类工具仍由 category gate 延迟，不进入 eager 缓存路径（回归守卫）。"""
+    executed: list[str] = []
+
+    class CountingWriteFileTool2(WriteFileTool):
+        async def execute(self, ctx, **kwargs):
+            executed.append(kwargs.get("content", ""))
+            return await super().execute(ctx, **kwargs)
+
+    target_s = str(tool_context.working_dir / "d4guard.txt")
+
+    registry = ToolRegistry()
+    registry.register(CountingWriteFileTool2())
+
+    scripts = [
+        [
+            StreamChunk(
+                tool_call_deltas=[
+                    ToolCallDelta(
+                        index=0,
+                        id="w1",
+                        name="write_file",
+                        arguments_delta=json.dumps({"file_path": target_s, "content": "X"}),
+                    )
+                ]
+            ),
+            StreamChunk(finish_reason="length"),
+        ],
+        [
+            StreamChunk(
+                tool_call_deltas=[
+                    ToolCallDelta(
+                        index=0,
+                        id="w2",
+                        name="write_file",
+                        arguments_delta=json.dumps({"file_path": target_s, "content": "Y"}),
+                    )
+                ]
+            ),
+            StreamChunk(finish_reason="tool_calls"),
+        ],
+        text_response("done"),
+    ]
+
+    loop = AgentLoop(
+        llm=YieldingMockLLM(scripts),
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+    )
+    conv = Conversation()
+    await loop.run(conv)
+    await asyncio.sleep(0)
+
+    # Write tool is DEFERRED (category gate), not cached -- only the
+    # retry's content should execute. 写工具走延迟而非缓存——只有重试的内容执行。
+    assert executed == ["Y"], f"expected ['Y'], got {executed}"
 
 
 # --- Plan mode (P49) ---

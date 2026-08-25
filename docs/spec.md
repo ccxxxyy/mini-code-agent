@@ -31,7 +31,7 @@ mini-code-agent/
 │       │   ├── mailbox.py           # Cross-agent file-based mailbox (inter-process)
 │       │   ├── planner.py           # Plan mode — structured task decomposition
 │       │   ├── spawn_backends.py    # Pane spawn backends (tmux / Windows Terminal)
-│       │   ├── agent_type_loader.py  # Custom agent types from .md files (B3)
+│       │   ├── agent_type_loader.py  # Custom agent types from .md files
 │       │   ├── subagent.py          # SubAgent spawning and lifecycle
 │       │   ├── task_store.py        # Persistent task store (/todo)
 │       │   ├── team.py              # Agent Teams — multi-agent coordination
@@ -58,7 +58,7 @@ mini-code-agent/
 │       ├── tools/                   # === TOOL LAYER ===
 │       │   ├── __init__.py
 │       │   ├── base.py              # Tool ABC, ToolRegistry, ToolContext
-│       │   ├── file_state_cache.py    # Read-before-edit enforcement (B2)
+│       │   ├── file_state_cache.py    # Read-before-edit enforcement
 │       │   ├── builtin/             # 20 core tools
 │       │   │   ├── __init__.py
 │       │   │   ├── read_file.py     # ReadFile tool
@@ -73,15 +73,7 @@ mini-code-agent/
 │       │   │   ├── wait_message.py  # Inter-agent messaging (receive)
 │       │   │   ├── tool_search.py   # Dynamic tool discovery (MCP dispatch)
 │       │   │   ├── mcp_call.py      # MCP tool invocation
-│       │   │   ├── ask_user.py      # Structured question to user (B1)
-│       │   │   ├── exit_plan_mode.py # LLM exits plan mode for review (B1)
-│       │   │   ├── task_create.py    # Create task on board (B1)
-│       │   │   ├── task_get.py       # Get task details (B1)
-│       │   │   ├── task_list.py      # List all tasks (B1)
-│       │   │   ├── task_update.py    # Update task status/description (B1)
-│       │   │   ├── load_skill.py     # Activate installed skill (B1)
-│       │   │   └── install_skill.py  # Install skill from path/URL (B1)
-│       │   ├── mcp/                 # MCP client integration
+│       │   │   ├── ask_user.py      # Structured question to user│       │   │   ├── exit_plan_mode.py # LLM exits plan mode for review│       │   │   ├── task_create.py    # Create task on board│       │   │   ├── task_get.py       # Get task details│       │   │   ├── task_list.py      # List all tasks│       │   │   ├── task_update.py    # Update task status/description│       │   │   ├── load_skill.py     # Activate installed skill│       │   │   └── install_skill.py  # Install skill from path/URL│       │   ├── mcp/                 # MCP client integration
 │       │   │   ├── __init__.py
 │       │   │   ├── client.py        # MCPManager — manages server connections
 │       │   │   ├── transport.py     # Transport abstractions (stdio, HTTP)
@@ -157,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 64 unit test files, 1155 tests
+│   ├── unit/                        # 64 unit test files, 1158 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2283,9 +2275,9 @@ class ReadFileTool(Tool):
 
 其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
 
-**Read-before-edit 强制（`tools/file_state_cache.py`）**：`FileStateCache` 记录每个被 `read_file` 读过的文件的 `mtime_ns`。`edit_file`（及覆盖已存在文件的 `write_file`）执行前过两道门——① 文件必须读过、② 读后 `mtime_ns` 未变——否则拒绝，防止基于陈旧内容或对未读文件的盲目修改。新建文件的 `write_file` 与 `delete_file` 豁免。缓存在 `ToolContext.file_state`，主 Agent 与每个 SubAgent 各持独立实例；成功编辑/写入后刷新条目，后续编辑无需重读。可通过 `[tools] enforce_read_before_edit = false` 关闭（默认 true，关闭时 `file_state=None` 门禁失效）。`ask_user`/`exit_plan_mode`/`task_*`/`load_skill`/`install_skill` 为 B1 流程工具（LLM 自主调用任务板/技能/计划审批/结构化提问）。
+**Read-before-edit 强制（`tools/file_state_cache.py`）**：`FileStateCache` 记录每个被 `read_file` 读过的文件的 `mtime_ns`。`edit_file`（及覆盖已存在文件的 `write_file`）执行前过两道门——① 文件必须读过、② 读后 `mtime_ns` 未变——否则拒绝，防止基于陈旧内容或对未读文件的盲目修改。新建文件的 `write_file` 与 `delete_file` 豁免。缓存在 `ToolContext.file_state`，主 Agent 与每个 SubAgent 各持独立实例；成功编辑/写入后刷新条目，后续编辑无需重读。可通过 `[tools] enforce_read_before_edit = false` 关闭（默认 true，关闭时 `file_state=None` 门禁失效）。`ask_user`/`exit_plan_mode`/`task_*`/`load_skill`/`install_skill` 为流程工具（LLM 自主调用任务板/技能/计划审批/结构化提问）。
 
-**自定义 Agent 类型（B3，`core/agent_type_loader.py`）**：用户可在 `~/.mini-agent/agents/` 或 `./.mini-agent/agents/` 放 `.md` 文件声明自定义 agent 类型。文件格式：YAML frontmatter（`name`/`description`/`allowed_tools`/`max_iterations`）+ body 作为 system_prompt 模板（支持 `{working_dir}/{platform}/{shell}/{iteration_budget}` 四个占位符）。app.py 启动时 `load_agent_types(config.agent_dirs)` 扫描并注册到 `AGENT_TYPES` 字典，消费侧（`get_agent_type`/`SubAgent`/`spawn_agents` 工具）零改动。优先级：项目 > 用户 > 内置（同名覆盖）。`spawn_agents` 工具 schema 的 `agent_type` 描述动态列举所有已注册类型。
+**自定义 Agent 类型（`core/agent_type_loader.py`）**：用户可在 `~/.mini-agent/agents/` 或 `./.mini-agent/agents/` 放 `.md` 文件声明自定义 agent 类型。文件格式：YAML frontmatter（`name`/`description`/`allowed_tools`/`max_iterations`）+ body 作为 system_prompt 模板（支持 `{working_dir}/{platform}/{shell}/{iteration_budget}` 四个占位符）。app.py 启动时 `load_agent_types(config.agent_dirs)` 扫描并注册到 `AGENT_TYPES` 字典，消费侧（`get_agent_type`/`SubAgent`/`spawn_agents` 工具）零改动。优先级：项目 > 用户 > 内置（同名覆盖）。`spawn_agents` 工具 schema 的 `agent_type` 描述动态列举所有已注册类型。
 
 ### 8.2 MCP 工具适配器 (`tools/mcp/adapter.py`)
 
@@ -2491,7 +2483,7 @@ async def _act(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
 
 - **为什么两阶段**：权限确认弹窗不可交错，所以预检必须串行；预检通过后的执行才并行。执行已预检过权限，`skip_permission=True` 避免重复检查。
 - **无 `return_exceptions`**：工具异常在 `_run_tool_pipeline` 内部就被捕获并包装为 `is_error=True` 的 ToolResult，gather 不会收到裸异常。
-- **流式提前执行（streaming tool execution）**：开启 `streaming_tool_execution` 时，`_stream_once` 中的 `IncrementalAssembler` 在流式传输期间逐 chunk 组装工具调用，**一组装完成就 `asyncio.create_task` 提交执行**——工具 #1 执行时工具 #2 还在流式传输。以下调用被延迟到 `_act()`：①写工具（`_WRITE_TOOLS`：write_file/edit_file/delete_file）**无条件延迟**——截断响应（`finish_reason="length"`）会触发 max_tokens 重试，但已 eager 完成的副作用无法回滚（`task.cancel()` 对已完成任务是空操作）→ 重试再产出同一调用会双写/双删（A3 修复；同时覆盖计划模式的写工具拒绝）；②`PermissionManager.would_ask()` 判定会询问用户的；③`HookManager.would_confirm()` 判定会弹确认框的（弹窗不能和流式渲染交错）。`_act()` 对这些已提交的任务直接 `await` 收集结果。
+- **流式提前执行（streaming tool execution）**：开启 `streaming_tool_execution` 时，`_stream_once` 中的 `IncrementalAssembler` 在流式传输期间逐 chunk 组装工具调用，**一组装完成就 `asyncio.create_task` 提交执行**——工具 #1 执行时工具 #2 还在流式传输。以下调用被延迟到 `_act()`：①写工具（ToolCategory.WRITE：write_file/edit_file/delete_file/install_skill）**无条件延迟**——截断响应（`finish_reason="length"`）会触发 max_tokens 重试，但已 eager 完成的副作用无法回滚（`task.cancel()` 对已完成任务是空操作）→ 重试再产出同一调用会双写/双删；同时覆盖计划模式的写工具拒绝；②`PermissionManager.would_ask()` 判定会询问用户的；③`HookManager.would_confirm()` 判定会弹确认框的（弹窗不能和流式渲染交错）；④**跨 attempt 结果缓存**：非延迟工具（bash 等）在截断重试前若已 eager 完成，结果按 `(name, args_json)` 签名缓存到 `_eager_completed`，重试产出相同签名时复用缓存不重跑——解决 bash 副作用双执行，不牺牲只读 bash 的流式延迟收益。`_act()` 对这些已提交的任务直接 `await` 收集结果。
 
 ---
 
@@ -2671,7 +2663,7 @@ class MemoryExtractor:
 
 **命令管道的关键细微差别**：`allow` 和 `ask` 模式都会**自动放行普通命令**——只有匹配危险模式的命令才弹确认框；`deny` 模式拒绝一切未被规则放行的命令。开启 `sandbox_auto_allow`（内核沙箱提供隔离）时，连危险命令也自动放行。**权限模式矩阵的插入点**：`PermissionMode.PLAN` 在规则判定后立即拒绝写形态命令（`WRITE_COMMAND_PATTERNS`：重定向到真实文件 + mkdir/copy/move/del 等，`>nul`/`>/dev/null`/`2>&1` 丢弃型放行）；敏感文件命令确认排在 bypass 短路**之前**——任何模式都不能静默放行 `type .env`；`PermissionMode.BYPASS` 在其后免确认放行剩余命令（含危险命令）。**模式×类别矩阵**：每个工具声明 `category: ToolCategory`（READ / WRITE / EXECUTE / EXTERNAL，未声明的插件工具默认 EXTERNAL），`agent_loop._check_permission` 在路径检查**之前**评估类别格——plan×WRITE 拒绝（mode:plan）、plan×EXTERNAL 拒绝（MCP 外部副作用无法核实为只读）、bypass×EXTERNAL 放行（mode:bypass）——因此 install_skill 这类无路径参数的工具也被拦住。类别门控读的是 `permission_manager.mode` 而非循环的 plan_mode 标志，故对子 Agent 同样生效。
 
-**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 28 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c`/`cmd /c` 等内联代码执行一律标记为危险——堵住 A2 实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
+**危险命令模式**：`DANGEROUS_COMMAND_PATTERNS` 共 28 条正则，除经典破坏项（`rm`、`sudo`、`chmod 777`、`mkfs`、`dd if=`、Windows 的 `del`、`rmdir`、`rd`、`format`、`curl|sh`——删除类命令 rm/del/rmdir/rd **任意形态均拦截**：裸 `rmdir` 删空目录、`rm`/`del` 删单个文件也弹确认，不限于 `-rf`、`/s`、`/q`）外，还把 **git 写操作纳入 human-in-the-loop**：`git push / commit / reset / stash / rebase / checkout（-b 除外）/ restore / clean` 都需用户确认——提交与改写历史必须由用户主动发起。**内联解释器拦截**：`python -c`/`node -e`/`perl -e`/`ruby -e`/`sh -c`/`bash -c`/`powershell -Command`/`pwsh -c`/`cmd /c` 等内联代码执行一律标记为危险——堵住实测中 LLM 被拒危险命令后改用解释器绕过的向量。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**写后执行检测**：`record_written_file()` 追踪本会话 agent 写过的文件，`is_executing_written_script()` 检测 `python script.py`/`cmd /c script.bat` 等执行写过的脚本时弹确认——堵住"先写 .py 文件再执行"的绕过路径。正则容忍选项变形（rm 长选项/标志后置、chmod 前置选项、`_GIT_PREFIX` 吞 git 全局选项如 `-C path`），堵住常见绕过。**诚实边界**：正则黑名单不可能穷尽——LLM 总能变形绕过签名（死循环实验已证），这是减速带而非围墙，命中后人工确认与迭代上限才是真护栏。沙箱默认开启（`sandbox=true`），三平台均提供 OS 级保护：Linux bwrap（unshare 自动后备）、macOS seatbelt、Windows 双模式（管理员 Low Integrity 内核级 / 非管理员无文件保护——限制仅文档说明、不打启动警告，attrib 已禁用）。
 
 **路径管道的顺序刻意为之**：显式 DENY 规则在 PathGuard **之前**评估——否则 PathGuard 的项目内 ALLOW 会短路它们，用户对项目内路径写的 `deny = ["*/secrets/*"]` 会静默失效。
 

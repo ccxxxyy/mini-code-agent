@@ -459,19 +459,42 @@ class AgentLoop:
         # the last result if still truncated (P44).
         # max_tokens 恢复：回答被截断（finish_reason "length"）时翻倍限制
         # 重试——最多 3 次，仍截断则保留最后一次结果。
+
         retry_max_tokens = 0  # 0 = provider uses its configured default
+        # Cross-attempt cache: eagerly completed tasks whose results must not
+        # be re-executed on retry. Key = "name\0args_json". Lives only within
+        # this _think() call -- no cross-iteration or cross-turn leakage.
+        # 跨 attempt 缓存：已 eager 完成的任务结果在重试时复用，不重跑。
+        # Key = "name\0args_json"。仅存活于本次 _think() 调用内。
+        self._eager_completed: dict[str, ToolResult] = {}
+        self._eager_keys: dict[str, str] = {}  # tc.id -> cache key
+
         for _attempt in range(1 + self.MAX_TOKENS_RETRIES):
             response = await self._stream_once(
                 api_messages, tool_schemas, max_tokens=retry_max_tokens
             )
             if response.finish_reason != "length" or self._cancelled:
                 break
-            # Discard tools submitted mid-stream for the truncated attempt --
-            # their arguments may be cut off mid-JSON.
-            # 丢弃截断尝试中流式提交的工具任务——参数可能在 JSON 中途被切断。
-            for task in self._streaming_tasks.values():
-                task.cancel()
+            # Salvage results from eagerly completed tasks before cancelling
+            # the rest -- an already-finished side-effecting command (mkdir,
+            # npm install, ...) cannot be rolled back; re-executing it on
+            # retry would be a double side effect. Incomplete tasks get
+            # cancelled as before (their args may be cut mid-JSON anyway).
+            # 取消前抢救已完成的 eager 任务结果——已结束的副作用命令
+            # （mkdir / npm install 等）无法回滚，重试时重跑会产生双副作用。
+            # 未完成任务照旧取消（参数可能被 JSON 截断）。
+            for tc_id, task in self._streaming_tasks.items():
+                if task.done() and not task.cancelled():
+                    try:
+                        key = self._eager_keys.get(tc_id)
+                        if key:
+                            self._eager_completed[key] = task.result()
+                    except Exception:
+                        pass
+                else:
+                    task.cancel()
             self._streaming_tasks = {}
+            self._eager_keys = {}
             retry_max_tokens = (retry_max_tokens or self._config.llm.max_tokens) * 2
         return response
 
@@ -553,9 +576,37 @@ class AgentLoop:
                         continue  # deferred to _act 延迟到 _act
                     if self._hooks.would_confirm(tc.name, tc.arguments):
                         continue  # confirm dialog -> deferred to _act 确认弹窗延迟到 _act
-                    self._streaming_tasks[tc.id] = asyncio.create_task(
-                        self._execute_single_tool(tc)
+                    # Cross-attempt dedup: if a prior truncated attempt
+                    # already completed this exact (name, args) command,
+                    # reuse the cached result instead of re-executing --
+                    # an already-committed side effect cannot be undone.
+                    # 跨 attempt 去重：若上一次截断 attempt 已完成同一
+                    # (name, args) 命令，复用缓存结果而非重跑——已提交
+                    # 的副作用无法撤销。
+                    import json as _json
+
+                    _cache_key = (
+                        tc.name
+                        + "\0"
+                        + _json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False)
                     )
+                    cached = self._eager_completed.get(_cache_key)
+                    if cached is not None:
+                        fut: asyncio.Future[ToolResult] = asyncio.get_event_loop().create_future()
+                        fut.set_result(
+                            ToolResult(
+                                call_id=tc.id,
+                                name=cached.name,
+                                output=cached.output,
+                                is_error=cached.is_error,
+                            )
+                        )
+                        self._streaming_tasks[tc.id] = fut
+                    else:
+                        self._streaming_tasks[tc.id] = asyncio.create_task(
+                            self._execute_single_tool(tc)
+                        )
+                    self._eager_keys[tc.id] = _cache_key
 
         if stream_started and self.on_stream_end:
             self.on_stream_end("".join(_stream_text_parts))

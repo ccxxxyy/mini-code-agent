@@ -3251,3 +3251,24 @@ mewcode `permissions/modes.py` 有 default/acceptEdits/plan/bypassPermissions �
 ## 98.3 验证
 
 12 个新测试（3 skills + 9 context）：激活历史保序去重、停用保留历史、restore_state 不动 system_prompt、附件含激活行与 do NOT re-activate、停用单列、无 provider 附件不变（向后兼容）、二次压缩替换旧块不堆叠、provider 崩溃静默、adopt 暂存、旧边界无技能字段 adopted_skills 为 None、check_and_compress 端到端边界写入、force=True 低于阈值也走全管道并写技能边界。全量 1143→1155。
+
+# §99 bash 副作用截断重试双执行修复
+
+## 99.1 问题
+
+A3 已通过 category gate 把 WRITE 类工具延迟到 `_act()` 消除双执行，但 bash 工具（`ToolCategory.EXECUTE`）未纳入——非危险的带副作用 bash（`mkdir`、`npm install`、`git add`）仍在流式期间 eager 执行。双执行链条：eager 任务已完成 → `task.cancel()` 空操作 → 重试产出相同工具调用 → `_act()` 中 `tc.id` 不在新 `streaming` 字典里（上次已清空）→ 再次执行。三重巧合但确实可触发。
+
+## 99.2 方案
+
+Roadmap 候选 ②：跨 attempt 结果缓存（根因修复）。不需要判断命令是否有副作用（不可穷尽），不需要牺牲流式延迟（只读 bash 仍即时执行）。
+
+1. `_think()` 开始前初始化 `_eager_completed: dict[str, ToolResult]`（key = `name + " " + json.dumps(args, sort_keys=True)`）和 `_eager_keys: dict[str, str]`（tc.id → cache key）。
+2. 截断重试时，已完成的 eager 任务（`task.done() and not task.cancelled()`）的结果存入 `_eager_completed`；未完成的照旧 cancel。
+3. `_stream_once()` eager 提交前先查缓存——命中则创建 `asyncio.Future` 并 `set_result()`，不再执行；未命中则照常 `create_task()`。两者都记入 `_eager_keys`。
+4. `_act()` 不变——`tc.id in streaming` 找到 Future 直接 await 返回。
+5. 缓存生命周期限于单次 `_think()` 调用——不跨迭代、不跨轮次。
+6. WRITE 类工具仍由 category gate 在缓存检查之前拦截，不进缓存路径（A3 不受影响）。
+
+## 99.3 验证
+
+3 个新测试（test_agent_loop.py）：同签名 bash 复用缓存只执行 1 次（核心）/ 不同签名不命中各执行一次 / WRITE 类仍走延迟路径回归守卫。全量 1155→1158。

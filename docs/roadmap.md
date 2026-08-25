@@ -706,10 +706,9 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 30. ✅ **D2 行为层已实现**：任何确认框被拒后 agent 停下回问用户（危险命令/项目外路径/hook 确认；默认阈值 1，拒一次即停，`max_consecutive_denials` 可调大；自动策略拒绝如敏感路径/deny 规则不计数），不再找绕过路径。详见 D2 条目完成记录 + tech-notes §89。D2 断了 D3 事故"反复试直到绕过"的链，但两者是不同层——D2 管行为（要不要继续试），管不了执行层（某条命令能不能真写文件）。Windows 非管理员的执行层 OS 限制（#1/#8）D2 无法消除，只能缩小攻击面。
 31. ✅ **全量测试已通过**：1059 passed, 1 skipped。
 
-☐ **D4【中·时序】带副作用的 bash 命令仍可能在截断重试时双执行（A3 残留）**
-A3 已把 `_WRITE_TOOLS`（write_file/edit_file/delete_file）延迟到 `_act` 消除双执行，但 **bash 工具未纳入**：非危险的带副作用 bash（`echo >file`、`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑（危险 bash 已由 would_ask 延迟，不受影响）。
-根因同 A3：eager 已完成的 bash 副作用无法回滚。未随 A3 一起修的原因：bash 是最高频工具且多数只读（ls/cat/grep/git log），无条件延迟会牺牲流式执行的主要延迟收益；而 A3 按 roadmap 明列的 write_file/delete_file 精确收口。
-候选方案：① 只延迟"可能有副作用"的 bash（需命令意图识别，回到不可穷尽问题）；② 截断重试时记录已 eager 完成的 bash 命令签名，重试若出现相同签名则复用结果不重跑（治本但需跨 attempt 状态）；③ 接受残留（截断本身是边缘场景，且多数 bash 幂等）。工作量：中。优先级低于 D2/D3（触发需"截断 + 带副作用 bash + 重试再产出同命令"三重巧合）。
+✅ **D4【中·时序】带副作用的 bash 命令截断重试不再双执行（A3 残留已修复）**
+**原问题**：A3 已把 WRITE 类工具延迟到 `_act` 消除双执行，但 bash（ToolCategory.EXECUTE）未纳入——非危险的带副作用 bash（`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑。
+**✅ 已修复**：方案 ② 跨 attempt 结果缓存——截断重试时把已完成的 eager 任务结果按 `(name, args_json)` 签名缓存（`_eager_completed`），重试产出相同签名的工具调用时复用缓存结果创建已完成 Future，`_act` 直接 await 返回不重跑。不需要判断命令是否有副作用（不可穷尽），不牺牲流式延迟收益（只读 bash 仍即时执行），对 WRITE 类工具无影响（category gate 在缓存检查之前拦截）。缓存生命周期限于单次 `_think()` 调用。3 个新测试，1155→1158。
 
 ☐ **D5【UX·低】on/off 模式命令无参数时行为不一致且不直觉**
 4 个 on/off 模式命令的无参数行为各不相同（`extensions/builtin_commands.py`），且都不是用户最直觉的"显示当前状态"：

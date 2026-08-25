@@ -867,6 +867,7 @@
 - [x] OpenAI/Anthropic 两家 Provider 的 stream() 都支持 max_tokens kwargs 覆盖
 - [x] Anthropic stop_reason="max_tokens" 归一化为 "length"
 - [x] 3 个新测试 + 1 个映射断言，总计 518 个全过
+- [x] bash 副作用截断重试双执行修复：已 eager 完成的工具结果按 `(name, args_json)` 签名缓存（`_eager_completed`），重试产出相同签名时复用结果不重跑；不需命令意图分类，不牺牲流式延迟，WRITE 类工具仍走延迟路径（category gate 在前）；3 个新测试覆盖同签名复用 / 不同签名不命中 / WRITE 类不进缓存回归
 
 ---
 
