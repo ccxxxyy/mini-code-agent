@@ -471,6 +471,12 @@ function connect() {
       case 'file_changes':
         addMsg('info', 'Files changed:\\n' + (msg.items || []).join('\\n'));
         break;
+      case 'history_reset':
+        msgs.innerHTML = '';
+        streamEl = null; streamBuf = '';
+        thinkingEl = null; thinkingBuf = '';
+        spinnerEl = null;
+        break;
       case 'history_user':
         addMsg('user', msg.text);
         break;

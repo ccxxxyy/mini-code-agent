@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1063%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1179%20passed-brightgreen)]()
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
@@ -206,7 +206,7 @@ mini --remote
 #    Open that URL in your browser
 ```
 
-The agent works on whatever directory you run the command from — just like terminal mode.
+The agent works on whatever directory you run the command from — just like terminal mode. Sessions persist automatically: every turn is saved, and after a crash/hard kill the server auto-restores this project's newest unclosed session on restart (a clean shutdown starts fresh; use `/session load` to resume manually).
 
 **Running from any directory** (if installed globally):
 
@@ -255,7 +255,7 @@ mini --remote --remote-token "my-secret"
 | `/audit [on\|off\|verify]` | Audit logging with hash-chain integrity; no args = show status |
 | `/theme [dark\|light\|default]` | Switch color theme |
 | `/memory [add\|delete\|consolidate\|export\|import]` | View, add, delete, consolidate, export or import memories |
-| `/session save\|list\|load\|delete\|tag\|untag\|tags` | Session management (tag for classification, list --tag to filter) |
+| `/session save\|new\|list\|load\|delete\|tag\|untag\|tags` | Session management (new = safe fresh start, tag for classification, list --tag to filter) |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | Manage skill packs |
 | `/plugins` | List loaded plugins (tools/commands/skills each registered) |
 | `/allow [remove] <command\|path\|tool> <pattern> [--save]` | Manage ALLOW permission rules (runtime, `--save` persists to TOML) |
@@ -306,7 +306,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1166 tests, 80%+ coverage
+├── tests/           # 1179 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -327,7 +327,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1166 tests
+uv run pytest tests/           # 1179 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

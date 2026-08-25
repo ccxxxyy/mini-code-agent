@@ -453,8 +453,8 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 - `remote/terminal.py` — RemoteTerminalAdapter：拦截 `show_info`/`show_error`/`show_file_changes` 三个方法转发到浏览器
 - `cli.py` — `--remote` / `--port` / `--host` 三个 CLI 参数
 
-NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
-- 服务端事件：`turn_start` / `turn_end` / `stream_start` / `stream_text` / `stream_end` / `thinking_delta` / `tool_call` / `tool_result` / `permission_request` / `info` / `error` / `file_changes`
+NDJSON 协议（13 种服务端事件 + 3 种 WS 客户端消息）：
+- 服务端事件：`turn_start` / `turn_end` / `stream_start` / `stream_text` / `stream_end` / `thinking_delta` / `tool_call` / `tool_result` / `permission_request` / `info` / `error` / `file_changes` / `history_reset`（会话被 /session load、/fork、/session new 换掉时广播，浏览器清空聊天区后随即收到新会话的 history_* 重放）
 - WS 客户端消息：`user_input` / `cancel`（通过 WS 消息设置 `agent_loop._cancelled`，即时生效）/ `permission_response`（通过 `loop.call_soon_threadsafe` 线程安全解析 asyncio.Future）
 
 浏览器 UI 功能：
@@ -493,7 +493,7 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 **仍存在的局限**（已确认）：
 - 多客户端支持（`self._clients: set` 广播），但所有客户端共享同一会话（无独立会话）
 - 无 TLS（明文 `ws://`）。可选 token 认证（`--remote-token`），未设时无认证
-- 浏览器刷新可恢复对话历史（`_replay_history()`），但服务器重启后丢失（远程模式未接入 SessionStore）
+- ~~浏览器刷新可恢复对话历史（`_replay_history()`），但服务器重启后丢失（远程模式未接入 SessionStore）~~ 已修复：远程模式接入 SessionStore——每轮自动保存、启动自动恢复本项目最新未关闭会话、退出标记正常关闭；`/session load` 后浏览器经 `history_reset` 事件刷新（tech-notes §102）
 - Markdown 图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
 
 ### 5.3 输入补全增强 ✅ 已实现

@@ -2090,3 +2090,14 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `extensions/builtin_commands.py` — `/plan` 的 `sub in ("", "on")` 拆开：`""` 走新增的状态显示（`Plan mode: **ON** (read-only)` / `**OFF**`），`"on"` 走原开启逻辑
 - [x] 命令注册 description 去掉 "Toggle"，改为 "no args = show status"
 - [x] 4 个新测试（test_slash_commands.py：每个命令 1 个，验证无参数状态显示+不改变状态），1162→1166
+
+---
+
+## 远程模式会话持久化（tech-notes §102）
+
+- [x] `app.py` — `_find_crashed_session()` 助手提取（终端询问式恢复与远程自动恢复共用过滤逻辑）
+- [x] `remote/server.py` — 四个接线点：启动 cleanup+自动恢复 / turn 后强制保存 / 斜杠后节流保存 / 退出 finally 标记正常关闭并保存
+- [x] `remote/server.py` + `web_ui.py` — `/session load`/`/fork` 换会话后广播 `history_reset` 事件清空聊天区并重放历史（修复既有盲区）
+- [x] `extensions/builtin_commands.py` — `/session new` 安全另起（旧会话完整存盘+新 ID+保留 system prompt；堵裸 /clear 同 ID 覆盖坑）
+- [x] `memory/context.py` + `app.py` — `ContextManager.reset_state()`：修复采用无边界会话继承上一会话已读文件缓存与技能状态的既有陈旧状态 bug
+- [x] 13 个新测试（test_remote_session.py：助手过滤 3 / 启动恢复 2 / 退出保存 1 / WS 循环接线 3 / 终端询问式回归 1 / session new 2 / reset_state 1），1166→1179

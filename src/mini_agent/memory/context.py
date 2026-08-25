@@ -88,6 +88,16 @@ class ContextManager:
         从压缩边界恢复的技能状态（调用历史, 激活集合），无则 None。"""
         return self._adopted_skills
 
+    def reset_state(self) -> None:
+        """Clear per-session state before adopting another session. Without
+        this, a session adopted WITHOUT a compact boundary inherits the
+        previous session's read-file cache and skill state (stale-state bug).
+        采用另一会话前清空会话级状态。不清空的话，无压缩边界的被采用
+        会话会继承上一会话的已读文件缓存与技能状态（陈旧状态 bug）。"""
+        self._read_files.clear()
+        self._last_user_request = ""
+        self._adopted_skills = None
+
     def record_file_read(self, path: str, content: str = "") -> None:
         if content:
             self._read_files[path] = truncate_to_tokens(content, _RECOVERY_TOKENS_PER_FILE)

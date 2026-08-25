@@ -885,6 +885,36 @@ def _make_session(app: Application) -> HandlerFn:
             path = await store.save(app.session)
             return f"Session saved: {path}"
 
+        if subcmd == "new":
+            from mini_agent.models.session import Session
+
+            old = app.session
+            old_id = old.metadata.session_id
+            # Leaving deliberately: save the old session intact and cleanly
+            # closed -- unlike /clear, its on-disk history is never touched
+            # again (the new session has its own id).
+            # 主动离开：旧会话完整存盘并标记正常关闭——与 /clear 不同，
+            # 其盘上历史不会再被碰（新会话有自己的 ID）。
+            saved_note = ""
+            if old.conversation.messages:
+                old.metadata.closed_cleanly = True
+                try:
+                    await store.save(old)
+                    saved_note = (
+                        f"\nPrevious session {old_id} saved -- "
+                        f"return with /session load {old_id[:8]}"
+                    )
+                except OSError:
+                    saved_note = f"\nWarning: failed to save previous session {old_id[:8]}"
+            fresh = Session()
+            # Keep the working system prompt (instructions/memory injection),
+            # same as /clear semantics 保留 system prompt，与 /clear 语义一致
+            fresh.conversation.system_prompt = old.conversation.system_prompt
+            fresh.metadata.model = old.metadata.model
+            fresh.metadata.project_dir = old.metadata.project_dir
+            app._adopt_session(fresh)
+            return f"New session started: {fresh.metadata.session_id}{saved_note}"
+
         if subcmd == "tag" and len(parts) > 1:
             tag = parts[1].strip().lstrip("#").split()[0] if parts[1].strip() else ""
             if not tag:
@@ -965,7 +995,7 @@ def _make_session(app: Application) -> HandlerFn:
             return f"Deleted: {sid}" if deleted else f"Not found: {sid}"
 
         return (
-            "Usage: /session save | /session list [--tag <name>] | "
+            "Usage: /session save | /session new | /session list [--tag <name>] | "
             "/session load <id> | /session delete <id> | "
             "/session tag <name> | /session untag <name> | /session tags"
         )
