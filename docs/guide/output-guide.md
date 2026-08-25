@@ -113,7 +113,7 @@
 |---|---|
 | 来源 | `ui/terminal.py` `feed_thinking`（被 `agent_loop.on_thinking_delta` 回调触发） |
 | 触发 | LLM 返回 reasoning_content / thinking delta 时（DeepSeek R1、o1/o3 等推理模型） |
-| 样式 | dim italic（淡色斜体），逐 token 直接写入终端（不走 Live 缓冲） |
+| 样式 | dim italic（淡色斜体），逐 token 直接写入终端；思考期间 Live 未启动——Live 延迟到首个正文 delta 才启动，否则 print 被 Live 拦截成碎行（tech-notes §100） |
 | 关闭方法 | `app.py` 中将 `self.agent_loop.on_thinking_delta` 设为 `None` |
 
 ### ⑨ LLM 流式回复（Markdown 渲染）  
@@ -122,7 +122,7 @@
 |---|---|
 | 来源 | `ui/renderer.py` `StreamRenderer`（Rich Live + Markdown） |
 | 触发 | LLM 返回 text delta 时（非 tool_call 的文本输出） |
-| 机制 | `on_stream_start` → Live 启动；`on_stream_delta` → 逐段提交式渲染；`on_stream_end(full_text)` → Live 关闭 |
+| 机制 | `on_stream_start` → 打分隔行（Live 不启动）；首个正文 delta（`feed_stream`）→ Live 延迟启动（思考流期间启动会拦截 print 产生碎行，tech-notes §100）；`on_stream_delta` → 逐段提交式渲染；`on_stream_end(full_text)` → Live 关闭 |
 | 关闭方法 | 不可关闭（关了就看不到 LLM 的回答） |
 
 ### ⑩ 文件变更汇总

@@ -2072,3 +2072,12 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 16 个新测试：test_plugin_loader 14 + test_skills 1 + test_slash_commands 1
 - [x] 968 passed, 1 skipped，覆盖率门禁通过，ruff clean
 - [x] 真实运行：启动横幅 + /plugins 表格 + /greet + /skill list 见 haiku-mode + 真实 LLM 调用 word_count 工具 + disabled_plugins 禁用生效
+
+---
+
+## 思考流渲染碎行修复（tech-notes §100）
+
+- [x] 第一次修复（`soft_wrap=True`）真实推理模型运行验证失败——碎行复现，重查真因
+- [x] 真因：agent_loop 首个 thinking chunk 即触发 `on_stream_start` 启动 Live，`feed_thinking` 的 print 被 Live 拦截为独立行块（`end=""` 失效）且每碎片后跟 `\r\x1b[2K` 整行擦除——碎片被擦除/打断只剩零星孤行
+- [x] `ui/terminal.py` — Live 延迟启动：`start_stream` 只打分隔行，`feed_stream` 首个正文 delta 才 `renderer.start()`（有思考先收尾思考行）；`feed_thinking` 直连写入（soft_wrap 保留管无 Live 路径折行）
+- [x] 4 个新测试（test_renderer.py，含 force_terminal=True ANSI 级验证：思考期间无 Live 无擦除码），1158→1162

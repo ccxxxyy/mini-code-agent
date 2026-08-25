@@ -623,12 +623,13 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 
 ### D. 后续工作中自查发现的缺陷
 
-☐ **D1【UI·中】思考流（reasoning_content）渲染碎行**
+✅ **D1【UI·中】思考流（reasoning_content）渲染碎行（已修复）**
 `ui/terminal.py:203-206` 的 `feed_thinking` 用 `console.print(delta, end="", style="dim italic", highlight=False)` 逐 token 输出模型思考流。Rich 的 `console.print` 不跨调用记录光标列位，每个小片段（如 `.txt`/`).`/`32).`）当独立渲染单元按 `console.width` 各自换行——短碎片落在宽度边界附近时片段间被插入换行，正文前出现一长串断续碎行。
 触发条件：仅推理模型吐 `reasoning_content` 时经 `on_thinking_delta → feed_thinking` 触发（普通模型无思考流，故时有时无，非稳定复现）。主回答流走 `StreamRenderer`（Live+Markdown 缓冲，renderer.py）不受影响。
 修复方案（首选 `soft_wrap=True`）：给该 print 加 `soft_wrap=True`。这不是绕过而是对准病灶——它直接关闭 Rich 的内部词折行与裁剪，"每个片段各自按宽度折行"的机制被移除，折行交给终端并保持真实光标列位；同时保留 Rich 的 dim italic 样式/主题/Windows ANSI 使能。一行修复、低风险、无功能牺牲。
 备选（非必需，更重且不更彻底）：① 仿主流做 thinking 缓冲按行 flush——解决同一症状却引入缓冲状态与额外 bug 面，仅当需要对思考流做 Markdown/Live 渲染才值得；② 裸写 `console.file.write` + 手动 ANSI——完全脱离 Rich 但丢样式整合、需自理 legacy Windows ANSI，跨平台更脆，是退步。
 诚实边界：soft_wrap 后超宽思考文本由终端硬折行（不按词），但思考流是 dim 辅助信息，可读性足够。工作量：小（一行 + 真实推理模型运行验证碎行消失）。验证要点：改完必须对着会吐 `reasoning_content` 的模型真实跑一轮肉眼确认碎行消失（reasoning 里本就有的 \n 是真内容、不归此修复管）。
+**✅ 已修复（真因与上方分析不同，详见 tech-notes §100）**：首选方案 `soft_wrap=True` 实施后**真实推理模型运行验证失败**——碎行仍在（回答前出现 `.`/`11` 等孤立碎片各自成行）。真实终端的主机制不是宽度折行，而是 **Live 拦截**：agent_loop 在第一个 thinking chunk 就触发 `on_stream_start` → `StreamRenderer.start()` 启动 Live，之后 `feed_thinking` 的每次 `console.print` 被 Live 拦截为独立行块（`end=""` 失效），且每个碎片后跟 Live 刷新的 `\r\x1b[2K`（回车+整行擦除）——碎片被擦除/打断，只剩零星碎片幸存各自成行。上方分析的宽度折行机制只在无 Live 路径存在（次要），单测用文件控制台（Live 拦截不生效）所以没抓住。**最终修复**：Live 延迟到第一个正文 delta（`feed_stream`）才启动，思考期间直连顺序写入（soft_wrap 保留，管无 Live 路径的折行）；正文开始前收尾思考行。`force_terminal=True` 的 ANSI 级验证：旧行为每碎片后跟 `\r\x1b[2K`，新行为思考文本连续完整。4 个新测试（Live 延迟启动+无擦除码 / 思考仅无正文收尾 / 超宽无折行 / 自带换行保留），1158→1162。
 
 ✅ **D2【行为·高】危险命令被拒后 agent 自主找绕过路径，而非停下求助**
 现象（A2 真实验证时实测）：用户让删 `/tmp/a2test`，agent 连续被拒 4 条危险命令（`rm --recursive --force`→`rmdir /S /Q`→`cmd /c rmdir`→`del /Q && rmdir`，正则全部正确命中并弹窗、用户全拒），但 agent 没有停下，而是继续自主换方式,第 12 轮用 `python -c "shutil.rmtree(...)"`（不匹配任何危险正则）**GRANTED 并真的删除了目录**——共 13 轮、烧 97k tokens。

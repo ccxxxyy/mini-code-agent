@@ -135,3 +135,121 @@ async def test_streaming_nested_fence_stays_in_one_block():
     # 非法嵌套被修复后，"### 2. next" 应作为代码块内容渲染（保留 ### 前缀），
     # 而不是被断开当成真标题（真标题渲染会去掉 ### 标记）
     assert "### 2. next" in out
+
+
+# --- feed_thinking fragmented-line fix 思考流碎行修复 ---
+
+
+async def test_feed_thinking_no_fragment_wrapping():
+    """A thinking delta wider than console.width must NOT be word-wrapped by
+    Rich: Rich wraps each print as an independent render unit starting from
+    column 0, but the REAL cursor may be mid-line from prior deltas -- its
+    inserted newlines land in wrong places, littering broken fragments.
+    soft_wrap leaves line-breaking to the terminal (which tracks the real
+    cursor column). Regression-verified: without soft_wrap this exact input
+    renders as 'this is a \\nlong \\nthinking \\nfragment'.
+    超过 console.width 的思考增量不能被 Rich 折行：Rich 把每次 print 当
+    从 0 列起算的独立渲染单元，而真实光标可能在行中——插入的换行位置
+    全错，产生碎行。soft_wrap 把折行交给终端。反向验证：无 soft_wrap 时
+    此输入渲染为 'this is a \\nlong \\nthinking \\nfragment'。"""
+    from io import StringIO
+
+    from mini_agent.ui.terminal import Terminal
+
+    term = Terminal()
+    buf = StringIO()
+    term.console = Console(file=buf, width=10, force_terminal=False)
+
+    # One wide fragment + trailing small fragments (real streams mix both)
+    # 一个超宽片段 + 若干小片段（真实流两者混合）
+    term.feed_thinking("this is a long thinking fragment")
+    term.feed_thinking(".txt")
+    term.feed_thinking(").")
+
+    out = buf.getvalue()
+    assert "\n" not in out, f"Rich inserted line breaks: {out!r}"
+    assert out == "this is a long thinking fragment.txt)."
+
+
+async def test_feed_thinking_preserves_real_newlines():
+    """Newlines that ARE in the reasoning content must pass through.
+    reasoning 内容里本来就有的换行必须原样保留。"""
+    from io import StringIO
+
+    from mini_agent.ui.terminal import Terminal
+
+    term = Terminal()
+    buf = StringIO()
+    term.console = Console(file=buf, width=40, force_terminal=False)
+
+    term.feed_thinking("step one\n")
+    term.feed_thinking("step two")
+
+    assert buf.getvalue() == "step one\nstep two"
+
+
+async def test_thinking_deltas_do_not_run_under_live():
+    """The REAL fragmentation mechanism in a live terminal: agent_loop fires
+    on_stream_start on the FIRST thinking chunk, and console.print during an
+    active Live is intercepted -- each fragment is followed by Live's refresh
+    control codes (\\r + erase-line), so fragments get erased/broken and only
+    scattered pieces survive on their own lines. Fix: Live start is deferred
+    to the first answer delta (feed_stream); thinking writes go directly to
+    the terminal with no Live active. force_terminal=True exercises the real
+    ANSI path (Live interception is a no-op on file consoles).
+    真实终端碎行主机制：agent_loop 在第一个 thinking chunk 就触发
+    on_stream_start，而 Live 活跃期间 console.print 被拦截——每个碎片后
+    跟 Live 刷新控制码（\\r+整行擦除），碎片被擦除/打断，只剩零星碎片
+    各自成行。修复：Live 延迟到第一个正文 delta 才启动，思考期间直连
+    写入无 Live。force_terminal=True 走真实 ANSI 路径（文件控制台下
+    Live 拦截不生效，测不到）。"""
+    import re
+    from io import StringIO
+
+    from mini_agent.ui.renderer import StreamRenderer
+    from mini_agent.ui.terminal import Terminal
+
+    term = Terminal()
+    buf = StringIO()
+    term.console = Console(file=buf, width=80, force_terminal=True)
+    term.renderer = StreamRenderer(term.console)
+
+    term.start_stream()
+    for d in ["9", ".", "11", " vs ", "9", ".", "9", ", think", "ing..."]:
+        term.feed_thinking(d)
+    # No Live while thinking streams -- deltas are direct sequential writes
+    # 思考流期间无 Live——增量直连顺序写入
+    assert term.renderer._live is None
+    thinking_out = buf.getvalue()
+    # No carriage-return/erase-line between fragments (Live's erasure signature)
+    # 碎片之间无回车/整行擦除（Live 擦除特征码）
+    assert "\r" not in thinking_out, f"Live erasure codes present: {thinking_out!r}"
+    stripped = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", thinking_out)
+    assert "9.11 vs 9.9, thinking..." in stripped
+
+    # First answer delta lazily starts the Live (after ending the thinking line)
+    # 第一个正文 delta 才延迟启动 Live（先收尾思考行）
+    term.feed_stream("answer text")
+    assert term.renderer._live is not None
+    assert term.finish_stream() == "answer text"
+
+
+async def test_thinking_only_turn_finishes_cleanly():
+    """Thinking followed by tool calls (no answer text) must not crash
+    finish_stream: the renderer's Live was never started.
+    只有思考没有正文（后接工具调用）时 finish_stream 不能崩溃：
+    renderer 的 Live 从未启动。"""
+    from io import StringIO
+
+    from mini_agent.ui.renderer import StreamRenderer
+    from mini_agent.ui.terminal import Terminal
+
+    term = Terminal()
+    buf = StringIO()
+    term.console = Console(file=buf, width=80, force_terminal=False)
+    term.renderer = StreamRenderer(term.console)
+
+    term.start_stream()
+    term.feed_thinking("reasoning only")
+    assert term.finish_stream() == ""
+    assert "reasoning only" in buf.getvalue()

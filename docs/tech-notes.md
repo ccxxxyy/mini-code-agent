@@ -3262,7 +3262,7 @@ A3 已通过 category gate 把 WRITE 类工具延迟到 `_act()` 消除双执行
 
 Roadmap 候选 ②：跨 attempt 结果缓存（根因修复）。不需要判断命令是否有副作用（不可穷尽），不需要牺牲流式延迟（只读 bash 仍即时执行）。
 
-1. `_think()` 开始前初始化 `_eager_completed: dict[str, ToolResult]`（key = `name + " " + json.dumps(args, sort_keys=True)`）和 `_eager_keys: dict[str, str]`（tc.id → cache key）。
+1. `_think()` 开始前初始化 `_eager_completed: dict[str, ToolResult]`（key = `name + "\0" + json.dumps(args, sort_keys=True)`）和 `_eager_keys: dict[str, str]`（tc.id → cache key）。
 2. 截断重试时，已完成的 eager 任务（`task.done() and not task.cancelled()`）的结果存入 `_eager_completed`；未完成的照旧 cancel。
 3. `_stream_once()` eager 提交前先查缓存——命中则创建 `asyncio.Future` 并 `set_result()`，不再执行；未命中则照常 `create_task()`。两者都记入 `_eager_keys`。
 4. `_act()` 不变——`tc.id in streaming` 找到 Future 直接 await 返回。
@@ -3272,3 +3272,29 @@ Roadmap 候选 ②：跨 attempt 结果缓存（根因修复）。不需要判�
 ## 99.3 验证
 
 3 个新测试（test_agent_loop.py）：同签名 bash 复用缓存只执行 1 次（核心）/ 不同签名不命中各执行一次 / WRITE 类仍走延迟路径回归守卫。全量 1155→1158。
+
+# §100 思考流渲染碎行修复
+
+## 100.1 问题
+
+推理模型吐 `reasoning_content` 时，`ui/terminal.py` 的 `feed_thinking` 用 `console.print(delta, end="", ...)` 逐 token 输出，正文前出现一长串断续碎行（`.`/`11` 等孤立碎片各自成行）。仅推理模型触发（普通模型无思考流），时有时无非稳定复现。
+
+## 100.2 第一次修复失败：soft_wrap 假设
+
+roadmap D1 的初始分析把病灶定位在 Rich 的逐 print 宽度折行：`console.print` 不跨调用记录光标列位，每个小片段被当作从第 0 列起算的独立渲染单元按 `console.width` 折行。据此加了 `soft_wrap=True`（关闭 Rich 内部折行，交给终端），文件控制台单测也反向验证了该机制（Console(width=10) 下超宽片段确实被错位折行）。**但真实推理模型运行验证失败——碎行原样复现。** 教训：文件控制台（force_terminal=False）单测走的不是真实终端渲染路径，"测试通过 + 机制反向验证"不等于修好了真实症状，真实运行验证不可省。
+
+## 100.3 真因：Live 拦截 + 整行擦除
+
+真实终端的主机制在 agent_loop 与 renderer 的交互里：`_stream_once` 在**第一个 thinking chunk** 就触发 `on_stream_start` → `terminal.start_stream()` → `StreamRenderer.start()` 启动 Live。之后每个 `feed_thinking` 的 `console.print` 都发生在 Live 活跃期间——Rich 把 Live 期间的 print 拦截为 Live 区上方的独立行块（renderer.py 自己的注释就写着这行为），`end=""` 失效；且 ANSI 级取证显示每个碎片后跟 Live 刷新的 `\r\x1b[2K`（回车+整行擦除），碎片被后续刷新擦除/打断，与滚动竞争后只剩零星碎片幸存、各自成行——正好是实测症状（大部分思考文本消失，只剩 `.`/`11` 孤行）。宽度折行机制真实存在但只在无 Live 路径生效（次要）。
+
+## 100.4 最终修复
+
+Live 延迟启动（terminal.py）：`start_stream()` 只打分隔行不再启动 Live；`feed_stream()` 首个正文 delta 到达时才 `renderer.start()`（若有思考文本先收尾思考行+空行分隔）；`feed_thinking` 直连顺序写入（保留 soft_wrap 管无 Live 路径折行）。esc_watcher 仍在首个 thinking chunk 启动（双 Esc 中断思考不受影响）；思考仅无正文（后接工具调用）时 `renderer.finish()` 对未启动的 Live 天然安全（`_live is None` 跳过）。
+
+备选方案（未采用）：thinking 缓冲按行 flush（引入缓冲状态与额外 bug 面）；裸 console.file.write + 手动 ANSI（丢样式整合、跨平台更脆）；agent_loop 层拆分 thinking/正文的 stream_start 回调（改动面更大且 esc_watcher 时机耦合）。
+
+诚实边界：超宽思考文本由终端硬折行（不按词）——dim 辅助信息可读性足够；reasoning 自带换行是真内容原样保留。
+
+## 100.5 验证
+
+ANSI 级取证（force_terminal=True）：旧行为每碎片后跟 `\r\x1b[2K` 擦除码；新行为思考文本连续完整（`9.11 vs 9.9, thinking...` 一行直通）、正文 delta 才见 Live 控制码。4 个新测试（test_renderer.py）：思考期间无 Live+无擦除码+正文延迟启动 Live / 思考仅无正文 finish 不崩 / 超宽片段无 Rich 折行 / 自带换行保留。全量 1158→1162。终端真实验证已通过：两轮真实推理模型运行（9.11 vs 9.9 短推理 + 水池注水长推理，中英混排/自带换行/长段落全覆盖），思考流以 dim 连续段落完整显示在回答前，碎行消失（对照第一次修复时同款问题的碎行症状）。
