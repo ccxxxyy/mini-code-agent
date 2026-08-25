@@ -205,6 +205,14 @@ class SubAgent:
                 "\n\n[Inherited context -- summary of the parent conversation "
                 "so far. Use it to understand references in your task:]\n" + context_summary
             )
+        else:
+            system_prompt += (
+                "\n\n[IMPORTANT: You have NOT been given any context about "
+                "the parent conversation. If the task refers to a discussion, "
+                "decision, or context you have no knowledge of, say so explicitly "
+                "and ask for the missing information in your report -- "
+                "NEVER fabricate what was discussed.]"
+            )
         self._conversation = Conversation(system_prompt=system_prompt)
         self._conversation.append(Message(role=Role.USER, content=task))
 

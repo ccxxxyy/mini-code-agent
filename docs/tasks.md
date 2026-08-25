@@ -2118,3 +2118,10 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 - [x] `extensions/builtin_commands.py` — `_SESSION_LIST_LIMIT = 20` 常量；list 参数 token 扫描解析（`--all` / `--page N` / `--tag <name>` 任意组合）；超限截断 + 尾行双语提示（页码/总数/下一页/--all）；`--page N` 真分页（末页无下一页提示、超范围报错、--all 优先）；usage 补 `[--page N] [--all]`
 - [x] 7 个新测试（test_slash_commands.py：截断+尾行 / --all 全量 / ≤20 无尾行 / --tag 组合 / --page 2 末页 / 超范围 / --all 优先），1182→1189
+
+---
+
+## 模糊确认不算授权 + 子 agent 反幻觉守则（tech-notes §105）
+
+- [x] `app.py` — SYSTEM_PROMPT Guidelines 新增 `IMPORTANT:` 规则：用户表示只讨论时约束持续有效直到显式动手指令，模糊确认只确认理解不解除约束，不确定时主动问
+- [x] `core/subagent.py` — SubAgent 初始化根据 context_summary 有无条件注入反幻觉提示（无继承上下文时追加 `[IMPORTANT: You have NOT been given any context...]`，有时不触发）
