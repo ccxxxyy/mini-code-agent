@@ -67,7 +67,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Source | `ui/trace.py` `TraceRenderer` (EventBus subscriber) |
 | Trigger | After `/trace on` is enabled, one line is printed per event (phase switch / permission / tool / LLM / turn) |
 | Includes | Phase switches (iter), permission decisions (perm), tool lifecycle (tool start/done), LLM request/response (llm), turn summary (turn), permission mode switches (mode) |
-| Toggle | `/trace on` to enable, `/trace off` to disable, `/trace` to toggle |
+| Toggle | `/trace on` to enable, `/trace off` to disable; `/trace` with no args shows current state |
 | Effect when off | Zero output (short-circuited by `if not self.enabled: return` inside the handler) |
 
 ### ④ Tool Usage Explanation Panel `Teach: tool_name`
@@ -77,7 +77,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Source | `ui/teach.py` `TeachRenderer` (EventBus subscriber) |
 | Trigger | After `/explain on` is enabled, an explanation panel is printed before each tool call |
 | Includes | Why this tool was chosen / the actual arguments passed / what each argument means — helps understand the Agent's decision process |
-| Toggle | `/explain on` to enable, `/explain off` to disable |
+| Toggle | `/explain on` to enable, `/explain off` to disable; `/explain` with no args shows current state |
 | Use case | Enable when you want to know "why did the Agent call this tool instead of that one"; keep it off for daily use (off by default) |
 
 ### ⑤ Tool Call Line `╭─ tool_name args...`

@@ -96,14 +96,14 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="trace",
-            description="Toggle agent internals trace (usage: /trace [on|off])",
+            description="Agent internals trace (usage: /trace [on|off], no args = show status)",
             handler=_make_trace(app),
         )
     )
     reg.register(
         SlashCommand(
             name="explain",
-            description="Toggle teaching mode (usage: /explain [on|off])",
+            description="Teaching mode (usage: /explain [on|off], no args = show status)",
             handler=_make_explain(app),
         )
     )
@@ -124,7 +124,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="plan",
-            description="Toggle plan mode — read-only (usage: /plan [on|off])",
+            description="Read-only plan mode (usage: /plan [on|off], no args = show status)",
             handler=_make_plan(app),
         )
     )
@@ -1070,9 +1070,6 @@ def _make_trace(app: Application) -> HandlerFn:
             app.trace_renderer.enabled = True
         elif arg == "off":
             app.trace_renderer.enabled = False
-        else:
-            # Toggle 切换
-            app.trace_renderer.enabled = not app.trace_renderer.enabled
         state = "ON 开启" if app.trace_renderer.enabled else "OFF 关闭"
         return f"Trace mode: {state}"
 
@@ -1088,9 +1085,6 @@ def _make_explain(app: Application) -> HandlerFn:
             tr.enabled = True
         elif arg == "off":
             tr.enabled = False
-        else:
-            tr.enabled = not tr.enabled
-
         state = "ON" if tr.enabled else "OFF"
         return f"Teaching mode: {state}"
 
@@ -1117,9 +1111,6 @@ def _make_audit(app: Application) -> HandlerFn:
             al.set_enabled(True)
         elif arg == "off":
             al.set_enabled(False)
-        else:
-            al.set_enabled(not al.enabled)
-
         state = "ON 开启（跨重启持久）" if al.enabled else "OFF 关闭"
         info = f"  Log: {al.log_path}\n  Entries: {al.entry_count}"
         return f"Audit mode: {state}\n{info}"
@@ -1175,7 +1166,7 @@ def _make_plan(app: Application) -> HandlerFn:
 
         sub = args.strip().lower()
 
-        if sub in ("", "on"):
+        if sub == "on":
             app.set_permission_mode(PermissionMode.PLAN)
             conv = app.session.conversation
             if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
@@ -1189,7 +1180,12 @@ def _make_plan(app: Application) -> HandlerFn:
                 conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
             return "Plan mode **OFF** — all tools re-enabled."
 
-        return "Usage: `/plan [on|off]` — toggle read-only planning mode."
+        if sub:
+            return "Usage: `/plan [on|off]` — toggle read-only planning mode."
+
+        is_on = app.permission_manager.mode is PermissionMode.PLAN
+        state = "**ON** (read-only)" if is_on else "**OFF**"
+        return f"Plan mode: {state}"
 
     return handler
 

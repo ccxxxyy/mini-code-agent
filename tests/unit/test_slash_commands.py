@@ -90,3 +90,75 @@ def test_names_includes_hidden():
     reg.register(SlashCommand(name="visible", description="x", handler=handler))
     reg.register(SlashCommand(name="secret", description="x", handler=handler, hidden=True))
     assert reg.names() == {"visible", "secret"}
+
+
+# --- no-arg = show status, don't change state 无参数只显示状态 ---
+
+
+class _Obj:
+    """Minimal attribute bag for mocking app sub-objects."""
+
+    def __init__(self, **kw: object) -> None:
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+async def test_trace_no_arg_shows_status():
+    from mini_agent.extensions.builtin_commands import _make_trace
+
+    app = _Obj(trace_renderer=_Obj(enabled=False))
+    handler = _make_trace(app)
+    result = await handler("", None)
+    assert "OFF" in result
+    assert not app.trace_renderer.enabled
+
+    app.trace_renderer.enabled = True
+    result = await handler("", None)
+    assert "ON" in result
+    assert app.trace_renderer.enabled
+
+
+async def test_explain_no_arg_shows_status():
+    from mini_agent.extensions.builtin_commands import _make_explain
+
+    app = _Obj(teach_renderer=_Obj(enabled=True))
+    handler = _make_explain(app)
+    result = await handler("", None)
+    assert "ON" in result
+    assert app.teach_renderer.enabled
+
+    app.teach_renderer.enabled = False
+    result = await handler("", None)
+    assert "OFF" in result
+    assert not app.teach_renderer.enabled
+
+
+async def test_audit_no_arg_shows_status():
+    from mini_agent.extensions.builtin_commands import _make_audit
+
+    app = _Obj(
+        audit_logger=_Obj(
+            enabled=False,
+            set_enabled=lambda v: None,
+            log_path="/tmp/audit.jsonl",
+            entry_count=42,
+        )
+    )
+    handler = _make_audit(app)
+    result = await handler("", None)
+    assert "OFF" in result
+    assert not app.audit_logger.enabled
+
+
+async def test_plan_no_arg_shows_status():
+    from mini_agent.extensions.builtin_commands import _make_plan
+    from mini_agent.models.permissions import PermissionMode
+
+    app = _Obj(permission_manager=_Obj(mode=PermissionMode.DEFAULT))
+    handler = _make_plan(app)
+    result = await handler("", None)
+    assert "OFF" in result
+
+    app.permission_manager.mode = PermissionMode.PLAN
+    result = await handler("", None)
+    assert "ON" in result

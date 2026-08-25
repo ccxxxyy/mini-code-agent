@@ -279,7 +279,7 @@ mini-code-agent/
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 1162 个测试（64 单元 + 5 集成），80%+ 覆盖率
+├── tests/                      # 1166 个测试（64 单元 + 5 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -386,7 +386,7 @@ mini-code-agent/
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 - [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，1162 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，1166 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
@@ -949,13 +949,13 @@ reason = "spec.md 是项目策略只读文件"
 | `/replay <名称>` | 零 LLM 确定性重放已录制的工具序列 |
 | `/todo [add\|done\|start\|fail\|delete\|clear]` | 持久化任务列表（带依赖追踪，跨会话保留） |
 | `/cost` | 成本仪表盘：按模型分账的 token 用量与金额 |
-| `/trace [on\|off]` | 显示/隐藏 Agent 内部状态（阶段/权限/工具/LLM） |
-| `/explain [on\|off]` | 显示/隐藏工具使用说明面板 |
-| `/audit [on\|off\|verify]` | 审计日志开关 + 哈希链完整性验证 |
+| `/trace [on\|off]` | Agent 内部状态（阶段/权限/工具/LLM），无参数显示当前状态 |
+| `/explain [on\|off]` | 工具使用说明面板，无参数显示当前状态 |
+| `/audit [on\|off\|verify]` | 审计日志，无参数显示当前状态 + 哈希链完整性验证 |
 | `/theme [dark\|light\|default]` | 切换颜色主题（持久化） |
 | `/spawn <任务>` | 派生后台 SubAgent（详见上方多 Agent 章节） |
 | `/team <任务>` | LLM 规划 + 并行执行（详见上方多 Agent 章节） |
-| `/plan` | 进入/退出 Plan 模式（只读规划，不执行工具） |
+| `/plan [on\|off]` | Plan 模式（只读规划，不执行工具），无参数显示当前状态 |
 | `/mode [名称]` | 查看/切换权限模式：default / accept-edits / plan / bypass（deny 规则和敏感路径所有模式下有效） |
 | `/tools` | 列出已注册工具 |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | 技能包管理 |

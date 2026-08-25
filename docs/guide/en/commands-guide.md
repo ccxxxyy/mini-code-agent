@@ -123,7 +123,7 @@ LLM automatically decomposes the task → matches team members by role → execu
 ```
 
 ### /plan [on|off]
-Toggle read-only plan mode (write-type tools disabled). Without parameters, shows the current state.
+Read-only plan mode (write-type tools disabled). Without parameters, shows the current state.
 Now implemented via the unified permission mode switch: `on` is equivalent to `/mode plan`, `off` to `/mode default`.
 
 ### /mode [name]
@@ -152,10 +152,10 @@ The startup mode can be set via `[security] approval_mode` in config.toml (see t
 ## 4. Observability and Debugging
 
 ### /trace [on|off]
-Show the agent's internal state in real time: ReAct phase transitions, permission decisions (including the matched rule), tool durations, LLM token metadata.
+Show the agent's internal state in real time: ReAct phase transitions, permission decisions (including the matched rule), tool durations, LLM token metadata. Without parameters, shows the current state without changing it.
 
 ### /explain [on|off]
-Teaching mode: prints an explanatory panel before each tool call (why this tool is used / what the parameters mean).
+Teaching mode: prints an explanatory panel before each tool call (why this tool is used / what the parameters mean). Without parameters, shows the current state without changing it.
 
 ### /audit [on|off|verify]
 ```
@@ -283,9 +283,9 @@ Session-level (lost on restart):
 | `/allow` `/deny` (without `--save`) | Rules live in session memory only; `/deny remove` also only removes in-session rules — TOML-loaded ones return on next startup |
 | `/mode` | Reverts to the `[security] approval_mode` config value on restart |
 | `/plan` | Same (startup value controlled by `enable_plan_mode`) |
-| `/trace` `/explain` | Toggles are not written to disk |
+| `/trace` `/explain` | State is not written to disk; without parameters, shows current state |
 | `/model` | LLM profile switch is per-session |
-| `/audit on/off` | The toggle is session-level (the audit log file itself is persistent) |
+| `/audit on/off` | The on/off state is session-level (the audit log file itself is persistent); no args shows current state |
 | `/skill activate/deactivate` | Activation injects into the system prompt; after `/session save`, if the session has been compressed (a compact boundary exists), `load` restores the activation state from the boundary (prompts are not re-injected) — otherwise prompts survive but the registry's active state is lost |
 | The `a` (always) answer in confirmation dialogs | Session grant, cleared on restart |
 

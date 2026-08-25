@@ -65,7 +65,7 @@
 | 来源 | `ui/trace.py` `TraceRenderer`（EventBus 订阅者） |
 | 触发 | `/trace on` 开启后，每个事件（阶段切换/权限/工具/LLM/轮次）打一行 |
 | 包含 | 阶段切换（iter）、权限判定（perm）、工具生命周期（tool start/done）、LLM 请求/响应（llm）、轮次汇总（turn）、权限模式切换（mode） |
-| 开关 | `/trace on` 开启，`/trace off` 关闭，`/trace` 切换 |
+| 开关 | `/trace on` 开启，`/trace off` 关闭，`/trace` 无参数只显示当前状态 |
 | 关闭后效果 | 零输出（handler 内 `if not self.enabled: return` 短路） |
 
 ### ④ 工具使用说明面板 `Teach: tool_name`
@@ -75,7 +75,7 @@
 | 来源 | `ui/teach.py` `TeachRenderer`（EventBus 订阅者） |
 | 触发 | `/explain on` 开启后，每次工具调用前打印一个说明面板 |
 | 包含 | 为什么选这个工具 / 实际传入的参数 / 各参数的含义——帮助理解 Agent 决策过程 |
-| 开关 | `/explain on` 开启，`/explain off` 关闭 |
+| 开关 | `/explain on` 开启，`/explain off` 关闭，`/explain` 无参数只显示当前状态 |
 | 用途 | 想知道"Agent 为什么调这个工具而不是那个"时开启；日常使用关闭（默认关） |
 
 ### ⑤ 工具调用行 `╭─ tool_name args...`

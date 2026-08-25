@@ -272,7 +272,7 @@ max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutiv
                              # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
 streaming_tool_execution = true  # During streaming, start executing a tool call as soon as it is fully assembled (false waits for the stream to end)
-enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on toggles at runtime);
+enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on|off switches at runtime);
                              # equivalent to [security].approval_mode = "plan" and takes precedence
 # self_verify = false        # Experimental: LLM automatically verifies tool results
 # planner_profile = ""       # LLM Profile name used by the /team Planner (empty = use the main model)

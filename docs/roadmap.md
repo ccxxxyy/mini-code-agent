@@ -711,13 +711,13 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 **原问题**：A3 已把 WRITE 类工具延迟到 `_act` 消除双执行，但 bash（ToolCategory.EXECUTE）未纳入——非危险的带副作用 bash（`mkdir`、`npm install`、`git add` 等）仍在流式期间 eager 执行，截断重试后同样可能双跑。
 **✅ 已修复**：方案 ② 跨 attempt 结果缓存——截断重试时把已完成的 eager 任务结果按 `(name, args_json)` 签名缓存（`_eager_completed`），重试产出相同签名的工具调用时复用缓存结果创建已完成 Future，`_act` 直接 await 返回不重跑。不需要判断命令是否有副作用（不可穷尽），不牺牲流式延迟收益（只读 bash 仍即时执行），对 WRITE 类工具无影响（category gate 在缓存检查之前拦截）。缓存生命周期限于单次 `_think()` 调用。3 个新测试，1155→1158。
 
-☐ **D5【UX·低】on/off 模式命令无参数时行为不一致且不直觉**
+✅ **D5【UX·低】on/off 模式命令无参数时行为不一致且不直觉（已修复）**
 4 个 on/off 模式命令的无参数行为各不相同（`extensions/builtin_commands.py`），且都不是用户最直觉的"显示当前状态"：
-- `/plan`（:1161）：无参数 = **无条件打开**（`sub in ("", "on")`），而非 toggle 也非显示状态。B1 验证时暴露：exit_plan_mode 工具关闭 plan 模式后，用户输 `/plan` 想查状态却又打开了
-- `/trace`（:1059）：无参数 = **toggle**（`not app.trace_renderer.enabled`）
-- `/explain`（:1076）：无参数 = **toggle**（`not tr.enabled`）
-- `/audit`（:1105）：无参数 = **toggle**（`not al.enabled`）
-建议统一为：**无参数 = 只显示当前状态不改变**，`on`/`off` 显式切换。或至少把 `/plan` 的无参数行为从"无条件打开"改为与其他三个一致的 toggle。工作量：小（4 处 else 分支改为显示状态）。
+- `/plan`：无参数 = **无条件打开**（`sub in ("", "on")`），而非 toggle 也非显示状态。验证时暴露：exit_plan_mode 工具关闭 plan 模式后，用户输 `/plan` 想查状态却又打开了
+- `/trace`：无参数 = **toggle**（`not app.trace_renderer.enabled`）
+- `/explain`：无参数 = **toggle**（`not tr.enabled`）
+- `/audit`：无参数 = **toggle**（`not al.enabled`）
+**✅ 已修复**：统一为**无参数 = 只显示当前状态不改变**，`on`/`off` 显式切换。4 个 handler 的 `else` 分支（`/plan` 的 `""` 分支）从 toggle/无条件开启改为只返回状态字符串。`/plan` 新增状态显示（`Plan mode: **ON** (read-only)` / `**OFF**`）。description 去掉 "Toggle" 改为 "no args = show status"。4 个新测试，1162→1166。
 
 ✅ **D6【安全·高】bash 通道读敏感文件绕过 read_file 拦截（泄漏 API key）**
 D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），agent 立刻改用 `type D:\...\.env`（bash 通道）成功打印、**泄漏真实 API key**。与 D3 同源——bash 绕过工具层保护——但方向是读泄密。根因：敏感文件保护 `PathGuard.is_sensitive_file` 只在 read_file/write_file/delete_file 工具层，bash 命令管道从不查路径，`type`/`cat`/`Get-Content`/`more .env` 作普通命令被 auto-grant。
