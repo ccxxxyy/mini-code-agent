@@ -562,11 +562,11 @@ NDJSON 协议（12 种服务端事件 + 3 种 WS 客户端消息）：
 - ~~无推送唤醒~~ **✅ 以轮询替代（有意的适配）**：mewcode 推送唤醒服务的是常驻交互队友；mini 的 pane worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信，投递延迟上界即轮询间隔——无需推送通道
 - ~~主 Agent 在 spawn_agents 期间阻塞~~ **✅ 已解除**：`spawn_agents` 新增 `background=true` 模式——立即返回 agent ids，LLM 可继续其他工作；每个子 agent 完成时经 mailbox 向 'main' 投递含结果的通知，**自动投递**：`SubAgentCompleteEvent` 触发 `terminal.interrupt_input()` 中断输入等待，主循环通过 `_handle_background_delivery()` 自动 drain mailbox 并运行 `agent_loop.run()` 处理结果——无需等待用户输入，结果即时送达。`/spawn --background` 命令行也可直接后台派发。默认仍为阻塞模式（需要全部结果再继续的场景）。`inherit_context=true` 组合下的摘要 LLM 调用也已可观测（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent` + 终端提示 + trace 行）且 background 模式下非阻塞（摘要+spawn 整体后台 task，立即返回）。
 
-### 6.3 Agent 类型定义 ✅ 已实现（P48 + B3 自定义）
+### 6.3 Agent 类型定义 ✅ 已实现（P48 + 自定义类型）
 
 | | mini | mewcode |
 |---|---|---|
-| Agent 类型 | **4 种内置** + **用户自定义 .md**：explore / plan / worker / verify（P48）+ `.mini-agent/agents/*.md` 声明式扩展（B3） | **4 种内置**（.md 声明）：Explore、Plan、general-purpose、Verification |
+| Agent 类型 | **4 种内置** + **用户自定义 .md**：explore / plan / worker / verify（P48）+ `.mini-agent/agents/*.md` 声明式扩展 | **4 种内置**（.md 声明）：Explore、Plan、general-purpose、Verification |
 | 用户扩展 | ✅ 项目级 + 用户级双目录，同名覆盖内置 | ✅ 项目级 + 用户级双目录 |
 
 **已完成**（P48）：

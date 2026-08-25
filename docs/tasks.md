@@ -965,6 +965,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 ### P44.1 实现
 - [x] `core/agent_loop.py` — _think() 重试循环：finish_reason == "length" 时 max_tokens 翻倍重发（最多 MAX_TOKENS_RETRIES=3 次），仍截断保留最后结果；重试前取消流式提交的工具任务（参数可能被 JSON 中途切断）；用户取消不重试；流式调用逻辑提取为 _stream_once()
+- [x] `core/agent_loop.py` — 跨 attempt 结果缓存（`_eager_completed` + `_eager_keys`）：截断重试时已完成的 eager 工具结果按 `(name, args_json)` 缓存，重试产出相同签名时复用不重跑——bash 副作用双执行修复；3 个新测试（1155→1158）
 - [x] `llm/openai_provider.py` — stream() 的 max_tokens 支持 kwargs 覆盖配置值
 - [x] `llm/anthropic_provider.py` — 同上；stop_reason="max_tokens" 归一化为 OpenAI 的 "length"（恢复逻辑两家通用）
 
