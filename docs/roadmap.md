@@ -731,10 +731,9 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 
 **✅ 已修复**：三件套——① Theme 新增 `user_input` 亮浅蓝字段（default `#5fd7ff`/dark `#7dcfff`/light 白底可读蓝 `#0969da`；不复用 warning——`#f39c12` 黑底偏暗且语义不同）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮浅蓝；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
 
-☐ **D8【存储·低】崩溃/硬杀会话永久积累——加默认 40 天启动清理**
+✅ **D8【存储·低】崩溃/硬杀会话永久积累——加默认 40 天启动清理（已修复）**
 现状：`SessionStore.cleanup_stale()` 只删"已正常关闭 + 超龄"的会话，`closed_cleanly=False` 的一律跳过（崩溃恢复候选不能删）。但恢复只取本项目**最新**一个崩溃会话——非最新的崩溃会话、以及再也不启动的项目的崩溃会话**永久留盘**（`~/.mini-agent/sessions/`），只能 `/session delete` 或手动删文件。远程模式会话持久化接入后暴露此积累风险（终端模式既有行为，非新引入）。
-方案：`MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`（0 = 禁用）；`cleanup_stale()` 增加崩溃会话清理逻辑——`closed_cleanly=False` 且超过 40 天的也删除（默认 40 天比正常会话的 30 天更宽松：崩溃会话有恢复价值，多留 10 天缓冲）。清理时机保持启动时、且在崩溃恢复检测**之前**执行——40 天前的崩溃会话直接清掉不再进入恢复候选（正是意图：这么久之前的会话不值得自动恢复）。`config.toml.example` 补 `[memory]` 两个清理配置的文档（`session_cleanup_days` 目前也未记录）。
-验证要点：超龄崩溃会话被删 / 40 天内的保留且仍可恢复 / 0 禁用 / 正常会话 30 天逻辑不受影响。工作量：小。
+**已修复**：`MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`（0 = 永久保留）；`cleanup_stale()` 增加 `crashed_max_age_days` 参数——`closed_cleanly=False` 且超过 40 天的也删除（比正常 30 天更宽松：崩溃会话有恢复价值多留 10 天）。清理在崩溃恢复检测之前执行——40 天前的崩溃会话直接清掉不进恢复候选。`config.toml.example` 补 `[memory]` 两个清理配置的文档。app.py 和 remote/server.py 两个调用点同步传入新参数。3 个新测试（超龄崩溃被删/40 天内保留/0 禁用/正常 30 天不受影响），1179→1182。详见 tech-notes §103。
 
 ☐ **D9【UX·低】/session list 无分页无条数限制——上百会话整屏刷过**
 现状（远程会话持久化真实验证实测暴露）：`/session list` 把 `list_sessions()` 的全部结果逐行输出——实测 159 个会话（6.8MB）一次刷 159 行，把之前的终端内容全部顶出屏幕；用户实际只关心最近几个。远程模式浏览器里同样一大坨。`--tag` 过滤是唯一的收窄手段，但没打过标签的会话无法过滤。

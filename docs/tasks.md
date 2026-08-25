@@ -2101,3 +2101,13 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `extensions/builtin_commands.py` — `/session new` 安全另起（旧会话完整存盘+新 ID+保留 system prompt；堵裸 /clear 同 ID 覆盖坑）
 - [x] `memory/context.py` + `app.py` — `ContextManager.reset_state()`：修复采用无边界会话继承上一会话已读文件缓存与技能状态的既有陈旧状态 bug
 - [x] 13 个新测试（test_remote_session.py：助手过滤 3 / 启动恢复 2 / 退出保存 1 / WS 循环接线 3 / 终端询问式回归 1 / session new 2 / reset_state 1），1166→1179
+
+---
+
+## 崩溃会话启动清理（tech-notes §103）
+
+- [x] `models/config.py` — `MemoryConfig.crashed_session_cleanup_days: int = 40`（0 = 永久保留）
+- [x] `memory/session_store.py` — `cleanup_stale()` 新增 `crashed_max_age_days` 参数：超龄崩溃会话也删除
+- [x] `app.py` + `remote/server.py` — 两个调用点同步传入新参数
+- [x] `config.toml.example` — `[memory]` 补 `session_cleanup_days` 和 `crashed_session_cleanup_days` 两个配置文档
+- [x] 3 个新测试（test_session_store.py：超龄崩溃被删 / 40 天内保留+0 禁用 / 正常 30 天不受影响），1179→1182

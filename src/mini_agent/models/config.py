@@ -95,6 +95,10 @@ class MemoryConfig:
     # Sessions older than this many days are auto-removed at startup (0 = off)
     # 超过此天数的旧会话启动时自动清理（0 = 禁用）
     session_cleanup_days: int = 30
+    # Crashed sessions (closed_cleanly=False) older than this are also removed
+    # (longer than session_cleanup_days because crash sessions have recovery value)
+    # 崩溃会话（closed_cleanly=False）超过此天数也清理（比正常会话更宽松，因有恢复价值）
+    crashed_session_cleanup_days: int = 40
     # Circuit breaker: skip compression after N consecutive ineffective attempts
     # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
     compress_max_failures: int = 3

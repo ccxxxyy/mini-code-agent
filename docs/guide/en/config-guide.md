@@ -61,7 +61,7 @@ Built-in defaults → user config.toml → project config.toml → .env → envi
 | `~/.mini-agent/.theme` | User-level | Theme preference written by the `/theme` command |
 | `~/.mini-agent/memory/user_memory.json` | User-level | Cross-project memory (auto extraction on SESSION_END + `/memory add`) |
 | `<project>/.mini-agent/memory.json` | Project-level | Project memory |
-| `~/.mini-agent/sessions/` | User-level | Session persistence (auto-save/crash recovery); properly closed sessions older than `session_cleanup_days` days are cleaned up automatically at startup |
+| `~/.mini-agent/sessions/` | User-level | Session persistence (auto-save/crash recovery); properly closed sessions older than `session_cleanup_days` (default 30) days and crashed sessions older than `crashed_session_cleanup_days` (default 40) days are cleaned up at startup |
 | `~/.mini-agent/audit.jsonl` | User-level | Audit log (after `/audit on` is enabled) |
 | `~/.mini-agent/recordings/` | User-level | Tool-chain recordings (saved by `/record`, read by `/replay`) |
 | `~/.mini-agent/cost_ledger.json` | User-level | Cumulative cost ledger (written automatically each turn; `/cost reset` zeroes it after confirmation and resets the start date — deleting the file is equivalent) |
@@ -216,7 +216,8 @@ hard_compression_threshold = 0.90 # Hard threshold (force compression at 90%, by
 auto_extract = true          # Automatically extract memory at session end
 spill_threshold_chars = 50000 # Tool results exceeding this many characters are spilled to disk keeping only a preview (0 = disabled) — prevents large files from blowing up the context
 aggregate_spill_chars = 200000 # Per-turn cumulative tool-result character budget: when exceeded, force spill in descending size order (0 = disabled) — prevents "each one under the limit, but their total blows up"
-session_cleanup_days = 30    # Old sessions older than this many days are cleaned up automatically at startup (0 = disabled) — sessions that did not close properly are kept for crash recovery
+session_cleanup_days = 30    # Properly closed sessions older than this are cleaned up at startup (0 = disabled)
+crashed_session_cleanup_days = 40  # Crashed sessions older than this are also cleaned up (0 = keep forever) — longer than 30 days because crash sessions have recovery value
 compress_max_failures = 3    # Compression circuit breaker: skip after N consecutive ineffective compressions (0 = disabled) — prevents infinite loops when the already-read-files list gets too long
 llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
 recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)

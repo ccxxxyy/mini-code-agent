@@ -109,9 +109,12 @@ class RemoteServer:
         /fork + /clear 保留历史另起（裸 /clear 会让自动保存以同会话 ID
         覆盖旧历史）。"""
         app = self._app
-        if app.config.memory.session_cleanup_days > 0:
+        mem = app.config.memory
+        if mem.session_cleanup_days > 0 or mem.crashed_session_cleanup_days > 0:
             try:
-                await app.session_store.cleanup_stale(app.config.memory.session_cleanup_days)
+                await app.session_store.cleanup_stale(
+                    mem.session_cleanup_days, mem.crashed_session_cleanup_days
+                )
             except Exception:
                 logger.debug("stale session cleanup failed", exc_info=True)
         latest = await app._find_crashed_session()

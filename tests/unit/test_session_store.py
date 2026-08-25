@@ -132,9 +132,53 @@ async def test_cleanup_stale_skips_unclean_sessions(tmp_path: Path):
     await store.save(crashed)
     _backdate_session(store, crashed, days_ago=60)
 
+    # Without crashed_max_age_days, unclean sessions are kept
+    # 不传 crashed_max_age_days 时崩溃会话保留
     removed = await store.cleanup_stale(max_age_days=30)
     assert removed == 0
     assert await store.load(crashed.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_removes_old_crashed_sessions(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    old_crash = Session()
+    old_crash.metadata.closed_cleanly = False
+    await store.save(old_crash)
+    _backdate_session(store, old_crash, days_ago=50)
+
+    recent_crash = Session()
+    recent_crash.metadata.closed_cleanly = False
+    await store.save(recent_crash)
+    _backdate_session(store, recent_crash, days_ago=10)
+
+    removed = await store.cleanup_stale(max_age_days=30, crashed_max_age_days=40)
+    assert removed == 1
+    assert await store.load(old_crash.metadata.session_id) is None
+    assert await store.load(recent_crash.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_crashed_disabled_with_zero(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    crashed = Session()
+    crashed.metadata.closed_cleanly = False
+    await store.save(crashed)
+    _backdate_session(store, crashed, days_ago=999)
+
+    removed = await store.cleanup_stale(max_age_days=30, crashed_max_age_days=0)
+    assert removed == 0
+    assert await store.load(crashed.metadata.session_id) is not None
+
+
+async def test_cleanup_stale_normal_unaffected_by_crashed_param(tmp_path: Path):
+    store = SessionStore(session_dir=str(tmp_path))
+    old_clean = Session()
+    old_clean.metadata.closed_cleanly = True
+    await store.save(old_clean)
+    _backdate_session(store, old_clean, days_ago=35)
+
+    removed = await store.cleanup_stale(max_age_days=30, crashed_max_age_days=40)
+    assert removed == 1
+    assert await store.load(old_clean.metadata.session_id) is None
 
 
 async def test_cleanup_stale_disabled_with_zero(tmp_path: Path):

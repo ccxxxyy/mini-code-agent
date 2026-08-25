@@ -149,7 +149,7 @@ PyCharm 对 `dict[Type[Event], ...]` 报"不可哈希类型不能做字典键"�
 
 采用 **Rich（输出渲染）+ Prompt Toolkit（输入交互）** 组合（`ui/` 目录）：
 
-- `renderer.py`：`StreamRenderer` 用 Rich 的 `Live` 组件实现流式 Markdown 渲染——每收到一个 delta 就累积缓冲并整体重渲染 `Markdown(buffer)`，15fps 刷新率，实现代码高亮、粗体等富文本的"边想边输出"
+- `renderer.py`：`StreamRenderer` 用 Rich 的 `Live` 组件实现流式 Markdown 渲染——逐段提交式（已完成段落永久打印固化、Live 区只渲染尾段），8Hz 刷新率（legacy Windows 控制台 15Hz 会撕裂），实现代码高亮、粗体等富文本的"边想边输出"；思考流（reasoning_content）不走 Live，Live 延迟到首个正文 delta 才启动（§100）
 - `input_handler.py`：Prompt Toolkit 的 `PromptSession` 提供输入历史（上下键）、`Esc+Enter` 插入换行的多行编辑
 - `terminal.py`：`Terminal` 门面类聚合两者，暴露 `get_user_input() / start_stream() / feed_stream() / finish_stream() / confirm()` 等语义化接口
 
@@ -3354,3 +3354,19 @@ ANSI 级取证（force_terminal=True）：旧行为每碎片后跟 `\r\x1b[2K` �
 `/session new` 真实运行验证已通过：真实 LLM 对话一轮 → WS 发 `/session new` → 收到 "New session started: <新ID> / Previous session <旧ID> saved -- return with /session load <前缀>" 提示与 `history_reset` 广播（浏览器聊天区清空）；落盘检查旧会话 closed_cleanly=True、消息完整，VERDICT: PASS。
 
 用户终端人工验证（日常动作级）全部通过：远程模式关窗口硬杀→重启自动恢复 / 远程 Ctrl+C 善终→重启空白新会话 / 终端关窗口→重启弹询问（y 恢复接上文、n 拒绝后标记 closed_cleanly=true 不再问）/ 终端 exit→重启不弹询问 / `/session new` 全流程（新会话隔离、旧会话 list 可见、load 回去历史与 LLM 上下文无损）。验证方法论教训：留给用户的验证只含日常动作（关窗口/Ctrl+C/聊天/刷新），文件取证类步骤由开发侧脚本完成，不混入用户步骤。
+
+# §103 崩溃会话启动清理
+
+## 103.1 问题
+
+`SessionStore.cleanup_stale()` 只删"已正常关闭 + 超龄"的会话，`closed_cleanly=False` 的一律跳过。但崩溃恢复只取本项目最新一个崩溃会话——非最新的、以及再也不启动的项目的崩溃会话永久留盘（159 个会话 6.8MB，§102 远程持久化真实验证时实测暴露此积累）。
+
+## 103.2 方案
+
+`cleanup_stale()` 新增 `crashed_max_age_days` 参数：`closed_cleanly=False` 且超过该天数的会话也删除。默认 40 天——比正常会话的 30 天更宽松 10 天（崩溃会话有恢复价值，多留缓冲），0 = 永久保留（禁用此清理维度）。`MemoryConfig` 新增 `crashed_session_cleanup_days: int = 40`，app.py 和 remote/server.py 两个调用点同步传入。清理时机保持启动时、在崩溃恢复检测之前——40 天前的崩溃会话直接清掉不进恢复候选（正是意图）。`config.toml.example` 补 `[memory]` 两个清理配置的文档（`session_cleanup_days` 之前也未记录）。
+
+当 `max_age_days <= 0 AND crashed_max_age_days <= 0` 时整体跳过（不扫文件）；单维度 0 只关该维度、另一维度仍生效。
+
+## 103.3 验证
+
+3 个新测试（test_session_store.py）：超龄崩溃会话被删且 40 天内的保留 / 0 禁用崩溃清理 / 正常 30 天逻辑不受 crashed 参数影响（回归）。全量 1179→1182。

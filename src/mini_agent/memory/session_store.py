@@ -85,33 +85,42 @@ class SessionStore:
             return True
         return False
 
-    async def cleanup_stale(self, max_age_days: int = 30) -> int:
-        """Delete sessions older than *max_age_days*. Sessions that were
-        NOT closed cleanly are skipped (they may be needed for crash
-        recovery). Returns the number of sessions removed.
-        删除超过 max_age_days 天的会话；未正常关闭的保留（可能用于崩溃恢复）。
-        返回删除数量。"""
-        if max_age_days <= 0:
+    async def cleanup_stale(self, max_age_days: int = 30, crashed_max_age_days: int = 0) -> int:
+        """Delete stale sessions. Normally-closed sessions older than
+        *max_age_days* are removed; crashed sessions (closed_cleanly=False)
+        older than *crashed_max_age_days* are also removed (0 = keep forever).
+        Returns the total number of sessions removed.
+        删除过期会话。正常关闭超过 max_age_days 天的删除；崩溃会话超过
+        crashed_max_age_days 天的也删除（0 = 永久保留）。返回总删除数。"""
+        if max_age_days <= 0 and crashed_max_age_days <= 0:
             return 0
         self._ensure_dir()
-        cutoff = datetime.now() - timedelta(days=max_age_days)
+        clean_cutoff = datetime.now() - timedelta(days=max_age_days) if max_age_days > 0 else None
+        crashed_cutoff = (
+            datetime.now() - timedelta(days=crashed_max_age_days)
+            if crashed_max_age_days > 0
+            else None
+        )
         removed = 0
         for f in list(self._dir.glob("*.json")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 meta = data.get("metadata", {})
-                if not meta.get("closed_cleanly", True):
-                    continue
                 last_active = meta.get("last_active", "")
                 if not last_active:
                     continue
-                if datetime.fromisoformat(last_active) < cutoff:
+                ts = datetime.fromisoformat(last_active)
+                is_clean = meta.get("closed_cleanly", True)
+                if is_clean and clean_cutoff and ts < clean_cutoff:
+                    f.unlink()
+                    removed += 1
+                elif not is_clean and crashed_cutoff and ts < crashed_cutoff:
                     f.unlink()
                     removed += 1
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
         if removed:
-            log.debug("Cleaned up %d stale session(s) older than %d days", removed, max_age_days)
+            log.debug("Cleaned up %d stale session(s)", removed)
         return removed
 
 
