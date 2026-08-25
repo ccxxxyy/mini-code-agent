@@ -2081,3 +2081,12 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 真因：agent_loop 首个 thinking chunk 即触发 `on_stream_start` 启动 Live，`feed_thinking` 的 print 被 Live 拦截为独立行块（`end=""` 失效）且每碎片后跟 `\r\x1b[2K` 整行擦除——碎片被擦除/打断只剩零星孤行
 - [x] `ui/terminal.py` — Live 延迟启动：`start_stream` 只打分隔行，`feed_stream` 首个正文 delta 才 `renderer.start()`（有思考先收尾思考行）；`feed_thinking` 直连写入（soft_wrap 保留管无 Live 路径折行）
 - [x] 4 个新测试（test_renderer.py，含 force_terminal=True ANSI 级验证：思考期间无 Live 无擦除码），1158→1162
+
+---
+
+## on/off 模式命令无参数行为统一（tech-notes §101）
+
+- [x] `extensions/builtin_commands.py` — `/trace`、`/explain`、`/audit` 的 `else` 分支从 toggle 改为跳到状态返回（不改变状态）
+- [x] `extensions/builtin_commands.py` — `/plan` 的 `sub in ("", "on")` 拆开：`""` 走新增的状态显示（`Plan mode: **ON** (read-only)` / `**OFF**`），`"on"` 走原开启逻辑
+- [x] 命令注册 description 去掉 "Toggle"，改为 "no args = show status"
+- [x] 4 个新测试（test_slash_commands.py：每个命令 1 个，验证无参数状态显示+不改变状态），1162→1166

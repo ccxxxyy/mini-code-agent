@@ -3298,3 +3298,19 @@ Live 延迟启动（terminal.py）：`start_stream()` 只打分隔行不再启�
 ## 100.5 验证
 
 ANSI 级取证（force_terminal=True）：旧行为每碎片后跟 `\r\x1b[2K` 擦除码；新行为思考文本连续完整（`9.11 vs 9.9, thinking...` 一行直通）、正文 delta 才见 Live 控制码。4 个新测试（test_renderer.py）：思考期间无 Live+无擦除码+正文延迟启动 Live / 思考仅无正文 finish 不崩 / 超宽片段无 Rich 折行 / 自带换行保留。全量 1158→1162。终端真实验证已通过：两轮真实推理模型运行（9.11 vs 9.9 短推理 + 水池注水长推理，中英混排/自带换行/长段落全覆盖），思考流以 dim 连续段落完整显示在回答前，碎行消失（对照第一次修复时同款问题的碎行症状）。
+
+# §101 on/off 模式命令无参数行为统一
+
+## 101.1 问题
+
+4 个 on/off 模式命令（`/trace`、`/explain`、`/audit`、`/plan`）无参数时行为各不相同：前三个是 toggle（`else: x = not x`），`/plan` 是无条件打开（`sub in ("", "on")`）。用户输 `/plan` 想看当前状态却被打开了（验证时暴露）。四个命令都不是最直觉的"显示当前状态"。
+
+## 101.2 方案
+
+统一为**无参数 = 只显示当前状态不改变**，`on`/`off` 显式切换。`/trace`、`/explain`、`/audit` 删除 `else` 分支的 toggle 赋值（直接落到已有的状态返回行）；`/plan` 拆开 `sub in ("", "on")`——`"on"` 走开启逻辑，`""` 走新增的状态显示（`Plan mode: **ON** (read-only)` / `**OFF**`，读 `app.permission_manager.mode is PermissionMode.PLAN`）。description 去掉 "Toggle"，改为 "no args = show status"。
+
+备选方案（未采用）：统一为 toggle——但 `/plan` 从无条件打开改为 toggle 仍不直觉（用户不知道当前状态就盲切），且与 `/mode` 的"无参数 = 显示当前"不一致。
+
+## 101.3 验证
+
+4 个新测试（test_slash_commands.py）：每个命令初始状态 → 无参数调用 → 断言状态不变 + 返回包含当前状态描述。全量 1162→1166。
