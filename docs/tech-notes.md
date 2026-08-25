@@ -3386,3 +3386,31 @@ ANSI 级取证（force_terminal=True）：旧行为每碎片后跟 `\r\x1b[2K` �
 ## 104.3 验证
 
 7 个新测试（test_slash_commands.py，真实 SessionStore + tmp_path）：25 个会话默认 20 行+尾行含总数 / `--all` 25 行无尾行 / 3 个无尾行 / `--tag` 过滤后仍截断 + `--tag --all` 组合全量 + 无匹配标签提示 / `--page 2` 显示剩余 5 条+页码 2/2+末页无下一页提示 / `--page 99` 超范围报错 / `--page 2 --all` 时 --all 优先全量。全量 1182→1189。终端真实验证：用户实际的 159 个会话场景直接跑 `/session list` 肉眼确认（这正是暴露此问题的原始场景）。
+
+# §105 模糊确认不算授权 + 子 agent 反幻觉守则
+
+## 105.1 问题
+
+两个行为层 prompt 缺陷，均由真实 LLM 终端验证实测暴露：
+
+① **模糊确认被当授权**：用户明确说"先不要动手，只讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件——之后经指令还原、git diff + grep + 测试三重核查确认恢复彻底。根因："只讨论"是对话级约束，但 SYSTEM_PROMPT 没有"模糊确认不解除约束"的规则，LLM 按默认语义理解"对"。
+
+② **无上下文子 agent 幻觉编造**：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用它不知道的上下文）时，不承认不知道，自信编造了完整方案——含虚构实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 有"文件不存在要如实报告"守则，但没有"引用未知上下文时如实说明"的守则。
+
+## 105.2 方案
+
+纯 prompt 工程，无逻辑代码改动。
+
+**B9**：`app.py` SYSTEM_PROMPT 的 Guidelines 列表末尾新增 `IMPORTANT:` 规则——用户明确表示只讨论/不要动手时约束持续有效（列举中英文关键词："先不要动手"/"只讨论"/"let's just discuss"/"don't make changes yet"），直到用户给出显式动手指令（"开始动手"/"执行"/"go ahead"/"do it"/"make the changes"）；模糊确认（"对"/"嗯"/"好"/"right"/"ok"/"yes"）只确认理解不解除约束；不确定时主动问"现在可以动手了吗？/ Ready to proceed with changes?"。与 git commit 守则同级别 `IMPORTANT:` 风格，英文正文中文关键词示例。
+
+**B9.1**：`core/subagent.py` SubAgent 初始化时根据 `context_summary` 有无条件注入——无继承上下文时在 system prompt 末尾追加 `[IMPORTANT: You have NOT been given any context about the parent conversation. If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed.]`；有 context_summary 时不触发（已有真实摘要，fork 场景不受影响）。注入点在 agent 类型 prompt 之后（覆盖所有类型含自定义 .md），比 roadmap 方向建议的逐类型修改更全面且维护成本更低。
+
+备选方案（未采用）：B9 用 /discuss 命令注入模式守则（类似 /plan 的 _PLAN_MODE_PROMPT 动态注入/移除）——语义更强但增加了命令复杂度、用户需显式激活/退出，而真实场景是对话中自然流露的意图不适合强制命令化。
+
+## 105.3 诚实边界
+
+prompt 守则是**提示非强制**——LLM 仍可能违反（尤其模型能力较弱或上下文窗口尾端时），但实测暴露问题的场景中加守则后命中率显著提高。这是 system prompt 技术的天然边界——真正的强制需要执行层机制（如 plan 模式的工具 schema 隐藏 + 执行拦截），但对话级讨论模式不适合全面禁工具（用户可能需要 agent 读文件辅助讨论）。
+
+## 105.4 验证
+
+无新测试（prompt 字符串改动不改变代码行为路径，全量 1189 回归通过）。真实 LLM 验证（可选但推荐）：说"先不要动手只讨论" → 给方案 → 回"对" → 看 agent 是否问"现在可以动手了吗"而非直接改文件。

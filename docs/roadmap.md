@@ -603,13 +603,13 @@ mewcode `remote.py` 接入 SessionManager（持久会话）；mini `remote/serve
 mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snapshot_skills`），mini `memory/context.py` 无 skill 相关恢复。
 **✅ 已实现**：`SkillRegistry` 记录保序去重的激活历史（`_invocations`，deactivate 不抹除——是调用记录不是当前状态）；`ContextManager.set_skill_provider()` 回调注入技能状态（memory 层不 import extensions 层，保持依赖方向）；压缩恢复附件新增技能行——激活中的标注 "do NOT re-activate"（prompt 在 system prompt 中存活、不被压缩，丢的是激活历史），已停用的单列历史行；`compact_boundary` 持久化 `skill_invocations`/`active_skills`，`adopt_boundary` 暂存、app 层经 `restore_state()` 写回 registry（不重注入 prompt——恢复的 system_prompt 已含，重走 activate 会重复拼接）。会话恢复后 `is_active`/`deactivate`/`match_triggers`/`reload` 全部恢复正常。**复验补修**：终端复验发现手动 /compact 绕过 `check_and_compress` 直接调 compressor——恢复附件与全部边界字段（已读文件/用户请求/技能状态）都不写（既有缺陷，本次暴露）。`check_and_compress` 加 `force` 参数，/compact 改走同一管道；连锁收益：空对话+激活技能时 force 也能建边界持久化技能状态。**边界**：自动压缩仅在阈值触发，未经历任何压缩（也未手动 /compact）的会话恢复时激活集合仍丢（prompt 本身在序列化的 system_prompt 中存活）；完整会话级持久化属 /session 存档格式扩展，另行考虑。12 个新测试，1143→1155。
 
-☐ **B9 模糊确认不算授权（system prompt 守则）**
-**问题**（B4.1 终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
-**方向**：SYSTEM_PROMPT 增加守则："当用户明确表示只讨论/不要动手时，该约束持续有效，直到用户明确说'开始动手/执行'类指令；模糊确认（对/嗯/好）只确认理解，不解除约束——不确定时先问'现在可以动手了吗'"。可配合测试：对话式约束遵从的 E2E 用例。工作量：小。
+✅ **B9 模糊确认不算授权（system prompt 守则，已实现）**
+**问题**（终端验证中实测暴露）：用户明确说"先不要动手，我们只是讨论"，agent 盘点后主动问"确认 A 还是 B，确认后动手"；用户下一句以"对，另外提醒：改完要跑测试"开头（附和分析 + 继续讨论），agent 把"对"解读为方案授权，直接修改了 6 处文件。"只讨论"的强约束未被显式解除前，模糊的"对/嗯/好"不应视为动手授权。
+**✅ 已实现**：`app.py` SYSTEM_PROMPT Guidelines 列表新增 `IMPORTANT:` 规则——用户明确表示只讨论时约束持续有效，直到用户给出显式动手指令（"开始动手"/"执行"/"go ahead"/"make the changes"），模糊确认（"对"/"嗯"/"好"/"right"/"ok"/"yes"）只确认理解不解除约束，不确定时主动问"现在可以动手了吗？"。中英文关键词示例嵌入 prompt（与 git commit 守则同级别 `IMPORTANT:` 风格）。诚实边界：prompt 守则是提示非强制——LLM 仍可能违反（尤其模型能力较弱时），但实测暴露问题的场景中加守则后命中率显著提高。详见 tech-notes §105。
 
-☐ **B9.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则）**
-**问题**（B4.1 终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。worker prompt 已有"文件不存在要如实报告"守则，但没有"任务引用了你不知道的讨论/上下文时如实说明"的守则。
-**方向**：agent_types.py 各类型 prompt 加一条："If the task refers to a discussion, decision, or context you have no knowledge of, say so explicitly and ask for the missing information in your report -- NEVER fabricate what was discussed."（fork 场景注入的 `[Inherited context]` 段天然满足"有知识"，不受影响）。工作量：小。
+✅ **B9.1 空白上下文子 agent 的幻觉编造（SubAgent prompt 守则，已实现）**
+**问题**（终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。
+**✅ 已实现**：`core/subagent.py` SubAgent 初始化时根据 context_summary 有无条件注入——无继承上下文时追加 `[IMPORTANT: You have NOT been given any context about the parent conversation...]` 提示，明确要求如实说明并 NEVER fabricate。有 context_summary 时不触发（已有真实摘要）。注入点在 agent 类型 prompt 之后，覆盖所有类型（含自定义 .md 类型），与 roadmap 方向建议的逐类型修改相比更全面且维护成本更低。诚实边界：同 B9——prompt 守则是提示非强制。详见 tech-notes §105。
 
 ### C. 文档过时
 
@@ -745,6 +745,11 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距
 - **多客户端会话隔离**：mewcode 同样单 agent 广播（remote.py:91）无隔离——非差距
 - **常驻队友 transcript 恢复**：mewcode `teams/transcript.py` 独有；mini 一次性 worker 适配论证基本成立，若走向常驻队友需重评估
+
+☐ **D10【UX·中】/spawn 默认改为后台模式（自动投递）**
+现状：`/spawn <task>` 默认是前台模式——子 agent 跑完结果静悄悄存到文件，用户需手动 `/spawn wait` 取。后台模式 `/spawn --background <task>` 已实现完整的自动投递（子 agent 完成后中断用户输入等待、自动弹出结果），但需显式加 `--background` 参数。两者功能实质重叠：前台模式除了"需要手动 wait"之外无任何额外价值——它是后台投递实现前的权宜设计，投递做好后没把默认行为跟着改。
+方案：把 `/spawn <task>`（无 flag）的默认行为改为后台模式（等同于现在的 `--background`）——跑完自动投递，不需要 wait。保留 `--wait` 参数用于"我就等这一个结果、阻塞到完成"的少数场景（语义反转：现在 --background 是 opt-in，改后 --wait 是 opt-in）。`--background` 参数保留为 no-op 别名（向后兼容，不报错）。
+影响面：`extensions/builtin_commands.py` _make_spawn handler 的默认分支、`core/subagent.py` SubAgentManager.spawn 调用方式、app.py 的 `_run_agent_and_report` 接线。涉及真实 LLM 验证（spawn 后不输 wait、结果是否自动弹出）。工作量：小-中。
 
 ---
 

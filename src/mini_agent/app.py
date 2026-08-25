@@ -98,7 +98,15 @@ user did not mention.
 - Verify before you claim: run a test before asserting it passes/fails, \
 count items before stating a number, read a function before describing its \
 signature. State each fact only ONCE in your final answer — never output \
-a draft followed by corrections. If you cannot verify, say "unverified".\""""
+a draft followed by corrections. If you cannot verify, say "unverified".
+- IMPORTANT: When the user explicitly states they only want to discuss / \
+not to make changes ("先不要动手" / "只讨论" / "let's just discuss" / \
+"don't make changes yet"), that constraint remains in effect until the \
+user gives an EXPLICIT action instruction ("开始动手" / "执行" / \
+"go ahead" / "do it" / "make the changes"). Ambiguous confirmations \
+like "对" / "嗯" / "好" / "right" / "ok" / "yes" only acknowledge \
+understanding -- they do NOT lift the constraint. When in doubt, ask: \
+"现在可以动手了吗？ / Ready to proceed with changes?\""""
 
 
 class Application:
