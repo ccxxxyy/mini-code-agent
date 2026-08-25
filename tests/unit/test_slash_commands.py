@@ -162,3 +162,104 @@ async def test_plan_no_arg_shows_status():
     app.permission_manager.mode = PermissionMode.PLAN
     result = await handler("", None)
     assert "ON" in result
+
+
+# --- /session list pagination 会话列表分页 ---
+
+
+async def _session_list_app(tmp_path, count: int, tag: str = ""):
+    """Create an app bag with a real store holding *count* sessions.
+    构造带真实 store 与 count 个会话的 app 替身。"""
+    from mini_agent.memory.session_store import SessionStore
+    from mini_agent.models.session import Session
+
+    store = SessionStore(session_dir=str(tmp_path))
+    for _ in range(count):
+        s = Session()
+        s.metadata.closed_cleanly = True
+        if tag:
+            s.metadata.tags.append(tag)
+        await store.save(s)
+    return _Obj(session_store=store, session=Session())
+
+
+async def test_session_list_truncates_at_limit(tmp_path):
+    from mini_agent.extensions.builtin_commands import _SESSION_LIST_LIMIT, _make_session
+
+    app = await _session_list_app(tmp_path, count=25)
+    result = await _make_session(app)("list", None)
+
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == _SESSION_LIST_LIMIT
+    assert "25" in result  # footer shows total 尾行显示总数
+    assert "--all" in result
+
+
+async def test_session_list_all_shows_everything(tmp_path):
+    from mini_agent.extensions.builtin_commands import _make_session
+
+    app = await _session_list_app(tmp_path, count=25)
+    result = await _make_session(app)("list --all", None)
+
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == 25
+    assert "--all` 查看全部" not in result  # no footer 无尾行提示
+
+
+async def test_session_list_no_footer_under_limit(tmp_path):
+    from mini_agent.extensions.builtin_commands import _make_session
+
+    app = await _session_list_app(tmp_path, count=3)
+    result = await _make_session(app)("list", None)
+
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == 3
+    assert "--all" not in result
+
+
+async def test_session_list_tag_filter_combines_with_truncation(tmp_path):
+    from mini_agent.extensions.builtin_commands import _SESSION_LIST_LIMIT, _make_session
+
+    app = await _session_list_app(tmp_path, count=25, tag="work")
+    handler = _make_session(app)
+
+    result = await handler("list --tag work", None)
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == _SESSION_LIST_LIMIT  # filtered then truncated 过滤后仍截断
+
+    result_all = await handler("list --tag work --all", None)
+    rows_all = [ln for ln in result_all.split("\n") if "model=" in ln]
+    assert len(rows_all) == 25  # --all combines with --tag 组合生效
+
+    result_none = await handler("list --tag nosuch", None)
+    assert "No sessions with tag" in result_none
+
+
+async def test_session_list_page_2(tmp_path):
+    from mini_agent.extensions.builtin_commands import _SESSION_LIST_LIMIT, _make_session
+
+    app = await _session_list_app(tmp_path, count=25)
+    result = await _make_session(app)("list --page 2", None)
+
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == 25 - _SESSION_LIST_LIMIT  # remaining 5 剩余 5 条
+    assert "2/2" in result  # page indicator 页码指示
+    assert "--page 3" not in result  # last page: no next hint 末页无下一页提示
+
+
+async def test_session_list_page_out_of_range(tmp_path):
+    from mini_agent.extensions.builtin_commands import _make_session
+
+    app = await _session_list_app(tmp_path, count=25)
+    result = await _make_session(app)("list --page 99", None)
+    assert "out of range" in result
+    assert "2" in result  # total pages shown 显示总页数
+
+
+async def test_session_list_all_wins_over_page(tmp_path):
+    from mini_agent.extensions.builtin_commands import _make_session
+
+    app = await _session_list_app(tmp_path, count=25)
+    result = await _make_session(app)("list --page 2 --all", None)
+    rows = [ln for ln in result.split("\n") if "model=" in ln]
+    assert len(rows) == 25  # --all takes precedence --all 优先
