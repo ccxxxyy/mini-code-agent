@@ -139,12 +139,12 @@
 - [x] 通过 Agent 调用 MCP 工具正常
 - [x] 服务器断连后优雅处理
 
-### Anthropic Provider（未实际验证——代码就绪但从未连接真实 Claude API）
-- [ ] 流式响应正常
-- [ ] tool_use 格式正确
-- [ ] thinking blocks 解析（如适用）
+### Anthropic Provider（部分已经 Anthropic 兼容端点真实验证，tech-notes §110）
+- [x] 流式响应正常（DashScope Anthropic 兼容端点 + qwen3.6-plus 真实验证）
+- [x] tool_use 格式正确（同上，工具调用多轮 e2e 退出码 0）
+- [x] thinking blocks 解析（阿里云 MaaS 网关 Anthropic 协议端点 + deepseek-v4-pro 真实思考流验证；signature_delta 由单测+mock e2e 按官方事件形态覆盖）
 - [ ] token 计数合理
-> 注：以上 4 项需要 Anthropic API key 才能验证。单元测试覆盖了消息格式转换，但端到端调用从未执行——待有 Claude API 访问权限时补验。
+> 注：剩余 2 项需官方 Anthropic API key 补验（含签名多轮往返不 400、prompt 缓存命中）。
 
 ---
 
@@ -1643,3 +1643,19 @@
 - [x] 向后兼容：原有 block/confirm + 固定字段规则不受影响
 - [x] 58 个新测试（30 条件引擎 + 28 hook 增强含 5 个 confirm+condition 端到端 + 2 个 command stdout 显示），1201→1259 全过
 - [x] 真实 LLM 验证 8/8：notify 通知行 + 模板展开 / block+condition 拦截 / command POST_TOOL 不弹确认框+`syntax OK` 显示 / .txt 不触发 .py 条件 / confirm+condition 弹窗+reason+拒绝+批准均正确
+
+## 发送侧 extended thinking 控制 检查项
+
+- [x] `LLMConfig.thinking` 默认 False：关闭时请求体无 thinking 键、assistant 消息格式不变（MockTransport 取证）
+- [x] 自适应 budget：opus/sonnet≥4.6 → `budget_tokens: 0`；其余 → max(1024, max_tokens−1)；budget 触下限时 max_tokens 抬到 budget+1（API 要求 max_tokens > budget_tokens）
+- [x] 版本检测不误伤：日期段（claude-sonnet-4-20250514）、旧命名（claude-3-5-sonnet）、haiku、非 claude 模型均不判为自适应
+- [x] `signature_delta` → `StreamChunk.thinking_signature` → assemble 拼接 → `metadata["thinking_signature"]`
+- [x] 签名往返三道闸：仅 thinking 开启时回传 / 无签名不回传 / thinking 块排在 text 和 tool_use 之前
+- [x] `to_api_messages()` 携带 thinking metadata（Anthropic 与 Responses 往返共用）；openai_provider 发送前剥除
+- [x] Responses：thinking 开启时 `reasoning: {effort, summary: auto}`，effort 可经 `extra.reasoning_effort` 配置（默认 medium），关闭时无 reasoning 键
+- [x] SSE `data:` 无空格兼容（三 provider 统一）
+- [x] 17 个新测试，1259→1276 全过，ruff clean
+- [x] OpenAI 兼容 `extra` 透传（qwen `enable_thinking` 等）：真实验证开关生效且核心字段不可被覆盖
+- [x] 真实 LLM 验证（DashScope Anthropic 兼容端点 + qwen3.6-plus）：thinking 参数被接受、流式内容正确、`MINI_AGENT_THINKING=true mini -p` 工具调用 e2e 退出码 0；默认关闭回归 PASS
+- [x] 本地 mock e2e（`experiments/verify_thinking_e2e.py` 4/4）：官方形态 SSE → 真实 headless 管道，思考流渲染 / 签名往返（排 tool_use 前）/ `data:` 无空格解析全过
+- [ ] 官方 Anthropic API 补验：签名密码学校验的严格性（无效签名 400 只有官方端执行；真实思考流已经阿里云 MaaS 网关 Anthropic 协议端点验证）

@@ -3546,3 +3546,50 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 - `test_hooks.py` 追加（28 个）：condition 匹配 5 个 + confirm+condition 端到端 5 个（匹配触发/不匹配放行/拒绝阻止/always 授权/无回调安全拒绝）+ notify 4 个 + command 8 个（含 stdout 显示/空 stdout 不显示）+ expand_template 4 个 + post_tool 注册 1 个 + 缺字段跳过 1 个
 
 全量 1201→1259（58 新），全过。向后兼容：原有 27 个 hook 测试全过（仅修正 1 个 event="post_tool" 不再是非法 event 的断言）。
+
+# §110 发送侧 extended thinking 控制
+
+## 110.1 背景
+
+来自 roadmap B12。对照扫描发现 mini 只**被动解析**思考流（`reasoning_content`/`thinking_delta` 渲染），从不在请求侧开启——DeepSeek 类自动吐 reasoning_content 的模型不受影响，但 Anthropic 官方 extended thinking 模型必须在请求体里显式传 `thinking` 参数才会思考，等于功能不可用。mewcode 侧：provider 配置 `thinking: true`；自适应 budget（opus/sonnet≥4.6 传 `budget_tokens: 0` 让模型自主决定，其余 max_output_tokens−1 下限 1024）；思考块带签名在对话中往返。
+
+## 110.2 实现
+
+**配置**（`models/config.py` + `config/loader.py`）：`LLMConfig.thinking: bool = False`。三种开启途径：TOML `[llm] thinking = true`（走通用 `_merge`，零 loader 改动）、环境变量 `MINI_AGENT_THINKING=true`、按 profile 的 `MODEL_<名称>_THINKING=true`（`_load_profiles` 里 `replace(..., thinking=...)`，不设则继承主配置）。
+
+**Anthropic 请求侧**（`llm/anthropic_provider.py`）：
+- 自适应 budget：`_supports_adaptive_thinking()` 正则解析模型家族+版本（`claude-(?:opus|sonnet)-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?`，负向前瞻防止 `claude-sonnet-4-20250514` 的日期段被当版本号；`claude-3-5-sonnet` 旧命名天然不匹配）。≥4.6 → `budget_tokens: 0`；其余 → `max(1024, max_tokens−1)`，若 budget 触到 1024 下限且 ≥ max_tokens，把 max_tokens 抬到 budget+1（API 要求 max_tokens > budget_tokens）
+- 签名捕获：`_parse_event` 新增 `signature_delta` 分支 → `StreamChunk.thinking_signature`（新字段），`assemble_response` 拼接为 `LLMResponse.thinking_signature`
+- 签名往返：`_split_system(messages, include_thinking=)` 对 assistant 消息从 `metadata` 重建 `{type: "thinking", thinking, signature}` 块，排在 text/tool_use 之前（Anthropic 要求含 tool_use 的 assistant 消息带回 thinking 块）。三道闸：仅 thinking 开启时回传（关闭时发 thinking 块会 400）、无签名不回传（API 拒绝无签名块）、默认参数 False 保持旧行为
+
+**metadata 管道打通**（`models/message.py` + `core/agent_loop.py`）：agent_loop 已有 `metadata["thinking"]` 存储，本次补 `thinking_signature`。关键修复：`Conversation.to_api_messages()` 此前**不输出 metadata**，导致 P70 的 Responses reasoning 回传实际拿不到数据（死代码）——新增 `_attach_thinking()` 给 assistant 消息带上 `metadata` 键，Anthropic/Responses 两家的往返同时激活。`openai_provider` 发送前剥除 `metadata` 键（严格的 OpenAI 兼容服务端可能拒绝未知消息字段）。
+
+**OpenAI Responses**（`llm/openai_responses_provider.py`）：thinking 开启时请求体加 `reasoning: {effort, summary: "auto"}`——summary 让推理以 `response.reasoning_summary_text.delta` 事件流回（不传则无思考流）；effort 从 `LLMConfig.extra` 的 `reasoning_effort` 读取（TOML `extra = {reasoning_effort = "high"}`），默认 medium。
+
+**顺带修复（真实验证暴露）**：三个 provider 的 SSE 解析都写死 `startswith("data: ")`（冒号后必须有空格）。SSE 规范允许 `data:` 后直接跟值，DashScope 的 Anthropic 兼容端点正是这么发的——导致所有事件被静默丢弃、流式返回空内容。统一改为 `startswith("data:")` + `line[5:].lstrip()`。
+
+**认证兼容**：AnthropicProvider 同时发 `x-api-key` 和 `Authorization: Bearer`——官方 API 只读前者、忽略多余头；第三方 Anthropic 兼容网关（DashScope 等）只认后者。
+
+## 110.3 验证
+
+16 个新测试（1259→1275 全过）：自适应模型检测 8 断言（含日期段/旧命名/haiku 排除）、signature_delta 解析、assemble 拼接、往返三道闸（tool_use 前置/纯文本/关闭不回传/无签名不回传）、to_api_messages metadata 携带、openai 剥除，以及 7 个 httpx.MockTransport 取证测试直接断言 `stream()` 实际发出的 HTTP body（Anthropic：显式 budget=2047 / 自适应 budget=0 / 关闭时无 thinking 键且消息不变 / 下限 1024 抬 max_tokens 到 1025；Responses：默认 effort=medium / extra 覆盖 effort=high / 关闭时无 reasoning 键）。
+
+真实 LLM 验证（DashScope Anthropic 兼容端点 `dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy` + qwen3.6-plus，走 AnthropicProvider 真实 HTTP）：
+- thinking 参数被端点接受（无 400），流式内容正确（`9.11 > 9.9`）
+- 完整 e2e：`MINI_AGENT_PROVIDER=anthropic MINI_AGENT_THINKING=true mini -p "读取 README.md 的第一行并原样输出"` → 工具调用多轮 + 正确输出 `# Mini-Code-Agent`，退出码 0
+- 回归：默认配置（thinking 关闭）`mini -p` 正常，输出 "2" 退出码 0
+
+本地 mock e2e（`experiments/verify_thinking_e2e.py`，4/4 PASS）：本地 SSE 服务器按官方事件形态吐 thinking_delta/signature_delta/tool_use，真实 mini-agent headless 管道（env 配置 → AnthropicProvider → agent_loop → 工具执行 → 第二次 LLM 调用）跑完整回合，取证断言：① 请求 1 含 `thinking: {type: enabled, budget_tokens: 4095}` ② thinking_delta 事件流完整进渲染管道 ③ **请求 2 带签名 thinking 块回传且排在 tool_use 前** ④ 退出码 0 最终回答完整。第二轮 SSE 故意用 `data:` 无空格格式，同趟覆盖网关兼容解析修复。比 MockTransport 测试多覆盖 agent_loop → metadata → 下一请求的整条链路。
+
+真实思考流验证（阿里云 MaaS 网关 Anthropic 协议端点 `/apps/anthropic` + deepseek-v4-pro-0813）：thinking 开启后真实吐 `thinking_delta`（553 字符思考流 + 答案 `9.9` 正确）；完整 e2e（`MINI_AGENT_THINKING=true mini -p` + stream-json）两轮均带思考流（189 字符）、read_file 工具调用多轮、无 error 事件、退出码 0——该端点不吐 signature_delta，恰好实证了"无签名不回传"闸门在真实多轮下不报错。
+
+## 110.4 诚实边界
+
+- DashScope 代理不产思考块（试遍 qwen3.6-plus/max/flash + `anthropic-beta: interleaved-thinking` 头，事件里只有 text 块），千问经 Anthropic 协议无法验证思考流。真实思考流输出已经阿里云 MaaS 网关 Anthropic 协议端点（deepseek-v4-pro）验证；我方管道行为（渲染/存储/签名往返格式）已由本地 mock e2e 全链路验证。**待官方 Anthropic API 补验的有两点**：① 签名的密码学校验（该端点不吐签名；无效签名被 400 拒绝的严格性只有官方端执行）；② opus/sonnet≥4.6 传 `budget_tokens: 0` 的自适应行为按 mewcode 参考实现照搬，官方 API 是否接受 0 未实测。另实测发现：第三方 Anthropic 协议端点不吃这套开关——deepseek 的 `/apps/anthropic` 端点不传 thinking 参数也默认吐思考块（332 字符），"开了才思考"只对官方 Claude 成立。
+- 多个 thinking 块（interleaved thinking）不支持：assemble 按单块拼接，签名多块会串联失效。默认非交错模式下每轮只有一个 thinking 块，够用。
+
+## 110.5 附记：OpenAI 兼容 extra 透传接线（qwen 混合推理模型思考开关）
+
+后续问答中发现文档与代码不符：config-guide 写着 `[llm] extra = {}` "透传给 API 的额外参数"，但 openai_provider 的请求体构造从未读取 `config.extra`——qwen3 这类"参数开关思考"的混合模型（需要请求体带 `enable_thinking: true`）因此无法开启思考。修复：body 构造后 `body.setdefault(k, v)` 逐键透传（setdefault 防止覆盖 model/messages/stream 等核心字段）。
+
+真实验证（阿里云 MaaS 网关 + qwen3.6-plus）：该网关默认吐思考（不传参也有 1410 字符思考流）；`extra = {enable_thinking = false}` 后 thinking 降为 0——透传确实控制行为。顺带取证思考的质量价值：关思考后模型把 9.11 vs 9.9 答错（答 9.11），开思考答对（9.9）。1 个新测试（透传 + 核心字段防覆盖），1275→1276。

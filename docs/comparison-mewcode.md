@@ -127,7 +127,7 @@
 | | mini-code-agent | mewcode-python |
 |---|---|---|
 | OpenAI 兼容（Chat Completions） | ✅ | ✅ |
-| Anthropic 原生 | 代码就绪，未 E2E 验证 | ✅ 完整验证 |
+| Anthropic 原生 | ✅ 流式/tool_use/思考流经 Anthropic 协议端点真实验证，含发送侧 extended thinking（自适应 budget + 签名往返，tech-notes §110）；签名密码学校验待官方 key 补验 | ✅ 完整验证 |
 | OpenAI Responses API | ✅ `provider = "openai-responses"` | ✅ |
 
 **已完成**（Responses API）：
@@ -145,7 +145,7 @@
 
 **与 mewcode 的最终对比**：mini 在 7 项上超出（temperature/max_output_tokens/incomplete 事件/failed 事件/内置重试/动态窗口探测/并行工具追踪/零 SDK），mewcode 的 3 项差距（thinking round-trip/tool pairing/错误分类）已全部补齐，`function_call_arguments.done` 是纯风格差异不计入
 
-**仍待做**（1.1 节内）：Anthropic Provider E2E 验证（需 API key）
+**仍待做**（1.1 节内）：官方 Anthropic API 补验签名密码学校验与 prompt 缓存命中（流式/tool_use/思考流已经 Anthropic 协议端点真实验证，tech-notes §110）
 
 ### 1.2 Prompt 缓存 ✅ 已实现（P37）
 

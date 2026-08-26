@@ -199,7 +199,8 @@ base_url = "https://api.deepseek.com/v1"  # API 地址（默认 None，用 Provi
 temperature = 0.0
 max_tokens = 4096            # 单次回复上限；截断时自动翻倍重试最多 3 次（P44），此值是重试的起点
 timeout = 120.0
-# extra = {}                 # 透传给 API 的额外参数（如 top_p、stop 等）
+thinking = false             # 发送侧 extended thinking：Anthropic thinking 参数 / Responses reasoning 参数（tech-notes §110）；也可用 MINI_AGENT_THINKING 或按 profile 的 MODEL_<名称>_THINKING 开启；Responses 的 effort 用 extra = {reasoning_effort = "high"} 调整（默认 medium）；各场景示例见下方"思考流（extended thinking）配置详解"
+# extra = {}                 # 透传给 API 的额外参数（如 top_p、stop、qwen 混合推理模型的 enable_thinking = true）；核心字段（model/messages）不可被覆盖
 
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
@@ -468,6 +469,81 @@ MODEL_STRONG_API_KEY=sk-ant-strong-key
 MINI_AGENT_PLANNER_PROFILE=strong    # /team 的 Planner 用 strong Profile
 MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 ```
+
+### 思考流（extended thinking）配置详解
+
+思考流指模型回答前的推理过程，终端里以暗斜体显示在正文前（tech-notes §110）。**能不能看到、要不要配置，取决于模型类型和接入协议**：
+
+| 模型类型 | 例子 | 默认行为 | 需要的配置 |
+|---|---|---|---|
+| 永远思考型 | deepseek-reasoner、DeepSeek R1 | 自动吐思考，直接可见 | **无需任何配置** |
+| Anthropic 协议接入 | Claude 系列、各家为接 Claude Code 提供的端点 | 官方 Claude **不思考**（必须显式开启）；第三方端点跟随各家默认（实测 deepseek 的 Anthropic 端点默认就思考） | `thinking = true`（官方 Claude 必需） |
+| OpenAI Responses（o 系列） | o1 / o3 / o4-mini | 内部推理但摘要不流回（看不到） | `thinking = true` |
+| 参数开关型（混合推理） | qwen3 系、GLM 思考版 | 跟随服务端/网关默认 | `extra = {enable_thinking = true/false}` |
+| 非推理模型 | deepseek-chat、gpt-4o | 无思考能力 | **配了也没用**（模型没这能力） |
+
+**场景一：Anthropic 协议模型开思考**（Claude 官方 / Anthropic 兼容网关）
+
+```toml
+# .mini-agent/config.toml
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+thinking = true              # 开启后请求体自动带 thinking 参数
+```
+
+budget 自适应无需配置：opus/sonnet ≥ 4.6 传 `budget_tokens: 0`（模型自主决定思考量），其余传 `max(1024, max_tokens − 1)`。思考块签名自动随多轮对话往返，无需干预。
+
+等价的环境变量写法（`.env`）：
+
+```bash
+MINI_AGENT_PROVIDER=anthropic
+MINI_AGENT_MODEL=claude-sonnet-4-5-20250929
+MINI_AGENT_THINKING=true     # 接受 1/true/yes/on（大小写不敏感）
+```
+
+**场景二：o1/o3 等 Responses 模型开思考 + 调节推理力度**
+
+```toml
+[llm]
+provider = "openai-responses"
+model = "o3"
+thinking = true                            # reasoning 摘要以思考流形式流回
+extra = {reasoning_effort = "high"}        # 可选：low/medium/high（部分新模型另支持 minimal），默认 medium
+```
+
+**场景三：qwen 混合推理模型的思考开关**（OpenAI 兼容模式）
+
+```toml
+[llm]
+model = "qwen3.6-plus"
+extra = {enable_thinking = true}     # 强制开（部分网关默认已开，配置后不依赖网关默认值）
+# extra = {enable_thinking = false}  # 强制关——省输出 token，但推理质量下降
+```
+
+注意这里用的是 `extra` 而非 `thinking`——`thinking` 只作用于 Anthropic/Responses 协议；qwen 的开关是 OpenAI 兼容请求体里的厂商私有参数，走 `extra` 透传。实测参考：关思考后 qwen3.6-plus 会把 "9.11 和 9.9 哪个大" 答错。
+
+**场景四：按 Profile 混搭**——日常快模型不思考，难题切换到思考档
+
+```bash
+# .env
+MINI_AGENT_MODELS=fast,think
+
+MODEL_FAST_MODEL=deepseek-chat               # 日常：快、便宜、不思考
+
+MODEL_THINK_MODEL=claude-sonnet-4-5-20250929 # 难题：/model think 切换
+MODEL_THINK_PROVIDER=anthropic
+MODEL_THINK_API_KEY=sk-ant-xxxx
+MODEL_THINK_THINKING=true                    # 只有这个档案开思考
+```
+
+`MODEL_<名>_THINKING` 未设置时继承主配置的 `thinking` 值。
+
+**场景五：什么都不配（默认）**
+
+`thinking = false`、`extra = {}`——请求体不带任何思考参数，一切跟随服务端默认：永远思考型照常可见，Anthropic/Responses 不思考，混合型由网关决定。
+
+**代价提醒**：思考内容计入输出 token（Anthropic 按输出价计费），且首字回答变慢。预算敏感场景建议只在难题档案开启（场景四），或对混合模型显式关闭（场景三）。
 
 ### 修改后生效方式
 

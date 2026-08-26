@@ -92,6 +92,7 @@ class Conversation:
                         for tc in msg.tool_calls
                     ],
                 }
+                _attach_thinking(api_msg, msg)
                 result.append(api_msg)
             elif msg.role == Role.TOOL and msg.tool_result:
                 result.append(
@@ -102,5 +103,23 @@ class Conversation:
                     }
                 )
             else:
-                result.append({"role": msg.role.value, "content": msg.content})
+                api_msg = {"role": msg.role.value, "content": msg.content}
+                if msg.role == Role.ASSISTANT:
+                    _attach_thinking(api_msg, msg)
+                result.append(api_msg)
         return result
+
+
+def _attach_thinking(api_msg: dict[str, Any], msg: Message) -> None:
+    """Carry thinking (+ signature) in metadata for provider round-trip:
+    Anthropic rebuilds signed thinking blocks, Responses API rebuilds
+    reasoning items. Providers strip metadata before sending otherwise.
+    thinking（含签名）放 metadata 供 Provider 回传：Anthropic 重建带签名
+    thinking 块，Responses API 重建 reasoning 项，其余 Provider 发送前剥除。"""
+    thinking = msg.metadata.get("thinking")
+    if not thinking:
+        return
+    api_msg["metadata"] = {"thinking": thinking}
+    signature = msg.metadata.get("thinking_signature")
+    if signature:
+        api_msg["metadata"]["thinking_signature"] = signature

@@ -258,6 +258,7 @@ mini --version           # 查看版本
 | `MINI_AGENT_API_KEY` | API 密钥（优先级高于 OPENAI_API_KEY） | `sk-xxxx` |
 | `MINI_AGENT_BASE_URL` | API 地址（优先级高于 OPENAI_BASE_URL） | `https://...` |
 | `MINI_AGENT_MODELS` | 命名多模型定义（配合 `MODEL_<名>_MODEL` 等） | `fast,smart` |
+| `MINI_AGENT_THINKING` | 发送侧 extended thinking（官方 Claude / Responses 模型需显式开启才思考） | `true` |
 | `MINI_AGENT_PLANNER_PROFILE` | 多 Agent 编排时 Planner 用的模型 profile | `smart` |
 | `MINI_AGENT_WORKER_PROFILE` | 多 Agent 编排时 Worker 用的模型 profile | `fast` |
 

@@ -36,6 +36,9 @@ class StreamChunk:
 
     delta: str = ""
     thinking: str = ""
+    # Anthropic thinking block signature (required for round-trip)
+    # Anthropic thinking 块签名（回传必需）
+    thinking_signature: str = ""
     tool_call_deltas: list[ToolCallDelta] = field(default_factory=list)
     finish_reason: str | None = None
     usage: TokenUsage | None = None
@@ -47,6 +50,7 @@ class LLMResponse:
 
     content: str = ""
     thinking: str = ""
+    thinking_signature: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str = "stop"
@@ -114,6 +118,7 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
     """
     content_parts: list[str] = []
     thinking_parts: list[str] = []
+    signature_parts: list[str] = []
     tool_call_builders: dict[int, dict[str, Any]] = {}
     usage = TokenUsage()
     finish_reason = "stop"
@@ -123,6 +128,8 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
             content_parts.append(chunk.delta)
         if chunk.thinking:
             thinking_parts.append(chunk.thinking)
+        if chunk.thinking_signature:
+            signature_parts.append(chunk.thinking_signature)
         if chunk.finish_reason:
             finish_reason = chunk.finish_reason
         if chunk.usage:
@@ -174,6 +181,7 @@ def assemble_response(chunks: list[StreamChunk]) -> LLMResponse:
     return LLMResponse(
         content="".join(content_parts),
         thinking="".join(thinking_parts),
+        thinking_signature="".join(signature_parts),
         tool_calls=tool_calls,
         usage=usage,
         finish_reason=finish_reason,

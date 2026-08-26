@@ -199,7 +199,8 @@ base_url = "https://api.deepseek.com/v1"  # API endpoint (default None, uses the
 temperature = 0.0
 max_tokens = 4096            # Per-response cap; on truncation, automatically doubles and retries up to 3 times (P44) — this value is the retry starting point
 timeout = 120.0
-# extra = {}                 # Extra parameters passed through to the API (e.g. top_p, stop, etc.)
+thinking = false             # Request-side extended thinking: Anthropic thinking param / Responses reasoning param (tech-notes §110); can also enable via MINI_AGENT_THINKING or per-profile MODEL_<NAME>_THINKING; tune Responses effort via extra = {reasoning_effort = "high"} (default medium); per-scenario examples in "Thinking Stream Configuration in Detail" below
+# extra = {}                 # Extra parameters passed through to the API (e.g. top_p, stop, or enable_thinking = true for qwen hybrid reasoning models); core fields (model/messages) cannot be overridden
 
 [tools]
 bash_timeout = 120.0         # bash command timeout (seconds)
@@ -470,6 +471,81 @@ At runtime:
 MINI_AGENT_PLANNER_PROFILE=strong    # /team's Planner uses the strong Profile
 MINI_AGENT_WORKER_PROFILE=fast       # SubAgent workers use the fast Profile
 ```
+
+### Thinking Stream (Extended Thinking) Configuration in Detail
+
+The thinking stream is the model's reasoning process before the answer, rendered as dim italics ahead of the response text (tech-notes §110). **Whether you can see it, and what to configure, depends on the model type and protocol**:
+
+| Model type | Examples | Default behavior | Required config |
+|---|---|---|---|
+| Always-thinking | deepseek-reasoner, DeepSeek R1 | Emits thinking automatically, always visible | **None** |
+| Anthropic protocol | Claude family, vendor endpoints built for Claude Code | Official Claude: **no thinking** (must be enabled explicitly); third-party endpoints follow their own defaults (measured: deepseek's Anthropic endpoint thinks by default) | `thinking = true` (required for official Claude) |
+| OpenAI Responses (o-series) | o1 / o3 / o4-mini | Reasons internally but no summary streams back (invisible) | `thinking = true` |
+| Param-gated (hybrid reasoning) | qwen3 family, GLM thinking variants | Follows the server/gateway default | `extra = {enable_thinking = true/false}` |
+| Non-reasoning | deepseek-chat, gpt-4o | No thinking capability | **Config has no effect** (the model can't think) |
+
+**Scenario 1: Enable thinking for Anthropic-protocol models** (official Claude / Anthropic-compatible gateways)
+
+```toml
+# .mini-agent/config.toml
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+thinking = true              # request body automatically carries the thinking param
+```
+
+The budget is adaptive, no tuning needed: opus/sonnet >= 4.6 send `budget_tokens: 0` (the model decides its own thinking amount); others send `max(1024, max_tokens − 1)`. Thinking-block signatures round-trip across turns automatically.
+
+Equivalent environment variable form (`.env`):
+
+```bash
+MINI_AGENT_PROVIDER=anthropic
+MINI_AGENT_MODEL=claude-sonnet-4-5-20250929
+MINI_AGENT_THINKING=true     # accepts 1/true/yes/on (case-insensitive)
+```
+
+**Scenario 2: Enable thinking for o1/o3 Responses models + tune reasoning effort**
+
+```toml
+[llm]
+provider = "openai-responses"
+model = "o3"
+thinking = true                            # reasoning summaries stream back as the thinking stream
+extra = {reasoning_effort = "high"}        # optional: low/medium/high (some newer models also accept minimal), default medium
+```
+
+**Scenario 3: Thinking switch for qwen hybrid reasoning models** (OpenAI-compatible mode)
+
+```toml
+[llm]
+model = "qwen3.6-plus"
+extra = {enable_thinking = true}     # force on (some gateways default to on; setting it removes the dependency on gateway defaults)
+# extra = {enable_thinking = false}  # force off — saves output tokens, but reasoning quality drops
+```
+
+Note this uses `extra`, not `thinking` — `thinking` only applies to the Anthropic/Responses protocols; qwen's switch is a vendor-specific field in the OpenAI-compatible request body, passed through via `extra`. Measured reference: with thinking off, qwen3.6-plus answers "which is bigger, 9.11 or 9.9" WRONG.
+
+**Scenario 4: Mix per Profile** — fast non-thinking model for daily work, switch to a thinking profile for hard problems
+
+```bash
+# .env
+MINI_AGENT_MODELS=fast,think
+
+MODEL_FAST_MODEL=deepseek-chat               # daily: fast, cheap, no thinking
+
+MODEL_THINK_MODEL=claude-sonnet-4-5-20250929 # hard problems: switch via /model think
+MODEL_THINK_PROVIDER=anthropic
+MODEL_THINK_API_KEY=sk-ant-xxxx
+MODEL_THINK_THINKING=true                    # only this profile thinks
+```
+
+When `MODEL_<NAME>_THINKING` is unset, the profile inherits the main config's `thinking` value.
+
+**Scenario 5: Configure nothing (default)**
+
+`thinking = false`, `extra = {}` — the request carries no thinking params whatsoever, everything follows the server default: always-thinking models stay visible, Anthropic/Responses don't think, hybrid models follow the gateway.
+
+**Cost note**: thinking counts as output tokens (Anthropic bills it at the output rate) and delays the first answer token. For budget-sensitive setups, enable it only on a hard-problem profile (Scenario 4), or explicitly turn it off for hybrid models (Scenario 3).
 
 ### When Changes Take Effect
 

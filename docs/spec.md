@@ -475,6 +475,7 @@ class LLMConfig:
     max_tokens: int = 4096
     temperature: float = 0.0
     timeout: float = 120.0
+    thinking: bool = False                # 发送侧 extended thinking（tech-notes §110）
     extra: dict = field(default_factory=dict)  # Provider-specific params
 
 
@@ -815,6 +816,7 @@ class StreamChunk:
     """A single chunk from a streaming LLM response."""
     delta: str = ""                       # Text content delta
     thinking: str = ""                    # Extended thinking delta
+    thinking_signature: str = ""          # Anthropic thinking block signature (round-trip)
     tool_call_deltas: list[ToolCallDelta] = field(default_factory=list)
     finish_reason: str | None = None      # "stop", "tool_calls", "length"
     usage: TokenUsage | None = None       # Only on final chunk
@@ -825,6 +827,7 @@ class LLMResponse:
     """Completed LLM response (assembled from stream or non-streaming)."""
     content: str = ""
     thinking: str = ""                    # Extended thinking content (Claude)
+    thinking_signature: str = ""          # Signature for thinking round-trip
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str = "stop"

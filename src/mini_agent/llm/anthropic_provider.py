@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -37,6 +38,34 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 
 _EPHEMERAL = {"type": "ephemeral"}
 
+# Matches family + version in e.g. "claude-opus-4-6" / "claude-sonnet-4-5-20250929";
+# negative lookaheads keep date segments out of the version groups.
+# 匹配模型家族+版本号；负向前瞻避免把日期段当版本号。
+_ADAPTIVE_THINKING_RE = re.compile(r"claude-(?:opus|sonnet)-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?")
+
+
+def _supports_adaptive_thinking(model: str) -> bool:
+    """Opus/Sonnet >= 4.6 accept budget_tokens=0 (model decides its own budget).
+    Opus/Sonnet >= 4.6 接受 budget_tokens=0（模型自行决定思考预算）。"""
+    m = _ADAPTIVE_THINKING_RE.search(model)
+    if not m:
+        return False
+    return (int(m.group(1)), int(m.group(2) or 0)) >= (4, 6)
+
+
+def _thinking_block(msg: dict[str, Any]) -> dict[str, Any] | None:
+    """Rebuild a signed thinking block from message metadata for round-trip.
+    Anthropic requires assistant turns (esp. with tool_use) to carry back
+    their thinking blocks with signatures when thinking is enabled.
+    从消息 metadata 重建带签名的 thinking 块用于回传——thinking 开启时
+    Anthropic 要求 assistant 消息（尤其含 tool_use 的）带回 thinking 块。"""
+    meta = msg.get("metadata") or {}
+    thinking = meta.get("thinking")
+    signature = meta.get("thinking_signature")
+    if thinking and signature:
+        return {"type": "thinking", "thinking": thinking, "signature": signature}
+    return None
+
 
 def _mark_last_user_for_cache(messages: list[dict[str, Any]]) -> None:
     """Add cache_control to the last user message's content.
@@ -66,6 +95,11 @@ class AnthropicProvider(LLMProvider):
             base_url=self._base_url,
             headers={
                 "x-api-key": config.api_key,
+                # Third-party Anthropic-compatible gateways (DashScope etc.)
+                # auth via Bearer; the official API only reads x-api-key
+                # 第三方 Anthropic 兼容网关（DashScope 等）用 Bearer 认证，
+                # 官方 API 只读 x-api-key、忽略多余头
+                "Authorization": f"Bearer {config.api_key}",
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
@@ -78,16 +112,29 @@ class AnthropicProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        system_prompt, api_messages = self._split_system(messages)
+        system_prompt, api_messages = self._split_system(
+            messages, include_thinking=self._config.thinking
+        )
 
+        max_tokens = kwargs.get("max_tokens") or self._config.max_tokens
         body: dict[str, Any] = {
             "model": self._config.model,
             "messages": api_messages,
             # kwargs override supports max_tokens recovery retries (P44)
             # kwargs 覆盖支持 max_tokens 恢复重试
-            "max_tokens": kwargs.get("max_tokens") or self._config.max_tokens,
+            "max_tokens": max_tokens,
             "stream": True,
         }
+        if self._config.thinking:
+            if _supports_adaptive_thinking(self._config.model):
+                budget = 0
+            else:
+                budget = max(1024, max_tokens - 1)
+                if budget >= max_tokens:
+                    # Anthropic requires max_tokens > budget_tokens
+                    # Anthropic 要求 max_tokens > budget_tokens
+                    body["max_tokens"] = budget + 1
+            body["thinking"] = {"type": "enabled", "budget_tokens": budget}
         if system_prompt:
             body["system"] = [
                 {
@@ -123,9 +170,12 @@ class AnthropicProvider(LLMProvider):
                     continue
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
+                    # SSE allows "data:" without a trailing space (some
+                    # Anthropic-compatible gateways omit it)
+                    # SSE 规范允许 "data:" 后无空格（部分兼容网关会省略）
+                    if not line.startswith("data:"):
                         continue
-                    data = line[6:]
+                    data = line[5:].lstrip()
                     if data == "[DONE]":
                         break
                     try:
@@ -149,6 +199,8 @@ class AnthropicProvider(LLMProvider):
                 return StreamChunk(delta=delta.get("text", ""))
             if delta_type == "thinking_delta":
                 return StreamChunk(thinking=delta.get("thinking", ""))
+            if delta_type == "signature_delta":
+                return StreamChunk(thinking_signature=delta.get("signature", ""))
             if delta_type == "input_json_delta":
                 index = event.get("index", 0)
                 return StreamChunk(
@@ -215,6 +267,7 @@ class AnthropicProvider(LLMProvider):
     @staticmethod
     def _split_system(
         messages: list[dict[str, Any]],
+        include_thinking: bool = False,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Extract system prompt and convert to Anthropic format.
         提取系统 prompt 并转换为 Anthropic 格式。
@@ -228,6 +281,9 @@ class AnthropicProvider(LLMProvider):
                 system = msg.get("content", "")
             elif role == "assistant" and msg.get("tool_calls"):
                 content: list[dict[str, Any]] = []
+                block = _thinking_block(msg) if include_thinking else None
+                if block:
+                    content.append(block)
                 if msg.get("content"):
                     content.append({"type": "text", "text": msg["content"]})
                 for tc in msg["tool_calls"]:
@@ -258,6 +314,15 @@ class AnthropicProvider(LLMProvider):
                         ],
                     }
                 )
+            elif role == "assistant":
+                block = _thinking_block(msg) if include_thinking else None
+                if block:
+                    blocks: list[dict[str, Any]] = [block]
+                    if msg.get("content"):
+                        blocks.append({"type": "text", "text": msg["content"]})
+                    api_msgs.append({"role": "assistant", "content": blocks})
+                else:
+                    api_msgs.append({"role": "assistant", "content": msg.get("content", "")})
             else:
                 api_msgs.append({"role": role, "content": msg.get("content", "")})
 

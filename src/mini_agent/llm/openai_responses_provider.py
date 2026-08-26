@@ -242,6 +242,13 @@ class OpenAIResponsesProvider(LLMProvider):
         if self._config.temperature is not None:
             body["temperature"] = self._config.temperature
 
+        # Request-side reasoning control; summary makes reasoning stream back
+        # as response.reasoning_summary_text.delta events (B12)
+        # 发送侧 reasoning 控制；summary 让推理以 reasoning_summary_text 事件流回
+        if self._config.thinking:
+            effort = self._config.extra.get("reasoning_effort", "medium")
+            body["reasoning"] = {"effort": effort, "summary": "auto"}
+
         has_function_calls = False
         tool_calls: dict[int, dict[str, str]] = {}
 
@@ -267,9 +274,10 @@ class OpenAIResponsesProvider(LLMProvider):
                     response.raise_for_status()
 
                     async for line in response.aiter_lines():
-                        if not line.startswith("data: "):
+                        # SSE 规范允许 "data:" 后无空格（部分兼容网关会省略）
+                        if not line.startswith("data:"):
                             continue
-                        data_str = line[6:]
+                        data_str = line[5:].lstrip()
                         if data_str == "[DONE]":
                             break
                         try:

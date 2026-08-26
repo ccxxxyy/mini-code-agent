@@ -285,6 +285,8 @@ class AgentLoop:
             )
             if response.thinking:
                 assistant_msg.metadata["thinking"] = response.thinking
+                if response.thinking_signature:
+                    assistant_msg.metadata["thinking_signature"] = response.thinking_signature
             if response.usage:
                 # completion_tokens (this message's own size), NOT total_tokens:
                 # total includes the whole prompt, so summing it per message

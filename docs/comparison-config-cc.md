@@ -78,6 +78,7 @@ model = "deepseek-chat"
 api_key = "sk-..."        # 建议放 .env 而非这里
 base_url = "https://api.deepseek.com/v1"
 temperature = 0.0
+thinking = false          # 发送侧 extended thinking（Anthropic/Responses）
 
 [security]
 permission_mode = "ask"

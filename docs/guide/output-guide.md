@@ -112,7 +112,7 @@
 | 项 | 说明 |
 |---|---|
 | 来源 | `ui/terminal.py` `feed_thinking`（被 `agent_loop.on_thinking_delta` 回调触发） |
-| 触发 | LLM 返回 reasoning_content / thinking delta 时（DeepSeek R1、o1/o3 等推理模型） |
+| 触发 | LLM 返回 reasoning_content / thinking delta 时（DeepSeek R1、o1/o3 等自动吐思考的推理模型；官方 Claude / Responses 模型需 `[llm] thinking = true` 或 `MINI_AGENT_THINKING=true` 在发送侧开启，部分第三方 Anthropic 协议端点默认已开，tech-notes §110） |
 | 样式 | dim italic（淡色斜体），逐 token 直接写入终端；思考期间 Live 未启动——Live 延迟到首个正文 delta 才启动，否则 print 被 Live 拦截成碎行（tech-notes §100） |
 | 关闭方法 | `app.py` 中将 `self.agent_loop.on_thinking_delta` 设为 `None` |
 
@@ -176,7 +176,7 @@
 | `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | LLM 以 `spawn_agents background=true` 派发的后台 agent 完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果 |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` 的 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` 订阅者 | `inherit_context=true` 或 `/spawn --fork` 时摘要 LLM 调用开始/完成；`/trace on` 下同时显示 `ctx` trace 行 |
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中；等输入期间并发输出（并行工具的 trace/结果行）重定向到提示行上方，输入行不被打断 |
-| thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时 |
+| thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时，或 Anthropic/Responses 模型开启发送侧 thinking 时（tech-notes §110） |
 | `Goodbye!` | `app.py` `run()` finally | 正常退出时 |
 | `Interrupted.` | `app.py` `_handle_turn` except | Ctrl+C / 双 Esc 中断时 |
 

@@ -133,7 +133,7 @@
 
 | 项 | 操作 |
 |---|---|
-| Anthropic Provider 验证 | 代码就绪（P37 已加 prompt 缓存三处标记）但从未连接真实 Claude API——待有 API key 时验证 4 项 + 缓存命中（见 checklist Phase 5/37） |
+| Anthropic Provider 验证 | 流式/tool_use/思考流已经 Anthropic 协议端点真实验证（tech-notes §110）；剩签名密码学校验 + prompt 缓存命中待官方 Claude API key（见 checklist Phase 5/37） |
 | CC 对照评测数据补齐 | benchmarks/ 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） |
 
 ### 待做实验
@@ -148,7 +148,7 @@
 | 项 | 说明 | 工作量 |
 |---|---|---|
 | ✅ 插件生态（plugin_loader） | 第三方 pip 包（`mini_agent.plugins` entry point）/ 本地 `.py` 文件（`plugin_dirs`）注册工具/命令/技能；四钩子契约、三层异常隔离、`disabled_plugins` 禁用、`/plugins` 展示。详见 tech-notes §83 | 已完成 |
-| Anthropic Provider E2E 验证 | 代码就绪（含 P37 prompt 缓存），注册 Anthropic Console 获取 API key 即可验证流式/tool_use/thinking/token 计数 | ~2 小时 |
+| Anthropic Provider E2E 验证 | 流式/tool_use/思考流已经 Anthropic 协议端点真实验证（tech-notes §110）；签名密码学校验与 prompt 缓存命中仍需官方 Anthropic API key 补验 | ~0.5 小时 |
 | CC 对照评测数据补齐 | `benchmarks/` 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） | — |
 
 ### 已知限制（各文档的"诚实边界"统一收录于此）
@@ -169,7 +169,7 @@
 - `aggregate_spill_chars` < 单文件大小的极端参数下，豁免读回计入累计会链式溢写-读回（默认 200K 无此问题）
 
 **Anthropic Provider：**
-- 代码就绪含 prompt 缓存，但从未连接真实 Claude API 进行 E2E 验证
+- 流式/tool_use/思考流已经 Anthropic 协议端点（阿里云 MaaS 网关 + deepseek-v4-pro）真实验证；签名密码学校验与 prompt 缓存命中从未连接官方 Claude API 验证（第三方端点不校验签名、缓存字段不回传）
 
 ### 明确不做（有意决策，非遗漏）
 
@@ -621,10 +621,11 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **验证要点**：`mini -p "1+1"` 输出答案退出码 0 / stream-json 每行合法 JSON 且事件序完整 / 危险命令被拒不挂起 / 与交互模式共存不回归。工作量：中。
 **✅ 已实现**：新模块 `headless.py`（`run_headless(app, prompt, output_format) -> exit_code`）+ cli.py `-p/--prompt` 与 `--output-format {text,stream-json}` 参数。接线仿远程模式：AgentLoop 回调整体替换（text 静默只捕获最终文本 / stream-json 映射为远程协议同名事件 user_message/turn_start/stream_*/thinking_delta/tool_call/tool_result/turn_end/error/info/file_changes）；`permission_manager._confirm = None` 走现成 `no_ui:default_deny` 失败安全；stdout 纯净性——CLI 层 `redirect_stdout(sys.stderr)` 包住构造与运行，结果写 `sys.__stdout__`。生命周期最小路径：prepare → MCP 连接 → 手工回合（@file 展开 + UserMessageEvent + 自持异常拿退出码，不复用会吞异常的 _handle_turn）→ MCP 断开。诚实边界：需确认操作一律拒绝（熔断早停、被拒工具不产生 tool_result 事件）、一次性会话不落盘（防 CI 每跑留档）、不跑 SESSION hooks/记忆提取。8 个新测试（参数解析 2 / text 模式 / NDJSON 合法性与事件序 / 工具事件 / 危险命令拒绝不挂起 / LLM 异常退出码 1 / 会话不落盘），1193→1201。真实 LLM 双模式验证 PASS（text 输出 "2" 退出码 0；stream-json 32 行全合法 JSON 含 thinking_delta 事件序完整）。详见 tech-notes §108。
 
-☐ **B12 发送侧 extended thinking 控制**
+✅ **B12 发送侧 extended thinking 控制（已实现）**
 **来源**：对照扫描发现 mini 只**被动解析**思考流（reasoning_content/thinking_delta 渲染），从不在请求侧开启——对 Anthropic 官方 extended thinking 模型等于功能不可用（DeepSeek 类自动吐 reasoning_content 的不受影响）。mewcode：provider 配置 `thinking: true`；自适应 budget（opus/sonnet≥4.6 传 `budget_tokens: 0`，其余 max_output_tokens−1 下限 1024）；思考块带签名在对话中往返。
 **方案**：`LLMConfig` 新增 `thinking: bool = False`（或按 profile 配置）；anthropic_provider 请求体加 `thinking: {type: "enabled", budget_tokens: ...}` 自适应逻辑；思考块签名往返（Anthropic 要求 assistant 消息回传 thinking 块）；OpenAI Responses reasoning 参数同理。
 **验证要点**：开启后真实 Anthropic 请求含 thinking 参数且思考流渲染 / 关闭默认行为不变 / 签名往返多轮不 400。工作量：小-中。
+**✅ 已实现**：`LLMConfig.thinking: bool = False`，TOML `[llm] thinking = true` / `MINI_AGENT_THINKING` / 按 profile `MODEL_<名称>_THINKING` 三途径开启。anthropic_provider 自适应 budget（正则版本检测带负向前瞻防日期段误判，≥4.6 → 0，其余 max(1024, max_tokens−1) 且触下限时抬 max_tokens）；`signature_delta` 解析 → `StreamChunk/LLMResponse.thinking_signature` → `metadata["thinking_signature"]`；`_split_system` 带签名 thinking 块回传（三道闸：仅开启时/无签名不回传/排在 tool_use 前）。修复 `to_api_messages()` 不输出 metadata 的死代码（Responses reasoning 回传实际拿不到数据），openai_provider 发送前剥除。Responses 加 `reasoning: {effort, summary: auto}`（effort 经 `extra.reasoning_effort` 配置，默认 medium）。顺带修复真实验证暴露的三 provider SSE `data:` 无空格事件全丢 bug + Anthropic 双认证头（x-api-key + Bearer）。16 个新测试（含 7 个 MockTransport 请求体取证），1259→1275。真实 LLM 验证：DashScope Anthropic 兼容端点 thinking 请求被接受、工具调用 e2e 退出码 0、默认关闭回归 PASS；阿里云 MaaS 网关 Anthropic 协议端点（deepseek-v4-pro）真实思考流输出 + 多轮无 400；本地 mock e2e（experiments/verify_thinking_e2e.py 4/4）验签名往返全链路。仅剩官方 API 的签名密码学校验待补验。详见 tech-notes §110。
 
 ☐ **B13 记忆子系统体验增强（后台整固节律 + 并行 recall 预取）**
 **来源**：对照扫描的两处程度差距。① 整固：mini 是阈值(20 条)触发/手动 `/memory consolidate`；mewcode autoDream 在 ≥24h 且 ≥5 会话后**后台** fork 子 agent 合并去重（锁文件 + 失败回滚），用户无感。② recall：mini 的 LLM recall（P52）串行在注入路径上；mewcode 的 LLM 选择器与主 LLM 调用**并行预取**（8s 超时，工具执行后非阻塞注入）——recall 延迟成本归零。

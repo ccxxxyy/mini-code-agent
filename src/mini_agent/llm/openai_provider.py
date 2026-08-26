@@ -126,7 +126,13 @@ class OpenAIProvider(LLMProvider):
         await self._probe_context_window()
         body: dict[str, Any] = {
             "model": self._config.model,
-            "messages": _sanitize_surrogates(messages),
+            # metadata (thinking round-trip payload) is internal-only; strict
+            # OpenAI-compatible servers may reject unknown message fields
+            # metadata（thinking 回传载荷）仅内部使用；严格的兼容服务端可能拒绝未知字段
+            "messages": [
+                {k: v for k, v in m.items() if k != "metadata"}
+                for m in _sanitize_surrogates(messages)
+            ],
             "temperature": self._config.temperature,
             # kwargs override supports max_tokens recovery retries (P44)
             # kwargs 覆盖支持 max_tokens 恢复重试
@@ -137,6 +143,13 @@ class OpenAIProvider(LLMProvider):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+
+        # Pass-through extra params (top_p, stop, qwen's enable_thinking...);
+        # setdefault so core fields (model/messages/stream) can't be clobbered
+        # extra 参数透传（top_p、stop、qwen 的 enable_thinking 等）；
+        # setdefault 防止覆盖核心字段（model/messages/stream）
+        for key, value in self._config.extra.items():
+            body.setdefault(key, value)
 
         # Retry rate limits / transient 5xx with backoff -- but ONLY when the
         # failure happens before any chunk was yielded (a clean re-request).
@@ -160,9 +173,10 @@ class OpenAIProvider(LLMProvider):
                     continue
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
+                    # SSE 规范允许 "data:" 后无空格（部分兼容网关会省略）
+                    if not line.startswith("data:"):
                         continue
-                    data = line[6:]
+                    data = line[5:].lstrip()
                     if data == "[DONE]":
                         break
 
