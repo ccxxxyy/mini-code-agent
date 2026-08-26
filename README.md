@@ -287,6 +287,7 @@ All settings via `~/.mini-agent/config.toml` (user) or `.mini-agent/config.toml`
 model = "deepseek-chat"
 provider = "openai"       # "openai" | "openai-responses" (o1/o3/o4-mini) | "anthropic"
 temperature = 0.0
+thinking = false          # request-side extended thinking (Anthropic thinking param / Responses reasoning param)
 
 [cost]
 budget = 5.0

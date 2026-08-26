@@ -410,6 +410,50 @@ async def test_error_classification_401():
             pass
 
 
+# --- 发送侧 reasoning 参数 ---
+
+
+async def _capture_body(provider: OpenAIResponsesProvider) -> dict:
+    import json as _json
+
+    import httpx as _httpx
+
+    provider._probe_attempted = True
+    captured: dict = {}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.update(_json.loads(request.content))
+        return _httpx.Response(
+            200, text="data: {}\n\n", headers={"content-type": "text/event-stream"}
+        )
+
+    provider._client = _httpx.AsyncClient(
+        base_url="http://test/v1", transport=_httpx.MockTransport(handler)
+    )
+    async for _ in provider.stream([{"role": "user", "content": "hi"}]):
+        pass
+    return captured
+
+
+async def test_reasoning_param_when_thinking_enabled():
+    provider = OpenAIResponsesProvider(LLMConfig(api_key="test", model="o1", thinking=True))
+    body = await _capture_body(provider)
+    assert body["reasoning"] == {"effort": "medium", "summary": "auto"}
+
+
+async def test_reasoning_effort_from_extra():
+    provider = OpenAIResponsesProvider(
+        LLMConfig(api_key="test", model="o1", thinking=True, extra={"reasoning_effort": "high"})
+    )
+    body = await _capture_body(provider)
+    assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+
+
+async def test_no_reasoning_param_when_thinking_disabled():
+    body = await _capture_body(make_provider())
+    assert "reasoning" not in body
+
+
 async def test_error_classification_network():
     import httpx as _httpx
 

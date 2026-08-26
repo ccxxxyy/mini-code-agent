@@ -199,3 +199,4 @@ uv run python experiments/verify_circuit_breaker.py --model gpt-4o-mini
 | `verify_token_keep_window.py` | P68 token 驱动保留窗口随压缩目标缩放 |
 | `verify_tool_permission.py` | P79 工具级权限门 + check() 通用入口四阶段（TOOL deny 拦截 / 对照组危险命令确认 / TOOL allow 零弹窗 / [tools] 持久化往返） |
 | `verify_default_agent_type.py` | P80 未指定类型回退 DEFAULT_AGENT_TYPE（worker 档案 + 保留 config 迭代预算）两阶段 |
+| `verify_thinking_e2e.py` | 发送侧 extended thinking 全管道（tech-notes §110）：本地 mock SSE 服务器按官方事件形态吐 thinking_delta/signature_delta/tool_use，真实 headless 管道断言 thinking 参数 / 思考流渲染 / 签名往返排 tool_use 前 / 完整回合（4 项，无需 API key） |

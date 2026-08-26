@@ -466,3 +466,256 @@ def test_anthropic_cache_usage_parsing():
     assert chunk.usage.prompt_tokens == 1000
     assert chunk.usage.cache_read_input_tokens == 800
     assert chunk.usage.cache_creation_input_tokens == 200
+
+
+# --- Anthropic: 发送侧 extended thinking ---
+
+
+def test_adaptive_thinking_model_detection():
+    from mini_agent.llm.anthropic_provider import _supports_adaptive_thinking
+
+    # >= 4.6 → 自适应（budget_tokens: 0）
+    assert _supports_adaptive_thinking("claude-opus-4-6")
+    assert _supports_adaptive_thinking("claude-sonnet-4-6-20260101")
+    assert _supports_adaptive_thinking("claude-opus-5")
+    # < 4.6 → 显式 budget；日期段不能被当成版本号
+    assert not _supports_adaptive_thinking("claude-sonnet-4-5-20250929")
+    assert not _supports_adaptive_thinking("claude-sonnet-4-20250514")
+    assert not _supports_adaptive_thinking("claude-3-5-sonnet-20241022")
+    assert not _supports_adaptive_thinking("claude-haiku-4-5")
+    assert not _supports_adaptive_thinking("gpt-4o")
+
+
+def test_anthropic_signature_delta_parsing():
+    provider = make_anthropic()
+    chunk = provider._parse_event(
+        {
+            "type": "content_block_delta",
+            "delta": {"type": "signature_delta", "signature": "sig_abc"},
+        }
+    )
+    assert chunk is not None
+    assert chunk.thinking_signature == "sig_abc"
+
+
+def test_assemble_response_collects_signature():
+    chunks = [
+        StreamChunk(thinking="let me think"),
+        StreamChunk(thinking_signature="sig_"),
+        StreamChunk(thinking_signature="abc"),
+        StreamChunk(delta="answer"),
+        StreamChunk(finish_reason="stop"),
+    ]
+    resp = assemble_response(chunks)
+    assert resp.thinking == "let me think"
+    assert resp.thinking_signature == "sig_abc"
+    assert resp.content == "answer"
+
+
+def test_anthropic_thinking_roundtrip_with_tool_calls():
+    # thinking 开启时，带签名的 thinking 块必须回传且排在 tool_use 之前
+    msg = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "bash", "arguments": "{}"}}
+        ],
+        "metadata": {"thinking": "plan...", "thinking_signature": "sig1"},
+    }
+    _, msgs = AnthropicProvider._split_system([msg], include_thinking=True)
+    blocks = msgs[0]["content"]
+    assert blocks[0] == {"type": "thinking", "thinking": "plan...", "signature": "sig1"}
+    assert blocks[1]["type"] == "tool_use"
+
+
+def test_anthropic_thinking_roundtrip_text_only():
+    msg = {
+        "role": "assistant",
+        "content": "hello",
+        "metadata": {"thinking": "hmm", "thinking_signature": "sig2"},
+    }
+    _, msgs = AnthropicProvider._split_system([msg], include_thinking=True)
+    blocks = msgs[0]["content"]
+    assert blocks[0]["type"] == "thinking"
+    assert blocks[1] == {"type": "text", "text": "hello"}
+
+
+def test_anthropic_thinking_not_roundtripped_when_disabled():
+    # 默认关闭：即使 metadata 有 thinking 也不回传（否则 API 400）
+    msg = {
+        "role": "assistant",
+        "content": "hello",
+        "metadata": {"thinking": "hmm", "thinking_signature": "sig2"},
+    }
+    _, msgs = AnthropicProvider._split_system([msg])
+    assert msgs[0]["content"] == "hello"
+
+
+def test_anthropic_thinking_block_requires_signature():
+    # 无签名的 thinking 不回传（Anthropic 拒绝无签名 thinking 块）
+    msg = {"role": "assistant", "content": "hi", "metadata": {"thinking": "hmm"}}
+    _, msgs = AnthropicProvider._split_system([msg], include_thinking=True)
+    assert msgs[0]["content"] == "hi"
+
+
+def test_to_api_messages_carries_thinking_metadata():
+    from mini_agent.models.message import Conversation, Message, Role, ToolCall
+
+    conv = Conversation()
+    m1 = Message(role=Role.ASSISTANT, content="ans")
+    m1.metadata["thinking"] = "t1"
+    m1.metadata["thinking_signature"] = "s1"
+    conv.append(m1)
+    m2 = Message(
+        role=Role.ASSISTANT,
+        content="",
+        tool_calls=[ToolCall(id="c1", name="bash", arguments={}, raw_arguments="{}")],
+    )
+    m2.metadata["thinking"] = "t2"
+    conv.append(m2)
+    api = conv.to_api_messages()
+    assert api[0]["metadata"] == {"thinking": "t1", "thinking_signature": "s1"}
+    assert api[1]["metadata"] == {"thinking": "t2"}
+    # user 消息不带 metadata
+    conv2 = Conversation()
+    conv2.append(Message(role=Role.USER, content="hi"))
+    assert "metadata" not in conv2.to_api_messages()[0]
+
+
+async def _capture_request_body(provider: AnthropicProvider, messages: list) -> dict:
+    """Drive stream() against a MockTransport and return the actual HTTP body.
+    用 MockTransport 驱动 stream()，返回实际发出的 HTTP 请求体。"""
+    import httpx
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured.update(_json.loads(request.content))
+        return httpx.Response(
+            200, text="data: {}\n\n", headers={"content-type": "text/event-stream"}
+        )
+
+    provider._client = httpx.AsyncClient(
+        base_url="https://mock", transport=httpx.MockTransport(handler)
+    )
+    async for _ in provider.stream(messages):
+        pass
+    return captured
+
+
+async def test_anthropic_thinking_request_body_explicit_budget():
+    provider = AnthropicProvider(
+        LLMConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-5-20250929",
+            api_key="test",
+            max_tokens=2048,
+            thinking=True,
+        )
+    )
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "ok",
+            "metadata": {"thinking": "plan", "thinking_signature": "sig1"},
+        },
+        {"role": "user", "content": "go on"},
+    ]
+    body = await _capture_request_body(provider, msgs)
+    # < 4.6 → 显式 budget = max_tokens - 1
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 2047}
+    # 带签名 thinking 块回传，排在 text 之前
+    assistant = body["messages"][1]
+    assert assistant["content"][0] == {"type": "thinking", "thinking": "plan", "signature": "sig1"}
+
+
+async def test_anthropic_thinking_request_body_adaptive():
+    provider = AnthropicProvider(
+        LLMConfig(
+            provider="anthropic",
+            model="claude-opus-4-6",
+            api_key="test",
+            max_tokens=2048,
+            thinking=True,
+        )
+    )
+    body = await _capture_request_body(provider, [{"role": "user", "content": "hi"}])
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 0}
+    assert body["max_tokens"] == 2048
+
+
+async def test_anthropic_thinking_disabled_request_body_unchanged():
+    provider = AnthropicProvider(
+        LLMConfig(provider="anthropic", model="claude-opus-4-6", api_key="test", max_tokens=2048)
+    )
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "ok",
+            "metadata": {"thinking": "plan", "thinking_signature": "sig1"},
+        },
+        {"role": "user", "content": "go on"},
+    ]
+    body = await _capture_request_body(provider, msgs)
+    assert "thinking" not in body
+    assert body["messages"][1]["content"] == "ok"
+
+
+async def test_anthropic_thinking_budget_floor_bumps_max_tokens():
+    # max_tokens 太小时 budget 落到下限 1024，max_tokens 抬到 budget+1
+    provider = AnthropicProvider(
+        LLMConfig(
+            provider="anthropic",
+            model="claude-3-5-sonnet-20241022",
+            api_key="test",
+            max_tokens=512,
+            thinking=True,
+        )
+    )
+    body = await _capture_request_body(provider, [{"role": "user", "content": "hi"}])
+    assert body["thinking"]["budget_tokens"] == 1024
+    assert body["max_tokens"] == 1025
+
+
+async def test_openai_extra_params_passthrough():
+    # extra 透传（qwen enable_thinking 等）；核心字段不可被覆盖
+    import httpx
+
+    provider = OpenAIProvider(
+        LLMConfig(
+            api_key="test",
+            model="qwen-test",
+            extra={"enable_thinking": True, "top_p": 0.9, "model": "evil-override"},
+        )
+    )
+    provider._probe_attempted = True
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured.update(_json.loads(request.content))
+        return httpx.Response(
+            200, text="data: {}\n\n", headers={"content-type": "text/event-stream"}
+        )
+
+    provider._client = httpx.AsyncClient(
+        base_url="http://test/v1", transport=httpx.MockTransport(handler)
+    )
+    async for _ in provider.stream([{"role": "user", "content": "hi"}]):
+        pass
+    assert captured["enable_thinking"] is True
+    assert captured["top_p"] == 0.9
+    assert captured["model"] == "qwen-test"  # setdefault 挡住核心字段覆盖
+
+
+def test_openai_provider_strips_metadata():
+    from mini_agent.llm.openai_provider import _sanitize_surrogates
+
+    msgs = [{"role": "assistant", "content": "x", "metadata": {"thinking": "t"}}]
+    stripped = [{k: v for k, v in m.items() if k != "metadata"} for m in _sanitize_surrogates(msgs)]
+    assert stripped == [{"role": "assistant", "content": "x"}]

@@ -14,6 +14,8 @@
 # temperature = 0.0
 # max_tokens = 4096
 # timeout = 120.0
+# thinking = false             # 发送侧 extended thinking（Anthropic thinking 参数 / Responses reasoning 参数）
+# extra = {}                   # 透传给 API 的额外参数（如 top_p、qwen 混合推理模型的 enable_thinking = true）
 
 [tools]
 # bash_timeout = 120.0

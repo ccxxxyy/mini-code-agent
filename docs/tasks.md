@@ -2148,3 +2148,19 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `cli.py` — `-p/--prompt` 与 `--output-format {text,stream-json}` 参数 + headless 分支（redirect_stdout(stderr) 保 stdout 纯净）
 - [x] `headless.py`（新）— run_headless 双模式运行器：回调整体替换、权限 no_ui:default_deny 失败安全、最小生命周期、退出码 0/1、会话不落盘
 - [x] 8 个新测试（test_headless.py），1193→1201；真实 LLM 双模式验证 PASS
+
+---
+
+## 发送侧 extended thinking 控制（tech-notes §110）
+
+- [x] `models/config.py` — `LLMConfig.thinking: bool = False`；`config/loader.py` — `MINI_AGENT_THINKING` 环境变量 + 按 profile 的 `MODEL_<名称>_THINKING`（不设继承主配置）
+- [x] `llm/base.py` — `StreamChunk.thinking_signature` / `LLMResponse.thinking_signature`，`assemble_response` 拼接签名
+- [x] `llm/anthropic_provider.py` — 请求体 `thinking: {type: enabled, budget_tokens}` 自适应逻辑（opus/sonnet≥4.6 → 0，其余 max(1024, max_tokens−1) 且必要时抬 max_tokens）；`signature_delta` 解析；`_split_system` 带签名 thinking 块回传（仅开启时、无签名不回传）；`x-api-key` + `Authorization: Bearer` 双认证头
+- [x] `models/message.py` — `to_api_messages()` 给 assistant 消息携带 thinking metadata（修复 Responses reasoning 回传拿不到数据的死代码）；`core/agent_loop.py` — 存 `thinking_signature`
+- [x] `llm/openai_provider.py` — 发送前剥除内部 `metadata` 键
+- [x] `llm/openai_responses_provider.py` — thinking 开启时加 `reasoning: {effort, summary: auto}`，effort 从 `extra.reasoning_effort` 读取（默认 medium）
+- [x] 三 provider SSE 解析兼容 `data:` 后无空格（真实验证暴露：DashScope Anthropic 兼容端点事件被全量丢弃）
+- [x] 16 个新测试（含 7 个 MockTransport 请求体取证），1259→1275；真实 LLM 验证：DashScope Anthropic 兼容端点 thinking 请求 + 工具调用 e2e PASS，默认关闭回归 PASS
+- [x] `experiments/verify_thinking_e2e.py` — 本地 mock SSE 服务器 e2e（官方事件形态）：thinking 参数 / 思考流渲染 / 签名往返排 tool_use 前 / 完整回合 4/4 PASS
+- [x] 真实思考流验证（阿里云 MaaS 网关 Anthropic 协议端点 + deepseek-v4-pro）：thinking_delta 真实流出、工具调用多轮无 400、无签名不回传闸门实证、退出码 0
+- [x] `llm/openai_provider.py` — `extra` 透传接线（文档与代码不符修复，setdefault 防覆盖核心字段）；qwen3.6-plus 真实验证 enable_thinking 开关生效（关思考后 9.11 vs 9.9 答错，开思考答对），1275→1276

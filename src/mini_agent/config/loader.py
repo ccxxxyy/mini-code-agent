@@ -14,6 +14,10 @@ from mini_agent.config.defaults import get_defaults
 from mini_agent.models.config import AgentConfig, MCPServerConfig
 
 
+def _parse_bool(raw: str) -> bool:
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class ConfigLoader:
     """Loads and merges configuration from all layers. 从所有层级加载并合并配置。"""
 
@@ -112,12 +116,14 @@ class ConfigLoader:
             model = get("MODEL")
             if not model:
                 continue
+            thinking_raw = get("THINKING")
             profile = replace(
                 config.llm,
                 model=model,
                 provider=get("PROVIDER") or config.llm.provider,
                 api_key=get("API_KEY") or config.llm.api_key,
                 base_url=get("BASE_URL") or config.llm.base_url,
+                thinking=_parse_bool(thinking_raw) if thinking_raw else config.llm.thinking,
             )
             config.llm_profiles[name] = profile
 
@@ -165,6 +171,9 @@ class ConfigLoader:
                     overrides[config_key] = value
         if overrides:
             config = ConfigLoader._apply_cli(config, overrides)
+        thinking_raw = os.environ.get("MINI_AGENT_THINKING")
+        if thinking_raw:
+            config.llm.thinking = _parse_bool(thinking_raw)
         return config
 
     @staticmethod

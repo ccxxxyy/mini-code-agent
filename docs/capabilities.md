@@ -205,7 +205,7 @@
 | 要求点 | 实现 |
 |---|---|
 | System Prompt 工程 | `app.py` SYSTEM_PROMPT — 动态注入工作目录/平台/shell/当前模型名，平台感知命令指引，工具使用准则 |
-| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI Chat Completions + OpenAI Responses API（o1/o3/o4-mini，含 thinking round-trip + tool pairing repair + 错误分类）+ Anthropic 三 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42） |
+| LLM API | httpx 直连（不依赖厂商 SDK），OpenAI Chat Completions + OpenAI Responses API（o1/o3/o4-mini，含 thinking round-trip + tool pairing repair + 错误分类）+ Anthropic 三 Provider，注册表工厂模式，`/model` 多模型热切换，上下文窗口 API 自动探测（P42），发送侧 extended thinking（`[llm] thinking = true`：Anthropic thinking 参数自适应 budget + 思考块签名往返 / Responses reasoning 参数，tech-notes §110） |
 | 流式响应 | SSE 逐行解析 → StreamChunk 统一抽象 → Rich Live 实时渲染；截断恢复——finish_reason="length" 自动翻倍 max_tokens 重试最多 3 次（P44） |
 | 多轮对话 | Conversation 全量重放，工具调用配对协议（tool_calls ↔ tool_call_id） |
 | 对话管理器 | Conversation 类：append / to_api_messages / token 累计（窗口截取由 ContextManager/Compressor 负责） |

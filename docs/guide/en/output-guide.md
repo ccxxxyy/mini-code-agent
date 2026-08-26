@@ -114,7 +114,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Item | Description |
 |---|---|
 | Source | `ui/terminal.py` `feed_thinking` (triggered by the `agent_loop.on_thinking_delta` callback) |
-| Trigger | When the LLM returns reasoning_content / thinking deltas (reasoning models such as DeepSeek R1, o1/o3) |
+| Trigger | When the LLM returns reasoning_content / thinking deltas (models like DeepSeek R1, o1/o3 that emit thinking automatically; official Claude / Responses models need request-side enabling via `[llm] thinking = true` or `MINI_AGENT_THINKING=true`; some third-party Anthropic-protocol endpoints think by default, tech-notes §110) |
 | Style | dim italic (faint italics), written token-by-token directly to the terminal; no Live is active during thinking — Live start is deferred to the first answer delta, otherwise prints get intercepted by Live and fragment into broken lines (tech-notes §100) |
 | How to disable | Set `self.agent_loop.on_thinking_delta` to `None` in `app.py` |
 
@@ -178,7 +178,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent spawned via `spawn_agents background=true` completes; automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` subscriber of `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` | When `inherit_context=true` or `/spawn --fork` triggers a summary LLM call; `/trace on` also shows `ctx` trace lines |
 | Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit; concurrent output during the input wait (trace/result lines from parallel tools) reroutes above the prompt so the input line is never disrupted |
-| Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content |
+| Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content, or Anthropic/Responses models with request-side thinking enabled (tech-notes §110) |
 | `Goodbye!` | `app.py` `run()` finally | On normal exit |
 | `Interrupted.` | `app.py` `_handle_turn` except | On Ctrl+C / double-Esc interrupt |
 

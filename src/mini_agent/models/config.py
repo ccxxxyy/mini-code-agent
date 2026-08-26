@@ -14,6 +14,12 @@ class LLMConfig:
     max_tokens: int = 4096
     temperature: float = 0.0
     timeout: float = 120.0
+    # Request-side extended thinking: Anthropic `thinking` param / OpenAI
+    # Responses `reasoning` param. Providers that always emit
+    # reasoning_content (DeepSeek-style) don't need this.
+    # 发送侧 extended thinking：Anthropic thinking 参数 / OpenAI Responses
+    # reasoning 参数。自动吐 reasoning_content 的 Provider（DeepSeek 类）无需开启。
+    thinking: bool = False
     extra: dict = field(default_factory=dict)
 
 
