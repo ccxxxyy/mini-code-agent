@@ -24,7 +24,7 @@
 商用 Agent 的行为只能"配置"，不能"改造"。本项目每一层都可以直接改代码：
 
 - 想让压缩策略偏向保留代码块？改 `compressor.py` 一个类
-- 想给某个目录加只读锁？注册一个 PRE_TOOL Hook，10 行
+- 想给某个目录加只读锁？`[[hooks]]` 配置 3 行，零代码（或注册 PRE_TOOL Hook）
 - 想接入公司内部的私有 LLM 网关？Provider ABC 实现三个方法
 - 想审计 Agent 的每一次文件写入？订阅 ToolCallStartEvent 即可
 

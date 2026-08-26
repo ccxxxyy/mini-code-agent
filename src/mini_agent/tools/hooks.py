@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -12,6 +13,11 @@ from fnmatch import fnmatch
 from typing import Any
 
 from mini_agent.models.message import ToolResult
+from mini_agent.tools.hook_conditions import (
+    ConditionGroup,
+    evaluate_condition,
+    parse_condition,
+)
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +41,14 @@ class HookAction(StrEnum):
     BLOCK = "block"
     MODIFY = "modify"
     CONFIRM = "confirm"
+    COMMAND = "command"
+    NOTIFY = "notify"
+
+
+STAGE_MAP: dict[str, HookStage] = {
+    "pre_tool": HookStage.PRE_TOOL,
+    "post_tool": HookStage.POST_TOOL,
+}
 
 
 @dataclass
@@ -55,23 +69,33 @@ class HookResult:
 
 HookFn = Callable[[HookContext], Awaitable[HookResult]]
 
+CommandRunner = Callable[[str, float], Awaitable[tuple[int, str]]]
+
 
 @dataclass
 class HookRule:
-    """Declarative PRE_TOOL rule from `[[hooks]]` TOML config.
-    Users block tools (action="block") or require user confirmation
-    (action="confirm") by config instead of writing Python hook code --
-    adapted from mewcode's `reject: true` pre_tool_use hooks.
-    来自 `[[hooks]]` TOML 配置的声明式 PRE_TOOL 规则——用户通过配置
-    而非 Python 代码阻止工具执行（action="block"）或要求用户确认
-    （action="confirm"），对标 mewcode 的 reject hook。"""
+    """Declarative rule from `[[hooks]]` TOML config.
+    来自 `[[hooks]]` TOML 配置的声明式规则。
 
-    tool: str = "*"  # fnmatch pattern on tool name 工具名 fnmatch 模式
-    arg: str = ""  # optional: check only this argument 只检查此参数
-    contains: str = ""  # optional: substring that triggers 触发子串
-    regex: str = ""  # optional: re.search pattern that triggers 触发正则
-    reason: str = ""  # message shown to the LLM 回给 LLM 的原因
-    action: HookAction = HookAction.BLOCK  # block or confirm 阻止或确认
+    Supports four actions:
+      block   — reject tool execution (default)
+      confirm — require user confirmation
+      command — execute a shell command
+      notify  — display a terminal notification
+    """
+
+    tool: str = "*"
+    arg: str = ""
+    contains: str = ""
+    regex: str = ""
+    reason: str = ""
+    action: HookAction = HookAction.BLOCK
+    condition: str = ""
+    _parsed_condition: ConditionGroup | None = field(default=None, repr=False)
+    command: str = ""
+    command_timeout: float = 30.0
+    message: str = ""
+    event: str = "pre_tool"
 
     def _value_hits(self, text: str) -> bool:
         if self.contains and self.contains not in text:
@@ -80,7 +104,10 @@ class HookRule:
             return False
         return True
 
-    def matches(self, tool_name: str, args: dict[str, Any] | None) -> bool:
+    def matches(self, tool_name: str, args: dict[str, Any] | None, event: str = "pre_tool") -> bool:
+        if self._parsed_condition is not None:
+            ctx = {"tool": tool_name, "event": event, "args": args or {}}
+            return evaluate_condition(self._parsed_condition, ctx)
         if not fnmatch(tool_name, self.tool):
             return False
         if not self.contains and not self.regex:
@@ -89,6 +116,43 @@ class HookRule:
         if self.arg:
             return self._value_hits(str(values.get(self.arg, "")))
         return any(self._value_hits(str(v)) for v in values.values())
+
+
+def expand_template(
+    template: str,
+    tool_name: str | None,
+    tool_args: dict[str, Any] | None,
+    stage: str = "",
+    tool_result: ToolResult | None = None,
+) -> str:
+    """Expand $TOOL_NAME, $TOOL_ARGS.<key>, $EVENT, $RESULT in a template.
+    Unknown variables are left as-is.
+    """
+
+    def _replace(m: re.Match[str]) -> str:
+        full = m.group(0)
+        if full == "$TOOL_NAME":
+            return tool_name or ""
+        if full == "$EVENT":
+            return stage
+        if full == "$RESULT":
+            if tool_result:
+                return tool_result.output or ""
+            return ""
+        if full == "$RESULT_ERROR":
+            if tool_result:
+                return "true" if tool_result.is_error else "false"
+            return ""
+        if full == "$TOOL_ARGS":
+            return json.dumps(tool_args or {}, ensure_ascii=False)
+        if full.startswith("$TOOL_ARGS."):
+            key = full[len("$TOOL_ARGS.") :]
+            if tool_args and key in tool_args:
+                return str(tool_args[key])
+            return ""
+        return full
+
+    return re.sub(r"\$TOOL_ARGS\.\w+|\$\w+", _replace, template)
 
 
 def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
@@ -102,20 +166,36 @@ def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
             log.warning("hooks[%d]: not a table, skipped", i)
             continue
         event = entry.get("event", "pre_tool")
-        if event != "pre_tool":
-            log.warning("hooks[%d]: unsupported event '%s' (only 'pre_tool'), skipped", i, event)
+        if event not in STAGE_MAP:
+            log.warning("hooks[%d]: unsupported event '%s', skipped", i, event)
             continue
         if not entry.get("reject", True):
             log.warning("hooks[%d]: only reject=true rules are supported, skipped", i)
             continue
         action_raw = str(entry.get("action", "block")).lower()
-        if action_raw not in (HookAction.BLOCK, HookAction.CONFIRM):
+        valid_actions = (
+            HookAction.BLOCK,
+            HookAction.CONFIRM,
+            HookAction.COMMAND,
+            HookAction.NOTIFY,
+        )
+        if action_raw not in valid_actions:
             log.warning(
-                "hooks[%d]: unsupported action '%s' (only 'block'/'confirm'), skipped",
+                "hooks[%d]: unsupported action '%s', skipped",
                 i,
                 action_raw,
             )
             continue
+
+        cmd = str(entry.get("command", ""))
+        if action_raw == HookAction.COMMAND and not cmd:
+            log.warning("hooks[%d]: action='command' requires 'command' field, skipped", i)
+            continue
+        msg = str(entry.get("message", ""))
+        if action_raw == HookAction.NOTIFY and not msg:
+            log.warning("hooks[%d]: action='notify' requires 'message' field, skipped", i)
+            continue
+
         regex = str(entry.get("regex", ""))
         if regex:
             try:
@@ -123,6 +203,15 @@ def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
             except re.error as e:
                 log.warning("hooks[%d]: invalid regex '%s' (%s), skipped", i, regex, e)
                 continue
+
+        condition_str = str(entry.get("condition", ""))
+        parsed_cond: ConditionGroup | None = None
+        if condition_str:
+            parsed_cond = parse_condition(condition_str)
+            if parsed_cond is None:
+                log.warning("hooks[%d]: invalid condition '%s', skipped", i, condition_str)
+                continue
+
         rules.append(
             HookRule(
                 tool=str(entry.get("tool", "*")) or "*",
@@ -131,6 +220,12 @@ def parse_hook_rules(raw_rules: list[Any]) -> list[HookRule]:
                 regex=regex,
                 reason=str(entry.get("reason", "")),
                 action=HookAction(action_raw),
+                condition=condition_str,
+                _parsed_condition=parsed_cond,
+                command=cmd,
+                command_timeout=float(entry.get("command_timeout", 30.0)),
+                message=msg,
+                event=event,
             )
         )
     return rules
@@ -142,10 +237,6 @@ class HookManager:
 
     def __init__(self) -> None:
         self._hooks: dict[HookStage, list[tuple[int, HookFn]]] = {}
-        # Declarative confirm rules -- kept for the non-interactive peek
-        # would_confirm() (mirrors PermissionManager.would_ask)
-        # 声明式确认规则——供非交互预判 would_confirm() 使用
-        # （对应 PermissionManager.would_ask）
         self._confirm_rules: list[HookRule] = []
 
     def register(self, stage: HookStage, hook: HookFn, priority: int = 0) -> None:
@@ -163,10 +254,7 @@ class HookManager:
 
     def would_confirm(self, tool_name: str, args: dict[str, Any] | None) -> bool:
         """Non-interactive peek: would a declarative rule ask for confirmation?
-        Only covers `[[hooks]]` config rules -- programmatic hooks returning
-        CONFIRM cannot be predicted without running them.
-        非交互预判：声明式规则是否会要求确认？只覆盖 `[[hooks]]` 配置规则——
-        代码注册的 hook 返回 CONFIRM 无法在不执行的情况下预测。"""
+        非交互预判：声明式规则是否会要求确认？"""
         return any(r.matches(tool_name, args) for r in self._confirm_rules)
 
     async def run(self, ctx: HookContext) -> HookResult:
@@ -174,10 +262,6 @@ class HookManager:
 
         Short-circuits on BLOCK and CONFIRM. MODIFY updates ctx.tool_args
         and continues down the chain.
-
-        按优先级顺序运行该阶段的所有 hook。
-        遇到 BLOCK 和 CONFIRM 时短路返回。MODIFY 会更新 ctx.tool_args
-        并继续执行链上后续 hook。
         """
         final = HookResult(action=HookAction.CONTINUE)
         for _priority, hook in self._hooks.get(ctx.stage, []):
@@ -192,27 +276,131 @@ class HookManager:
         return final
 
 
-def register_hook_rules(manager: HookManager, raw_rules: list[Any]) -> int:
-    """Parse config rules and register them as PRE_TOOL blocking or
-    confirming hooks. Returns the number of rules registered.
-    解析配置规则并注册为 PRE_TOOL 阻止或确认 hook，返回注册数量。"""
+def register_hook_rules(
+    manager: HookManager,
+    raw_rules: list[Any],
+    *,
+    command_runner: CommandRunner | None = None,
+    notify_callback: Callable[[str], None] | None = None,
+) -> int:
+    """Parse config rules and register them as lifecycle hooks.
+    Returns the number of rules registered.
+    解析配置规则并注册为生命周期 hook，返回注册数量。"""
     rules = parse_hook_rules(raw_rules)
     for rule in rules:
+        stage = STAGE_MAP.get(rule.event, HookStage.PRE_TOOL)
 
-        async def _rule_hook(ctx: HookContext, _rule: HookRule = rule) -> HookResult:
-            if ctx.tool_name and _rule.matches(ctx.tool_name, ctx.tool_args):
-                if _rule.action == HookAction.CONFIRM:
-                    reason = _rule.reason or (
-                        f"tool '{ctx.tool_name}' requires confirmation (project hook rule)"
-                    )
-                    return HookResult(action=HookAction.CONFIRM, reason=reason)
-                reason = _rule.reason or (
-                    f"tool '{ctx.tool_name}' is blocked by a project hook rule"
-                )
-                return HookResult(action=HookAction.BLOCK, reason=reason)
+        if rule.action == HookAction.COMMAND:
+            _register_command_rule(manager, rule, stage, command_runner, notify_callback)
+        elif rule.action == HookAction.NOTIFY:
+            _register_notify_rule(manager, rule, stage, notify_callback)
+        elif rule.action == HookAction.CONFIRM:
+            _register_confirm_rule(manager, rule, stage)
+        else:
+            _register_block_rule(manager, rule, stage)
+
+    return len(rules)
+
+
+def _register_block_rule(manager: HookManager, rule: HookRule, stage: HookStage) -> None:
+    async def _rule_hook(ctx: HookContext, _rule: HookRule = rule) -> HookResult:
+        if ctx.tool_name and _rule.matches(ctx.tool_name, ctx.tool_args, _rule.event):
+            reason = _rule.reason or (f"tool '{ctx.tool_name}' is blocked by a project hook rule")
+            return HookResult(action=HookAction.BLOCK, reason=reason)
+        return HookResult(action=HookAction.CONTINUE)
+
+    manager.register(stage, _rule_hook)
+
+
+def _register_confirm_rule(manager: HookManager, rule: HookRule, stage: HookStage) -> None:
+    async def _rule_hook(ctx: HookContext, _rule: HookRule = rule) -> HookResult:
+        if ctx.tool_name and _rule.matches(ctx.tool_name, ctx.tool_args, _rule.event):
+            reason = _rule.reason or (
+                f"tool '{ctx.tool_name}' requires confirmation (project hook rule)"
+            )
+            return HookResult(action=HookAction.CONFIRM, reason=reason)
+        return HookResult(action=HookAction.CONTINUE)
+
+    manager.register(stage, _rule_hook)
+    manager.track_confirm_rule(rule)
+
+
+def _register_command_rule(
+    manager: HookManager,
+    rule: HookRule,
+    stage: HookStage,
+    runner: CommandRunner | None,
+    notify_callback: Callable[[str], None] | None = None,
+) -> None:
+    async def _rule_hook(
+        ctx: HookContext,
+        _rule: HookRule = rule,
+        _runner: CommandRunner | None = runner,
+        _notify: Callable[[str], None] | None = notify_callback,
+    ) -> HookResult:
+        if not ctx.tool_name or not _rule.matches(ctx.tool_name, ctx.tool_args, _rule.event):
             return HookResult(action=HookAction.CONTINUE)
 
-        manager.register(HookStage.PRE_TOOL, _rule_hook)
-        if rule.action == HookAction.CONFIRM:
-            manager.track_confirm_rule(rule)
-    return len(rules)
+        expanded = expand_template(
+            _rule.command,
+            ctx.tool_name,
+            ctx.tool_args,
+            stage=_rule.event,
+            tool_result=ctx.tool_result,
+        )
+
+        if not _runner:
+            log.warning("hook command skipped (no runner): %s", expanded)
+            return HookResult(action=HookAction.CONTINUE)
+
+        try:
+            returncode, output = await _runner(expanded, _rule.command_timeout)
+        except Exception:
+            log.warning("hook command failed: %s", expanded, exc_info=True)
+            return HookResult(action=HookAction.CONTINUE)
+
+        if output and _notify:
+            _notify(output)
+
+        if stage == HookStage.PRE_TOOL and returncode != 0:
+            reason = output or _rule.reason or "command hook rejected tool execution"
+            return HookResult(action=HookAction.BLOCK, reason=reason)
+
+        return HookResult(action=HookAction.CONTINUE)
+
+    manager.register(stage, _rule_hook)
+
+
+def _register_notify_rule(
+    manager: HookManager,
+    rule: HookRule,
+    stage: HookStage,
+    callback: Callable[[str], None] | None,
+) -> None:
+    async def _rule_hook(
+        ctx: HookContext,
+        _rule: HookRule = rule,
+        _cb: Callable[[str], None] | None = callback,
+    ) -> HookResult:
+        if not ctx.tool_name or not _rule.matches(ctx.tool_name, ctx.tool_args, _rule.event):
+            return HookResult(action=HookAction.CONTINUE)
+
+        expanded = expand_template(
+            _rule.message,
+            ctx.tool_name,
+            ctx.tool_args,
+            stage=_rule.event,
+            tool_result=ctx.tool_result,
+        )
+
+        if _cb:
+            try:
+                _cb(expanded)
+            except Exception:
+                log.warning("hook notify callback failed", exc_info=True)
+        else:
+            log.info("hook notify: %s", expanded)
+
+        return HookResult(action=HookAction.CONTINUE)
+
+    manager.register(stage, _rule_hook)

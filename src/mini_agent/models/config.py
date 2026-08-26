@@ -186,9 +186,10 @@ class AgentConfig:
     # 默认 1：拒一次即停（拒绝确认框 = "别做这个"，agent 停下问你而非找绕过）。
     # 调大可给 agent 被拒后用修正命令重试的空间。
     max_consecutive_denials: int = 1
-    # Declarative PRE_TOOL rejection rules from `[[hooks]]` TOML (raw dicts,
-    # parsed by tools/hooks.parse_hook_rules)
-    # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）
+    # Declarative hook rules from `[[hooks]]` TOML (raw dicts, parsed by
+    # tools/hooks.parse_hook_rules). Supports PRE_TOOL/POST_TOOL events,
+    # 4 actions (block/confirm/command/notify), and condition expressions.
+    # `[[hooks]]` TOML 声明式规则（block/confirm/command/notify + 条件表达式）
     hooks: list = field(default_factory=list)
     self_verify: bool = False
     # Execute tool calls as they finish assembling during streaming

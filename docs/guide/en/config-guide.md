@@ -500,7 +500,12 @@ Warnings only, no blocking — the LLM keeps working after the overage; whether 
 
 ### Hook Rule Details ([[hooks]] section)
 
-**What it does**: without writing a single line of Python, declare via configuration "which tool calls should be rejected or require confirmation". With `action = "block"` (default), a match means the call is **not executed**; the LLM receives `Blocked by hook: <reason>` and adjusts its strategy (switches approach or informs the user) instead of blindly retrying. With `action = "confirm"`, a match pops a y/a/n confirmation dialog for you to decide — y allows once, a stops asking for the same rule within this session, n rejects (the LLM receives `Denied by user: <reason>` and the task continues after skipping that call).
+**What it does**: without writing a single line of Python, declare via configuration "which tool calls should be rejected, require confirmation, trigger a command, or emit a notification". Four action types:
+
+- `action = "block"` (default) — a match means the call is **not executed**; the LLM receives `Blocked by hook: <reason>` and adjusts its strategy (switches approach or informs the user) instead of blindly retrying
+- `action = "confirm"` — a match pops a y/a/n confirmation dialog for you to decide: y allows once, a stops asking for the same rule within this session, n rejects (the LLM receives `Denied by user: <reason>` and the **Agent stops the current goal** to ask you how to proceed — one denial stops by default; tune with `max_consecutive_denials`)
+- `action = "command"` — executes a shell command (specified in the `command` field); when `event = "pre_tool"`, a non-zero exit code **blocks the tool call** (the LLM receives `Blocked by hook: <command stdout or reason>`); when `event = "post_tool"`, it is fire-and-forget (non-zero exit does not block; any stdout is displayed as a terminal notification)
+- `action = "notify"` — prints a one-line notification in the terminal (specified in the `message` field); does not block or require confirmation
 
 **Where to write it**: user-level `~/.mini-agent/config.toml` (effective across projects) or project-level `.mini-agent/config.toml` (this project only).
 **Layer semantics (careful)**: when the project level defines `[[hooks]]`, it **wholesale replaces** the user-level rule list (no merging) — to have both take effect, copy the user-level rules into the project level.
@@ -513,9 +518,13 @@ Warnings only, no blocking — the LLM keeps working after the overage; whether 
 | `arg` | No | Empty | Only check this parameter's value (e.g. `"file_path"`); by default **all** parameter values are checked |
 | `contains` | No | Empty | Trigger only when the parameter value contains this substring |
 | `regex` | No | Empty | Trigger only when the parameter value matches this regex via `re.search`; invalid regexes are **skipped with a warning**, never blocking startup |
-| `reason` | Recommended | Auto-generated | Rejection/confirmation reason, returned verbatim to the LLM (also shown in the confirm dialog) — spelling out "why + what to do instead" works best |
-| `action` | No | `"block"` | `"block"` rejects directly; `"confirm"` shows a y/a/n confirmation dialog (a = stop asking for the same rule within this session); other values are skipped with a warning |
-| `event` | No | `"pre_tool"` | Currently only `pre_tool` is supported; other values are skipped with a warning |
+| `condition` | No | Empty | Condition expression — when set, **takes priority over** the four fixed fields `tool`/`arg`/`contains`/`regex`; available fields: `tool` (tool name), `args.<key>` (parameter value); operators `==`, `!=`, `=~` (regex via `re.search`), `~=` (glob via `fnmatch`); combine with `and`/`or` (**no mixing** in one expression) |
+| `reason` | Recommended | Auto-generated | Rejection/confirmation reason — returned verbatim to the LLM for block, also shown in the confirm dialog. Spell out "why + what to do instead" for best results. Not used by notify (use `message` instead) |
+| `action` | No | `"block"` | `"block"` rejects directly; `"confirm"` shows a y/a/n confirmation dialog (a = stop asking for the same rule within this session); `"command"` executes a command (PRE_TOOL: non-zero exit code blocks the tool; POST_TOOL: fire-and-forget); `"notify"` prints a terminal notification line; other values are skipped with a warning |
+| `event` | No | `"pre_tool"` | `pre_tool` (default) or `post_tool`; other values are skipped with a warning |
+| `command` | No | Empty | Shell command template for `action = "command"`; supports template variables (see below) |
+| `command_timeout` | No | `30` | Command timeout in seconds (only effective when `action = "command"`) |
+| `message` | No | Empty | Notification message template for `action = "notify"`; supports template variables (see below) |
 | `reject` | No | `true` | Currently only `true` is supported; `false` is skipped with a warning |
 
 **Matching semantics**:
@@ -528,7 +537,33 @@ Warnings only, no blocking — the LLM keeps working after the overage; whether 
 1. `[[hooks]]` must be written **after** all top-level keys (`max_agent_iterations`, `theme`, etc.) — a top-level key appearing after `[[hooks]]` gets absorbed into that rule entry and corrupts parsing
 2. Use **single quotes** for the `regex` value (TOML literal string): `regex = 'rm\s+-rf'` — inside double quotes `\s` is an illegal escape and raises an error
 
-**Verifying it works**: seeing `Loaded N hook rule(s) from config` at startup means it loaded; have the Agent trip a rule — a block rule shows the error `Blocked by hook: <your reason>`, a confirm rule pops the confirmation dialog (after rejection the LLM receives `Denied by user: <your reason>`).
+**Template variables**: the `command` and `message` fields support the following variables, expanded automatically at runtime:
+
+| Variable | Description |
+|---|---|
+| `$TOOL_NAME` | Current tool name |
+| `$TOOL_ARGS.<key>` | Tool parameter value (e.g. `$TOOL_ARGS.file_path`, `$TOOL_ARGS.command`) |
+| `$TOOL_ARGS` | All parameters as JSON (without a dot, returns the full JSON object) |
+| `$EVENT` | Event stage (`pre_tool` or `post_tool`) |
+| `$RESULT` | Tool output text (only has a value when `event = "post_tool"`) |
+| `$RESULT_ERROR` | Whether the tool errored: `"true"` or `"false"` (only when `event = "post_tool"`) |
+
+**Condition expressions**: when the `condition` field is non-empty, it **takes priority over** the four fixed fields `tool`/`arg`/`contains`/`regex` for determining whether the rule triggers. Syntax examples:
+
+```toml
+# Equivalent to tool="bash" + contains="git push" but more flexible
+condition = "tool == 'bash' and args.command =~ 'git push'"
+
+# OR combination — any tool triggers
+condition = "tool == 'bash' or tool == 'delete_file'"
+
+# Multi-condition AND
+condition = "tool == 'bash' and args.command =~ 'git push' and args.command =~ '--force'"
+```
+
+Operators: `==` (equal), `!=` (not equal), `=~` (regex match via `re.search`), `~=` (glob match via `fnmatch`). Combine with `and` (all must match) or `or` (any match). **Cannot mix** `and` and `or` in the same expression — split into separate `[[hooks]]` rules when needed.
+
+**Verifying it works**: seeing `Loaded N hook rule(s) from config` at startup means it loaded; have the Agent trip a rule — a block rule shows the error `Blocked by hook: <your reason>`, a confirm rule pops the confirmation dialog (after rejection the LLM receives `Denied by user: <your reason>`), a command rule check the command output log, a notify rule check the terminal notification line.
 
 **Common recipes**:
 
@@ -575,9 +610,37 @@ tool = "bash"
 contains = "git push"
 action = "confirm"
 reason = "push affects the remote repository"
+
+# Auto-format .py files after writing (post_tool stage, failure doesn't block the write)
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "ruff format $TOOL_ARGS.file_path"
+command_timeout = 15
+
+# Syntax-check .py files after writing (post_tool, warning only — does not block)
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "python -c \"import ast; ast.parse(open('$TOOL_ARGS.file_path').read()); print('syntax OK')\""
+
+# Print a notification line after every bash call (for auditing/observing)
+[[hooks]]
+event = "post_tool"
+tool = "bash"
+action = "notify"
+message = "[hook] bash done: $TOOL_ARGS.command"
+
+# Use condition expressions instead of fixed fields — flexible combinations
+[[hooks]]
+condition = "tool == 'bash' and args.command =~ 'git push' and args.command =~ '--force'"
+action = "block"
+reason = "force push is forbidden; go through a PR"
 ```
 
-**Boundaries**: the configuration layer handles "reject" (block) and "force confirm" (confirm). Rewriting parameters (MODIFY) or observing/recording requires writing a Python Hook or an EventBus subscriber — see docs/agent-architecture.md S04. The confirm decision dialog is executed by the main Agent's terminal; SubAgents (spawn_agents) do not load `[[hooks]]` rules and have no confirmation UI — code-registered CONFIRM hooks always safely reject when there is no UI.
+**Boundaries**: the configuration layer handles "reject" (block), "force confirm" (confirm), "execute command" (command), and "terminal notification" (notify) — all declarative, no Python required. Rewriting parameters (MODIFY) requires writing a Python Hook or an EventBus subscriber — see docs/agent-architecture.md S04. The confirm decision dialog is executed by the main Agent's terminal; SubAgents (spawn_agents) do not load `[[hooks]]` rules and have no confirmation UI — code-registered CONFIRM hooks always safely reject when there is no UI.
 
 ---
 

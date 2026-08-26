@@ -498,7 +498,12 @@ MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 
 ### Hook 规则详解（[[hooks]] 段）
 
-**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝或需要确认"。`action = "block"`（默认）命中即**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试；`action = "confirm"` 命中弹 y/a/n 确认框由你裁决——y 放行一次、a 本会话内同一规则不再询问、n 拒绝（LLM 收到 `Denied by user: <reason>`，跳过该次调用后任务继续）。
+**作用**：不写一行 Python，用配置声明"什么工具调用要被拒绝、需要确认、触发命令或发出通知"。四种 action：
+
+- `action = "block"`（默认）——命中即**不执行**，LLM 收到 `Blocked by hook: <reason>` 后会调整策略（换方案或告知用户），不会瞎重试
+- `action = "confirm"`——命中弹 y/a/n 确认框由你裁决：y 放行一次、a 本会话内同一规则不再询问、n 拒绝（LLM 收到 `Denied by user: <reason>`，**Agent 停止当前目标**回问你怎么办——默认拒一次即停，`max_consecutive_denials` 可调）
+- `action = "command"`——执行 shell 命令（`command` 字段指定）；`event = "pre_tool"` 时非零返回码**阻止工具执行**（LLM 收到 `Blocked by hook: <命令 stdout 或 reason>`）；`event = "post_tool"` 时火后不管（非零返回码不阻断，stdout 显示为终端通知）
+- `action = "notify"`——在终端打印一行通知（`message` 字段指定），不阻断也不确认
 
 **写在哪**：用户级 `~/.mini-agent/config.toml`（跨项目生效）或项目级 `.mini-agent/config.toml`（仅本项目）。
 **层级语义（注意）**：项目级定义了 `[[hooks]]` 时**整体替换**用户级的规则列表（不合并）——想两边都生效，把用户级规则复制进项目级。
@@ -511,9 +516,13 @@ MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 | `arg` | 否 | 空 | 只检查此参数的值（如 `"file_path"`）；缺省检查**所有**参数值 |
 | `contains` | 否 | 空 | 参数值包含此子串才触发 |
 | `regex` | 否 | 空 | 参数值 `re.search` 命中此正则才触发；非法正则**告警跳过该条**，不阻断启动 |
-| `reason` | 建议填 | 自动生成 | 拒绝/确认原因，原样回给 LLM（confirm 时也显示在弹窗里）——写清楚"为什么+该怎么办"效果最好 |
-| `action` | 否 | `"block"` | `"block"` 直接拒绝；`"confirm"` 弹 y/a/n 确认框（a = 本会话内同一规则不再询问）；其他值告警跳过 |
-| `event` | 否 | `"pre_tool"` | 目前只支持 `pre_tool`，其他值告警跳过 |
+| `condition` | 否 | 空 | 条件表达式——**设置时优先于** `tool`/`arg`/`contains`/`regex` 四个固定字段；可用字段 `tool`（工具名）和 `args.<key>`（参数值）；运算符 `==`、`!=`、`=~`（正则 `re.search`）、`~=`（glob `fnmatch`），用 `and`/`or` 组合（**同一表达式内不可混用**） |
+| `reason` | 建议填 | 自动生成 | 拒绝/确认原因，block 时原样回给 LLM、confirm 时也显示在弹窗里——写清楚"为什么+该怎么办"效果最好。notify 动作不使用此字段（用 `message`） |
+| `action` | 否 | `"block"` | `"block"` 直接拒绝；`"confirm"` 弹 y/a/n 确认框（a = 本会话内同一规则不再询问）；`"command"` 执行命令（PRE_TOOL 非零返回码阻止工具，POST_TOOL 火后不管）；`"notify"` 终端通知行；其他值告警跳过 |
+| `event` | 否 | `"pre_tool"` | `pre_tool`（默认）或 `post_tool`；其他值告警跳过 |
+| `command` | 否 | 空 | `action = "command"` 时的 shell 命令模板，支持模板变量（见下方说明） |
+| `command_timeout` | 否 | `30` | 命令超时秒数（仅 `action = "command"` 时生效） |
+| `message` | 否 | 空 | `action = "notify"` 时的通知消息模板，支持模板变量（见下方说明） |
 | `reject` | 否 | `true` | 目前只支持 `true`，`false` 告警跳过 |
 
 **匹配语义**：
@@ -526,7 +535,33 @@ MINI_AGENT_WORKER_PROFILE=fast       # SubAgent worker 用 fast Profile
 1. `[[hooks]]` 必须写在所有顶级键（`max_agent_iterations`、`theme` 等）**之后**——顶级键出现在 `[[hooks]]` 之后会被归入该规则条目导致解析错乱
 2. `regex` 的值用**单引号**（TOML literal string）：`regex = 'rm\s+-rf'`——双引号里 `\s` 是非法转义会报错
 
-**验证是否生效**：启动时看到 `Loaded N hook rule(s) from config` 即已加载；让 Agent 触发一条规则，block 规则显示错误 `Blocked by hook: <你的 reason>`，confirm 规则弹出确认框（拒绝后 LLM 收到 `Denied by user: <你的 reason>`）。
+**模板变量**：`command` 和 `message` 字段支持以下变量，运行时自动替换：
+
+| 变量 | 说明 |
+|---|---|
+| `$TOOL_NAME` | 当前工具名 |
+| `$TOOL_ARGS.<key>` | 工具参数值（如 `$TOOL_ARGS.file_path`、`$TOOL_ARGS.command`） |
+| `$TOOL_ARGS` | 全部参数的 JSON（无点号时返回完整 JSON 对象） |
+| `$EVENT` | 事件阶段（`pre_tool` 或 `post_tool`） |
+| `$RESULT` | 工具输出文本（仅 `event = "post_tool"` 时有值） |
+| `$RESULT_ERROR` | 工具是否出错：`"true"` 或 `"false"`（仅 `event = "post_tool"` 时有值） |
+
+**condition 表达式**：当 `condition` 字段非空时，它**优先于** `tool`/`arg`/`contains`/`regex` 四个固定字段来决定是否触发。语法示例：
+
+```toml
+# 等价于 tool="bash" + contains="git push" 但更灵活
+condition = "tool == 'bash' and args.command =~ 'git push'"
+
+# OR 组合——任一工具命中即触发
+condition = "tool == 'bash' or tool == 'delete_file'"
+
+# 多条件 AND
+condition = "tool == 'bash' and args.command =~ 'git push' and args.command =~ '--force'"
+```
+
+运算符：`==`（相等）、`!=`（不等）、`=~`（正则匹配 `re.search`）、`~=`（glob 匹配 `fnmatch`）。组合用 `and`（全部命中）或 `or`（任一命中），**同一表达式内不可混用** `and` 和 `or`——需要混用时拆成多条 `[[hooks]]` 规则。
+
+**验证是否生效**：启动时看到 `Loaded N hook rule(s) from config` 即已加载；让 Agent 触发一条规则，block 规则显示错误 `Blocked by hook: <你的 reason>`，confirm 规则弹出确认框（拒绝后 LLM 收到 `Denied by user: <你的 reason>`），command 规则查看命令输出日志，notify 规则查看终端通知行。
 
 **常用配方**：
 
@@ -573,9 +608,39 @@ tool = "bash"
 contains = "git push"
 action = "confirm"
 reason = "push 会影响远程仓库"
+
+# ——— command / notify 配方 ———
+
+# 写 .py 文件后自动格式化（post_tool 阶段，命令失败不影响写入）
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "ruff format $TOOL_ARGS.file_path"
+command_timeout = 15
+
+# 写 .py 文件后自动语法检查（post_tool 阶段，仅告警不阻断）
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "python -c \"import ast; ast.parse(open('$TOOL_ARGS.file_path').read()); print('syntax OK')\""
+
+# bash 工具执行后打印通知行（观察/审计用途）
+[[hooks]]
+event = "post_tool"
+tool = "bash"
+action = "notify"
+message = "[hook] bash 完成: $TOOL_ARGS.command"
+
+# 用 condition 表达式替代固定字段——灵活组合
+[[hooks]]
+condition = "tool == 'bash' and args.command =~ 'git push' and args.command =~ '--force'"
+action = "block"
+reason = "禁止 force push，请走 PR"
 ```
 
-**边界**：配置层做"拒绝"（block）与"强制确认"（confirm）。改写参数（MODIFY）、观察记录需写 Python Hook 或 EventBus 订阅者——见 docs/agent-architecture.md S04。confirm 的裁决弹窗由主 Agent 的 terminal 执行；子 Agent（spawn_agents）不加载 `[[hooks]]` 规则、无确认 UI，代码注册的 CONFIRM hook 在无 UI 时一律安全拒绝。
+**边界**：配置层做"拒绝"（block）、"强制确认"（confirm）、"执行命令"（command）与"终端通知"（notify）——四种 action 均为声明式配置，无需写代码。改写参数（MODIFY）、复杂观察记录等高级场景仍需写 Python Hook 或 EventBus 订阅者——见 docs/agent-architecture.md S04。confirm 的裁决弹窗由主 Agent 的 terminal 执行；子 Agent（spawn_agents）不加载 `[[hooks]]` 规则、无确认 UI，代码注册的 CONFIRM hook 在无 UI 时一律安全拒绝。
 
 ---
 

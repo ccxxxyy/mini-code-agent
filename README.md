@@ -133,17 +133,23 @@ Manage with `/skill list`, `/skill activate <name>`, `/skill install <path-or-gi
 
 ### Hooks
 
-Declarative `[[hooks]]` rules in config.toml block or confirm tool calls — no code needed:
+Declarative `[[hooks]]` rules in config.toml — no code needed:
 
 ```toml
 [[hooks]]
 tool = "write_file"
 contains = "spec.md"
-action = "block"             # "block" (default) | "confirm" (y/a/n prompt)
+action = "block"  # "block" (default) | "confirm" | "command" | "notify"
 reason = "spec.md is read-only by project policy"
+
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "ruff format $TOOL_ARGS.file_path"
 ```
 
-11 hook stages available. See [config.toml.example](config.toml.example) for all options.
+4 actions (block/confirm/command/notify), condition expressions (`==`/`!=`/`=~`/`~=` + `and`/`or`), template variables (`$TOOL_NAME`/`$TOOL_ARGS.<key>`), 11 hook stages. See [config.toml.example](config.toml.example) for all options.
 
 ## Quick Start
 

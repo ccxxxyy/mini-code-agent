@@ -581,7 +581,7 @@ class AgentConfig:
     max_agent_iterations: int = 80
     # 确认框连续被拒 N 次后停下回问用户（危险命令/项目外路径/hook 确认；默认 1 = 拒一次即停；防止被拒后找绕过路径）
     max_consecutive_denials: int = 1
-    # `[[hooks]]` TOML 的声明式 PRE_TOOL 拒绝规则（原始字典，注册时解析）
+    # `[[hooks]]` TOML 声明式规则（block/confirm/command/notify，支持 PRE_TOOL/POST_TOOL）
     hooks: list = field(default_factory=list)
     self_verify: bool = False
     # 流式期间工具调用一组装完成就开始执行
@@ -1018,6 +1018,8 @@ class HookAction(StrEnum):
     BLOCK = "block"                  # Block the operation
     MODIFY = "modify"                # Proceed with modified context
     CONFIRM = "confirm"              # Ask user for confirmation
+    COMMAND = "command"              # Execute a shell command
+    NOTIFY = "notify"               # Display a terminal notification
 
 
 @dataclass
@@ -2311,7 +2313,7 @@ class MCPToolAdapter(Tool):
 
 ### 8.3 Hook 链集成
 
-Hook 系统（`tools/hooks.py`）定义 11 个生命周期阶段（`HookStage`）：`STARTUP` / `SHUTDOWN` / `SESSION_START` / `SESSION_END` / `USER_INPUT` / `TURN_START` / `TURN_END` / `PRE_LLM` / `POST_LLM` / `PRE_TOOL` / `POST_TOOL`。Hook 返回值动作（`HookAction`）有四种：`CONTINUE` / `BLOCK` / `MODIFY` / `CONFIRM`。`HookManager.run` 按优先级顺序执行，遇 BLOCK 和 CONFIRM 短路返回，MODIFY 更新 `ctx.tool_args` 后继续链上后续 hook。
+Hook 系统（`tools/hooks.py` + `tools/hook_conditions.py`）定义 11 个生命周期阶段（`HookStage`）：`STARTUP` / `SHUTDOWN` / `SESSION_START` / `SESSION_END` / `USER_INPUT` / `TURN_START` / `TURN_END` / `PRE_LLM` / `POST_LLM` / `PRE_TOOL` / `POST_TOOL`。Hook 返回值动作（`HookAction`）有六种：`CONTINUE` / `BLOCK` / `MODIFY` / `CONFIRM` / `COMMAND` / `NOTIFY`。`HookManager.run` 按优先级顺序执行，遇 BLOCK 和 CONFIRM 短路返回，MODIFY 更新 `ctx.tool_args` 后继续链上后续 hook，COMMAND/NOTIFY 在闭包内完成执行后返回 BLOCK 或 CONTINUE。声明式规则支持条件表达式（`condition` 字段，`==`/`!=`/`=~`/`~=` 运算符 + `and`/`or` 组合）和模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`/`$EVENT`/`$RESULT`/`$RESULT_ERROR`）。
 
 工具执行始终经过完整安全流水线（`_run_tool_pipeline`）：
 
@@ -2333,6 +2335,8 @@ HookManager.run(PRE_TOOL, ctx)
     | BLOCK   -> return error ToolResult with hook reason
     | CONFIRM -> confirm_callback 弹 y/a/n 对话框
     |            (a="always" 本会话同 (工具,原因) 不再问; 拒绝 -> error)
+    | COMMAND -> 执行 shell 命令（仅 DENY 规则可阻止；非零返回码 -> BLOCK）
+    | NOTIFY  -> 终端通知行（不阻塞）
     | MODIFY  -> update args from modified context
     v
 Tool.execute(ctx, **validated_args)

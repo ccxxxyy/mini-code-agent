@@ -413,7 +413,7 @@ D3 内联解释器: python -c / node -e|-p / perl -e / ruby -e / sh -c / bash -c
 
 - **HookStage**（在哪拦）：PRE_TOOL / POST_TOOL / PRE_LLM / POST_LLM / SESSION_START / SESSION_END / USER_INPUT。P3 实际接线前两个，其余为 P4/P5 预留插槽（PRE_LLM 注入记忆、SESSION_END 触发提取）
 - **HookContext**（能看到什么）：stage + tool_name + tool_args（**可变**，参数改写通道）+ tool_result（仅 POST 有值）
-- **HookAction**（能做什么）：CONTINUE 放行 / BLOCK 阻止 / MODIFY 改参 / CONFIRM 上交用户
+- **HookAction**（能做什么）：CONTINUE 放行 / BLOCK 阻止 / MODIFY 改参 / CONFIRM 上交用户 / COMMAND 执行命令 / NOTIFY 终端通知（后两者为 B10 新增，声明式 `[[hooks]]` 配置可用四种：block/confirm/command/notify；另有条件表达式 `condition` 字段和模板变量 `$TOOL_NAME`/`$TOOL_ARGS.<key>`）
 - **HookResult**（裁决书）：action + modified_args + reason（阻止理由回传给 LLM）
 - **HookManager**：按 stage 分组注册，优先级降序执行
 
@@ -443,9 +443,14 @@ D3 内联解释器: python -c / node -e|-p / perl -e / ruby -e / sh -c / bash -c
                      write_file/edit_file → check_path(write)
                      DENIED → "Permission denied" 回传 LLM
 2. PRE_TOOL Hooks    BLOCK → "Blocked by hook: {reason}" 回传
+                     CONFIRM → y/a/n 确认框
+                     COMMAND → 执行命令（非零返回码 → BLOCK）
+                     NOTIFY → 终端通知行（不阻塞）
                      MODIFY → 用改写后的参数继续
 3. Tool.execute      validate_args → 执行 → 异常兜底
-4. POST_TOOL Hooks   观察结果
+4. POST_TOOL Hooks   COMMAND → 执行命令（火后不管）
+                     NOTIFY → 终端通知行
+                     观察结果
 ```
 
 细节：`args = dict(tc.arguments)` **先复制再给 Hook 改**——ToolCall 是 frozen 的对话历史事实，Hook 修改的是副本，历史不被污染。
@@ -3494,3 +3499,50 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 8 个新测试（test_headless.py，真实 Application + MockLLM 替换）：参数解析 2 / text 模式最终文本+退出码 / NDJSON 每行合法+事件序（user_message→turn_start→…→turn_end）/ 工具事件对 / 危险命令拒绝不挂起（no_ui:default_deny + confirm_denied 熔断）/ LLM 异常 error 事件+退出码 1（turn_end 仍收尾）/ 会话不落盘。全量 1193→1201。
 
 真实 LLM 验证双模式 PASS：`mini -p "1+1等于几？只回答数字"` stdout 仅 "2"、退出码 0；stream-json 模式 32 行全部 `json.loads` 通过，事件序 user_message→turn_start→stream_start→thinking_delta×26→stream_text→stream_end→turn_end（思考流正确入流）。
+
+# §109 零代码声明式 hook 增强
+
+## 109.1 背景
+
+来自 roadmap B10。mini 的 `[[hooks]]` TOML 仅两种 action（block/confirm）+ 四种固定匹配字段；mewcode 有 command/prompt/http 三种可用动作 + 条件表达式引擎。C2 修正时诚实降级了论证——"EventBus 订阅者覆盖观察类扩展"只半成立，能力可达但需写 Python。
+
+## 109.2 实现
+
+分两块独立模块：
+
+**条件表达式引擎**（`tools/hook_conditions.py`，新文件）：
+- `Condition(field, operator, value)` + `ConditionGroup(conditions, logic)` 数据模型
+- `parse_condition(expr)` → `ConditionGroup | None`：用 `\s+and\s+`/`\s+or\s+`（`re.IGNORECASE`）分割（混用拒绝），子表达式正则匹配 field/op/value（支持单双引号和裸词），正则值编译检查
+- `evaluate_condition(group, context)` → bool：按 and(all)/or(any) 短路求值
+- `resolve_field(field, context)` → str：支持点号访问（`args.command` → context["args"]["command"]），缺失返回空串
+- 四运算符：`==` 精确、`!=` 不等、`=~` re.search、`~=` fnmatch
+
+**hooks.py 增强**（原文件扩展）：
+- `HookAction` 新增 `COMMAND`/`NOTIFY`
+- `HookRule` 新增字段：`condition`/`_parsed_condition`/`command`/`command_timeout`/`message`/`event`
+- `expand_template(template, tool_name, tool_args, stage, tool_result)` — 模板变量展开（`$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`(JSON)/`$EVENT`/`$RESULT`/`$RESULT_ERROR`），未知变量保持原样
+- `parse_hook_rules()` 扩展：支持 event=post_tool、action=command/notify、condition 字段解析
+- `register_hook_rules()` 新增 `command_runner`/`notify_callback` 关键字参数，按 action 类型分发到四个注册函数
+- `STAGE_MAP` 映射 event 字符串到 HookStage
+
+**command 动作安全设计**：
+- 仅检查显式 DENY 规则（`_deny_rule_matches`），**不走交互式确认**——hook 命令是用户自己写在 config.toml 的，弹确认框问用户没有道理。初版用 `check_command()` 走完整权限管道（含危险命令检测），交互验证时暴露 UX 问题：`python -c "..."` 被标为危险命令弹确认框，出现在 write_file 工具块内部，用户误以为在问"是否允许写文件"而非"是否允许 hook 命令"。修正为仅 DENY 规则可阻止 hook 命令。
+- PRE_TOOL：非零返回码 → BLOCK（stdout 作 reason）；零 → CONTINUE
+- POST_TOOL：始终 CONTINUE（非零返回码不阻断，仅 stdout 通过 notify 显示）
+- 非空 stdout 通过 `notify_callback` 显示到终端（PRE_TOOL 和 POST_TOOL 均如此）
+- 被 DENY 规则拒绝时 runner 返回 `(-1, "denied by rule")`：PRE_TOOL 场景因非零返回码会 BLOCK 用户工具（并显示 "denied by rule"）；POST_TOOL 场景仅显示不阻断
+- 模板展开不转义值（配置作者控制模板）
+
+**notify 动作**：调 `notify_callback`（注入 `terminal.show_info`），无回调降级为 `log.info`。
+
+**app.py 接线**：`App._run_hook_command` 方法封装 DENY 规则检查 + subprocess + 超时处理，作为 `command_runner` 传入；`terminal.show_info` 作为 `notify_callback` 传入。
+
+**agent_loop.py 无改动**：command 和 notify 闭包内完成执行后返回 BLOCK 或 CONTINUE，现有分支逻辑天然兼容。
+
+## 109.3 验证
+
+58 个新测试：
+- `test_hook_conditions.py`（30 个）：parse 15 个（简单/不等/正则/glob/and/or/混用拒绝/非法运算符/非法表达式/空串/双引号/裸词/点号/非法正则值/多 and）+ evaluate 9 个 + resolve 5 个 + 集成 1 个
+- `test_hooks.py` 追加（28 个）：condition 匹配 5 个 + confirm+condition 端到端 5 个（匹配触发/不匹配放行/拒绝阻止/always 授权/无回调安全拒绝）+ notify 4 个 + command 8 个（含 stdout 显示/空 stdout 不显示）+ expand_template 4 个 + post_tool 注册 1 个 + 缺字段跳过 1 个
+
+全量 1201→1259（58 新），全过。向后兼容：原有 27 个 hook 测试全过（仅修正 1 个 event="post_tool" 不再是非法 event 的断言）。

@@ -89,9 +89,13 @@
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
 
-# 声明式 Hook 规则（详见 docs/guide/config-guide.md "Hook 规则详解"）
-# 命中的工具调用被拒绝执行（默认）或弹窗确认，reason 回给 LLM。可写多条 [[hooks]]。
+# 声明式 Hook 规则
+# action: "block"（默认）拒绝 | "confirm" 弹确认框 | "command" 执行命令 | "notify" 终端通知
+# event: "pre_tool"（默认）工具执行前 | "post_tool" 工具执行后
+# 匹配方式：固定字段（tool/arg/contains/regex）或 condition 表达式（优先）
 # 注意：[[hooks]] 必须写在所有顶级键之后；regex 用单引号（literal string）
+#
+# --- 固定字段匹配（原有方式） ---
 # [[hooks]]
 # tool = "write_file"        # 工具名 fnmatch 模式（"bash"、"write_*"，默认 "*" 全部）
 # arg = "file_path"          # 可选：只检查此参数（缺省检查所有参数值）
@@ -106,5 +110,33 @@
 # [[hooks]]
 # tool = "bash"
 # contains = "git push"
-# action = "confirm"         # 可选："block"（默认）拒绝；"confirm" 弹 y/a/n 确认框
+# action = "confirm"
 # reason = "push 会影响远程仓库"
+#
+# --- 条件表达式匹配（设置时覆盖固定字段）---
+# 运算符：==（精确）!=（不等）=~（正则）~=（glob）
+# 组合：and / or（不可混用）
+# 字段：tool、args.<key>（点号访问工具参数）
+# [[hooks]]
+# condition = "tool == 'bash' and args.command =~ 'git push'"
+# action = "confirm"
+# reason = "push 会影响远程仓库"
+#
+# --- command 动作（执行 shell 命令）---
+# 模板变量：$TOOL_NAME、$TOOL_ARGS.<key>、$TOOL_ARGS(JSON)、$EVENT、$RESULT、$RESULT_ERROR
+# PRE_TOOL：命令返回非零则阻止工具执行（stdout 作为拒绝原因）
+# POST_TOOL：火后不管（命令失败不影响工具结果）
+# 安全：仅显式 DENY 规则可阻止（用户自配命令不弹交互确认）
+# [[hooks]]
+# event = "post_tool"
+# condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+# action = "command"
+# command = "ruff format $TOOL_ARGS.file_path"
+# command_timeout = 10
+#
+# --- notify 动作（终端通知行）---
+# [[hooks]]
+# event = "post_tool"
+# tool = "write_file"
+# action = "notify"
+# message = "已写入文件: $TOOL_ARGS.file_path"

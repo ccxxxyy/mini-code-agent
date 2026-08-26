@@ -96,9 +96,9 @@ while True:
 
 **为什么需要**：循环必须保持简单——它是系统的骨架，不能塞满业务逻辑。但你需要在"工具执行前记日志"、"LLM 调用前注入记忆"、"会话结束时提取偏好"这些时机做事。Hook 让这些需求以**外挂**方式接入，而非内嵌。
 
-**核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、或只做旁路操作（记日志）。
+**核心原则**：循环提供插入点（PRE_TOOL / POST_TOOL / PRE_LLM / SESSION_END 等），外部注册 handler。Handler 可以 BLOCK（拦截）、MODIFY（修改参数）、CONFIRM（上交用户）、COMMAND（执行命令）、NOTIFY（终端通知），或只做旁路操作（记日志）。
 
-**本项目实现**：`tools/hooks.py` HookManager 支持 11 个 HookStage（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则——用户零代码声明"什么工具调用要被拒绝或需要确认"（tool fnmatch + contains/regex 匹配），启动时自动注册为 PRE_TOOL hook：`action = "block"`（默认）直接拒绝，`action = "confirm"` 弹 y/a/n 确认框由用户裁决（裁决在 agent_loop，经 app 注入的 terminal.confirm 执行；无 UI 安全拒绝），配置方法见 guide/config-guide.md。
+**本项目实现**：`tools/hooks.py` + `tools/hook_conditions.py`，HookManager 支持 11 个 HookStage。实际挂载：PRE_LLM 注入记忆、SESSION_END 提取偏好、PRE_TOOL/POST_TOOL 审计。另有 `[[hooks]]` TOML 声明式规则——用户零代码声明工具调用的拦截/确认/命令/通知行为，支持两种匹配（固定字段 tool/contains/regex 或条件表达式 `condition`）+ 四种动作（`block` 拒绝 / `confirm` 弹确认框 / `command` 执行 shell 命令 / `notify` 终端通知）+ 模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`）+ PRE_TOOL 与 POST_TOOL 两个阶段。command 动作仅受显式 DENY 规则约束（用户自配命令不弹交互确认），PRE_TOOL 非零返回码阻止工具执行。配置方法见 guide/config-guide.md。
 
 **判断标准**：框架是否提供工具执行前后的扩展点？能不能在不改源码的情况下加审计/拦截？
 

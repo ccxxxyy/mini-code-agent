@@ -921,17 +921,23 @@ skills/daily-check/SKILL.md          # 项目级
 
 ### Hook 规则
 
-在 config.toml 中声明 `[[hooks]]` 规则，拦截或确认工具调用，无需写代码：
+在 config.toml 中声明 `[[hooks]]` 规则——零代码控制工具调用：
 
 ```toml
 [[hooks]]
 tool = "write_file"
 contains = "spec.md"
-action = "block"             # "block"（默认，直接拒绝）| "confirm"（弹 y/a/n 确认框）
+action = "block"  # "block"（默认）| "confirm" | "command" | "notify"
 reason = "spec.md 是项目策略只读文件"
+
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'write_file' and args.file_path =~ '\\.py$'"
+action = "command"
+command = "ruff format $TOOL_ARGS.file_path"
 ```
 
-支持 11 个 hook 阶段。完整选项见 [config.toml.example](config.toml.example)。
+4 种动作（block/confirm/command/notify）、条件表达式（`==`/`!=`/`=~`/`~=` + `and`/`or`）、模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`）、11 个 hook 阶段。完整选项见 [config.toml.example](config.toml.example)。
 
 ## 全部命令一览
 
