@@ -3442,3 +3442,27 @@ prompt 守则是**提示非强制**——LLM 仍可能违反（尤其模型能�
 4 个新测试（test_spawn_team.py，handler 级 + 真实 SubAgentManager/MockLLM）：无 flag 单任务走 spawn_background（_background_ids 注册+消息含 auto-delivered）/ -p 并行默认后台 / --background no-op 别名行为与默认一致 / --wait 仍阻塞内联返回结果（回归）。全量 1189→1193。
 
 真实 LLM 终端验证已通过（日常动作级）：`/spawn 数一下项目里有几个md` 派发后**零手动输入**，终端自动弹 "Background agent 08501734 finished — processing result..."，主 LLM 转述结果并主动 glob 复核子 agent 计数（44 个 .md，还纠正了其分类明细的出入——自动投递路径"LLM 转述"的增值面）；`/spawn --wait 输出<随机串>` 阻塞后内联返回完整原始输出（回归）。
+
+# §107 对照文档事实修正
+
+## 107.1 问题
+
+comparison-mewcode.md 三处陈述与实际不符（roadmap 文档过时清单登记）：① 把"无 TLS"单独列为 mini 对 mewcode 的劣势，但 mewcode 远程模式 TLS 与认证两者皆无、mini 反而有 token 认证——劣势表述漏掉了反超事实；② 称 mewcode hook 有"command/prompt/http/agent 四种动作"，实际 agent executor 是 stub；③ "mewcode 13 文件 vs mini 3 文件"的团队系统对比双边都过时。
+
+## 107.2 修正与复验
+
+实施前对 mewcode 源码（本地 mewcode-python）逐条重新核实，不盲信登记时的旧结论：
+
+- **远程认证**：`grep -i "tls|token|auth" mewcode/remote.py` 命中 4 处——逐行检查全部是 `inputTokens`/`outputTokens` LLM 计数，非认证。结论成立：mewcode 无任何认证。comparison 5.2 局限行与 roadmap 已知限制行改为"无 TLS 加密但有 token 认证（常量时间比较）；认证维度 mini 反超（mewcode 两者皆无）"。
+- **hook 动作**：`hooks/executors.py` 实测含 "agent executor not yet implemented" stub。comparison 7.2 改为"三种可用 + agent stub"，同时**诚实降级** mini 侧论证：原文"EventBus 订阅者覆盖观察类，不重复建设"只半成立——能力可达但需写 Python，mewcode 是零代码 YAML + 条件表达式引擎（==/!=/=~/~= + and/or）；零代码声明式 hook 列为可选补齐方向。
+- **团队文件数**：mewcode teams/ 实测 15 文件 2069 行（与登记一致）；mini 侧重新实测为 **8 文件 2055 行**（登记时估"约 7"漏了 agent_type_loader）。改为按实测数字陈述，并指出两者体量已持平、真实差异在组织方式（常驻队友 vs 一次性 worker）。
+
+## 107.3 验证
+
+纯文档修正，无代码改动，测试计数不变（1193）。三条修正的数据来源均为实施当日对 mewcode 源码/mini 源码的直接实测命令输出，非转录旧文档。
+
+## 107.4 衍生发现
+
+本次修正过程暴露两个真实改进方向，已详细登记 roadmap 待做：① 零代码声明式 hook 增强（hook 论证诚实降级暴露的差距：自定义 command/notify 动作 + 条件表达式引擎，command 动作须走既有权限管道的安全设计是关键）；② 远程模式 TLS 支持（认证对比暴露的自身短板：token 在明文信道传输打折认证价值——轻方案反代文档化优先，原生 TLS 视公网部署需求再做）。后续追查 mewcode 远程实现细节又发现：其默认绑定 `0.0.0.0:18888` 监听所有网卡且 CLI 无参数可改，叠加无认证——局域网任何设备可直连完全控制 agent；mini 默认 localhost/可配/可选 token，安全姿态四项中三项反超（均已补录 comparison 与 TLS 待做条目的对比参照）。
+
+随后应用户要求做了 mewcode **全模块面对照扫描**（146 文件 23209 行全量清点 + teams/hooks/memory/TUI/agent 五子系统深挖，双侧源码逐项核实），产出完整差距清单并全部登记 roadmap：完全缺失 4 项（`-p` 非交互模式+NDJSON、发送侧 extended thinking 控制、MCP native 延迟加载、SyntheticOutput 结构化输出——各自单列登记）、程度差距 4 项（检查点选择性恢复、后台整固节律+并行 recall 预取合并一条、worktree 重目录软链单列）、UX 小项 4 个打包一条——共 8 条新待做（首轮登记漏了 SyntheticOutput 与 worktree 软链两条，经用户核对指出后补登）。零代码 hook 待做条目以实测细节增援（15 事件/async/once/reject 修饰符/prompt 动作注入 system prompt + mewcode 自身 TUI 路径不触发 hook 的残缺）。同时确认 mewcode 自身多处脚手架未接线（teammate transcript 无调用方、md 自定义命令 loader 未挂接、多 provider 只用第一个），常驻队友"暂不做"论证获增援。mini 反超面复核确认：成本追踪/多模型热切换/远程安全/崩溃恢复/record-replay/审计链/插件生态/Windows 沙箱/会话管理。

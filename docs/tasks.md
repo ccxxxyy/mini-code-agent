@@ -2132,3 +2132,10 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 - [x] `extensions/builtin_commands.py` — `_make_spawn` 单任务与 `-p` 并行默认分支统一改调 `spawn_background`（原 background 专用分支合并删除，subagent.py 零改动）；`--background` 变 no-op 别名；`--wait` 保持阻塞式 opt-in；usage 文本与注册 description 同步
 - [x] 4 个新测试（test_spawn_team.py：默认后台 / -p 默认后台 / --background no-op / --wait 阻塞回归），1189→1193
+
+---
+
+## 对照文档事实修正（tech-notes §107）
+
+- [x] `docs/comparison-mewcode.md` 三处修正（实施前对 mewcode 源码逐条复验）：远程认证（mini 有 token 认证 mewcode 两者皆无）/ hook 动作"四种"→"三种可用 + agent stub" + EventBus 论证诚实降级半成立 / 团队文件数实测 15 文件 2069 行 vs 8 文件 2055 行体量持平
+- [x] `docs/roadmap.md` 已知限制行补认证对比参照

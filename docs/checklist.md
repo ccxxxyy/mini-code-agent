@@ -1264,6 +1264,14 @@
 - [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
 - [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
 
+## 对照文档事实修正 检查项
+
+- [x] 实施前对 mewcode 源码逐条复验（不盲信 roadmap 旧核实结论）：remote.py 4 处 token 命中确认为 LLM 计数非认证 / hooks/executors.py agent stub 属实 / teams/ 15 文件 2069 行属实
+- [x] 远程认证：comparison 局限行 + roadmap 已知限制行改为"mini 有 token 认证无 TLS；mewcode 两者皆无，认证维度反超"
+- [x] hook 动作类型："四种"改"三种可用 + agent stub"；EventBus 覆盖论证诚实降级为半成立（能力可达但需写 Python），零代码声明式 hook 列为可选方向
+- [x] 团队文件数：重新实测 mini 侧为 8 文件 2055 行（原估"约 7"漏 agent_type_loader），与 mewcode 15 文件 2069 行体量持平，差异在组织方式
+- [x] 修正文案不引入 roadmap 条目编号（编号只允许在 roadmap/tech-notes 出现）
+
 ## /spawn 默认后台自动投递 检查项
 
 - [x] 单任务与 `-p` 并行默认分支统一改调 `spawn_background`（原 background 专用分支合并删除）

@@ -15,7 +15,7 @@
 | 注释 | 全部中英双语（336 条） | 英文为主 |
 | 代码风格 | ruff（line-length 100, target py311） | ruff |
 
-**差距**：代码量已接近（16,500 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）和多 Agent 团队系统（mewcode 13 个文件 vs mini 3 个）。
+**差距**：代码量已接近（16,500 vs 15,000+）——剩余差距主要在 TUI 框架（Textual vs 手拼）。多 Agent 系统规模已持平：mewcode teams/ 15 文件 2069 行 vs mini 8 文件 2055 行（mailbox/team/spawn_backends/worker/subagent/task_store/agent_types/agent_type_loader），差异在组织方式（mewcode 常驻队友 vs mini 一次性 worker）而非体量。
 
 **增强方向**：代码量不是目标——功能对齐后代码自然会增长。不追求行数对等，追求每个维度不弱于。
 
@@ -492,7 +492,7 @@ NDJSON 协议（13 种服务端事件 + 3 种 WS 客户端消息）：
 
 **仍存在的局限**（已确认）：
 - 多客户端支持（`self._clients: set` 广播），但所有客户端共享同一会话（无独立会话）
-- 无 TLS（明文 `ws://`）。可选 token 认证（`--remote-token`），未设时无认证
+- 无 TLS 加密（明文 `ws://`），但有可选 token 认证（`--remote-token`，常量时间比较），未设时无认证。**安全姿态 mini 全面反超**：mewcode `remote.py` 实测无任何 TLS/认证机制（grep 命中的 token 均为 LLM token 计数），且默认绑定 `0.0.0.0:18888` 监听所有网卡、CLI 无参数可改——局域网任何设备无认证直连即获完整 agent 控制权；mini 默认 `localhost` 只本机、`--host` 可配、token 认证可选——两者皆缺 TLS，其余三项 mini 全部更安全
 - ~~浏览器刷新可恢复对话历史（`_replay_history()`），但服务器重启后丢失（远程模式未接入 SessionStore）~~ 已修复：远程模式接入 SessionStore——每轮自动保存、启动自动恢复本项目最新未关闭会话、退出标记正常关闭；`/session load` 后浏览器经 `history_reset` 事件刷新（tech-notes §102）
 - Markdown 图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
 
@@ -669,7 +669,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 5. 11 个测试：工具名匹配 / fnmatch 模式 / arg 限定 / 任意参数子串 / regex（含 AND 语义与非法正则跳过）/ 默认 reason / 非法条目跳过 / TOML 往返 / **端到端**（AgentLoop 流水线内拦截，文件未写入且 LLM 收到原因）
 
-**与 mewcode 的差异**：mewcode 的 hook 还支持 command/prompt/http/agent 四种动作类型和条件表达式引擎；mini 做拒绝（block）与确认两种规则，观察类扩展已有 EventBus 订阅者机制覆盖（含 `listener_dirs` 零代码插件），不重复建设。
+**与 mewcode 的差异**：mewcode 的 hook 支持 command/prompt/http **三种可用**动作类型（第四种 agent executor 是 stub——`hooks/executors.py` 实测返回 "agent executor not yet implemented"）+ 条件表达式引擎（`conditions.py`：==/!=/=~/~= 运算符 + and/or 组合）；mini 做拒绝（block）与确认两种规则，观察类扩展由 EventBus 订阅者机制覆盖（含 `listener_dirs` 插件）。**诚实说明**：mini 的"EventBus 覆盖观察类"论证只**半成立**——能力可达但需写 Python，mewcode 是零代码 YAML 配置 + 条件表达式；若要补齐零代码声明式 hook（自定义动作 + 条件引擎）是一个可选方向，当前 `[[hooks]]` TOML 已覆盖 block/confirm 两种最高频场景。
 
 ---
 
