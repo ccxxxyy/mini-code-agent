@@ -159,7 +159,7 @@
 - macOS 窗格由 tmux 覆盖，不做 iTerm2 专属后端
 
 **远程/浏览器模式（`--remote`）：**
-- 无 TLS（明文 `ws://`），可选 token 认证（`--remote-token`）但不加密传输
+- 无 TLS 加密（明文 `ws://`），有可选 token 认证（`--remote-token`）但不加密传输
 - 会话已持久化（每轮自动保存 + 启动自动恢复本项目最新未关闭会话）；与终端模式的差异：恢复不询问（启动时无客户端可问），正常关闭后重启从新会话开始（可 /session load 手动恢复）
 - 浏览器图片仅支持公网 URL（本地文件路径因浏览器安全策略无法加载）
 - 所有客户端共享同一会话（无独立会话隔离）
@@ -611,16 +611,67 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **问题**（终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。
 **✅ 已实现**：`core/subagent.py` SubAgent 初始化时根据 context_summary 有无条件注入——无继承上下文时追加 `[IMPORTANT: You have NOT been given any context about the parent conversation...]` 提示，明确要求如实说明并 NEVER fabricate。有 context_summary 时不触发（已有真实摘要）。注入点在 agent 类型 prompt 之后，覆盖所有类型（含自定义 .md 类型），与 roadmap 方向建议的逐类型修改相比更全面且维护成本更低。诚实边界：同 B9——prompt 守则是提示非强制。详见 tech-notes §105。
 
+☐ **B10 零代码声明式 hook 增强（自定义动作 + 条件表达式引擎）**
+**来源**：C2 修正时诚实降级了 mini 侧论证暴露的真实差距——mini 的"EventBus 订阅者覆盖观察类扩展"只半成立：能力可达但需写 Python（EventBus 订阅者或 listener_dirs 插件），mewcode 是零代码 YAML 配置。
+**现状**：mini 的 `[[hooks]]` TOML 仅两种 action（`block` 命中即拒 / `confirm` 弹 y/a/n）+ 四种固定匹配字段（tool fnmatch / arg / contains / regex）；mewcode 有三种可用动作（command 执行 shell / prompt 注入提示 / http 回调，第四种 agent 是 stub）+ 条件表达式引擎（`==`/`!=`/`=~`/`~=` 运算符 + `and`/`or` 组合）。
+**方案**：分两块、可独立实施——
+① **自定义动作**：`[[hooks]]` 新增 `action = "command"`（命中时执行配置的 shell 命令，如"每次 write_file 后自动跑 formatter"）与 `action = "notify"`（终端提示行，观察类零代码化）。**安全设计是关键**：command 动作本身是"配置文件能执行任意命令"的口子——须走既有权限管道（危险命令检查/deny 规则照拦）、文档明示风险、考虑要求命令在 allowed_commands 白名单内。http 回调价值低暂缓。
+② **条件表达式**：`condition = "tool == 'bash' and arg =~ 'git push'"` 字符串字段，小型解析器（仅比较运算符 + and/or，不做完整表达式语言），与现有固定字段并存（condition 优先）。
+**评估**：现有 block/confirm 已覆盖最高频安全场景，本项属扩展性增强非缺陷。工作量：中（表达式解析器 + 动作执行器 + 安全评审 + 文档）。验证要点：command 动作走权限管道被 deny 规则拦截 / 条件表达式四运算符与组合 / 非法表达式温和降级不炸配置加载 / 与固定字段共存优先级。
+**补充情报**（深挖 mewcode hooks/ 全量实现后追加）：mewcode 实为 **15 事件**（比 mini 的 11 阶段多 pre_send/post_receive/error/compact/permission_request/file_change/command_execute）；动作修饰符含 `async:`（fire-and-forget 不阻塞，pre_tool_use 禁用）、`once:`（会话内只跑一次）、`reject:`（pre_tool_use 专用拦截，条件即闸门、命令输出作为拒绝理由）；prompt 动作把展开后的消息**注入下一次请求的 system prompt**（等于 hook 能改模型指令）。同时 mewcode 自身缺陷：pre/post_tool_use 只在非交互执行路径触发（TUI 路径不生效）、agent 动作是 stub——补齐时不必对齐这些残缺面。
+
+☐ **B11 `-p` 非交互一次性模式 + NDJSON 事件流输出**
+**来源**：全模块面对照扫描发现的完全缺失项。mewcode `__main__.py` 支持 `-p "任务"` 一次性执行后退出 + `--output-format stream-json` 输出 NDJSON 事件流（assistant/thinking/tool_use/tool_result/usage/turn_complete/result/error/compact/retry 十种事件）；mini CLI 只有交互 TUI / --remote / --worker 三种形态，**无法被脚本、CI、管道调用**。
+**方案**：cli.py 新增 `-p <prompt>` 与 `--output-format {text,stream-json}`；text 模式复用 AgentLoop 回调收集最终文本打印退出；stream-json 模式把 on_stream_delta/on_thinking_delta/on_tool_start/on_tool_end/usage 等回调映射为 NDJSON 行（复用远程模式 `_ws_send` 的事件命名以保持两个机器接口一致）。权限：非交互无确认 UI，走 fail-safe 拒绝（与子 agent 无门语义一致），文档明示"需要确认的操作在 -p 模式一律拒绝，可配 --mode accept-edits 放宽"。
+**验证要点**：`mini -p "1+1"` 输出答案退出码 0 / stream-json 每行合法 JSON 且事件序完整 / 危险命令被拒不挂起 / 与交互模式共存不回归。工作量：中。
+
+☐ **B12 发送侧 extended thinking 控制**
+**来源**：对照扫描发现 mini 只**被动解析**思考流（reasoning_content/thinking_delta 渲染），从不在请求侧开启——对 Anthropic 官方 extended thinking 模型等于功能不可用（DeepSeek 类自动吐 reasoning_content 的不受影响）。mewcode：provider 配置 `thinking: true`；自适应 budget（opus/sonnet≥4.6 传 `budget_tokens: 0`，其余 max_output_tokens−1 下限 1024）；思考块带签名在对话中往返。
+**方案**：`LLMConfig` 新增 `thinking: bool = False`（或按 profile 配置）；anthropic_provider 请求体加 `thinking: {type: "enabled", budget_tokens: ...}` 自适应逻辑；思考块签名往返（Anthropic 要求 assistant 消息回传 thinking 块）；OpenAI Responses reasoning 参数同理。
+**验证要点**：开启后真实 Anthropic 请求含 thinking 参数且思考流渲染 / 关闭默认行为不变 / 签名往返多轮不 400。工作量：小-中。
+
+☐ **B13 记忆子系统体验增强（后台整固节律 + 并行 recall 预取）**
+**来源**：对照扫描的两处程度差距。① 整固：mini 是阈值(20 条)触发/手动 `/memory consolidate`；mewcode autoDream 在 ≥24h 且 ≥5 会话后**后台** fork 子 agent 合并去重（锁文件 + 失败回滚），用户无感。② recall：mini 的 LLM recall（P52）串行在注入路径上；mewcode 的 LLM 选择器与主 LLM 调用**并行预取**（8s 超时，工具执行后非阻塞注入）——recall 延迟成本归零。
+**方案**：① `MemoryConsolidator` 加时间+会话数双门槛的启动后台任务模式（复用现有合并逻辑，加锁与回滚）；② recall 改 `asyncio.create_task` 与主调用并行，超时放弃本轮注入。
+**验证要点**：整固只在双门槛满足时触发且失败可回滚 / 并行 recall 不增加首 token 延迟 / 超时降级无 recall 不报错。工作量：中。
+
+☐ **B14 MCP native 延迟加载模式（Anthropic defer_loading）**
+**来源**：对照扫描。mewcode MCP 三模式：eager / **native**（Anthropic 官方端点用 `defer_loading` 字段 + `anthropic-beta` tool-search header，模型原生按需搜索工具）/ dispatch；mini 只有 eager/dispatch——dispatch 是自建等效实现，对 Anthropic 官方端点没用上原生能力（原生模式无需自建 tool_search/mcp_call 中转、token 效率更高）。
+**方案**：`[mcp]` 配置 `loading = "native"` 第三选项；anthropic_provider 工具序列化时对 defer 工具加 `defer_loading: true` 并附 beta header；非 Anthropic 端点自动回退 dispatch。
+**验证要点**：native 模式请求体含 defer 字段与 header / 非 Anthropic 端点回退 / eager 与 dispatch 回归。工作量：小-中。
+
+☐ **B15 /undo 检查点增强（选择性恢复 + 快照容量）**
+**来源**：对照扫描的程度差距。mini `/undo [N]`：文件快照仅保留最近 5 轮、恢复只有"对话+文件一起回滚"一种；mewcode `/rewind`：每轮末快照、上限 100 个、恢复时**三选**（代码+对话 / 仅对话 / 仅代码）。"仅对话"场景真实存在（改动是对的但对话跑偏）；"仅代码"同理（讨论有价值但改动要扔）。
+**方案**：`FileSnapshotStore` 的 KEEP_TURNS 提为配置（默认仍 5，可调大）；`/undo` 加 `--code-only` / `--conv-only` 参数（默认双回滚不变）。
+**验证要点**：三种恢复各自生效 / 默认行为回归 / 快照容量配置生效。工作量：小-中。
+
+☐ **B16 交互 UX 小项包（对照扫描收集）**
+四个独立小项，可拆散实施：① **可折叠工具调用块**——只读工具（read_file/glob/grep）每轮 ≥2 次时自动折叠为一行摘要"✓ Done (N tool uses · Xs)"（mini 已有 ╭─╰─ 连线但不折叠；此项在 comparison 早有候选记录）；② **shift+tab 循环权限模式**（default→accept-edits→plan→bypass，替代输 /mode 全名）；③ **确认弹窗 "a"(always) 直接写永久规则**——mini 目前是会话级授权、持久要手动 /allow --save，mewcode 弹窗第三选项即写规则文件（需评估：静默写盘 vs 显式保存的安全取舍，可折中为写盘前提示一行）；④ **Esc 单击把运行中子 agent 转后台**（当前双 Esc 是取消整轮）。
+**评估**：全部非必需，按使用痛感排优先级：①>②>③>④。工作量：各自小。
+
+☐ **B17 SyntheticOutput 结构化输出工具**
+**来源**：全模块面对照扫描的完全缺失项。mewcode 的 `SyntheticOutput` 工具（tools/synthetic_output.py，68 行）让子 agent 以机器可读的结构化 JSON 返回结果（schema 约束），父方/调用方无需从自然语言报告里解析字段——服务于"子 agent 产出要被程序消费"的场景（如 verify agent 返回 {pass: bool, failures: [...]}）。mini 子 agent 只有自然语言报告 + 正则提取 deliverables 的启发式。
+**方案**：新增 `synthetic_output` 内置工具（READ 类别）：接受任意 JSON 参数原样存入 SubAgentResult 的结构化字段；`_format_agent_result` 与后台投递消息附带该 JSON 块；agent_types 的 verify prompt 引导使用。
+**验证要点**：子 agent 调用后父方拿到结构化字段 / 不调用时行为不变 / JSON 透传不被转述改写。工作量：小。
+
+☐ **B18 worktree 重型目录软链**
+**来源**：全模块面对照扫描的程度差距。mewcode worktree/setup.py 在创建 worktree 时把重型目录（默认 node_modules/.venv/vendor，可配 `symlink_directories`）从主工作区**软链**进 worktree——避免每个隔离 agent 重装依赖/复制巨型目录，创建秒级完成且不多占磁盘。mini 的 worktree 隔离（/spawn --isolated）每个 worktree 是干净 checkout，Python 项目里子 agent 要么没有 .venv 可用、要么依赖重建。
+**方案**：`SecurityConfig` 新增 `worktree_symlink_dirs: list[str] = [".venv", "node_modules", "vendor"]`；WorktreeManager 创建后对存在于主工作区的目录建符号链接（Windows 用 junction 回退，无权限时警告降级不失败）；文档明示风险——软链目录是共享可写的，并行 agent 同时写依赖目录仍会冲突（典型场景只读使用，可接受）。
+**验证要点**：worktree 内 .venv 可用 / Windows junction 生效或温和降级 / 配置为空列表禁用 / 删除 worktree 不误删主工作区真身。工作量：小-中。
+
 ### C. 文档过时
 
-☐ **C1 远程认证 mini 反超但文档未反映**
+✅ **C1 远程认证 mini 反超但文档未反映（已修正）**
 `--remote-token`（server.py 8 处）让 mini 有 token 认证，mewcode `remote.py` grep 无任何 TLS/token/auth。但 comparison doc 及 roadmap 已知限制仍把"无 TLS"列为劣势——应改为"mini 有 token 认证但无 TLS 加密；mewcode 两者皆无"。
+**✅ 已修正**（实施前对 mewcode 源码复验：remote.py 的 4 处 token 命中均为 LLM token 计数非认证，结论成立）：comparison 5.2 局限行改为"无 TLS 加密但有 token 认证，认证维度 mini 反超（mewcode 两者皆无）"；roadmap 已知限制行补对比参照。
 
-☐ **C2 hook 动作类型"四种"失实**
+✅ **C2 hook 动作类型"四种"失实（已修正）**
 comparison doc 7.2 称 mewcode hook 有 command/prompt/http/agent 四种动作。核实 `hooks/executors.py`：**agent executor 是 stub（"not yet implemented"）**，实际三种可用。应改为"三种可用 + agent 未实现"。同时 mini 的"EventBus listener_dirs 覆盖观察类"论证**半成立**：能力可达但需写 Python，mewcode 是零代码 YAML 配置 + 条件表达式引擎（`conditions.py`，==/!=/=~/~= + and/or）——若要补齐零代码声明式 hook 是一个可选方向。
+**✅ 已修正**（实施前复验 stub 属实）：comparison 7.2 改为"三种可用 + agent stub"，并加"诚实说明"段承认 EventBus 论证半成立、零代码声明式 hook 列为可选方向。
 
-☐ **C3 团队文件数过时**
+✅ **C3 团队文件数过时（已修正）**
 doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15 文件 2069 行；mini 多 Agent 相关约 7 文件（mailbox/team/spawn_backends/worker/subagent/task_store/agent_types）。
+**✅ 已修正**（实施前重新实测）：mewcode teams/ 15 文件 2069 行确认；mini 实为 **8 文件 2055 行**（原清单漏 agent_type_loader）——两者体量已持平，comparison 0.1 改为按实测数字陈述并指出差异在组织方式（常驻队友 vs 一次性 worker）而非体量。
 
 ### D. 后续工作中自查发现的缺陷
 
@@ -744,13 +795,22 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 - **Textual TUI**：mewcode 仍用 textual>=2.1；mini "Rich+ptk 补体验、不迁移" 成立
 - **图片多模态**：mewcode 并无真多模态（MCP ImageContent 仅字符串化 `[image: mime]`，tool_wrapper.py:76）——非差距
 - **多客户端会话隔离**：mewcode 同样单 agent 广播（remote.py:91）无隔离——非差距
-- **常驻队友 transcript 恢复**：mewcode `teams/transcript.py` 独有；mini 一次性 worker 适配论证基本成立，若走向常驻队友需重评估
+- **常驻队友 transcript 恢复**：mewcode `teams/transcript.py` 独有；mini 一次性 worker 适配论证基本成立，若走向常驻队友需重评估。**论证增援**（深挖实测）：transcript.py 的 save/load 在 mewcode 全库**没有任何调用方**——队友跨重启持久化只是脚手架未接线；且 Windows 强制 in-process 后端（窗格能力反而 mini 的 wt 支持更完整）——常驻体系的成熟度低于对照文档此前的预估
 
 ✅ **D10【UX·中】/spawn 默认改为后台模式（自动投递，已实现）**
 现状：`/spawn <task>` 默认是前台模式——子 agent 跑完结果静悄悄存到文件，用户需手动 `/spawn wait` 取。后台模式 `/spawn --background <task>` 已实现完整的自动投递（子 agent 完成后中断用户输入等待、自动弹出结果），但需显式加 `--background` 参数。两者功能实质重叠：前台模式除了"需要手动 wait"之外无任何额外价值——它是后台投递实现前的权宜设计，投递做好后没把默认行为跟着改。
 方案：把 `/spawn <task>`（无 flag）的默认行为改为后台模式（等同于现在的 `--background`）——跑完自动投递，不需要 wait。保留 `--wait` 参数用于"我就等这一个结果、阻塞到完成"的少数场景（语义反转：现在 --background 是 opt-in，改后 --wait 是 opt-in）。`--background` 参数保留为 no-op 别名（向后兼容，不报错）。
 影响面：`extensions/builtin_commands.py` _make_spawn handler 的默认分支、`core/subagent.py` SubAgentManager.spawn 调用方式、app.py 的 `_run_agent_and_report` 接线。涉及真实 LLM 验证（spawn 后不输 wait、结果是否自动弹出）。工作量：小-中。
 **✅ 已实现**：改动只需 `_make_spawn` 一个函数——单任务与 `-p` 并行的默认分支统一改调 `spawn_background`（原 background 专用分支合并删除；`spawn_background` 签名本就支持 isolation/agent_type/context_summary 透传，subagent.py 零改动）；`--background` 解析保留但变 no-op（向后兼容）；`--wait` 保持阻塞式 opt-in（进度面板+内联完整格式化结果）；`--pane` 与 `wait`/`list`/`cancel` 子命令不变（wait 仍服务 pane 收集与手动阻塞）。usage 文本与注册 description 同步。诚实边界：后台投递结果经 LLM 转述且 4000 字符截断，`--wait` 返回未截断的完整格式化输出（8000 字符 cap）——需要完整结果时用 `--wait`。4 个新测试（默认走 spawn_background / -p 默认后台 / --background no-op / --wait 阻塞回归），1189→1193。详见 tech-notes §106。
+
+☐ **D11【安全·中】远程模式 TLS 支持（原生 wss 或反代方案文档化）**
+**来源**：C1 修正（远程认证对比）时明确暴露的自身短板——认证维度 mini 反超 mewcode，但传输加密两者皆缺，且这对 mini 是**认证有效性问题**：token 在明文 `ws://` 信道传输，公网场景下嗅探者拿到 token 即可绕过认证——认证的价值被明文传输打了折扣。
+**对比参照**（复验 mewcode `remote.py` + `__main__.py` 实测）：mewcode 远程模式无 TLS、无认证、默认绑定 `0.0.0.0:18888` 且 CLI 不可改——三重叠加下局域网任何设备可无认证完全控制 agent；mini 默认 localhost/可配 host/可选 token，仅缺 TLS 一项。
+**现状**：唯一缓解是 server.py 启动横幅的文字警告（"公网暴露请加反代 + TLS，如 nginx + Let's Encrypt"），没有可操作的配置指引，也没有原生 TLS 选项。
+**方案**（二选一或先轻后重）：
+① **轻（推荐先做）**：反代方案正式文档化——config-guide 双语新增"远程模式公网部署"一节：nginx/caddy 的 wss 反代配置示例（含 WebSocket upgrade 头）、证书获取（Let's Encrypt/自签）、`--host 127.0.0.1` 只监听本机让反代做入口、token 与 TLS 组合使用说明。零代码，纯文档。
+② **重（可选后做）**：原生 TLS——`--tls-cert <pem> --tls-key <pem>` CLI 参数，`websockets.serve(ssl=ssl_context)`，浏览器端 `wss://` 自适应。工作量小-中，但证书管理（获取/续期/路径）成为用户负担，且自签证书浏览器告警的引导成本高——反代方案已是业界标准，原生 TLS 的增量价值有限。
+**评估**：内网/本机场景（当前主要用途）token 认证已够、无 TLS 可接受；公网场景是真实缺口。优先级中——被公网部署需求触发时再做②，①可随时做。验证要点（做①时）：按文档配置 nginx 反代后浏览器经 wss 正常对话 + token 认证生效；（做②时）：wss 连接 + 证书校验 + ws 明文模式回归。
 
 ---
 
