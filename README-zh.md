@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-![Tests](https://img.shields.io/badge/tests-1193%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1201%20passed-brightgreen)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 一个仿 Claude Code 的终端编程 Agent 工具。
@@ -238,8 +238,12 @@ mini --remote            # 远程/浏览器模式
 mini --port 9000         # 自定义端口
 mini --host 0.0.0.0      # 自定义主机（允许外部访问）
 mini --remote-token x    # 远程模式 token 认证
+mini -p "任务"           # 非交互一次性执行后退出（脚本/CI/管道用；退出码 0/1）
+mini -p "任务" --output-format stream-json   # 逐行 NDJSON 事件流（事件名同远程协议）
 mini --version           # 查看版本
 ```
+
+`-p` 模式说明：stdout 只承载结果（text 为最终回答 / stream-json 为事件流），其余输出走 stderr——可安全接管道（`mini -p "..." --output-format stream-json | jq .type`）。需要确认的操作（危险命令等）一律失败安全拒绝，可用 config.toml 的 `[security] approval_mode = "accept-edits"` 放宽；一次性会话不落盘。
 
 > `mini` 和 `mini-agent` 是同一个程序的两个入口（pyproject.toml 注册了两个别名）。pip 安装后直接用 `mini`；源码运行用 `uv run mini`。本文档后续示例统一用 `mini`。
 
@@ -279,7 +283,7 @@ mini-code-agent/
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
 │       └── models/             # 核心数据模型（消息、事件、配置、会话、权限）
-├── tests/                      # 1193 个测试（64 单元 + 5 集成），80%+ 覆盖率
+├── tests/                      # 1201 个测试（66 单元 + 5 集成），80%+ 覆盖率
 └── docs/
     ├── spec.md                 # 架构规格说明
     ├── tasks.md                # 开发任务清单
@@ -386,7 +390,7 @@ mini-code-agent/
 - [x] P82：PermissionDecision.PENDING（pane worker 跨进程权限审批 + 远程模式断连排队 + PENDING 事件可观测）
 - [x] P83：插件生态（pip 包 `mini_agent.plugins` entry point / 本地 `plugin_dirs` 文件注册工具/命令/技能，四钩子契约 + 三层异常隔离，`/plugins` 展示）
 
-**全部阶段已完成，1193 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
+**全部阶段已完成，1201 个测试全绿（1 skipped）。** 18 项需求的逐条实现证据见 [docs/capabilities.md](docs/capabilities.md)。
 
 ## 多 Agent 并行：/spawn 与 /team
 
