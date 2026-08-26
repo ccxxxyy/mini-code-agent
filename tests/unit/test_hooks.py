@@ -208,7 +208,7 @@ async def test_hook_rule_invalid_entries_skipped():
         mgr,
         [
             "not-a-table",  # 非字典
-            {"event": "post_tool", "tool": "bash"},  # 不支持的 event
+            {"event": "unknown_event", "tool": "bash"},  # 不支持的 event
             {"tool": "bash", "reject": False},  # 只支持 reject=true
             {"tool": "glob", "reason": "ok"},  # 唯一合法条目
         ],
@@ -571,3 +571,625 @@ async def test_confirm_always_grants_session(tool_context):
 
     assert t1.exists() and t2.exists()
     assert len(prompts) == 1  # second call auto-granted 第二次自动放行
+
+
+# --- Confirm + condition (B10 D scenarios) ---
+
+
+async def test_confirm_condition_match_fires(tool_context):
+    """Condition matches → confirm dialog fires."""
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "confirm_cond.txt"
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "condition": "tool == 'write_file' and args.file_path =~ 'confirm_cond'",
+                "action": "confirm",
+                "reason": "condition confirm test",
+            }
+        ],
+    )
+    prompts = []
+
+    async def approve(prompt: str):
+        prompts.append(prompt)
+        return True
+
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("done"),
+        ],
+    )
+    loop.confirm_callback = approve
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write"))
+    await loop.run(conv)
+
+    assert target.exists()
+    assert len(prompts) == 1
+    assert "condition confirm test" in prompts[0]
+
+
+async def test_confirm_condition_no_match_passes(tool_context):
+    """Condition does not match → no confirm, tool executes directly."""
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "no_match.txt"
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "condition": "tool == 'write_file' and args.file_path =~ 'WONT_MATCH'",
+                "action": "confirm",
+                "reason": "should not fire",
+            }
+        ],
+    )
+    prompts = []
+
+    async def approve(prompt: str):
+        prompts.append(prompt)
+        return True
+
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("done"),
+        ],
+    )
+    loop.confirm_callback = approve
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write"))
+    await loop.run(conv)
+
+    assert target.exists()
+    assert len(prompts) == 0  # no confirm dialog
+
+
+async def test_confirm_condition_denied_blocks(tool_context):
+    """Condition matches + user denies → tool blocked."""
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "denied_cond.txt"
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "condition": "tool == 'write_file'",
+                "action": "confirm",
+                "reason": "deny test",
+            }
+        ],
+    )
+
+    async def deny(prompt: str):
+        return False
+
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("ok"),
+        ],
+    )
+    loop.confirm_callback = deny
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write"))
+    await loop.run(conv)
+
+    assert not target.exists()
+    tool_msgs = [m for m in conv.messages if m.role == Role.TOOL]
+    assert any("Denied by user" in (m.tool_result.output or "") for m in tool_msgs if m.tool_result)
+
+
+async def test_confirm_condition_always_grants(tool_context):
+    """Condition matches + user says 'always' → second call auto-granted."""
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    t1 = tool_context.working_dir / "always1.txt"
+    t2 = tool_context.working_dir / "always2.txt"
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "condition": "tool == 'write_file'",
+                "action": "confirm",
+                "reason": "always test",
+            }
+        ],
+    )
+    prompts = []
+
+    async def always(prompt: str):
+        prompts.append(prompt)
+        return "always"
+
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(t1), "content": "1"}),
+            tool_call_response("write_file", {"file_path": str(t2), "content": "2"}),
+            text_response("done"),
+        ],
+    )
+    loop.confirm_callback = always
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write both"))
+    await loop.run(conv)
+
+    assert t1.exists() and t2.exists()
+    assert len(prompts) == 1  # second auto-granted
+
+
+async def test_confirm_condition_without_callback_denies(tool_context):
+    """Condition matches but no callback (headless) → safe deny."""
+    from mini_agent.models.message import Conversation, Message, Role
+    from mini_agent.tools.hooks import register_hook_rules
+    from tests.unit.test_agent_loop import text_response, tool_call_response
+
+    target = tool_context.working_dir / "headless.txt"
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "condition": "tool == 'write_file'",
+                "action": "confirm",
+            }
+        ],
+    )
+    loop = _make_confirm_loop(
+        tool_context,
+        mgr,
+        [
+            tool_call_response("write_file", {"file_path": str(target), "content": "hi"}),
+            text_response("ok"),
+        ],
+    )
+    # confirm_callback stays None → safe deny
+    conv = Conversation()
+    conv.append(Message(role=Role.USER, content="write"))
+    await loop.run(conv)
+    assert not target.exists()
+
+
+# --- Condition expression matching (B10) ---
+
+
+async def test_hook_rule_condition_matches():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(
+        mgr,
+        [{"condition": "tool == 'bash' and args.command =~ 'git push'", "reason": "no push"}],
+    )
+    assert n == 1
+    blocked = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={"command": "git push origin"}
+        )
+    )
+    assert blocked.action == HookAction.BLOCK
+    allowed = await mgr.run(
+        HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={"command": "git pull"})
+    )
+    assert allowed.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_condition_overrides_fixed_fields():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "tool": "read_file",
+                "contains": "should-be-ignored",
+                "condition": "tool == 'bash'",
+                "reason": "condition wins",
+            }
+        ],
+    )
+    blocked = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
+    assert blocked.action == HookAction.BLOCK
+    allowed = await mgr.run(
+        HookContext(stage=HookStage.PRE_TOOL, tool_name="read_file", tool_args={})
+    )
+    assert allowed.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_invalid_condition_skipped():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(mgr, [{"condition": "this is invalid", "reason": "bad"}])
+    assert n == 0
+
+
+async def test_hook_rule_condition_or():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"condition": "tool == 'bash' or tool == 'delete_file'", "action": "confirm"}],
+    )
+    for tool in ("bash", "delete_file"):
+        r = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name=tool, tool_args={}))
+        assert r.action == HookAction.CONFIRM
+    r = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="read_file", tool_args={}))
+    assert r.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_condition_with_args_dot_access():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"condition": "args.file_path =~ '\\.py$'", "tool": "write_file", "reason": "py only"}],
+    )
+    blocked = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "src/main.py"},
+        )
+    )
+    assert blocked.action == HookAction.BLOCK
+    allowed = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "README.md"},
+        )
+    )
+    assert allowed.action == HookAction.CONTINUE
+
+
+# --- Notify action (B10) ---
+
+
+async def test_hook_rule_notify_fires_callback():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    messages: list[str] = []
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "write_file", "action": "notify", "message": "wrote $TOOL_NAME"}],
+        notify_callback=messages.append,
+    )
+    result = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL, tool_name="write_file", tool_args={"file_path": "x.py"}
+        )
+    )
+    assert result.action == HookAction.CONTINUE
+    assert len(messages) == 1
+    assert "wrote write_file" in messages[0]
+
+
+async def test_hook_rule_notify_template_expansion():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    messages: list[str] = []
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "tool": "write_file",
+                "action": "notify",
+                "message": "File: $TOOL_ARGS.file_path",
+            }
+        ],
+        notify_callback=messages.append,
+    )
+    await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "/tmp/test.py"},
+        )
+    )
+    assert messages[0] == "File: /tmp/test.py"
+
+
+async def test_hook_rule_notify_no_callback_logs(caplog):
+    import logging
+
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "bash", "action": "notify", "message": "running bash"}],
+    )
+    with caplog.at_level(logging.INFO, logger="mini_agent.tools.hooks"):
+        await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
+    assert any("running bash" in r.message for r in caplog.records)
+
+
+async def test_hook_rule_notify_missing_message_skipped():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(mgr, [{"tool": "bash", "action": "notify"}])
+    assert n == 0
+
+
+# --- Command action (B10) ---
+
+
+async def test_hook_rule_command_pre_tool_success():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        return (0, "formatted ok")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "write_file", "action": "command", "command": "echo ok"}],
+        command_runner=runner,
+    )
+    result = await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL, tool_name="write_file", tool_args={"file_path": "x.py"}
+        )
+    )
+    assert result.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_command_pre_tool_reject():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        return (1, "validation failed")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "bash", "action": "command", "command": "validate $TOOL_ARGS.command"}],
+        command_runner=runner,
+    )
+    result = await mgr.run(
+        HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={"command": "rm -rf /"})
+    )
+    assert result.action == HookAction.BLOCK
+    assert "validation failed" in result.reason
+
+
+async def test_hook_rule_command_post_tool_always_continues():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        return (1, "error")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "event": "post_tool",
+                "tool": "write_file",
+                "action": "command",
+                "command": "ruff format $TOOL_ARGS.file_path",
+            }
+        ],
+        command_runner=runner,
+    )
+    result = await mgr.run(
+        HookContext(
+            stage=HookStage.POST_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "x.py"},
+        )
+    )
+    assert result.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_command_template_expansion():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    captured: list[str] = []
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        captured.append(cmd)
+        return (0, "")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "tool": "write_file",
+                "action": "command",
+                "command": "ruff format $TOOL_ARGS.file_path",
+            }
+        ],
+        command_runner=runner,
+    )
+    await mgr.run(
+        HookContext(
+            stage=HookStage.PRE_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "/src/main.py"},
+        )
+    )
+    assert captured[0] == "ruff format /src/main.py"
+
+
+async def test_hook_rule_command_stdout_displayed():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    displayed: list[str] = []
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        return (0, "syntax OK")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"event": "post_tool", "tool": "write_file", "action": "command", "command": "check"}],
+        command_runner=runner,
+        notify_callback=displayed.append,
+    )
+    await mgr.run(
+        HookContext(
+            stage=HookStage.POST_TOOL,
+            tool_name="write_file",
+            tool_args={"file_path": "x.py"},
+        )
+    )
+    assert displayed == ["syntax OK"]
+
+
+async def test_hook_rule_command_empty_stdout_not_displayed():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    displayed: list[str] = []
+
+    async def runner(cmd: str, timeout: float) -> tuple[int, str]:
+        return (0, "")
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "bash", "action": "command", "command": "silent"}],
+        command_runner=runner,
+        notify_callback=displayed.append,
+    )
+    await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
+    assert displayed == []
+
+
+async def test_hook_rule_command_no_runner_skipped(caplog):
+    import logging
+
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"tool": "bash", "action": "command", "command": "echo hi"}],
+    )
+    with caplog.at_level(logging.WARNING, logger="mini_agent.tools.hooks"):
+        result = await mgr.run(
+            HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={})
+        )
+    assert result.action == HookAction.CONTINUE
+    assert any("no runner" in r.message for r in caplog.records)
+
+
+async def test_hook_rule_command_timeout():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    async def slow_runner(cmd: str, timeout: float) -> tuple[int, str]:
+        raise TimeoutError()
+
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [
+            {
+                "tool": "bash",
+                "action": "command",
+                "command": "sleep 999",
+                "command_timeout": 1,
+            }
+        ],
+        command_runner=slow_runner,
+    )
+    result = await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="bash", tool_args={}))
+    assert result.action == HookAction.CONTINUE
+
+
+async def test_hook_rule_command_missing_skipped():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    mgr = HookManager()
+    n = register_hook_rules(mgr, [{"tool": "bash", "action": "command"}])
+    assert n == 0
+
+
+async def test_hook_rule_post_tool_event_registers_on_post_tool():
+    from mini_agent.tools.hooks import register_hook_rules
+
+    messages: list[str] = []
+    mgr = HookManager()
+    register_hook_rules(
+        mgr,
+        [{"event": "post_tool", "tool": "write_file", "action": "notify", "message": "done"}],
+        notify_callback=messages.append,
+    )
+    await mgr.run(HookContext(stage=HookStage.PRE_TOOL, tool_name="write_file", tool_args={}))
+    assert len(messages) == 0
+    await mgr.run(HookContext(stage=HookStage.POST_TOOL, tool_name="write_file", tool_args={}))
+    assert len(messages) == 1
+
+
+# --- expand_template ---
+
+
+def test_expand_template():
+    from mini_agent.tools.hooks import expand_template
+
+    result = expand_template(
+        "$TOOL_NAME: $TOOL_ARGS.file_path ($EVENT)",
+        tool_name="write_file",
+        tool_args={"file_path": "/tmp/x.py", "content": "hi"},
+        stage="pre_tool",
+    )
+    assert result == "write_file: /tmp/x.py (pre_tool)"
+
+
+def test_expand_template_tool_args_json():
+    from mini_agent.tools.hooks import expand_template
+
+    result = expand_template(
+        "args=$TOOL_ARGS",
+        tool_name="bash",
+        tool_args={"command": "ls"},
+    )
+    assert '"command": "ls"' in result
+
+
+def test_expand_template_missing_var():
+    from mini_agent.tools.hooks import expand_template
+
+    result = expand_template("$UNKNOWN stays", tool_name="bash", tool_args={})
+    assert result == "$UNKNOWN stays"
+
+
+def test_expand_template_result():
+    from mini_agent.models.message import ToolResult
+    from mini_agent.tools.hooks import expand_template
+
+    tr = ToolResult(call_id="c1", name="t", output="hello world", is_error=False)
+    result = expand_template("out=$RESULT err=$RESULT_ERROR", "t", {}, tool_result=tr)
+    assert result == "out=hello world err=false"

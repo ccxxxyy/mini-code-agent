@@ -252,9 +252,14 @@ class Application:
 
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
-        # Declarative rejection rules from `[[hooks]]` config (7.2)
-        # `[[hooks]]` 配置的声明式拒绝规则
-        n_rules = register_hook_rules(self.hook_manager, config.hooks)
+        # Declarative rules from `[[hooks]]` config (block/confirm/command/notify)
+        # `[[hooks]]` 配置的声明式规则（阻止/确认/命令/通知）
+        n_rules = register_hook_rules(
+            self.hook_manager,
+            config.hooks,
+            command_runner=self._run_hook_command,
+            notify_callback=self.terminal.show_info,
+        )
         if n_rules:
             self.terminal.show_info(f"Loaded {n_rules} hook rule(s) from config")
 
@@ -899,6 +904,34 @@ class Application:
 
         self.hook_manager.register(HookStage.PRE_LLM, _pre_llm_inject_memory)
         self.hook_manager.register(HookStage.SESSION_END, _session_end_extract_memory)
+
+    async def _run_hook_command(self, command: str, timeout: float) -> tuple[int, str]:
+        """Execute a hook command directly — no interactive confirmation.
+        Hook commands are user-configured in config.toml; prompting the
+        user to approve their own config makes no sense and confuses UX
+        (the dialog appears inside the tool block, looking like a tool
+        permission check).  Only explicit DENY rules block hook commands.
+        执行 hook 命令——不弹交互式确认。hook 命令是用户自己写在
+        config.toml 的，再弹确认框问用户没有道理且混淆 UX。
+        仅显式 DENY 规则可阻止 hook 命令。"""
+        import asyncio
+        from asyncio.subprocess import PIPE, STDOUT
+
+        from mini_agent.models.permissions import PermissionScope
+
+        if self.permission_manager._deny_rule_matches(PermissionScope.COMMAND, command):
+            logger.warning("hook command denied by rule: %s", command)
+            return (-1, "denied by rule")
+
+        cwd = str(self.session.metadata.project_dir or Path.cwd())
+        proc = await asyncio.create_subprocess_shell(command, stdout=PIPE, stderr=STDOUT, cwd=cwd)
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            output = stdout.decode(errors="replace").strip() if stdout else ""
+            return (proc.returncode or 0, output)
+        except TimeoutError:
+            proc.kill()
+            return (-1, "command timed out")
 
     def _adopt_session(self, loaded: Session) -> None:
         """Switch the app to a loaded session (fixes stale ToolContext ref).

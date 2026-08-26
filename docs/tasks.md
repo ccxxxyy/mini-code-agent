@@ -85,7 +85,8 @@ P1-P83 每个阶段的任务分解、实现记录与验收结果。每条任务�
 - [x] `security/tool_filter.py` — ToolFilter (上下文过滤)
 
 ### P3.2 Hook 系统
-- [x] `tools/hooks.py` — HookStage, HookContext, HookAction, HookResult, HookFn, HookManager (优先级+短路)
+- [x] `tools/hooks.py` — HookStage, HookContext, HookAction(6 种), HookResult, HookFn, HookRule, HookManager, expand_template, parse_hook_rules, register_hook_rules (优先级+短路+声明式 block/confirm/command/notify)
+- [x] `tools/hook_conditions.py` — Condition, ConditionGroup, parse_condition, evaluate_condition, resolve_field (条件表达式引擎)
 - [x] 内置防护: 危险命令确认 (PermissionManager 正则), 敏感文件保护 (PathGuard 模式)
 - [x] Agent Loop 集成安全管道 (PermissionCheck → PRE_TOOL → execute → POST_TOOL)
 

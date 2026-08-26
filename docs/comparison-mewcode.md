@@ -667,9 +667,9 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
    reason = "docs/spec.md is read-only by project policy"
    ```
 
-5. 11 个测试：工具名匹配 / fnmatch 模式 / arg 限定 / 任意参数子串 / regex（含 AND 语义与非法正则跳过）/ 默认 reason / 非法条目跳过 / TOML 往返 / **端到端**（AgentLoop 流水线内拦截，文件未写入且 LLM 收到原因）
+5. 58 个新测试（30 条件引擎 + 28 hook 增强）：条件表达式解析与求值全覆盖、四种动作类型（block/confirm/command/notify）、confirm+condition 五路径端到端、command stdout 显示、模板展开、POST_TOOL 事件、向后兼容
 
-**与 mewcode 的差异**：mewcode 的 hook 支持 command/prompt/http **三种可用**动作类型（第四种 agent executor 是 stub——`hooks/executors.py` 实测返回 "agent executor not yet implemented"）+ 条件表达式引擎（`conditions.py`：==/!=/=~/~= 运算符 + and/or 组合）；mini 做拒绝（block）与确认两种规则，观察类扩展由 EventBus 订阅者机制覆盖（含 `listener_dirs` 插件）。**诚实说明**：mini 的"EventBus 覆盖观察类"论证只**半成立**——能力可达但需写 Python，mewcode 是零代码 YAML 配置 + 条件表达式；若要补齐零代码声明式 hook（自定义动作 + 条件引擎）是一个可选方向，当前 `[[hooks]]` TOML 已覆盖 block/confirm 两种最高频场景。
+**与 mewcode 的差异**：mewcode 的 hook 支持 command/prompt/http **三种可用**动作类型（第四种 agent executor 是 stub）+ 条件表达式引擎（`conditions.py`：==/!=/=~/~= 运算符 + and/or 组合）；mini 支持 **block/confirm/command/notify 四种**动作类型 + 独立的条件表达式引擎（`hook_conditions.py`：同样四运算符 + and/or）。command 动作仅受显式 DENY 规则约束（用户自配命令不弹交互确认）；notify 动作通过终端通知行实现观察类零代码化。两者均支持模板变量展开（`$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`/`$EVENT`/`$RESULT`/`$RESULT_ERROR`）。mini 的 http 回调暂缓（价值低），mewcode 的 prompt 动作（注入 system prompt）在 mini 中由 EventBus PRE_LLM hook 覆盖。
 
 ---
 

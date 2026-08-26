@@ -1629,3 +1629,17 @@
 - [x] 示例插件 `examples/plugins/word_count_plugin.py` 三钩子全演示
 - [x] 16 个新测试，968 passed + 1 skipped，覆盖率门禁通过，ruff clean
 - [x] 真实运行验证：启动横幅 / /plugins 表格 / /greet / haiku-mode 技能 / 真实 LLM 调用 word_count 工具 / disabled_plugins 禁用生效
+
+## 零代码声明式 hook 增强 检查项
+
+- [x] 条件表达式引擎（`hook_conditions.py`）：`parse_condition` 解析 `==`/`!=`/`=~`/`~=` + `and`/`or`（不可混用），`evaluate_condition` 短路求值，`resolve_field` 支持 `args.<key>` 点号访问
+- [x] `HookAction` 新增 `COMMAND`/`NOTIFY`；`HookRule` 新增 `condition`/`command`/`command_timeout`/`message`/`event` 字段
+- [x] `expand_template()` 模板变量展开：`$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`(JSON)/`$EVENT`/`$RESULT`/`$RESULT_ERROR`，未知变量保持原样
+- [x] `parse_hook_rules()` 支持 `event = "post_tool"`、`action = "command"/"notify"`、`condition` 字段解析（非法表达式温和降级跳过）
+- [x] `register_hook_rules()` 新增 `command_runner`/`notify_callback` 参数，按动作类型分发到四个注册函数
+- [x] command 动作仅受显式 DENY 规则约束（`_deny_rule_matches`），不弹交互确认——用户自配命令不该再问；非零返回码（PRE_TOOL）→ BLOCK；stdout 通过 `notify_callback` 显示
+- [x] notify 动作调 `notify_callback`（注入 `terminal.show_info`），无回调降级 `log.info`
+- [x] condition 设置时优先于固定字段（tool/arg/contains/regex）
+- [x] 向后兼容：原有 block/confirm + 固定字段规则不受影响
+- [x] 58 个新测试（30 条件引擎 + 28 hook 增强含 5 个 confirm+condition 端到端 + 2 个 command stdout 显示），1201→1259 全过
+- [x] 真实 LLM 验证 8/8：notify 通知行 + 模板展开 / block+condition 拦截 / command POST_TOOL 不弹确认框+`syntax OK` 显示 / .txt 不触发 .py 条件 / confirm+condition 弹窗+reason+拒绝+批准均正确

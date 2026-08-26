@@ -87,8 +87,7 @@ allowed_commands = ["git *", "uv *"]
 context_window = 128000
 
 [[hooks]]
-tool = "bash"
-contains = "git push"
+condition = "tool == 'bash' and args.command =~ 'git push'"
 action = "confirm"
 reason = "push 会影响远程仓库"
 
@@ -309,26 +308,54 @@ CC 的 hooks 是**命令式脚本**——配置指定一个 shell 命令，CC �
 mini 的 hooks 是**声明式规则**——在 `config.toml` 里用 TOML 表达匹配条件和动作，不需要写脚本：
 
 ```toml
+# 条件表达式 + confirm 动作
 [[hooks]]
-tool = "bash"                # 工具名 fnmatch 模式
-arg = "command"              # 可选：只检查此参数
-contains = "git push"        # 子串匹配
-regex = '--force|main'       # 正则匹配（AND with contains）
-action = "confirm"           # "block"（默认）或 "confirm"
-reason = "禁止强推/直推 main"
+condition = "tool == 'bash' and args.command =~ 'git push'"
+action = "confirm"           # block | confirm | command | notify
+reason = "push 会影响远程仓库"
+
+# 固定字段匹配 + block 动作
+[[hooks]]
+tool = "write_file"
+arg = "file_path"
+regex = '\\.env$'
+action = "block"
+reason = "禁止写入 .env 文件"
+
+# POST_TOOL + command 动作（工具执行后自动运行审计）
+[[hooks]]
+event = "post_tool"
+condition = "tool == 'bash' and args.command =~ 'npm install'"
+action = "command"
+command = "npm audit"
+
+# POST_TOOL + notify 动作
+[[hooks]]
+event = "post_tool"
+tool = "bash"
+contains = "git push"
+action = "notify"
+message = "代码已推送到远程仓库"
 ```
 
-**匹配字段**：
-- `tool`：工具名 glob（`"bash"` / `"write_*"` / `"*"`）
-- `contains`：参数值子串
-- `regex`：参数值正则
-- 两者同时写 = AND
+**条件表达式**（`condition` 字段）：
+- 运算符：`==`（等于）、`!=`（不等于）、`=~`（正则 `re.search`）、`~=`（glob `fnmatch`）
+- 组合：`and` / `or`（同一表达式内不可混用）
+- 字段：`tool`（工具名）、`args.<key>`（工具参数）
 
-**动作**：
+也兼容旧版匹配字段（`tool` fnmatch + `arg` + `contains` 子串 + `regex` 正则），condition 设置时优先于旧字段。
+
+**事件阶段**：
+- `pre_tool`（默认）：工具执行前触发
+- `post_tool`：工具执行后触发
+
+**动作**（4 种）：
 - `block`：直接拒绝，LLM 收到 `Blocked by hook: <reason>`
 - `confirm`：弹 y/a/n 确认框（a = 本会话不再问）
+- `command`：执行 `command` 字段指定的 shell 命令，支持模板变量 `$TOOL_NAME`、`$TOOL_ARGS.<key>`、`$TOOL_ARGS`(JSON)、`$EVENT`、`$RESULT`、`$RESULT_ERROR`
+- `notify`：在 UI 显示通知消息（不阻断）
 
-mini 也支持代码注册的 **编程式 hooks**（`HookManager.register(stage, fn, priority)`），覆盖更多时机：`STARTUP`、`SHUTDOWN`、`SESSION_START`、`SESSION_END`、`USER_INPUT`、`TURN_START`、`TURN_END`、`PRE_LLM`、`POST_LLM`、`PRE_TOOL`、`POST_TOOL`。编程式 hooks 支持 `MODIFY` 动作（改写参数），声明式规则不支持。
+mini 也支持代码注册的 **编程式 hooks**（`HookManager.register(stage, fn, priority)`），覆盖更多时机：`startup`、`shutdown`、`session_start`、`session_end`、`user_input`、`turn_start`、`turn_end`、`pre_llm`、`post_llm`、`pre_tool`、`post_tool`。编程式 hooks 支持 `MODIFY` 动作（改写参数），声明式规则不支持 MODIFY 但已支持 command/notify 等副作用动作。
 
 ### 关键差异
 
@@ -336,13 +363,14 @@ mini 也支持代码注册的 **编程式 hooks**（`HookManager.register(stage,
 |------|-----|------|
 | 范式 | 命令式（shell 脚本） | 声明式（TOML 规则） + 编程式（Python 函数） |
 | 配置复杂度 | 需写脚本文件 + JSON 配置 | 纯 TOML，无需脚本 |
-| 灵活性 | 极高（任意 shell 命令） | 声明式：匹配 + block/confirm；编程式同等灵活 |
-| 匹配方式 | `matcher` 字符串 | `tool`（glob）+ `contains`（子串）+ `regex`（正则） |
-| 支持时机 | PreToolUse / PostToolUse / Notification / Stop | 11 个阶段（startup 到 post_tool） |
-| 参数改写 | 脚本修改后输出 | 编程式 `MODIFY` 动作 |
+| 灵活性 | 极高（任意 shell 命令） | 声明式：4 种动作（block/confirm/command/notify）+ 条件表达式；编程式同等灵活 |
+| 匹配方式 | `matcher` 字符串 | `condition` 表达式（`==` `!=` `=~` `~=` + `and`/`or`），兼容旧版 `tool`/`contains`/`regex` |
+| 支持时机 | PreToolUse / PostToolUse / Notification / Stop | 声明式：pre_tool / post_tool；编程式：11 个阶段（startup 到 post_tool） |
+| 模板变量 | 环境变量（`$TOOL_NAME` `$TOOL_INPUT`） | `$TOOL_NAME` `$TOOL_ARGS.<key>` `$TOOL_ARGS`(JSON) `$EVENT` `$RESULT` `$RESULT_ERROR`（command/notify 中使用） |
+| 参数改写 | 脚本修改后输出 | 编程式 `MODIFY` 动作（声明式不支持 MODIFY） |
 | 层级合并 | 用户 + 项目合并 | 项目有 hooks 时**整体替换**用户级（不合并） |
 
-**适用场景**：CC 的方式适合已有 CI/linter 脚本的团队（直接调用现有脚本）；mini 的声明式方式适合快速配置简单规则（不用写代码），编程式方式适合复杂场景。
+**适用场景**：CC 的方式适合已有 CI/linter 脚本的团队（直接调用现有脚本）；mini 的声明式方式支持条件表达式和 4 种动作（block/confirm/command/notify），覆盖 pre_tool 和 post_tool 两个阶段，大多数场景无需写脚本；编程式方式适合需要 MODIFY 参数改写等高级场景。
 
 ---
 
@@ -534,7 +562,8 @@ cache_creation = 3.0                 # 缓存创建价（可选）
 | `permissions.allow` | `permissions.toml` 的 `[commands] allow` 或 `[tools] allow` |
 | `permissions.deny` | `permissions.toml` 的 `[commands] deny` 或 `[tools] deny` |
 | `mcpServers` | `config.toml` 的 `[mcp.servers.*]` |
-| `hooks.PreToolUse` | `config.toml` 的 `[[hooks]]`（声明式）或 Python hook（编程式） |
+| `hooks.PreToolUse` | `config.toml` 的 `[[hooks]]`（声明式，`event = "pre_tool"` 默认）或 Python hook（编程式） |
+| `hooks.PostToolUse` | `config.toml` 的 `[[hooks]]`（声明式，`event = "post_tool"`）或 Python hook（编程式） |
 | `env` | `.env` 文件或 `config.toml` 内联 |
 
 ### API 密钥

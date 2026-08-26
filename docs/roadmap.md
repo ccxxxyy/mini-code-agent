@@ -611,14 +611,9 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **问题**（终端验证场景 1b 实测暴露）：无 fork 的子 agent 收到"总结我们讨论的方案"类任务（引用了它不知道的上下文）时，不承认不知道，而是**自信编造**了完整方案——含虚构的实现细节和不存在的文件名（`bash_tool.py`，实际是 `builtin/bash.py`），`Tools: 0` 纯凭空生成。
 **✅ 已实现**：`core/subagent.py` SubAgent 初始化时根据 context_summary 有无条件注入——无继承上下文时追加 `[IMPORTANT: You have NOT been given any context about the parent conversation...]` 提示，明确要求如实说明并 NEVER fabricate。有 context_summary 时不触发（已有真实摘要）。注入点在 agent 类型 prompt 之后，覆盖所有类型（含自定义 .md 类型），与 roadmap 方向建议的逐类型修改相比更全面且维护成本更低。诚实边界：同 B9——prompt 守则是提示非强制。详见 tech-notes §105。
 
-☐ **B10 零代码声明式 hook 增强（自定义动作 + 条件表达式引擎）**
+✅ **B10 零代码声明式 hook 增强（自定义动作 + 条件表达式引擎，已实现）**
 **来源**：C2 修正时诚实降级了 mini 侧论证暴露的真实差距——mini 的"EventBus 订阅者覆盖观察类扩展"只半成立：能力可达但需写 Python（EventBus 订阅者或 listener_dirs 插件），mewcode 是零代码 YAML 配置。
-**现状**：mini 的 `[[hooks]]` TOML 仅两种 action（`block` 命中即拒 / `confirm` 弹 y/a/n）+ 四种固定匹配字段（tool fnmatch / arg / contains / regex）；mewcode 有三种可用动作（command 执行 shell / prompt 注入提示 / http 回调，第四种 agent 是 stub）+ 条件表达式引擎（`==`/`!=`/`=~`/`~=` 运算符 + `and`/`or` 组合）。
-**方案**：分两块、可独立实施——
-① **自定义动作**：`[[hooks]]` 新增 `action = "command"`（命中时执行配置的 shell 命令，如"每次 write_file 后自动跑 formatter"）与 `action = "notify"`（终端提示行，观察类零代码化）。**安全设计是关键**：command 动作本身是"配置文件能执行任意命令"的口子——须走既有权限管道（危险命令检查/deny 规则照拦）、文档明示风险、考虑要求命令在 allowed_commands 白名单内。http 回调价值低暂缓。
-② **条件表达式**：`condition = "tool == 'bash' and arg =~ 'git push'"` 字符串字段，小型解析器（仅比较运算符 + and/or，不做完整表达式语言），与现有固定字段并存（condition 优先）。
-**评估**：现有 block/confirm 已覆盖最高频安全场景，本项属扩展性增强非缺陷。工作量：中（表达式解析器 + 动作执行器 + 安全评审 + 文档）。验证要点：command 动作走权限管道被 deny 规则拦截 / 条件表达式四运算符与组合 / 非法表达式温和降级不炸配置加载 / 与固定字段共存优先级。
-**补充情报**（深挖 mewcode hooks/ 全量实现后追加）：mewcode 实为 **15 事件**（比 mini 的 11 阶段多 pre_send/post_receive/error/compact/permission_request/file_change/command_execute）；动作修饰符含 `async:`（fire-and-forget 不阻塞，pre_tool_use 禁用）、`once:`（会话内只跑一次）、`reject:`（pre_tool_use 专用拦截，条件即闸门、命令输出作为拒绝理由）；prompt 动作把展开后的消息**注入下一次请求的 system prompt**（等于 hook 能改模型指令）。同时 mewcode 自身缺陷：pre/post_tool_use 只在非交互执行路径触发（TUI 路径不生效）、agent 动作是 stub——补齐时不必对齐这些残缺面。
+**已实现**：分两块——① 自定义动作：`action = "command"`（命中时执行 shell 命令，仅受显式 DENY 规则约束不弹交互确认；PRE_TOOL 非零返回码阻止工具执行，POST_TOOL 火后不管；stdout 通过终端通知显示）与 `action = "notify"`（终端通知行，观察类零代码化）。模板变量 `$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`(JSON)/`$EVENT`/`$RESULT`/`$RESULT_ERROR` 可在命令和消息中展开。② 条件表达式引擎：`condition = "tool == 'bash' and args.command =~ 'git push'"` 字符串字段，`hook_conditions.py` 独立模块实现解析器（`==`/`!=`/`=~`/`~=` 四运算符 + `and`/`or` 组合，不可混用），可用字段 `tool` 和 `args.<key>`。condition 设置时优先于固定字段（tool/arg/contains/regex），非法表达式温和降级跳过规则不崩配置加载。新增 `event = "post_tool"` 支持工具执行后触发。58 个新测试（30 条件引擎 + 28 hook 增强），1259 个全过。详见 tech-notes §109。
 
 ✅ **B11 `-p` 非交互一次性模式 + NDJSON 事件流输出（已实现）**
 **来源**：全模块面对照扫描发现的完全缺失项。mewcode `__main__.py` 支持 `-p "任务"` 一次性执行后退出 + `--output-format stream-json` 输出 NDJSON 事件流（assistant/thinking/tool_use/tool_result/usage/turn_complete/result/error/compact/retry 十种事件）；mini CLI 只有交互 TUI / --remote / --worker 三种形态，**无法被脚本、CI、管道调用**。
