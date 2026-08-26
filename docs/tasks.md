@@ -2139,3 +2139,11 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 
 - [x] `docs/comparison-mewcode.md` 三处修正（实施前对 mewcode 源码逐条复验）：远程认证（mini 有 token 认证 mewcode 两者皆无）/ hook 动作"四种"→"三种可用 + agent stub" + EventBus 论证诚实降级半成立 / 团队文件数实测 15 文件 2069 行 vs 8 文件 2055 行体量持平
 - [x] `docs/roadmap.md` 已知限制行补认证对比参照
+
+---
+
+## -p 非交互一次性模式 + NDJSON 事件流（tech-notes §108）
+
+- [x] `cli.py` — `-p/--prompt` 与 `--output-format {text,stream-json}` 参数 + headless 分支（redirect_stdout(stderr) 保 stdout 纯净）
+- [x] `headless.py`（新）— run_headless 双模式运行器：回调整体替换、权限 no_ui:default_deny 失败安全、最小生命周期、退出码 0/1、会话不落盘
+- [x] 8 个新测试（test_headless.py），1193→1201；真实 LLM 双模式验证 PASS

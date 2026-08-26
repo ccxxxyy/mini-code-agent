@@ -1264,6 +1264,17 @@
 - [x] 4 个新测试（Live 延迟+无擦除码 / 思考仅收尾 / 超宽无折行 / 自带换行保留），1158→1162
 - [x] 真实推理模型运行验证（第一次修复即栽在跳过此步）：两轮真实推理运行（9.11 vs 9.9 / 水池注水问题），思考流连续完整显示在回答前，碎行消失，中英混排/长推理/自带换行均正常
 
+## -p 非交互一次性模式 检查项
+
+- [x] cli.py `-p/--prompt` + `--output-format {text,stream-json}` 参数；API key 校验后分支，仿 --worker 的退出码模式
+- [x] headless.py：text 静默捕获最终文本 / stream-json 回调映射远程协议同名事件（含 on_tool_call_assembling 显式置空——修正远程模式的疏漏）
+- [x] 权限失败安全：_confirm=None 走现成 no_ui:default_deny，需确认操作拒绝+熔断不挂起
+- [x] stdout 纯净：redirect_stdout(stderr) 包住构造与运行，结果写 sys.__stdout__ 逐行 flush
+- [x] 生命周期最小路径：prepare → MCP 连 → 手工回合（不复用吞异常的 _handle_turn）→ MCP 断；退出码 0/1
+- [x] 一次性会话不落盘；不跑 SESSION hooks/记忆提取（诚实边界文档化）
+- [x] 8 个新测试，1193→1201
+- [x] 真实 LLM 双模式验证 PASS：text 输出 "2" 退出码 0；stream-json 32 行全合法 JSON、事件序完整含 thinking_delta
+
 ## 对照文档事实修正 检查项
 
 - [x] 实施前对 mewcode 源码逐条复验（不盲信 roadmap 旧核实结论）：remote.py 4 处 token 命中确认为 LLM 计数非认证 / hooks/executors.py agent stub 属实 / teams/ 15 文件 2069 行属实

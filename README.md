@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/mini-code-agent)](https://pypi.org/project/mini-code-agent/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1193%20passed-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-1201%20passed-brightgreen)]()
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 
 **A terminal-based coding agent** inspired by Claude Code — built from scratch in Python, fully open-source, and designed to be readable.
@@ -183,7 +183,13 @@ mini --api-key "sk-..." --base-url "https://api.deepseek.com/v1" --model "deepse
 ```bash
 mini          # start the agent
 mini --help   # see all options
+
+# Non-interactive one-shot (scripts / CI / pipes; exit code 0/1)
+mini -p "count the md files in this project"
+mini -p "..." --output-format stream-json | jq .type   # NDJSON event stream
 ```
+
+In `-p` mode stdout carries only the result (everything else goes to stderr); actions that would need confirmation are denied fail-safe — relax via `[security] approval_mode = "accept-edits"`; the one-shot session is not persisted.
 
 See [docs/guide/en/terminal-guide.md](docs/guide/en/terminal-guide.md) for how to open each terminal per OS and their compatibility levels.
 
@@ -306,7 +312,7 @@ mini-code-agent/
 │   ├── events/      # EventBus — async pub/sub decoupling all layers (5 subscribers, 17 subscriptions)
 │   ├── config/      # Layered config loading (TOML + env + CLI), shell/platform detection
 │   └── models/      # Dataclasses (messages, events, config, sessions, permissions)
-├── tests/           # 1193 tests, 80%+ coverage
+├── tests/           # 1201 tests, 80%+ coverage
 ├── skills/          # 4 built-in skill packs
 ├── experiments/     # 10 mechanism experiments (compression A/B, model mixing, deadlock induction, circuit breaker)
 ├── examples/        # Example plugins (drop into ./.mini-agent/plugins or declare a mini_agent.plugins entry point)
@@ -327,7 +333,7 @@ This project implements **19 of 20** mechanisms from the [learn-claude-code](htt
 
 ```bash
 uv sync --extra dev
-uv run pytest tests/           # 1193 tests
+uv run pytest tests/           # 1201 tests
 uv run ruff check src/ tests/  # lint
 uv run ruff format src/ tests/ # format
 ```

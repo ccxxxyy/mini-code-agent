@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1193 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1201 个测试全部通过（1 skipped）。
 
 ---
 
@@ -16,7 +16,7 @@
 - 流式渲染：`ui/renderer.py` — Rich Live 组件逐段提交式渲染 Markdown（8Hz，代码高亮/粗体），逐 token"边想边输出"；思考流（reasoning_content）dim 直连写入，Live 延迟到首个正文 delta 才启动（tech-notes §100）
 - 多轮对话：`models/message.py` 的 Conversation 全量重放历史，LLM 记住上下文
 - 交互细节：`>` 提示符、输入文字 bold 亮浅蓝着色 + 输入行上下同色横线、输入 `/` 弹出命令下拉菜单（上下键选择/Tab 补全/删字符重新过滤）、输入历史跨会话保留（↑ 键翻历史）、底部工具栏实时显示当前 LLM 和权限模式、工具调用 `╭─ ╰─` 连线展示、每轮 token 用量统计
-- 启动体验：`mini` 一个单词全局启动（同 `claude`）
+- 启动体验：`mini` 一个单词全局启动（同 `claude`）；`mini -p "任务"` 非交互一次性执行（脚本/CI/管道，`--output-format stream-json` 输出 NDJSON 事件流，事件名同远程协议）
 
 **验证**：真实 API 流式验证；终端交互全部手工验证过
 
@@ -268,7 +268,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1193 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
+| 测试 | 1201 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
 | 工具 | 20 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

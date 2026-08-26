@@ -3466,3 +3466,31 @@ comparison-mewcode.md 三处陈述与实际不符（roadmap 文档过时清单�
 本次修正过程暴露两个真实改进方向，已详细登记 roadmap 待做：① 零代码声明式 hook 增强（hook 论证诚实降级暴露的差距：自定义 command/notify 动作 + 条件表达式引擎，command 动作须走既有权限管道的安全设计是关键）；② 远程模式 TLS 支持（认证对比暴露的自身短板：token 在明文信道传输打折认证价值——轻方案反代文档化优先，原生 TLS 视公网部署需求再做）。后续追查 mewcode 远程实现细节又发现：其默认绑定 `0.0.0.0:18888` 监听所有网卡且 CLI 无参数可改，叠加无认证——局域网任何设备可直连完全控制 agent；mini 默认 localhost/可配/可选 token，安全姿态四项中三项反超（均已补录 comparison 与 TLS 待做条目的对比参照）。
 
 随后应用户要求做了 mewcode **全模块面对照扫描**（146 文件 23209 行全量清点 + teams/hooks/memory/TUI/agent 五子系统深挖，双侧源码逐项核实），产出完整差距清单并全部登记 roadmap：完全缺失 4 项（`-p` 非交互模式+NDJSON、发送侧 extended thinking 控制、MCP native 延迟加载、SyntheticOutput 结构化输出——各自单列登记）、程度差距 4 项（检查点选择性恢复、后台整固节律+并行 recall 预取合并一条、worktree 重目录软链单列）、UX 小项 4 个打包一条——共 8 条新待做（首轮登记漏了 SyntheticOutput 与 worktree 软链两条，经用户核对指出后补登）。零代码 hook 待做条目以实测细节增援（15 事件/async/once/reject 修饰符/prompt 动作注入 system prompt + mewcode 自身 TUI 路径不触发 hook 的残缺）。同时确认 mewcode 自身多处脚手架未接线（teammate transcript 无调用方、md 自定义命令 loader 未挂接、多 provider 只用第一个），常驻队友"暂不做"论证获增援。mini 反超面复核确认：成本追踪/多模型热切换/远程安全/崩溃恢复/record-replay/审计链/插件生态/Windows 沙箱/会话管理。
+
+# §108 `-p` 非交互一次性模式 + NDJSON 事件流
+
+## 108.1 问题
+
+mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--worker 三形态（全模块面对照扫描确认的完全缺失项）。
+
+## 108.2 方案
+
+新模块 `headless.py`，cli.py 在 API key 校验后分支 `-p`。三个关键设计：
+
+- **接线复用远程模式验证过的前提**：AgentLoop 七个回调是普通属性可整体替换（远程 `_wire_callbacks` 先例）；`permission_manager._confirm = None` 即触发现成的 `no_ui:default_deny` 失败安全路径（与子 agent 无门语义一致）——需确认的操作不挂起、直接拒绝并熔断早停。附带修正远程模式的一个疏漏：`on_tool_call_assembling` 这里显式置空（远程漏了它仍指向终端打印闭包）。
+- **stdout 纯净性**：CLI 层 `contextlib.redirect_stdout(sys.stderr)` 包住 Application 构造与整个运行——Rich Console 动态解析 sys.stdout，构造期的启动提示与回合内终端输出全部落 stderr；结果（text 最终文本 / NDJSON 行）写 `sys.__stdout__` 逐行 flush。stream-json 另挂 _QuietTerminal 适配器把 show_info/show_error/show_file_changes 转为 info/error/file_changes 事件。
+- **事件命名与远程 WS 协议一致**：两个机器接口（WS 与 NDJSON）同名同形（user_message/turn_start/stream_start/stream_text/stream_end/thinking_delta/tool_call{name,args≤200}/tool_result{name,output≤500,is_error,elapsed}/turn_end{tokens,iterations,elapsed}/error/info/file_changes），消费方可复用解析器。
+
+生命周期取 run() 的最小可行子集：`_llm.prepare()`（窗口探测）→ `_connect_mcp_servers()` → 手工构造回合（@file 展开 + UserMessageEvent + append；**不复用 `_handle_turn`**——它吞异常且经终端报告，无法拿退出码）→ `agent_loop.run()` 自持 try/except → finally 里 turn_end 事件 + `mcp_manager.disconnect_all()`。退出码：完成 0（confirm_denied 等早停是正常结局）、异常 1。
+
+## 108.3 诚实边界
+
+- 需确认的操作（危险命令/项目外路径/CONFIRM hook）一律失败安全拒绝并熔断早停——被拒工具不经过 on_tool_start/end 回调，因此 **stream-json 里不会出现该工具的 tool_result 事件**（早停原因在 stop_reason，最终文本会解释）；放宽用 `[security] approval_mode = "accept-edits"` 配置
+- **一次性会话不落盘**（不调 _autosave）——CI 每跑一次留一个会话文件会重演 159 文件积累问题
+- 不跑 STARTUP/SESSION hooks 与记忆提取（一次性语义，避免每次调用附带 LLM 提取成本）；不做启动崩溃恢复与超龄清理
+
+## 108.4 验证
+
+8 个新测试（test_headless.py，真实 Application + MockLLM 替换）：参数解析 2 / text 模式最终文本+退出码 / NDJSON 每行合法+事件序（user_message→turn_start→…→turn_end）/ 工具事件对 / 危险命令拒绝不挂起（no_ui:default_deny + confirm_denied 熔断）/ LLM 异常 error 事件+退出码 1（turn_end 仍收尾）/ 会话不落盘。全量 1193→1201。
+
+真实 LLM 验证双模式 PASS：`mini -p "1+1等于几？只回答数字"` stdout 仅 "2"、退出码 0；stream-json 模式 32 行全部 `json.loads` 通过，事件序 user_message→turn_start→stream_start→thinking_delta×26→stream_text→stream_end→turn_end（思考流正确入流）。

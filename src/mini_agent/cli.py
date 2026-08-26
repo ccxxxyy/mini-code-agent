@@ -61,6 +61,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run as a headless pane worker: execute the task described in "
         "SPEC_JSON and exit (used by /spawn --pane, not meant for manual use)",
     )
+    parser.add_argument(
+        "-p",
+        "--prompt",
+        default=None,
+        metavar="PROMPT",
+        help="Run one prompt non-interactively and exit (for scripts/CI/pipes); "
+        "actions that would need confirmation are denied fail-safe",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["text", "stream-json"],
+        default="text",
+        help="Output format for -p mode: 'text' (default) prints only the final "
+        "answer; 'stream-json' emits an NDJSON event stream (one JSON per line, "
+        "same event names as remote mode)",
+    )
     from mini_agent import __version__
 
     parser.add_argument(
@@ -122,6 +138,19 @@ def main(argv: list[str] | None = None) -> None:
         print("  2. 设置环境变量: OPENAI_API_KEY 或 MINI_AGENT_API_KEY")
         print("  3. CLI 参数: mini --api-key sk-xxx")
         sys.exit(1)
+
+    if args.prompt:
+        # Headless one-shot: ALL terminal/rich output goes to stderr so the
+        # real stdout carries only the result (final text or NDJSON lines).
+        # 一次性无头模式：终端输出整体转 stderr，真 stdout 只承载结果。
+        import contextlib
+
+        from mini_agent.headless import run_headless
+
+        with contextlib.redirect_stdout(sys.stderr):
+            app = Application(config)
+            code = asyncio.run(run_headless(app, args.prompt, args.output_format))
+        sys.exit(code)
 
     app = Application(config)
 
