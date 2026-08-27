@@ -334,13 +334,13 @@ reason = "push affects the remote repository"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"                  # "stdio" (subprocess) | "http" (remote) | "sse"
-loading = "eager"                    # "eager" (default, register everything) | "dispatch" (on-demand search + call)
+loading = "eager"                    # "eager" (default) | "native" (Anthropic native defer) | "dispatch" (on-demand search + call)
 
 # [mcp.servers.remote-api]
 # url = "http://localhost:8080/mcp"
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # Optional auth headers
-# loading = "dispatch"               # Lazy loading recommended when there are many tools
+# loading = "dispatch"               # Lazy loading for many tools; use "native" on official Anthropic endpoint (auto-fallback to dispatch elsewhere)
 ```
 
 ### Custom Agent Types

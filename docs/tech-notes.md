@@ -3672,3 +3672,47 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 - **② remote 接线：已完成**——判定为唯一值得升级的边界后随即实施（见上方升级路径），remote 模式现与终端共享整固节律。
 - **① 升级路径 a（headless 串行 await）：可选**——场景真实（`-p` 单轮问答）、改动小，但 headless 本就定位"跳过记忆提取"的轻量模式，是否让它反而在 recall 上更重，需要一个真实使用反馈再定。
 - **③④：不值得**——③ 防的是"结果仍正确"的极小概率窗口，④ 服务的是低频事件且现方案降级行为（攒满门槛才跑）本身安全。为它们加跨平台文件锁/状态迁移的复杂度，收益不成比例。
+
+---
+
+## 112 B14 MCP native 延迟加载模式（Anthropic defer_loading）
+
+**背景**：MCP 工具数量多时（几十到上百个），全量注入 `tools[]` 占据大量上下文且破坏 prompt cache——tools 数组在 system 之后、messages 之前，数组一变后面的整段历史缓存全部失效。Anthropic 官方 API 提供原生延迟加载机制：工具带 `defer_loading: true` 仍在 `tools[]` 中但服务端不给模型看，模型调 `tool_search` 后返回 `tool_reference` 块让服务端展开 schema，tools 数组字节不变，缓存前缀因此不断。
+
+**三条路的定位**：
+- **eager**：MCP schema 总量小，全量放进 tools[]，零开销
+- **native**：Anthropic 官方端点专用，`defer_loading` + `tool_reference`，保护 cache
+- **dispatch**：通用方案（任何端点可用），MCP 工具完全不进 tools[]，靠 `tool_search` + `mcp_call` 中转
+
+### 112.1 实现架构
+
+**数据流**（native 模式）：
+
+1. `MCPManager.connect_server(loading="native")` → 像 eager 一样注册 `MCPToolAdapter(deferred=True)` 到 ToolRegistry，同时存入 `_dispatch_tools` 供 `search_tools()` 搜索
+2. `ToolSchema(defer_loading=True)` → `to_json_schema()` 在顶层加 `"defer_loading": True`
+3. `AnthropicProvider._convert_tools()` → 传递 `defer_loading: true` 到 Anthropic 格式
+4. `AnthropicProvider.stream()` → 检测到 defer 工具，添加 `anthropic-beta: advanced-tool-use-2025-11-20` 请求头
+5. LLM 调用 `tool_search(query="...")` → 搜索 `_dispatch_tools`，返回 `ToolResult(content_blocks=[{"type": "tool_reference", "tool_name": "mcp_gh_get_issue"}])`
+6. `ToolResult.content_blocks` → `to_api_messages()` 附加到中间 dict → `_split_system()` 用 blocks 替代纯文本作为 `tool_result.content`
+7. Anthropic 服务端收到 `tool_reference` 后展开对应工具的 schema 进上下文，模型即可直接调用
+
+**自动降级**：`app._connect_mcp_servers()` 中，native 模式但非 Anthropic 官方端点（`api.anthropic.com`）时，`dataclasses.replace(srv_cfg, loading="dispatch")` 降级。第三方网关（DashScope 等）不支持 `defer_loading`/`tool_reference`，beta header 会导致拒绝请求。
+
+**条件 meta 工具注册**：`_adjust_mcp_meta_tools()` 按生效模式动态注销不需要的工具——eager 模式不需要 `tool_search`/`mcp_call`（工具已直接可用），native 模式不需要 `mcp_call`（工具直接通过 ToolRegistry 调用），dispatch 模式两者都需要。
+
+### 112.2 改动清单
+
+| 文件 | 改动 |
+|------|------|
+| `models/message.py` | `ToolResult` 加 `content_blocks` 字段；`to_api_messages()` 传递 |
+| `tools/base.py` | `Tool` 加 `should_defer`；`ToolSchema` 加 `defer_loading`；`to_json_schema()` 传递 |
+| `tools/mcp/adapter.py` | `MCPToolAdapter` 加 `deferred` 参数，传递到 `ToolSchema.defer_loading` |
+| `tools/mcp/client.py` | `connect_server()` 加 native 分支（双注册到 ToolRegistry + `_dispatch_tools`） |
+| `llm/anthropic_provider.py` | `_convert_tools()` 传递 `defer_loading`；`stream()` 加 beta header；`_split_system()` 处理 `content_blocks` |
+| `tools/builtin/tool_search.py` | native + anthropic 时返回 `tool_reference` content blocks |
+| `app.py` | 自动降级 + `_adjust_mcp_meta_tools()` 条件注销 |
+| `models/config.py` | `MCPServerConfig.loading` 注释补充 `"native"` |
+
+### 112.3 验证
+
+26 个新单测覆盖：ToolResult content_blocks / ToolSchema defer_loading / MCPToolAdapter deferred / connect_server 三模式 / AnthropicProvider 转换+header+序列化 / ToolSearchTool native vs dispatch / 自动降级 / meta 工具条件注销。1327 个全过。

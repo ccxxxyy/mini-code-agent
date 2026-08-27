@@ -416,11 +416,12 @@ env = { GITHUB_TOKEN = "ghp_..." }
 url = "http://localhost:8080/mcp"
 transport = "http"
 headers = { Authorization = "Bearer token" }     # 可选认证头
-loading = "dispatch"                              # eager（默认）| dispatch
+loading = "dispatch"                              # eager（默认）| native | dispatch
 ```
 
 mini 独有的 `loading` 字段：
 - `eager`（默认）：启动时立即注册工具到全局列表，LLM 直接可用
+- `native`：Anthropic 官方端点专用——工具注册但带 `defer_loading: true`，服务端隐藏 schema 直到 `tool_search` 返回 `tool_reference` 展开，保护 prompt cache 前缀。非 Anthropic 端点自动降级为 dispatch
 - `dispatch`：延迟加载——工具不进全局列表，LLM 通过 `tool_search` 工具按需搜索和调用。适合工具数量很多的 MCP 服务器（避免撑大 system prompt）
 
 ### 关键差异
@@ -429,7 +430,7 @@ mini 独有的 `loading` 字段：
 |------|-----|------|
 | 格式 | JSON `mcpServers` 字段 | TOML `[mcp.servers.*]` 节 |
 | 传输协议 | stdio / URL | stdio / http / sse（显式 `transport` 字段） |
-| 加载模式 | 全部即时加载 | 支持 `dispatch` 延迟加载（大量工具时省上下文） |
+| 加载模式 | 全部即时加载 | 三种模式：eager / native（Anthropic `defer_loading`）/ dispatch |
 | 认证 | 环境变量传递 | 环境变量 + HTTP `headers` 字段 |
 | 工具命名 | 原始工具名 | `mcp_<服务器名>_<工具名>` 前缀（避免冲突） |
 

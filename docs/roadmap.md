@@ -633,10 +633,11 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **验证要点**：整固只在双门槛满足时触发且失败可回滚 / 并行 recall 不增加首 token 延迟 / 超时降级无 recall 不报错。工作量：中。
 **✅ 已实现**：① `consolidation.py` 新增 `ConsolidationScheduler`——per-scope（用户级/项目级）双门槛（距上次 ≥`consolidate_min_hours` 默认 24h 且新会话 ≥`consolidate_min_sessions` 默认 5 个），状态记"尝试"而非"成功"（无可合并也记录，防每次启动重烧 LLM）；锁文件独占创建 + 10 分钟过期接管（初版 1h，真实验证后调低）；保存前 `.bak` 备份、失败回滚复原；`app.run()` 启动 `create_task` 后台执行、退出取消，合并逻辑零新增复用 P53。② `recall.py` 新增 `RecallPrefetcher`——首次 poll 发射任务立即放行（首 token 零阻塞），后续轮 await 残余（通常 0s），整体 8s 超时/失败降级头部截断；`_adopt_session` 换会话重置。**中途设计修正**：初版纯跳过语义（未完成返回 None）被真实验证打回——flash 快模型 round 1 约 1s 结束、round 2 时 recall 还没完成，两轮回合注不上；修正为 mewcode 语义"首轮放行、后续 await"。**连锁修复潜伏缺陷**：agent_loop 在 PRE_LLM hook 前快照 api_messages——hook 的 system_prompt 注入（含 P52 以来的旧串行 recall！）从未进过当轮请求，修复为 hook 后变化则重建。25 个新测试，1276→1301。真实 LLM 验证 7/7 ALL PASS（experiments/verify_memory_cadence.py：真实合并 6→4 / 重跑 gated / 锁 held / 注错回滚复原 / 首 poll 0.0s 对照串行 1.6s / 超时降级 / -p 端到端模型按注入记忆答出埋点虚构名）。诚实边界：>阈值时本回合首次 LLM 调用无记忆（无工具单轮回合整轮拿不到，第二次调用起保证）；后台整固终端与 remote 均启动（复验补接，公共方法两模式共用），headless 设计上不跑。详见 tech-notes §111。
 
-☐ **B14 MCP native 延迟加载模式（Anthropic defer_loading）**
+✅ **B14 MCP native 延迟加载模式（Anthropic defer_loading）**
 **来源**：对照扫描。mewcode MCP 三模式：eager / **native**（Anthropic 官方端点用 `defer_loading` 字段 + `anthropic-beta` tool-search header，模型原生按需搜索工具）/ dispatch；mini 只有 eager/dispatch——dispatch 是自建等效实现，对 Anthropic 官方端点没用上原生能力（原生模式无需自建 tool_search/mcp_call 中转、token 效率更高）。
 **方案**：`[mcp]` 配置 `loading = "native"` 第三选项；anthropic_provider 工具序列化时对 defer 工具加 `defer_loading: true` 并附 beta header；非 Anthropic 端点自动回退 dispatch。
 **验证要点**：native 模式请求体含 defer 字段与 header / 非 Anthropic 端点回退 / eager 与 dispatch 回归。工作量：小-中。
+已实现：`MCPServerConfig.loading = "native"` 第三选项——MCP 工具注册到 ToolRegistry 但带 `defer_loading: true`，Anthropic 服务端隐藏 schema 直到模型调 `tool_search` 返回 `tool_reference` 块展开。`AnthropicProvider` 自动附加 `anthropic-beta: advanced-tool-use-2025-11-20` header。非 Anthropic 端点 / 第三方网关自动降级为 dispatch。`_adjust_mcp_meta_tools()` 按生效模式动态注册/注销 `tool_search` 和 `mcp_call`。26 个新测试，1327 个全过。
 
 ☐ **B15 /undo 检查点增强（选择性恢复 + 快照容量）**
 **来源**：对照扫描的程度差距。mini `/undo [N]`：文件快照仅保留最近 5 轮、恢复只有"对话+文件一起回滚"一种；mewcode `/rewind`：每轮末快照、上限 100 个、恢复时**三选**（代码+对话 / 仅对话 / 仅代码）。"仅对话"场景真实存在（改动是对的但对话跑偏）；"仅代码"同理（讨论有价值但改动要扔）。

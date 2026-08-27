@@ -36,6 +36,7 @@ class ToolResult:
     output: str
     is_error: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -95,13 +96,14 @@ class Conversation:
                 _attach_thinking(api_msg, msg)
                 result.append(api_msg)
             elif msg.role == Role.TOOL and msg.tool_result:
-                result.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": msg.tool_result.call_id,
-                        "content": msg.tool_result.output,
-                    }
-                )
+                tr_msg: dict[str, Any] = {
+                    "role": "tool",
+                    "tool_call_id": msg.tool_result.call_id,
+                    "content": msg.tool_result.output,
+                }
+                if msg.tool_result.content_blocks:
+                    tr_msg["content_blocks"] = msg.tool_result.content_blocks
+                result.append(tr_msg)
             else:
                 api_msg = {"role": msg.role.value, "content": msg.content}
                 if msg.role == Role.ASSISTANT:

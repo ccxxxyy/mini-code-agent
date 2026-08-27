@@ -65,8 +65,8 @@ class MCPServerConfig:
     url: str = ""
     env: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
-    transport: str = "stdio"
-    loading: str = "eager"
+    transport: str = "stdio"  # "stdio" | "http" | "sse"
+    loading: str = "eager"  # "eager" | "native" | "dispatch"
 
 
 @dataclass

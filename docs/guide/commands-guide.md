@@ -239,7 +239,7 @@ deny 规则对会话内**所有 agent 实时生效**——包括正在运行的 
 `remove` 只移除当前会话规则表中的规则（scope+pattern+level 精确匹配）；来自 permissions.toml 的规则下次启动仍会加载，需编辑文件本身。
 
 ### /tools
-列出所有已注册工具（内置 + MCP，含 dispatch 模式的搜索提示）。无参数。
+列出所有已注册工具（内置 + MCP，含 dispatch/native 模式的搜索提示）。无参数。
 
 ---
 

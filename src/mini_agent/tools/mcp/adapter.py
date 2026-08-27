@@ -26,11 +26,13 @@ class MCPToolAdapter(Tool):
         server_name: str,
         tool_info: dict[str, Any],
         manager: MCPManager,
+        deferred: bool = False,
     ) -> None:
         self._server_name = server_name
         self._tool_info = tool_info
         self._manager = manager
         self._name = f"mcp_{server_name}_{tool_info.get('name', 'unknown')}"
+        self.should_defer = deferred
 
     @property
     def schema(self) -> ToolSchema:
@@ -54,6 +56,7 @@ class MCPToolAdapter(Tool):
             name=self._name,
             description=info.get("description", ""),
             parameters=parameters,
+            defer_loading=self.should_defer,
         )
 
     async def execute(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:

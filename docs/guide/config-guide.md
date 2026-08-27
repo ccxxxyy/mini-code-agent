@@ -332,13 +332,13 @@ reason = "push 会影响远程仓库"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"                  # "stdio"（子进程）| "http"（远程）| "sse"
-loading = "eager"                    # "eager"（默认，全部注册）| "dispatch"（按需搜索+调用）
+loading = "eager"                    # "eager"（默认）| "native"（Anthropic 原生延迟）| "dispatch"（按需搜索+调用）
 
 # [mcp.servers.remote-api]
 # url = "http://localhost:8080/mcp"
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
-# loading = "dispatch"               # 大量工具时推荐延迟加载
+# loading = "dispatch"               # 大量工具时用延迟加载；Anthropic 官方端点可用 "native"（非官方自动降级 dispatch）
 ```
 
 ### 自定义 Agent 类型

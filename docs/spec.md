@@ -505,7 +505,7 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"              # stdio | http | sse
-    loading: str = "eager"                # eager | dispatch
+    loading: str = "eager"                # eager | native | dispatch
 
 
 @dataclass
@@ -2284,7 +2284,7 @@ class ReadFileTool(Tool):
 | `load_skill` | 激活已安装的技能（注入 prompt） | 无限制 |
 | `install_skill` | 从路径或 git URL 安装技能 | 无限制 |
 
-其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。
+其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。Anthropic 官方端点还支持 **native 模式**：工具注册到 ToolRegistry 但带 `defer_loading: true`，服务端隐藏 schema 直到模型调 `tool_search` 返回 `tool_reference` 块展开——无需 `mcp_call` 中转，且 tools[] 数组不变保护 prompt cache 前缀。非 Anthropic 端点配置 native 会自动降级为 dispatch。
 
 **Read-before-edit 强制（`tools/file_state_cache.py`）**：`FileStateCache` 记录每个被 `read_file` 读过的文件的 `mtime_ns`。`edit_file`（及覆盖已存在文件的 `write_file`）执行前过两道门——① 文件必须读过、② 读后 `mtime_ns` 未变——否则拒绝，防止基于陈旧内容或对未读文件的盲目修改。新建文件的 `write_file` 与 `delete_file` 豁免。缓存在 `ToolContext.file_state`，主 Agent 与每个 SubAgent 各持独立实例；成功编辑/写入后刷新条目，后续编辑无需重读。可通过 `[tools] enforce_read_before_edit = false` 关闭（默认 true，关闭时 `file_state=None` 门禁失效）。`ask_user`/`exit_plan_mode`/`task_*`/`load_skill`/`install_skill` 为流程工具（LLM 自主调用任务板/技能/计划审批/结构化提问）。
 
@@ -2292,7 +2292,7 @@ class ReadFileTool(Tool):
 
 ### 8.2 MCP 工具适配器 (`tools/mcp/adapter.py`)
 
-与 dispatch 模式相对的是**直接注册模式**：`MCPToolAdapter` 把 MCP 发现的工具包装为内部 `Tool` 注册进 ToolRegistry，工具名在构造时确定为 `mcp_{server}_{tool}`：
+eager 和 native 两种模式都通过 `MCPToolAdapter` 把 MCP 发现的工具包装为内部 `Tool` 注册进 ToolRegistry（dispatch 模式不注册），工具名在构造时确定为 `mcp_{server}_{tool}`：
 
 ```python
 class MCPToolAdapter(Tool):
@@ -2303,6 +2303,7 @@ class MCPToolAdapter(Tool):
         server_name: str,
         tool_info: dict[str, Any],   # MCP 发现返回的原始 dict
         manager: MCPManager,
+        deferred: bool = False,      # native 模式为 True
     ) -> None:
         self._server_name = server_name
         self._tool_info = tool_info

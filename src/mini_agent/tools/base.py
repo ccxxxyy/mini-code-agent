@@ -38,11 +38,12 @@ class ToolSchema:
     description: str
     parameters: list[ToolParameter]
     raw_parameters: dict[str, Any] | None = None
+    defer_loading: bool = False
 
     def to_json_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function calling format. 转换为 OpenAI function calling 格式。"""
         if self.raw_parameters is not None:
-            return {
+            result = {
                 "type": "function",
                 "function": {
                     "name": self.name,
@@ -50,6 +51,9 @@ class ToolSchema:
                     "parameters": self.raw_parameters,
                 },
             }
+            if self.defer_loading:
+                result["defer_loading"] = True
+            return result
         properties: dict[str, Any] = {}
         required: list[str] = []
         for p in self.parameters:
@@ -64,7 +68,7 @@ class ToolSchema:
             properties[p.name] = prop
             if p.required:
                 required.append(p.name)
-        return {
+        result = {
             "type": "function",
             "function": {
                 "name": self.name,
@@ -76,6 +80,9 @@ class ToolSchema:
                 },
             },
         }
+        if self.defer_loading:
+            result["defer_loading"] = True
+        return result
 
 
 @dataclass
@@ -158,6 +165,7 @@ class Tool(ABC):
     # 流式期间抢先执行——对话框不能和流式渲染交错（实测：ask_user 在流
     # 未结束时弹出，提示符被 trace 行淹没）。
     opens_dialog: bool = False
+    should_defer: bool = False
 
     @property
     def schema(self) -> ToolSchema:

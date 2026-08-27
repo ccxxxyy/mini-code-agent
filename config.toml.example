@@ -94,6 +94,17 @@
 # url = "http://localhost:8080/mcp"
 # transport = "http"
 # headers = { Authorization = "Bearer your-token-here" }   # 可选认证头
+#
+# loading 模式（默认 eager）：
+#   eager    — 全量注册到 tools[]，适合工具数量少的服务器
+#   native   — Anthropic 官方端点专用：工具带 defer_loading 留在 tools[] 但服务端
+#              隐藏 schema，模型调 tool_search 后展开（保护 prompt cache 前缀）
+#   dispatch — 工具不进 tools[]，通过 tool_search 发现、mcp_call 调用（通用方案）
+# 非 Anthropic 官方端点配置 native 会自动降级为 dispatch
+# [mcp.servers.big-toolbox]
+# command = "npx"
+# args = ["-y", "@mcp/server-everything"]
+# loading = "native"
 
 # 声明式 Hook 规则
 # action: "block"（默认）拒绝 | "confirm" 弹确认框 | "command" 执行命令 | "notify" 终端通知

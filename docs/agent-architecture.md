@@ -306,7 +306,7 @@ while True:
 
 **为什么需要**：Agent 不可能内置所有工具。MCP（Model Context Protocol）是标准化的工具扩展协议——第三方写一个 MCP server，Agent 通过配置即可接入，无需改代码。
 
-**本项目实现**：`tools/mcp/` 三层架构（transport/client/adapter）。支持 stdio（子进程）+ HTTP + SSE 三种传输。MCPToolAdapter 把外部工具包装成和内置工具完全一样的 Tool 对象——Agent 看不出区别。config.toml `[mcp.servers.*]` 配置即连。支持 `loading = "dispatch"` 延迟加载模式——工具不进全局列表，LLM 通过 tool_search 工具按需发现和调用（适合工具数量很多的 MCP 服务器）。
+**本项目实现**：`tools/mcp/` 三层架构（transport/client/adapter）。支持 stdio（子进程）+ HTTP + SSE 三种传输。MCPToolAdapter 把外部工具包装成和内置工具完全一样的 Tool 对象——Agent 看不出区别。config.toml `[mcp.servers.*]` 配置即连。三种加载模式：`eager`（默认，全量注册）/ `native`（Anthropic 官方端点 `defer_loading` + `tool_reference`，保护 prompt cache 前缀，非 Anthropic 自动降级）/ `dispatch`（工具不进全局列表，LLM 通过 tool_search 按需发现和调用）。
 
 **判断标准**：Agent 能不能无代码接入外部工具？有没有标准化的工具扩展协议？多传输支持？
 
