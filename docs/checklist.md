@@ -1659,3 +1659,19 @@
 - [x] 真实 LLM 验证（DashScope Anthropic 兼容端点 + qwen3.6-plus）：thinking 参数被接受、流式内容正确、`MINI_AGENT_THINKING=true mini -p` 工具调用 e2e 退出码 0；默认关闭回归 PASS
 - [x] 本地 mock e2e（`experiments/verify_thinking_e2e.py` 4/4）：官方形态 SSE → 真实 headless 管道，思考流渲染 / 签名往返（排 tool_use 前）/ `data:` 无空格解析全过
 - [ ] 官方 Anthropic API 补验：签名密码学校验的严格性（无效签名 400 只有官方端执行；真实思考流已经阿里云 MaaS 网关 Anthropic 协议端点验证）
+
+## B14 检查项：MCP native 延迟加载模式
+
+- [x] `MCPServerConfig.loading` 支持 `"native"` 第三选项
+- [x] native 模式双注册：MCP 工具注册到 ToolRegistry（`deferred=True`）+ 存入 `_dispatch_tools`
+- [x] `ToolSchema.defer_loading` + `to_json_schema()` 输出 `defer_loading: true`
+- [x] `AnthropicProvider._convert_tools()` 传递 `defer_loading`
+- [x] `AnthropicProvider.stream()` 检测到 defer 工具时附加 `anthropic-beta: advanced-tool-use-2025-11-20` header
+- [x] `_split_system()` 处理 `ToolResult.content_blocks`（tool_reference 块替代纯文本）
+- [x] `ToolSearchTool` native + anthropic 时返回 `tool_reference` content blocks；dispatch 时返回纯文本
+- [x] 非 Anthropic 端点（provider != anthropic 或 base_url 非官方）自动降级 dispatch
+- [x] `_adjust_mcp_meta_tools()`：eager 注销 tool_search + mcp_call；native 注销 mcp_call；dispatch 保留两者
+- [x] eager / dispatch 模式行为完全不变（向后兼容）
+- [x] 26 个新测试（test_mcp_native.py），1301→1327 全过
+- [x] 真实 LLM 验证 6/6：native 降级消息 / 降级后 dispatch 连接 / tool_search 发现工具 / mcp_call 调用成功 / eager 直接调用 / eager 下 tool_search 不存在
+- [ ] 官方 Anthropic API 补验：`defer_loading` 字段 + `tool_reference` 回传（需官方 API key）

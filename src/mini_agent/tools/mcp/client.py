@@ -95,6 +95,16 @@ class MCPManager:
 
         if config.loading == "dispatch":
             self._dispatch_tools[name] = conn.tools
+        elif config.loading == "native":
+            for tool_info in conn.tools:
+                adapter = MCPToolAdapter(
+                    server_name=name,
+                    tool_info=tool_info,
+                    manager=self,
+                    deferred=True,
+                )
+                tool_registry.register(adapter)
+            self._dispatch_tools[name] = conn.tools
         else:
             for tool_info in conn.tools:
                 adapter = MCPToolAdapter(

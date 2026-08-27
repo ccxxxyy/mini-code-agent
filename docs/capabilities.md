@@ -63,8 +63,9 @@
 - `client.py`：MCPManager — 标准握手（initialize → initialized → tools/list）、多服务器管理、工具调用代理
 - `adapter.py`：MCPToolAdapter — MCP 工具的 inputSchema 自动转为内部 ToolSchema，以 `mcp_{server}_` 前缀注册进同一个 ToolRegistry
 - 无缝的含义：适配后的 MCP 工具和内置工具走完全相同的调用管道——权限检查、Hook 链、错误处理自动生效
+- 三种加载模式（`MCPServerConfig.loading`）：`eager`（默认，全量注册）/ `native`（Anthropic 官方端点 `defer_loading` + `tool_reference`，保护 prompt cache 前缀，非 Anthropic 自动降级 dispatch）/ `dispatch`（工具不进 tools[]，LLM 通过 `tool_search` 按需发现、`mcp_call` 调用）
 
-**验证**：7 个单测（FakeMCPManager 模拟服务器）
+**验证**：33 个单测（FakeMCPManager 模拟服务器 + native 模式全链路）
 
 ---
 

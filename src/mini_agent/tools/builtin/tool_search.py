@@ -13,6 +13,17 @@ from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
 
+def _is_native_mode(ctx: ToolContext) -> bool:
+    for srv_cfg in ctx.config.mcp.servers.values():
+        if srv_cfg.loading == "native":
+            return True
+    return False
+
+
+def _is_anthropic_provider(ctx: ToolContext) -> bool:
+    return ctx.config.llm.provider == "anthropic"
+
+
 class ToolSearchParams(BaseModel):
     """Pydantic model for tool_search parameters."""
 
@@ -29,7 +40,7 @@ class ToolSearchTool(Tool):
     _description = (
         "Search available MCP tools by keyword. "
         "Returns matching tool names, descriptions, and parameter schemas. "
-        "Use this to discover tools before calling them with mcp_call."
+        "Use this to discover tools before calling them."
     )
     params_model = ToolSearchParams
 
@@ -54,6 +65,21 @@ class ToolSearchTool(Tool):
                 call_id="",
                 name="tool_search",
                 output="No dispatch-mode MCP tools available.",
+            )
+
+        if _is_native_mode(ctx) and _is_anthropic_provider(ctx):
+            content_blocks = []
+            for m in matches:
+                registry_name = f"mcp_{m['server']}_{m['name']}"
+                content_blocks.append({"type": "tool_reference", "tool_name": registry_name})
+            lines = [f"Found {len(matches)} tool(s), expanding schemas:"]
+            for m in matches:
+                lines.append(f"  - {m['name']}: {m['description']}")
+            return ToolResult(
+                call_id="",
+                name="tool_search",
+                output="\n".join(lines),
+                content_blocks=content_blocks,
             )
 
         lines: list[str] = [f"Found {len(matches)} tool(s):"]

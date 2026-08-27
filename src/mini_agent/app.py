@@ -805,12 +805,41 @@ class Application:
         连接 config 中列出的 MCP 服务器（异步——需要事件循环）。"""
         if not self.config.mcp.servers:
             return
+        self._effective_mcp_modes: dict[str, str] = {}
         for name, srv_cfg in self.config.mcp.servers.items():
             try:
-                count = await self.mcp_manager.connect_server(name, srv_cfg, self.tool_registry)
+                effective_cfg = srv_cfg
+                if srv_cfg.loading == "native" and not self._is_native_capable():
+                    from dataclasses import replace
+
+                    effective_cfg = replace(srv_cfg, loading="dispatch")
+                    self.terminal.show_info(
+                        f"MCP: {name} native mode not supported by "
+                        f"{self.config.llm.provider}, falling back to dispatch"
+                    )
+                count = await self.mcp_manager.connect_server(
+                    name, effective_cfg, self.tool_registry
+                )
+                self._effective_mcp_modes[name] = effective_cfg.loading
                 self.terminal.show_info(f"MCP: {name} connected ({count} tools)")
             except Exception as e:
                 self.terminal.show_error(f"MCP: {name} failed: {e}")
+        self._adjust_mcp_meta_tools()
+
+    def _is_native_capable(self) -> bool:
+        if self.config.llm.provider != "anthropic":
+            return False
+        base_url = (self.config.llm.base_url or "https://api.anthropic.com").rstrip("/")
+        return "api.anthropic.com" in base_url
+
+    def _adjust_mcp_meta_tools(self) -> None:
+        modes = set(self._effective_mcp_modes.values()) if self._effective_mcp_modes else set()
+        needs_search = bool(modes & {"dispatch", "native"})
+        needs_call = "dispatch" in modes
+        if not needs_search and self.tool_registry.get("tool_search"):
+            self.tool_registry.unregister("tool_search")
+        if not needs_call and self.tool_registry.get("mcp_call"):
+            self.tool_registry.unregister("mcp_call")
 
     def _show_budget_warning(self) -> None:
         """Show budget warning lines when spend crosses 80%/100%.

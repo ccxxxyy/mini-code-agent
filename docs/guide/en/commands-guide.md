@@ -239,7 +239,7 @@ Deny rules bind **every agent in the session, live** — including running spawn
 `remove` only removes rules from the current session's rule table (exact scope+pattern+level match); rules from permissions.toml will still be loaded on the next startup — edit the file itself to remove them.
 
 ### /tools
-List all registered tools (built-in + MCP, including search hints in dispatch mode). No parameters.
+List all registered tools (built-in + MCP, including search hints in dispatch/native mode). No parameters.
 
 ---
 

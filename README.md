@@ -38,7 +38,7 @@
 
 📋 **Persistent Tasks** — `/todo` with dependency tracking (`--after`), survives restarts
 
-🔌 **MCP Protocol** — stdio + HTTP + SSE transport, connect any MCP-compatible tool server via config; `loading = "dispatch"` for lazy discovery
+🔌 **MCP Protocol** — stdio + HTTP + SSE transport, connect any MCP-compatible tool server via config; three loading modes: eager / native (Anthropic `defer_loading`) / dispatch
 
 🔒 **OS Sandbox** — Linux bubblewrap/unshare + macOS seatbelt + Windows dual-mode (admin Low Integrity kernel-level / non-admin no file protection, documented only) — on by default (`[security] sandbox = true`)
 
@@ -117,7 +117,7 @@ Connect any [MCP](https://modelcontextprotocol.io/)-compatible tool server via c
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"          # "stdio" | "http" | "sse"
-loading = "dispatch"         # "eager" (register all) | "dispatch" (lazy search + call)
+loading = "dispatch"         # "eager" (register all) | "native" (Anthropic defer) | "dispatch" (lazy search + call)
 ```
 
 ### Skills
@@ -309,7 +309,7 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 mini-code-agent/
 ├── src/mini_agent/
 │   ├── core/        # Agent loop, state, sub-agents, teams, planner, mailbox, pane worker, cost tracker, task store, tool recorder, agent types, spawn backends
-│   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/dispatch) + hook system
+│   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/native/dispatch) + hook system
 │   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
 │   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/unshare/seatbelt/windows dual-mode), worktree isolation, remote confirm (cross-process)
 │   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher

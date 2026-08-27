@@ -2164,3 +2164,30 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] `experiments/verify_thinking_e2e.py` — 本地 mock SSE 服务器 e2e（官方事件形态）：thinking 参数 / 思考流渲染 / 签名往返排 tool_use 前 / 完整回合 4/4 PASS
 - [x] 真实思考流验证（阿里云 MaaS 网关 Anthropic 协议端点 + deepseek-v4-pro）：thinking_delta 真实流出、工具调用多轮无 400、无签名不回传闸门实证、退出码 0
 - [x] `llm/openai_provider.py` — `extra` 透传接线（文档与代码不符修复，setdefault 防覆盖核心字段）；qwen3.6-plus 真实验证 enable_thinking 开关生效（关思考后 9.11 vs 9.9 答错，开思考答对），1275→1276
+
+---
+
+## MCP native 延迟加载模式（tech-notes §112）
+
+### B14 实现
+- [x] `models/message.py` — `ToolResult` 新增 `content_blocks: list[dict] | None = None`；`to_api_messages()` 传递到中间 dict
+- [x] `tools/base.py` — `Tool` ABC 加 `should_defer: bool = False`；`ToolSchema` 加 `defer_loading: bool = False`；`to_json_schema()` 输出 `defer_loading: true`
+- [x] `tools/mcp/adapter.py` — `MCPToolAdapter(deferred=True)` 传递到 `ToolSchema.defer_loading`
+- [x] `tools/mcp/client.py` — `connect_server()` 加 `native` 分支：注册到 ToolRegistry（deferred=True）+ 存入 `_dispatch_tools`
+- [x] `llm/anthropic_provider.py` — `_convert_tools()` 传递 `defer_loading`；`stream()` 检测到 defer 工具时附加 `anthropic-beta: advanced-tool-use-2025-11-20` header；`_split_system()` 处理 `content_blocks`
+- [x] `tools/builtin/tool_search.py` — native + anthropic 时返回 `tool_reference` content blocks；dispatch 时纯文本
+- [x] `app.py` — `_is_native_capable()` 判断官方端点；`_connect_mcp_servers()` 非 Anthropic 自动降级 dispatch；`_adjust_mcp_meta_tools()` 按生效模式注销 tool_search/mcp_call
+- [x] `models/config.py` — `MCPServerConfig.loading` 注释补充 `"native"`
+
+### B14 测试
+- [x] `tests/unit/test_mcp_native.py` 新文件，26 个测试：
+  - ToolResult content_blocks 4 个（默认 None / 设值 / to_api_messages 传递 / 无 blocks 不含键）
+  - ToolSchema defer_loading 3 个（默认 False / True / raw_parameters）
+  - MCPToolAdapter deferred 3 个（默认 / True / JSON schema）
+  - connect_server 三模式 3 个（native 双注册 / eager 无 defer / dispatch 不入 registry）
+  - AnthropicProvider 4 个（_convert_tools 传递 / 不传递 / _split_system 有 blocks / 无 blocks）
+  - ToolSearchTool 2 个（native 返回 tool_reference / dispatch 返回文本）
+  - 自动降级 4 个（官方 / 无 URL / openai / 第三方网关）
+  - _adjust_mcp_meta_tools 3 个（eager / native / dispatch）
+- [x] 1301→1327 全过，ruff clean
+- [x] 真实 LLM 验证 6/6：native 降级消息 / dispatch 连接 / tool_search 发现 / mcp_call 调用 / eager 直接调用 / eager 下 tool_search 不存在

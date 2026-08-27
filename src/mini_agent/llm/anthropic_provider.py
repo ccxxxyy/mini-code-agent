@@ -38,6 +38,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 
 _EPHEMERAL = {"type": "ephemeral"}
 
+NATIVE_TOOL_SEARCH_BETA = "advanced-tool-use-2025-11-20"
+
 # Matches family + version in e.g. "claude-opus-4-6" / "claude-sonnet-4-5-20250929";
 # negative lookaheads keep date segments out of the version groups.
 # 匹配模型家族+版本号；负向前瞻避免把日期段当版本号。
@@ -143,11 +145,14 @@ class AnthropicProvider(LLMProvider):
                     "cache_control": {"type": "ephemeral"},
                 }
             ]
+        extra_headers: dict[str, str] = {}
         if tools:
             tools_list = self._convert_tools(tools)
             if tools_list:
                 tools_list[-1] = {**tools_list[-1], "cache_control": {"type": "ephemeral"}}
             body["tools"] = tools_list
+            if any(t.get("defer_loading") for t in tools_list):
+                extra_headers["anthropic-beta"] = NATIVE_TOOL_SEARCH_BETA
         _mark_last_user_for_cache(api_messages)
 
         # Retry rate limits / transient 5xx with backoff, only before any
@@ -155,7 +160,9 @@ class AnthropicProvider(LLMProvider):
         # 限流/瞬时 5xx 带退避重试，仅限任何 chunk 产出之前（理由同 openai_provider）。
         attempt = 0
         while True:
-            async with self._client.stream("POST", "/v1/messages", json=body) as response:
+            async with self._client.stream(
+                "POST", "/v1/messages", json=body, headers=extra_headers or None
+            ) as response:
                 if response.status_code in RETRYABLE_HTTP_STATUSES and attempt < MAX_HTTP_RETRIES:
                     delay = compute_retry_delay(attempt, response.headers.get("retry-after"))
                     attempt += 1
@@ -302,6 +309,8 @@ class AnthropicProvider(LLMProvider):
                     )
                 api_msgs.append({"role": "assistant", "content": content})
             elif role == "tool":
+                content_blocks = msg.get("content_blocks")
+                tool_content: Any = content_blocks if content_blocks else msg.get("content", "")
                 api_msgs.append(
                     {
                         "role": "user",
@@ -309,7 +318,7 @@ class AnthropicProvider(LLMProvider):
                             {
                                 "type": "tool_result",
                                 "tool_use_id": msg.get("tool_call_id", ""),
-                                "content": msg.get("content", ""),
+                                "content": tool_content,
                             }
                         ],
                     }
@@ -336,13 +345,14 @@ class AnthropicProvider(LLMProvider):
         anthropic_tools = []
         for tool in openai_tools:
             func = tool.get("function", tool)
-            anthropic_tools.append(
-                {
-                    "name": func.get("name", ""),
-                    "description": func.get("description", ""),
-                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-                }
-            )
+            entry: dict[str, Any] = {
+                "name": func.get("name", ""),
+                "description": func.get("description", ""),
+                "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+            }
+            if tool.get("defer_loading"):
+                entry["defer_loading"] = True
+            anthropic_tools.append(entry)
         return anthropic_tools
 
     def count_tokens(self, text: str) -> int:
