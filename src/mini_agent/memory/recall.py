@@ -1,4 +1,4 @@
-"""Selective memory recall -- LLM picks the most relevant memories (P52).
+"""Selective memory recall -- LLM picks the most relevant memories.
 选择性记忆召回——LLM 挑选与当前消息最相关的记忆。
 
 When memory count exceeds the threshold, a lightweight LLM call selects the
@@ -11,6 +11,7 @@ block the main request).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -90,3 +91,59 @@ class MemoryRecall:
             return [str(i) for i in ids]
         except (json.JSONDecodeError, ValueError, TypeError):
             return None
+
+
+class RecallPrefetcher:
+    """Parallel recall prefetch -- selection runs alongside the main LLM call
+    (tech-notes §111). 并行召回预取——挑选与主 LLM 调用并行。
+
+    Awaiting select_relevant() inline on the injection path adds a full LLM
+    round-trip to first-token latency. Instead, the first poll() starts the
+    selection as a background task and returns immediately -- the main LLM
+    call proceeds while the selector runs. Later polls await the result,
+    which by then has usually completed behind the previous round. Timeout
+    or failure degrades to head-truncation (recall must never break the
+    main request).
+    在注入路径上内联 await 会把一次完整 LLM 往返加进首 token 延迟。
+    首次 poll() 把挑选放进后台任务立即返回——主 LLM 调用与挑选并行。
+    后续 poll await 结果（通常已藏在上一轮延迟后面完成）。
+    超时或失败降级头部截断（召回绝不打断主请求）。"""
+
+    def __init__(self, llm: Any = None, timeout: float = 8.0) -> None:
+        self._recall = MemoryRecall(llm)
+        self._timeout = timeout
+        self._task: asyncio.Task[list[MemoryEntry]] | None = None
+
+    async def poll(
+        self,
+        entries: list[MemoryEntry],
+        user_message: str,
+        top_k: int = 5,
+    ) -> list[MemoryEntry] | None:
+        """First call starts the prefetch and returns None immediately (the
+        main LLM call proceeds unblocked); later calls await the selection --
+        it usually finished during the previous round, so only the residual
+        (bounded by the task's overall timeout) can block. Timeout/failure
+        returns head-truncation fallback.
+        首次调用启动预取并立即返回 None（主 LLM 调用不受阻）；后续调用
+        await 挑选结果——通常已在上一轮期间完成，最多阻塞残余时间（受任务
+        整体超时约束）。超时/失败返回头部截断降级。"""
+        if self._task is None:
+            self._task = asyncio.create_task(
+                asyncio.wait_for(
+                    self._recall.select_relevant(entries, user_message, top_k),
+                    timeout=self._timeout,
+                )
+            )
+            return None
+        try:
+            return await self._task
+        except Exception:
+            logger.warning("recall prefetch failed or timed out; falling back")
+            return entries[:FALLBACK_LIMIT]
+
+    def cancel(self) -> None:
+        """Cancel a pending prefetch and reset. 取消未完成的预取并重置。"""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None

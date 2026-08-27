@@ -525,7 +525,11 @@ class MemoryConfig:
     aggregate_spill_chars: int = 200_000  # 单轮工具结果累计超此值时按大小降序强制溢写
     recall_threshold: int = 10            # 记忆超过此数量时用 LLM 选择性召回
     recall_top_k: int = 5
+    recall_timeout: float = 8.0           # 并行召回预取超时秒数，超时注入头部截断
     consolidation_threshold: int = 20     # 条目超过此数量时用 LLM 语义合并相关记忆
+    auto_consolidate: bool = True         # 启动时双门槛满足则后台整固记忆
+    consolidate_min_hours: float = 24.0   # 门槛一：距上次后台整固的小时数
+    consolidate_min_sessions: int = 5     # 门槛二：期间活跃的新会话数
     session_cleanup_days: int = 30        # 旧会话启动时自动清理（0 = 禁用）
     compress_max_failures: int = 3        # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
     llm_summarize: bool = True            # LLM 语义摘要压缩（False = 抽取式截断）
@@ -1852,6 +1856,8 @@ User types message in terminal
 |    |      plan_mode? -> 隐藏写工具 schema (_WRITE_TOOLS)    |     |
 |    |      EventBus.emit(LLMRequestEvent)                    |     |
 |    |      HookManager.run(PRE_LLM)  <- 记忆注入在此发生     |     |
+|    |        (hook 改了 system_prompt 则重建 api_messages,   |     |
+|    |         保证注入进当轮请求, tech-notes §111.3)          |     |
 |    |      ContextManager.check_and_compress() 每次调用前    |     |
 |    |      ContextManager.ensure_fits() 溢出兜底强制截断     |     |
 |    |      LLMProvider.stream(messages, tools) -> chunks     |     |
@@ -2632,9 +2638,9 @@ class MemoryExtractor:
         ...
 ```
 
-**召回**（`memory/recall.py`，P52）：记忆条目超过 `recall_threshold`（默认 10）时，不再盲目注入前 N 条，而是用轻量 LLM 调用挑选与当前消息最相关的 top-k（默认 5）条。失败回退头部截断（`FALLBACK_LIMIT=10`）。
+**召回**（`memory/recall.py`，P52 + tech-notes §111 并行预取）：记忆条目超过 `recall_threshold`（默认 10）时，不再盲目注入前 N 条，而是用轻量 LLM 调用挑选与当前消息最相关的 top-k（默认 5）条。失败回退头部截断（`FALLBACK_LIMIT=10`）。挑选经 `RecallPrefetcher` 与主 LLM 调用**并行预取**：本回合首次 PRE_LLM 发射后台任务立即放行（不阻塞首 token），后续轮 await 结果（通常已藏在上一轮延迟后面完成）；整体超时 `recall_timeout`（默认 8s），超时/失败降级头部截断注入。
 
-**合并**（`memory/consolidation.py`，P53）：词重叠去重只能捕捉表面相似性；条目超过阈值时，LLM 识别语义相关的组并各合并为一条（要求保留全部信息）。无合并或失败返回 `None`，调用方 no-op。
+**合并**（`memory/consolidation.py`，P53 + tech-notes §111 后台节律）：词重叠去重只能捕捉表面相似性；条目超过阈值时，LLM 识别语义相关的组并各合并为一条（要求保留全部信息）。无合并或失败返回 `None`，调用方 no-op。除阈值触发与手动 `/memory consolidate` 外，`ConsolidationScheduler` 在启动时以后台任务按**时间 + 会话数双门槛**（距上次 ≥ `consolidate_min_hours` 且新会话 ≥ `consolidate_min_sessions`）整固用户级 + 项目级记忆，用户无感；锁文件防多实例并发，保存前备份、失败回滚。
 
 ### 10.6 会话持久化
 
@@ -2924,7 +2930,7 @@ class AgentTeam:
 
 ### 12.5 远程/浏览器模式 (`remote/`)
 
-P57。`remote/server.py` 的 `RemoteServer` 启动 WebSocket 服务器替代终端 UI：包装 `Application` 的 terminal 拦截 UI 调用，以 NDJSON 事件与浏览器双向通信（`GET /` 返回内置 HTML 页面，`/ws` 升级 WebSocket）。共享同一个 `Application` 实例——引擎、工具、权限、记忆全部复用，只换交互层。
+P57。`remote/server.py` 的 `RemoteServer` 启动 WebSocket 服务器替代终端 UI：包装 `Application` 的 terminal 拦截 UI 调用，以 NDJSON 事件与浏览器双向通信（`GET /` 返回内置 HTML 页面，`/ws` 升级 WebSocket）。共享同一个 `Application` 实例——引擎、工具、权限、记忆全部复用（含启动时的后台记忆整固节律，经 `Application.start_background_consolidation()` 公共方法与终端模式共用接线、退出时取消），只换交互层。
 
 ---
 

@@ -17,7 +17,7 @@ IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".idea", ".vscod
 
 
 class GlobParams(BaseModel):
-    """Pydantic model for glob parameters (P46). Auto-generates ToolSchema."""
+    """Pydantic model for glob parameters. Auto-generates ToolSchema."""
 
     pattern: str = Field(description="Glob pattern to match files against")
     path: str | None = Field(

@@ -174,7 +174,7 @@ while True:
 
 **为什么需要**：三个子系统——**选择**（什么值得记）、**提取**（从对话中抽取）、**整合**（去重合并）。不是所有信息都值得记——"你好"不值得，"我喜欢简洁注释"值得。
 
-**本项目实现**：`memory/persistent.py` PersistentMemory（用户级 + 项目级双层）+ `memory/extraction.py` LLM 结构化提取（P30 从 regex 升级）+ `memory/recall.py` 选择性召回 + `memory/consolidation.py` 语义合并 + PRE_LLM hook 自动注入。三类提取：preference / convention / fact。60% 词重叠去重。
+**本项目实现**：`memory/persistent.py` PersistentMemory（用户级 + 项目级双层）+ `memory/extraction.py` LLM 结构化提取（P30 从 regex 升级）+ `memory/recall.py` 选择性召回（挑选与主 LLM 调用并行预取，不加首 token 延迟）+ `memory/consolidation.py` 语义合并（阈值触发 + 启动时后台节律：时间+会话数双门槛、锁防并发、失败回滚）+ PRE_LLM hook 自动注入。三类提取：preference / convention / fact。60% 词重叠去重。详见 tech-notes §111。
 
 **判断标准**：Agent 重启后还记得上次的偏好吗？记忆是自动提取的还是必须手动？有没有去重防膨胀？
 

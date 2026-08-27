@@ -1,4 +1,4 @@
-"""Embedded HTML/JS/CSS browser frontend for remote mode (P57).
+"""Embedded HTML/JS/CSS browser frontend for remote mode.
 远程模式的嵌入式 HTML/JS/CSS 浏览器前端。"""
 
 from __future__ import annotations

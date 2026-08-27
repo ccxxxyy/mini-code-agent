@@ -15,7 +15,7 @@ from mini_agent.tools.base import Tool, ToolContext
 
 
 class EditFileParams(BaseModel):
-    """Pydantic model for edit_file parameters (P46). Auto-generates ToolSchema."""
+    """Pydantic model for edit_file parameters. Auto-generates ToolSchema."""
 
     file_path: str = Field(
         description="Path to the file to edit (absolute or relative to working dir)"

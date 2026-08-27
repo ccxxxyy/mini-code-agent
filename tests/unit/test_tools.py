@@ -79,7 +79,7 @@ def test_validate_args_fills_defaults():
     assert validated["limit"] == 2000
 
 
-# --- Pydantic Schema generation (P46) ---
+# --- Pydantic Schema generation ---
 
 
 def test_pydantic_schema_generation():
@@ -361,7 +361,7 @@ async def test_grep_invalid_regex(tool_context):
     assert result.is_error
 
 
-# --- Pydantic schema for all other tools (P46) ---
+# --- Pydantic schema for all other tools ---
 
 
 def test_write_file_pydantic_schema():

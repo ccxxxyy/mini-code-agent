@@ -83,11 +83,11 @@ class SummarizeOldest(CompressionStrategy):
     """Stage 2: Summarize the oldest portion of messages into one summary message.
     第 2 级：把最旧的一批消息总结成一条摘要消息。
 
-    Uses a simple extractive approach (no LLM call in P4 — keeps it fast
+    Uses a simple extractive approach (no LLM call — keeps it fast
     and avoids recursive API calls). A full LLM-based summary can be
     plugged in later.
 
-    使用简单的抽取式方法（P4 阶段不调用 LLM——保持速度快并避免递归 API 调用）。
+    使用简单的抽取式方法（不调用 LLM——保持速度快并避免递归 API 调用）。
     以后可以接入完整的基于 LLM 的摘要。
     """
 

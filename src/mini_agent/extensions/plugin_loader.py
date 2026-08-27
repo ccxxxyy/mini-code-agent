@@ -1,5 +1,5 @@
 """Plugin ecosystem -- third-party packages/files registering tools, commands, skills.
-插件生态——第三方 pip 包 / 本地文件注册工具、命令、技能（P83）。
+插件生态——第三方 pip 包 / 本地文件注册工具、命令、技能。
 
 Discovery runs on two channels 发现走双通道:
 

@@ -98,6 +98,18 @@ class MemoryConfig:
     # semantically related memories into one
     # 记忆合并：条目超过此数量时用 LLM 语义合并相关记忆
     consolidation_threshold: int = 20
+    # Background consolidation cadence: at startup, when both gates pass
+    # (>= min hours since last run AND >= min new sessions), memories are
+    # consolidated in a background task -- invisible to the user
+    # 后台整固节律：启动时双门槛（距上次 >= 小时数 且 新会话 >= 个数）
+    # 满足则后台任务整固记忆——用户无感
+    auto_consolidate: bool = True
+    consolidate_min_hours: float = 24.0
+    consolidate_min_sessions: int = 5
+    # Recall prefetch runs in parallel with the main LLM call; past this many
+    # seconds the selection is abandoned and head-truncation is injected
+    # recall 预取与主 LLM 调用并行；超过此秒数放弃挑选、注入头部截断
+    recall_timeout: float = 8.0
     # Sessions older than this many days are auto-removed at startup (0 = off)
     # 超过此天数的旧会话启动时自动清理（0 = 禁用）
     session_cleanup_days: int = 30
@@ -140,7 +152,7 @@ class SecurityConfig:
 
 @dataclass
 class CostConfig:
-    """Cost tracking: per-model pricing and session budget (P29).
+    """Cost tracking: per-model pricing and session budget.
     成本跟踪：每模型价格与会话预算。"""
 
     # model name -> {"input": price per 1M tokens, "output": ...} 元/百万 token
@@ -152,7 +164,7 @@ class CostConfig:
 
 @dataclass
 class ContextConfig:
-    """Context awareness: project instruction file injection (P25).
+    """Context awareness: project instruction file injection.
     上下文感知：项目指令文件注入。"""
 
     # Priority order, first match wins 优先级顺序，第一个命中即用
@@ -208,7 +220,7 @@ class AgentConfig:
     listener_dirs: list[str] = field(
         default_factory=lambda: ["./.mini-agent/listeners", "~/.mini-agent/listeners"]
     )
-    # Plugin dirs: *.py files registering tools/commands/skills (P83).
+    # Plugin dirs: *.py files registering tools/commands/skills.
     # pip packages register via the mini_agent.plugins entry-point group instead.
     # 插件目录：*.py 文件注册工具/命令/技能；pip 包走 mini_agent.plugins entry point。
     plugin_dirs: list[str] = field(

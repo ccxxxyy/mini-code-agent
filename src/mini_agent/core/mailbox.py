@@ -21,7 +21,7 @@ channel is needed -- cross-process delivery latency is bounded by the poll
 interval. 唤醒说明：mini 的 worker 靠 wait_message 轮询（0.5s）跨进程
 收信，无需推送通道，投递延迟上界即轮询间隔。
 
-Messages carry an optional structured protocol (P58.4):
+Messages carry an optional structured protocol:
 type=text/request/response with request_id correlation and an approve
 verdict. Drained messages are marked read and kept on disk for audit
 within the session; a new SubAgentManager wipes stale inbox files.

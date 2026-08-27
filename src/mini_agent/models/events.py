@@ -39,7 +39,7 @@ class LLMResponseEvent(Event):
     content: str = ""
     has_tool_calls: bool = False
     tokens_used: int = 0
-    # Input/output split + model name for cost tracking (P29)
+    # Input/output split + model name for cost tracking
     # 输入/输出拆分 + 模型名——供成本跟踪
     prompt_tokens: int = 0
     completion_tokens: int = 0

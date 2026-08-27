@@ -370,7 +370,7 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 
 | | mini | mewcode |
 |---|---|---|
-| 记忆注入方式 | **LLM 选择性召回**——记忆 >10 条时 LLM 挑最相关的 ≤5 条注入 (P52) | **LLM 选择性召回**——先让 LLM 挑最相关的 ≤5 条 |
+| 记忆注入方式 | **LLM 选择性召回**——记忆 >10 条时 LLM 挑最相关的 ≤5 条注入 (P52)，**并行预取**（tech-notes §111） | **LLM 选择性召回**——先让 LLM 挑最相关的 ≤5 条，与主调用并行预取（8s 超时） |
 
 **已完成**（P52）：
 - `memory/recall.py` 新模块：`MemoryRecall.select_relevant()`——轻量 LLM 调用挑选相关记忆
@@ -380,11 +380,13 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 - fail-safe：LLM 失败/解析失败/幻觉 ID → 静默回退头部截断 `entries[:10]`
 - 保持 LLM 返回的相关性排序注入
 
+**已补齐并行预取**（tech-notes §111）：原实现串行 await 在注入路径上（一次 LLM 往返加进首 token 延迟），现 `RecallPrefetcher` 与主 LLM 调用并行——首次 PRE_LLM 发射任务立即放行，后续轮 await 残余（通常已完成），`recall_timeout`（默认 8s）超时/失败降级头部截断。程度差距已闭合；边界：>阈值时本回合首次 LLM 调用没有记忆（与 mewcode"工具执行后非阻塞注入"同语义）。
+
 ### 4.5 记忆合并 ✅ 已实现（P53）
 
 | | mini | mewcode |
 |---|---|---|
-| 重复记忆处理 | 60% 词重叠去重（提取时预过滤）+ **LLM 语义合并**（超阈值触发）(P53) | **LLM 语义合并**——自动把相关记忆整合成一条 |
+| 重复记忆处理 | 60% 词重叠去重（提取时预过滤）+ **LLM 语义合并**（超阈值触发 + **后台节律**，tech-notes §111）(P53) | **LLM 语义合并**——自动把相关记忆整合成一条（autoDream：≥24h 且 ≥5 会话后台跑） |
 
 **已完成**（P53）：
 - `memory/consolidation.py` 新模块：`MemoryConsolidator.consolidate()`——LLM 识别语义相关的记忆组并合并
@@ -392,6 +394,8 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 - 合并规则：保留组内最新 `created_at`、tags 并集、source="extracted"、未合并条目原样保留
 - 防护：幻觉 ID 过滤、单 ID 组忽略、跨组重复 ID 只处理首组、fail-safe 静默 no-op
 - `/memory consolidate` 手动触发子命令（无阈值限制，≥2 条即可跑）
+
+**已补齐后台节律**（tech-notes §111，对齐 autoDream）：`ConsolidationScheduler` 启动时后台任务按时间 + 会话数双门槛（≥24h 且 ≥5 新会话，per-scope 状态）整固用户级 + 项目级记忆，不受 20 条阈值限制、用户无感；锁文件防多实例并发、保存前备份失败回滚。程度差距已闭合；边界：终端与 remote 模式均启动（共用 Application 公共方法接线），headless 设计上不跑（一次性进程防 CI 每跑烧 LLM）。
 
 ### 4.6 记忆存储格式 ✅ 已实现（P61：导出/导入互操作）
 

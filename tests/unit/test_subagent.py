@@ -178,7 +178,7 @@ async def test_subagent_isolated_registry(tmp_path):
     assert registry.get("write_file") is not None
 
 
-# --- Agent type integration (P48) ---
+# --- Agent type integration ---
 
 
 async def test_subagent_with_explore_type(tmp_path):

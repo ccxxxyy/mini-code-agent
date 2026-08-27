@@ -1,4 +1,4 @@
-"""WebSocket server for remote/browser mode (P57).
+"""WebSocket server for remote/browser mode.
 远程/浏览器模式的 WebSocket 服务器。
 
 Starts a WebSocket server that replaces the terminal UI with NDJSON events
@@ -85,6 +85,9 @@ class RemoteServer:
         print("  Waiting for browser connection...")
 
         await self._restore_last_session()
+        # Background memory consolidation: same gated task as terminal mode
+        # (tech-notes §111) 后台记忆整固：与终端模式共用同一门槛化任务
+        self._app.start_background_consolidation()
 
         async with websockets.serve(
             self._handler,
@@ -96,6 +99,7 @@ class RemoteServer:
             try:
                 await asyncio.Future()
             finally:
+                await self._app.stop_background_consolidation()
                 await self._save_on_shutdown()
 
     async def _restore_last_session(self) -> None:

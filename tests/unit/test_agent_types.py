@@ -1,4 +1,4 @@
-"""Tests for the agent type definition system (P48).
+"""Tests for the agent type definition system.
 Agent 类型定义系统的测试。"""
 
 import pytest

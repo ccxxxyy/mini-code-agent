@@ -24,7 +24,7 @@ def _agent_type_description() -> str:
 
 
 class SpawnAgentsParams(BaseModel):
-    """Pydantic model for spawn_agents parameters (P46). Auto-generates ToolSchema."""
+    """Pydantic model for spawn_agents parameters. Auto-generates ToolSchema."""
 
     tasks: list[str] = Field(description="List of task descriptions, one per sub-agent")
     names: list[str] | None = Field(

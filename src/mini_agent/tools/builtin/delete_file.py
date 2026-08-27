@@ -13,7 +13,7 @@ from mini_agent.tools.base import Tool, ToolContext
 
 
 class DeleteFileParams(BaseModel):
-    """Pydantic model for delete_file parameters (P46). Auto-generates ToolSchema."""
+    """Pydantic model for delete_file parameters. Auto-generates ToolSchema."""
 
     file_path: str = Field(
         description="Path to the file to delete (absolute or relative to working dir)"

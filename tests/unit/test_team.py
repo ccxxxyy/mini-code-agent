@@ -308,7 +308,7 @@ async def test_failed_dependency_skips_dependent(tmp_path):
     assert "Skipped" in (report.results[1].error or "")
 
 
-# --- Coordinator mode (P45) Coordinator 模式 ---
+# --- Coordinator mode Coordinator 模式 ---
 
 
 async def test_coordinator_mode_prompt_injection(tmp_path):

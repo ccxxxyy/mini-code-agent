@@ -1,4 +1,4 @@
-"""Remote terminal adapter for browser mode (P57).
+"""Remote terminal adapter for browser mode.
 浏览器模式的远程终端适配器。
 
 Wraps the real Terminal to intercept calls and send them to WebSocket.

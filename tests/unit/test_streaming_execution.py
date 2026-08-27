@@ -1,4 +1,4 @@
-"""Tests for streaming tool execution (P38).
+"""Tests for streaming tool execution.
 流式工具执行的测试。"""
 
 import asyncio

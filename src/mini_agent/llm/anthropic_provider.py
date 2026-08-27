@@ -120,7 +120,7 @@ class AnthropicProvider(LLMProvider):
         body: dict[str, Any] = {
             "model": self._config.model,
             "messages": api_messages,
-            # kwargs override supports max_tokens recovery retries (P44)
+            # kwargs override supports max_tokens recovery retries
             # kwargs 覆盖支持 max_tokens 恢复重试
             "max_tokens": max_tokens,
             "stream": True,

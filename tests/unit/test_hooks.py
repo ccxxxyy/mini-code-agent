@@ -573,7 +573,7 @@ async def test_confirm_always_grants_session(tool_context):
     assert len(prompts) == 1  # second call auto-granted 第二次自动放行
 
 
-# --- Confirm + condition (B10 D scenarios) ---
+# --- Confirm + condition (tech-notes §109, confirm 场景组) ---
 
 
 async def test_confirm_condition_match_fires(tool_context):
@@ -774,7 +774,7 @@ async def test_confirm_condition_without_callback_denies(tool_context):
     assert not target.exists()
 
 
-# --- Condition expression matching (B10) ---
+# --- Condition expression matching (tech-notes §109) ---
 
 
 async def test_hook_rule_condition_matches():
@@ -870,7 +870,7 @@ async def test_hook_rule_condition_with_args_dot_access():
     assert allowed.action == HookAction.CONTINUE
 
 
-# --- Notify action (B10) ---
+# --- Notify action (tech-notes §109) ---
 
 
 async def test_hook_rule_notify_fires_callback():
@@ -942,7 +942,7 @@ async def test_hook_rule_notify_missing_message_skipped():
     assert n == 0
 
 
-# --- Command action (B10) ---
+# --- Command action (tech-notes §109) ---
 
 
 async def test_hook_rule_command_pre_tool_success():
