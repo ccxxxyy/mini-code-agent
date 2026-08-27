@@ -123,6 +123,9 @@ class MemoryConfig:
     # Use LLM semantic summary for compression (True) or extractive truncation (False)
     # 压缩时用 LLM 语义摘要（True）还是抽取式截断（False）
     llm_summarize: bool = True
+    # /undo file snapshots: keep the last N turns (raise for deeper rollback)
+    # /undo 文件快照：保留最近 N 轮（调大可回滚更早的改动）
+    undo_keep_turns: int = 5
 
 
 @dataclass

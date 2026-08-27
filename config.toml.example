@@ -34,6 +34,7 @@
 # llm_summarize = true           # LLM semantic summary for compression (false = extractive truncation) 压缩用 LLM 语义摘要（false = 抽取式截断）
 # session_cleanup_days = 30      # Normally-closed sessions older than N days auto-removed at startup (0 = off) 正常关闭超 N 天的会话启动时自动清理（0 = 禁用）
 # crashed_session_cleanup_days = 40  # Crashed sessions older than N days also removed (0 = keep forever) 崩溃会话超 N 天也清理（0 = 永久保留）
+# undo_keep_turns = 5            # /undo file snapshots: keep the last N turns /undo 文件快照保留最近 N 轮（调大可回滚更早改动）
 # auto_consolidate = true        # Background memory consolidation at startup when both gates below pass 启动时双门槛满足则后台整固记忆
 # consolidate_min_hours = 24.0   # Gate 1: hours since last background consolidation 门槛一：距上次后台整固的小时数
 # consolidate_min_sessions = 5   # Gate 2: new sessions active since last run 门槛二：期间活跃的新会话数

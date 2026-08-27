@@ -279,7 +279,7 @@ mini-code-agent/
 │       ├── security/           # 安全层（权限、路径守卫、审计、OS 沙箱 bwrap/unshare/seatbelt/Windows 双模式、worktree 隔离、跨进程权限确认）
 │       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、双 Esc 中断）
 │       ├── remote/             # 远程/浏览器模式（WebSocket 服务器 + 嵌入式 HTML/JS 客户端、断连排队）
-│       ├── extensions/         # 扩展协议（26 个斜杠命令、4 个技能包、事件监听插件、插件生态 plugin_loader）
+│       ├── extensions/         # 扩展协议（27 个斜杠命令、4 个技能包、事件监听插件、插件生态 plugin_loader）
 │       ├── llm/                # LLM Provider 抽象层（OpenAI Chat Completions + Responses API + Anthropic、Token 计数）
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
@@ -456,8 +456,10 @@ LLM 回答不满意时，不用继续追问（对话越来越乱）也不用 `/c
 ### /undo —— 回滚重来
 
 ```
-/undo        # 撤销最后一轮（你的问题 + LLM 的回答 + 工具调用记录全部删除）
-/undo 3      # 一次撤销最后 3 轮
+/undo                # 撤销最后一轮（你的问题 + LLM 的回答 + 工具调用记录全部删除）
+/undo 3              # 一次撤销最后 3 轮
+/undo --code-only    # 仅还原文件改动，对话保留（讨论有价值但改动要扔）
+/undo --conv-only    # 仅回滚对话，文件保持现状（改动是对的但对话跑偏）
 ```
 
 回滚后 LLM 完全"忘记"被撤销的内容——重新问会得到不受之前回答影响的全新答案。**文件操作也会一并撤销**（P27 操作级撤销）：该轮新建的文件删掉、修改的还原、删除的找回：
@@ -474,7 +476,7 @@ Context is now 1240 tokens.
 **适用场景**：换个问法重试、提问后发现给错了信息、撤销一轮误操作的文件修改、清掉一轮跑偏的探索。
 
 **操作级撤销的边界**：
-- 快照只保留**最近 5 轮**——更早的轮次只回滚对话不恢复文件
+- 快照默认只保留**最近 5 轮**（`[memory] undo_keep_turns` 可调大）——更早的轮次只回滚对话不恢复文件，`/undo` 会明确警告该部分未恢复
 - 单文件超过 **30MB** 不快照（undo 时提示手动恢复）
 - **bash 命令**改的文件不快照（无法预知 shell 会改什么）
 - 快照存 `.mini-agent/undo_snapshots/`（磁盘临时目录），会话结束自动清空
@@ -953,7 +955,7 @@ command = "ruff format $TOOL_ARGS.file_path"
 | `/compact` | 手动压缩对话历史 |
 | `/memory [add\|delete\|consolidate\|export\|import]` | 查看、添加、删除、合并、导出或导入持久记忆 |
 | `/session save\|new\|list\|load\|delete\|tag\|untag\|tags` | 会话管理（new 安全另起新会话，tag 分类标签，list 默认最近 20 条 / --page N 翻页 / --all 全部 / --tag 过滤） |
-| `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问 |
+| `/undo [N]` | 回滚最后 N 轮对话（默认 1），可换个问法重新问；`--code-only`/`--conv-only` 选择性恢复 |
 | `/fork [N]` | 分叉出新会话（可选先回滚 N 轮），原会话保留可随时回去 |
 | `/record start\|stop\|cancel\|list\|delete` | 录制工具调用序列为可重放脚本 |
 | `/replay <名称>` | 零 LLM 确定性重放已录制的工具序列 |

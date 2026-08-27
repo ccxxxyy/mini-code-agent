@@ -162,7 +162,7 @@ mini-code-agent/
 │
 ├── docs/                            # 18 个文档：14 个专题 + 4 个英文版指南（guide/en/）
 │   ├── guide/                       # 使用指南（面向使用者）
-│   │   ├── commands-guide.md        # 26 个斜杠命令完整语法与示例
+│   │   ├── commands-guide.md        # 27 个斜杠命令完整语法与示例
 │   │   ├── config-guide.md          # 配置文件与上下文文件完全指南
 │   │   ├── output-guide.md          # 终端输出格式与样式说明
 │   │   ├── terminal-guide.md        # 各系统终端打开方法与兼容性
@@ -533,6 +533,7 @@ class MemoryConfig:
     session_cleanup_days: int = 30        # 旧会话启动时自动清理（0 = 禁用）
     compress_max_failures: int = 3        # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
     llm_summarize: bool = True            # LLM 语义摘要压缩（False = 抽取式截断）
+    undo_keep_turns: int = 5              # /undo 文件快照保留最近 N 轮
 
 
 @dataclass
@@ -1423,7 +1424,7 @@ class SlashCommandRegistry:
 
     def is_slash_command(self, text: str) -> bool: ...
 
-    # Built-in commands (26 visible + 1 hidden):
+    # Built-in commands (27 visible + 1 hidden):
     # /help, /clear, /status, /model, /compact, /memory, /session,
     # /plan, /tools, /skill, /plugins, /allow, /deny, /exit, /undo,
     # /fork, /trace, /explain, /audit, /theme, /spawn, /team, /todo,
@@ -1945,7 +1946,7 @@ class EventBus:
 
 ### 6.2 事件类型 (`models/events.py`)
 
-全部 14 个事件类型如下。注意事件字段刻意保持**扁平的基础类型**（str/int/bool/dict），不引用 LLMResponse、ToolResult 等富对象——事件是给观察者（trace、成本跟踪、监听器插件）消费的快照，不是数据通道。
+全部 17 个事件类型如下。注意事件字段刻意保持**扁平的基础类型**（str/int/bool/dict），不引用 LLMResponse、ToolResult 等富对象——事件是给观察者（trace、成本跟踪、监听器插件）消费的快照，不是数据通道。
 
 ```python
 from dataclasses import dataclass, field
@@ -2646,7 +2647,7 @@ class MemoryExtractor:
 ### 10.6 会话持久化
 
 - **`memory/session_store.py`**：会话以 JSON 存于 `~/.mini-agent/sessions/`。元数据含 `closed_cleanly` 标志——启动时发现上次未干净退出的会话即提示崩溃恢复（终端询问式 / 远程自动恢复）。`cleanup_stale(max_age_days, crashed_max_age_days)` 清理过期会话：正常关闭超 30 天删除，崩溃会话超 40 天也删除（`crashed_session_cleanup_days` 配置，0 永久保留）。
-- **`memory/file_snapshots.py`**：操作级 `/undo` 的文件快照。只保留最近 `KEEP_TURNS=5` 轮；单文件超 `MAX_SNAPSHOT_BYTES=30MB` 跳过快照（恢复时提示手动处理）。
+- **`memory/file_snapshots.py`**：操作级 `/undo` 的文件快照。只保留最近 `keep_turns` 轮（`[memory] undo_keep_turns` 配置，默认 5）；单文件超 `MAX_SNAPSHOT_BYTES=30MB` 跳过快照（恢复时提示手动处理）。`restore_turns()` 按轮倒序恢复；`discard_turns()` 丢弃快照不恢复文件（`/undo --conv-only` 仅回滚对话时使用）。
 - **`memory/project_context.py`**：启动时按优先级查找项目指令文件（`AGENT.md` → `CLAUDE.md` → `.mini-agent/instructions.md`，可经 `[context]` 配置），连同用户级 `~/.mini-agent/instructions.md` 注入 system prompt（默认 8000 字符截断）。支持 @-include 递归引用：指令文件中整行 `@./path` 或 `@~/path` 展开为引用文件内容（`_expand_includes` 逐行匹配，base_dir 跟文件走，循环/缺失注释降级，深度 5 可配，展开后整体截断）。
 
 ---
@@ -3086,7 +3087,7 @@ You are a code reviewer. Follow these steps:
 
 ### 14.2 斜杠命令如何接入
 
-内置命令由 `extensions/builtin_commands.py` 的 `register_builtin_commands(app)` 集中注册——共 26 个可见命令（help/clear/status/model/compact/memory/session/tools/skill/plugins/trace/explain/audit/theme/plan/spawn/team/todo/cost/record/replay/undo/fork/allow/deny/exit），外加隐藏别名 `/quit`（等价 `/exit`）。
+内置命令由 `extensions/builtin_commands.py` 的 `register_builtin_commands(app)` 集中注册——共 27 个可见命令（help/clear/status/model/compact/memory/session/tools/skill/plugins/trace/explain/audit/theme/plan/mode/spawn/team/todo/cost/record/replay/undo/fork/allow/deny/exit），外加隐藏别名 `/quit`（等价 `/exit`）。
 
 用户自定义命令通过**插件**的 `register_commands` 钩子注册（14.5）：
 

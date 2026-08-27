@@ -358,14 +358,14 @@ while True:
 
 Agent 的核心循环（S01）**永远不改**——所有新能力都以以下三种方式接入：
 - **注册**：工具注册到 ToolRegistry（S02）
-- **订阅**：EventBus 订阅者（Trace 订阅 8 种事件 / Audit 订阅 4 种 / Teach 订阅 2 种 / Recorder 订阅 2 种 / Cost 订阅 1 种，共 17 个订阅——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `extensions/event_listeners.py` 加载注册，异常隔离不影响主流程
+- **订阅**：EventBus 订阅者（Trace 订阅 11 种事件 / Audit 订阅 4 种 / Teach 订阅 2 种 / Recorder 订阅 2 种 / Cost 订阅 1 种，共 20 个订阅——都是纯订阅者，Agent 循环完全不知道它们的存在）；用户可零代码接入——`listener_dirs` 目录下的 *.py 插件（`register(bus)` 或 `on_event(event)` 契约）启动时经 `extensions/event_listeners.py` 加载注册，异常隔离不影响主流程
 - **钩子**：HookManager 注册 handler（PRE_LLM 记忆注入 / SESSION_END 记忆提取）
 
 这意味着你可以**拿掉任何一个机制**（如删掉 CostTracker），Agent 照常工作——机制是可插拔的。
 
 ### 4.2 数据所有权决定能力边界
 
-本项目 Conversation 是本地 dataclass——所以 `/undo`（截断列表）和 `/fork`（deepcopy）天然可行。CC 的对话在服务端——所以它**做不到**这两个。
+本项目 Conversation 是本地 dataclass——所以 `/undo`（截断列表，且能 `--code-only`/`--conv-only` 拆开"对话"与"文件"两个维度选择性恢复）和 `/fork`（deepcopy）天然可行。CC 的对话在服务端——所以它**做不到**这两个。
 
 这不是实现细节，而是**架构决策**：谁拥有数据，谁就有操作数据的能力。选择本地持有数据 = 放弃云端协同但获得数据操控自由。
 
