@@ -107,7 +107,7 @@
 | 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 20 个） |
 | 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
 | 对话分叉/回滚 ✅ | P26 实现：/undo 轮次回滚 + /fork 深拷贝分叉（差异化能力——CC 服务端历史做不到） |
-| 操作级撤销 ✅ | P27 实现：每轮文件快照（5 轮保留/30MB 上限/磁盘存储会话结束清空），/undo 新建删掉/修改还原/删除找回 |
+| 操作级撤销 ✅ | P27 实现：每轮文件快照（默认 5 轮保留可配置/30MB 上限/磁盘存储会话结束清空），/undo 新建删掉/修改还原/删除找回；B15 增强：--code-only/--conv-only 选择性恢复 + undo_keep_turns 容量配置 |
 | 工具链录制/回放 ✅ | P28 实现：EventBus 订阅式录制 + _execute_single_tool 安全等价回放（权限/hook/快照全走） |
 | 成本仪表盘 ✅ | P29 实现：LLMResponseEvent 扩展 + CostTracker 订阅者（第 5 个）+ [cost] 配置计价 + 预算 80/100 警告 |
 | 持久化任务系统 ✅ | P32 实现（S12 补全）：TaskStore 磁盘持久 + /todo 命令 + blockedBy 依赖追踪 + 解锁提示；P74 歧义前缀检测 + 最短唯一前缀显示 |
@@ -639,10 +639,11 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **验证要点**：native 模式请求体含 defer 字段与 header / 非 Anthropic 端点回退 / eager 与 dispatch 回归。工作量：小-中。
 已实现：`MCPServerConfig.loading = "native"` 第三选项——MCP 工具注册到 ToolRegistry 但带 `defer_loading: true`，Anthropic 服务端隐藏 schema 直到模型调 `tool_search` 返回 `tool_reference` 块展开。`AnthropicProvider` 自动附加 `anthropic-beta: advanced-tool-use-2025-11-20` header。非 Anthropic 端点 / 第三方网关自动降级为 dispatch。`_adjust_mcp_meta_tools()` 按生效模式动态注册/注销 `tool_search` 和 `mcp_call`。26 个新测试，1327 个全过。
 
-☐ **B15 /undo 检查点增强（选择性恢复 + 快照容量）**
+✅ **B15 /undo 检查点增强（选择性恢复 + 快照容量）**
 **来源**：对照扫描的程度差距。mini `/undo [N]`：文件快照仅保留最近 5 轮、恢复只有"对话+文件一起回滚"一种；mewcode `/rewind`：每轮末快照、上限 100 个、恢复时**三选**（代码+对话 / 仅对话 / 仅代码）。"仅对话"场景真实存在（改动是对的但对话跑偏）；"仅代码"同理（讨论有价值但改动要扔）。
 **方案**：`FileSnapshotStore` 的 KEEP_TURNS 提为配置（默认仍 5，可调大）；`/undo` 加 `--code-only` / `--conv-only` 参数（默认双回滚不变）。
 **验证要点**：三种恢复各自生效 / 默认行为回归 / 快照容量配置生效。工作量：小-中。
+已实现：`/undo [N] [--code-only | --conv-only]` 三选恢复——默认双回滚不变；`--code-only` 仅恢复文件（对话与轮次计数不动，讨论有价值但改动要扔）；`--conv-only` 仅回滚对话（文件保持现状并丢弃对应快照 `discard_turns()`，改动是对的但对话跑偏）。快照容量 `[memory] undo_keep_turns` 配置化（默认仍 5）。7 个新测试，1327→1334 全过。真实 LLM 三模式验证：`--code-only` 后文件删、对话在；`--conv-only` 后文件在、对话删；默认双回滚回归。终端实测补强：`/undo N` 覆盖超出保留窗口的轮次时明确警告（该部分文件改动未恢复），不再静默跳过；+3 测试 →1337。详见 tech-notes §113。
 
 ☐ **B16 交互 UX 小项包（对照扫描收集）**
 四个独立小项，可拆散实施：① **可折叠工具调用块**——只读工具（read_file/glob/grep）每轮 ≥2 次时自动折叠为一行摘要"✓ Done (N tool uses · Xs)"（mini 已有 ╭─╰─ 连线但不折叠；此项在 comparison 早有候选记录）；② **shift+tab 循环权限模式**（default→accept-edits→plan→bypass，替代输 /mode 全名）；③ **确认弹窗 "a"(always) 直接写永久规则**——mini 目前是会话级授权、持久要手动 /allow --save，mewcode 弹窗第三选项即写规则文件（需评估：静默写盘 vs 显式保存的安全取舍，可折中为写盘前提示一行）；④ **Esc 单击把运行中子 agent 转后台**（当前双 Esc 是取消整轮）。

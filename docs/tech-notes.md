@@ -1454,7 +1454,7 @@ CC 的对话历史由 Anthropic 服务端管理，客户端无法截断或复制
 
 ## 27.2 恢复顺序与容量控制
 
-/undo N 按轮次倒序恢复（先恢复最新轮再恢复更早轮）——同一文件跨轮被改时，更早轮的快照最后写入，最终回到最早状态。容量三重控制：只保留最近 5 轮（begin_turn 时清理）、单文件 30MB 上限、会话结束 clear() 全清——最坏情况磁盘临时占用几十 MB，会话结束归零。bash 的文件变更仍是盲区（无法预知 shell 改什么），与 P24 文件变更汇总同样的既有局限。
+/undo N 按轮次倒序恢复（先恢复最新轮再恢复更早轮）——同一文件跨轮被改时，更早轮的快照最后写入，最终回到最早状态。容量三重控制：只保留最近 5 轮（begin_turn 时清理；§113 起提为 undo_keep_turns 配置）、单文件 30MB 上限、会话结束 clear() 全清——最坏情况磁盘临时占用几十 MB，会话结束归零。bash 的文件变更仍是盲区（无法预知 shell 改什么），与 P24 文件变更汇总同样的既有局限。
 
 ---
 
@@ -3716,3 +3716,33 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 ### 112.3 验证
 
 26 个新单测覆盖：ToolResult content_blocks / ToolSchema defer_loading / MCPToolAdapter deferred / connect_server 三模式 / AnthropicProvider 转换+header+序列化 / ToolSearchTool native vs dispatch / 自动降级 / meta 工具条件注销。1327 个全过。
+
+---
+
+## 113 B15 /undo 检查点增强（选择性恢复 + 快照容量）
+
+**背景**：P27 的操作级撤销只有一种恢复方式——对话与文件一起回滚。但两个真实场景各需要"只撤一半"：改动是对的但对话跑偏（想留代码、清对话），或讨论有价值但改动要扔（想留对话、还原代码）。mewcode 的 `/rewind` 提供三选恢复；mini 的快照保留轮数也硬编码为 5，深回滚场景（`/undo 8`）文件恢复不了。
+
+### 113.1 三选恢复的语义设计
+
+`/undo [N] [--code-only | --conv-only]`，两个标志互斥（同时给报 usage）。三种模式对状态的处理各不相同，关键在**轮次计数与快照的一致性**：
+
+- **默认（双回滚）**：行为完全不变——截断消息 + `restore_turns()` 恢复文件 + `current_turn_id` 回退。
+- **`--conv-only`（仅对话）**：截断消息、`current_turn_id` 回退，但文件保持现状。此时被撤销轮次的快照必须**丢弃**（新增 `discard_turns()`——删目录不恢复）：turn_id 回退后新对话会复用这些编号，旧快照残留会让未来的 `/undo` 把新轮次的文件错误恢复到几轮之前的状态。
+- **`--code-only`（仅代码）**：`restore_turns()` 恢复文件，对话、`total_turns`、`current_turn_id` 全部不动——对话轮次与 turn_id 的映射保持完整。快照被消费后，之后对同轮次再 `/undo` 只回滚对话（快照已空，无文件报告），语义自然收敛。
+
+`--code-only` 无文件改动时明确报告 "nothing to restore" 而非静默成功——用户必须知道没有任何东西被恢复。
+
+### 113.2 快照容量配置化
+
+`KEEP_TURNS = 5` 从模块常量提为构造参数：`FileSnapshotStore(base_dir, keep_turns=...)`（常量保留作默认值），`begin_turn()` 的清理阈值改用实例属性，下限钳制 `max(1, keep_turns)`。配置链：`[memory] undo_keep_turns = N`（`MemoryConfig` 新字段，默认 5）→ app.py 装配时传入。TOML 深合并是通用的（`_merge` 按字段名反射），加字段零胶水。
+
+### 113.3 验证
+
+7 个新测试（容量参数化清理 / discard_turns 不动文件且快照清空 / conv-only 文件保留对话回滚 / code-only 文件恢复对话不动 / code-only 无改动明确报告 / 标志互斥 / N+标志组合），1327→1334 全过。真实 LLM 三轮会话验证（deepseek-v4-flash-0731）：轮 1 建 a.txt 后 `--code-only` → a.txt 被删、对话保留；轮 2 建 b.txt 后 `--conv-only` → b.txt 留存、对话回滚；轮 3 建 c.txt 后默认 `/undo` → c.txt 被删、对话回滚。会话结束后文件系统终态与三模式语义完全一致（a 无 / b 有 / c 无）。配置端到端：临时目录写 `undo_keep_turns = 12` 的 TOML，`ConfigLoader.load()` 读出 12 并传导到 `store.keep_turns`。
+
+**既有边界不变**：bash 改的文件仍不快照（无法预知 shell 改什么）；单文件 30MB 上限；会话结束全清。
+
+### 113.4 终端实测暴露的静默边界：超窗轮次的恢复警告
+
+三模式验证通过后，用户终端实测 `undo_keep_turns = 2` + `/undo 3` 暴露一个 UX 缺口：第 1 轮快照已被 `begin_turn` 清理，输出只列了恢复的 2 个文件，对"没恢复的那轮"完全静默——与"too_large 必须明确提示"同一原则（用户必须知道哪些没恢复），却在保留窗口这条边上漏了。当场补上：`undo_ids` 中 `turn <= current_turn_id - keep_turns` 的轮次即被清理过的，双回滚与 `--code-only` 输出 `Warning: N turn(s) beyond snapshot retention (undo_keep_turns=K) -- file changes there were NOT restored`；`--code-only` 全部超窗时警告接在 "nothing to restore" 之后（区分"没改文件"和"改了但恢复不了"）。`--conv-only` 不警告（文件本来就故意保留）。注意警告说的是"该轮次的文件改动（若有）未恢复"——快照已删，无法回溯该轮是否真改过文件，措辞保持诚实。3 个新测试（超窗警告+超窗文件确实未恢复 / code-only 全超窗双信息 / 默认窗口内无警告回归），1334→1337；真实 LLM 复现原场景，警告行如实输出。

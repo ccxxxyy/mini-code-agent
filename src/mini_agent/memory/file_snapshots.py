@@ -2,10 +2,12 @@
 每轮文件快照——支持操作级撤销（/undo 连文件一起恢复）。
 
 Snapshots live on disk under <project>/.mini-agent/undo_snapshots/ and are
-cleared when the session ends. Only the last KEEP_TURNS turns are retained;
-files over MAX_SNAPSHOT_BYTES are skipped (reported for manual recovery).
+cleared when the session ends. Only the last keep_turns turns are retained
+(default KEEP_TURNS, configurable via [memory] undo_keep_turns); files over
+MAX_SNAPSHOT_BYTES are skipped (reported for manual recovery).
 快照存放在项目的 .mini-agent/undo_snapshots/ 下，会话结束时清空。
-只保留最近 KEEP_TURNS 轮；超过 MAX_SNAPSHOT_BYTES 的文件跳过（提示手动恢复）。
+只保留最近 keep_turns 轮（默认 KEEP_TURNS，可用 [memory] undo_keep_turns
+配置）；超过 MAX_SNAPSHOT_BYTES 的文件跳过（提示手动恢复）。
 """
 
 from __future__ import annotations
@@ -18,15 +20,16 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MAX_SNAPSHOT_BYTES = 30 * 1024 * 1024  # 30MB per file 单文件上限
-KEEP_TURNS = 5  # keep snapshots for the last N turns 保留最近 N 轮
+KEEP_TURNS = 5  # default: keep snapshots for the last N turns 默认保留最近 N 轮
 
 
 class FileSnapshotStore:
     """Stores pre-modification file contents, one directory per turn.
     按轮存储文件修改前的内容，每轮一个目录。"""
 
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: Path, keep_turns: int = KEEP_TURNS) -> None:
         self._base = base_dir
+        self.keep_turns = max(1, keep_turns)
 
     def _turn_dir(self, turn_id: int) -> Path:
         return self._base / f"turn_{turn_id}"
@@ -49,11 +52,11 @@ class FileSnapshotStore:
         )
 
     def begin_turn(self, turn_id: int) -> None:
-        """Start a new turn: prune old snapshots beyond KEEP_TURNS.
+        """Start a new turn: prune old snapshots beyond keep_turns.
         开始新轮：清理超出保留范围的旧快照。"""
         try:
             self._base.mkdir(parents=True, exist_ok=True)
-            cutoff = turn_id - KEEP_TURNS
+            cutoff = turn_id - self.keep_turns
             for d in self._base.glob("turn_*"):
                 try:
                     tid = int(d.name.split("_", 1)[1])
@@ -117,6 +120,13 @@ class FileSnapshotStore:
                     report.append(f"{path.name} (restore failed: {e})")
             shutil.rmtree(self._turn_dir(turn_id), ignore_errors=True)
         return report
+
+    def discard_turns(self, turn_ids: list[int]) -> None:
+        """Drop snapshots for the given turns without restoring files
+        (conversation-only undo keeps the code as-is).
+        丢弃给定轮次的快照但不恢复文件（仅对话回滚时代码保持现状）。"""
+        for turn_id in turn_ids:
+            shutil.rmtree(self._turn_dir(turn_id), ignore_errors=True)
 
     def clear(self) -> None:
         """Remove all snapshots (session end). 清空全部快照（会话结束）。"""

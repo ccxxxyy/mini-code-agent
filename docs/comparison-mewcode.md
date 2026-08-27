@@ -108,7 +108,7 @@
 | 架构文档 | agent-architecture.md（S01-S20 逐层解析） | 无 |
 | 技术笔记 | tech-notes.md（78 个专题，设计决策记录） | 无 |
 | 配置指南 | guide/config-guide.md（全配置文件说明） | config.yaml.example |
-| 命令参考 | guide/commands-guide.md（26 个命令完整语法/参数/示例） | 无 |
+| 命令参考 | guide/commands-guide.md（27 个命令完整语法/参数/示例） | 无 |
 | 终端指南 | guide/terminal-guide.md（各系统各终端） | 无 |
 | 实验报告 | experiments/（10 个实验脚本 + 数据） | 无 |
 | 能力对照 | capabilities.md（18 项需求逐条证据） | 无 |
@@ -787,7 +787,7 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 
 | 功能 | 说明 | 加强方向 |
 |---|---|---|
-| `/undo` 操作级撤销 | 对话 + 文件双回滚 | 可加：undo 预览（回滚前显示会恢复哪些文件） |
+| `/undo` 操作级撤销 | 对话 + 文件双回滚，--code-only/--conv-only 三选恢复（对齐 mewcode /rewind），快照轮数 undo_keep_turns 可配 | 可加：undo 预览（回滚前显示会恢复哪些文件） |
 | `/fork` 对话分叉 | 深拷贝会话独立分支 | 可加：`/fork list` 查看所有分支 |
 | `/record` + `/replay` | 零 LLM 调用工具链重放 | 可加：从 YAML/JSON 导入录制（手写工具链） |
 | `/cost` 成本仪表盘 | 按模型分账 + 双层预算 | 可加：硬预算（到额停止） |

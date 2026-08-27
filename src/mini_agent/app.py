@@ -305,7 +305,8 @@ class Application:
         from mini_agent.memory.file_snapshots import FileSnapshotStore
 
         self.agent_loop.snapshot_store = FileSnapshotStore(
-            working_dir / ".mini-agent" / "undo_snapshots"
+            working_dir / ".mini-agent" / "undo_snapshots",
+            keep_turns=self.config.memory.undo_keep_turns,
         )
 
         # Spill oversized tool results to disk (compression-reread fix)

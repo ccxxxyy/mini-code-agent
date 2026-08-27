@@ -642,7 +642,7 @@ P1-P83 每个阶段的任务分解、实现记录与验收结果。每条任务�
 
 ### 边界（文档已注明）
 - bash 命令的文件变更不快照
-- 只保留最近 5 轮；单文件 30MB 上限
+- 只保留最近 5 轮（后提为 `undo_keep_turns` 配置，见文末 /undo 检查点增强）；单文件 30MB 上限
 - 会话结束快照清空（undo 是会话内操作）
 
 ---
@@ -2191,3 +2191,20 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
   - _adjust_mcp_meta_tools 3 个（eager / native / dispatch）
 - [x] 1301→1327 全过，ruff clean
 - [x] 真实 LLM 验证 6/6：native 降级消息 / dispatch 连接 / tool_search 发现 / mcp_call 调用 / eager 直接调用 / eager 下 tool_search 不存在
+
+---
+
+## /undo 检查点增强：选择性恢复 + 快照容量（tech-notes §113）
+
+### 实现
+- [x] `memory/file_snapshots.py` — `FileSnapshotStore(base_dir, keep_turns=KEEP_TURNS)` 容量参数化（下限钳制 1），`begin_turn()` 清理阈值改用实例属性；新增 `discard_turns()`（删快照目录不恢复文件，供仅对话回滚）
+- [x] `models/config.py` — `MemoryConfig.undo_keep_turns: int = 5`（TOML `[memory] undo_keep_turns` 深合并零胶水）
+- [x] `app.py` — FileSnapshotStore 装配时传入 `keep_turns=config.memory.undo_keep_turns`
+- [x] `extensions/builtin_commands.py` — `/undo [N] [--code-only | --conv-only]`：标志互斥校验；默认双回滚不变；`--code-only` 仅恢复文件（对话/total_turns/current_turn_id 全不动，无改动明确报告 nothing to restore）；`--conv-only` 仅回滚对话（文件保持现状 + `discard_turns()` 丢弃快照 + turn_id 回退，防编号复用后错误恢复）
+
+### 测试与验证
+- [x] `tests/unit/test_file_snapshots.py` 新增 7 个测试：keep_turns=2 清理生效 / discard_turns 文件不动且快照清空 / conv-only 文件保留对话回滚快照丢弃 / code-only 文件恢复对话与轮次计数不动 / code-only 无改动明确报告 / --code-only --conv-only 互斥报 usage / N+标志组合（/undo 2 --code-only）
+- [x] 1327→1334 全过，ruff clean
+- [x] 真实 LLM 三模式验证（deepseek-v4-flash-0731 三轮会话）：--code-only 文件删对话在 / --conv-only 文件在对话删 / 默认双回滚回归；终态文件系统与语义一致
+- [x] 超窗警告（终端实测暴露的静默边界）：undo_ids 中 turn <= current - keep_turns 的轮次输出 Warning（双回滚与 --code-only；--conv-only 不警告）；+3 测试（超窗警告 / code-only 全超窗 / 窗口内无警告），1334→1337；真实 LLM keep_turns=2 场景复现警告行
+- [x] 配置端到端：临时 TOML `undo_keep_turns = 12` → ConfigLoader 读出 → store.keep_turns 传导

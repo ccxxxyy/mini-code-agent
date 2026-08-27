@@ -182,7 +182,7 @@ def register_builtin_commands(app: Application) -> None:
     reg.register(
         SlashCommand(
             name="undo",
-            description="Roll back the last N turns (usage: /undo [N], default 1)",
+            description=("Roll back the last N turns (usage: /undo [N] [--code-only|--conv-only])"),
             handler=_make_undo(app),
         )
     )
@@ -519,9 +519,52 @@ def _make_undo(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         from mini_agent.models.message import Role
 
-        n = int(args.strip()) if args.strip().isdigit() else 1
-        if n < 1:
-            return "Usage: /undo [N] (N >= 1)"
+        usage = "Usage: /undo [N] [--code-only | --conv-only] (N >= 1)"
+        n = 1
+        mode = "both"
+        for tok in args.split():
+            if tok in ("--code-only", "--conv-only"):
+                if mode != "both":
+                    return usage  # flags are mutually exclusive 标志互斥
+                mode = "code" if tok == "--code-only" else "conv"
+            elif tok.isdigit() and int(tok) >= 1:
+                n = int(tok)
+            else:
+                return usage
+        store = getattr(app.agent_loop, "snapshot_store", None)
+
+        def retention_warning(undo_ids: list[int], turn_id: int) -> str | None:
+            # Turns at or below the prune cutoff had their snapshots cleared by
+            # begin_turn -- the user must know those files were NOT restored.
+            # 低于清理线的轮次快照已被 begin_turn 清掉——用户必须知道没恢复。
+            pruned = [t for t in undo_ids if t <= turn_id - store.keep_turns]
+            if not pruned:
+                return None
+            return (
+                f"Warning: {len(pruned)} turn(s) beyond snapshot retention "
+                f"(undo_keep_turns={store.keep_turns}) -- file changes there were "
+                f"NOT restored 超出快照保留轮数，该部分文件改动未恢复."
+            )
+
+        # Code-only: restore files, keep the conversation (and turn counters)
+        # 仅代码：恢复文件，对话（与轮次计数）保持不变
+        if mode == "code":
+            if not store:
+                return "No file snapshots available: snapshot store is disabled."
+            turn_id = app.agent_loop.current_turn_id
+            undo_ids = [t for t in range(turn_id - n + 1, turn_id + 1) if t > 0]
+            file_report = store.restore_turns(undo_ids)
+            warning = retention_warning(undo_ids, turn_id)
+            if not file_report:
+                base = f"No file changes recorded in the last {n} turn(s); nothing to restore."
+                return f"{base}\n{warning}" if warning else base
+            lines = [f"Restored files from the last {n} turn(s); conversation kept 对话保留."]
+            lines.append("Files restored 文件已恢复:")
+            lines.extend(f"  - {r}" for r in file_report)
+            if warning:
+                lines.append(warning)
+            return "\n".join(lines)
+
         conv = app.session.conversation
         user_idxs = [i for i, m in enumerate(conv.messages) if m.role == Role.USER]
         if not user_idxs:
@@ -535,23 +578,31 @@ def _make_undo(app: Application) -> HandlerFn:
         app.context_manager.update_total(conv)
         app.session.metadata.total_turns = max(0, app.session.metadata.total_turns - n)
 
-        # Restore files modified in the undone turns 恢复被撤销轮次修改的文件
+        # Both: restore files modified in the undone turns. Conv-only: discard
+        # their snapshots so the code keeps its current state.
+        # 双回滚：恢复被撤销轮次修改的文件。仅对话：丢弃对应快照，代码保持现状。
         file_report: list[str] = []
-        store = getattr(app.agent_loop, "snapshot_store", None)
+        warning: str | None = None
         if store:
             turn_id = app.agent_loop.current_turn_id
             undo_ids = [t for t in range(turn_id - n + 1, turn_id + 1) if t > 0]
-            file_report = store.restore_turns(undo_ids)
+            if mode == "both":
+                file_report = store.restore_turns(undo_ids)
+                warning = retention_warning(undo_ids, turn_id)
+            else:
+                store.discard_turns(undo_ids)
             app.agent_loop.current_turn_id = max(0, turn_id - n)
 
         preview = (undone.content or "")[:60]
-        lines = [
-            f"Rolled back {n} turn(s), removed {removed} message(s).",
-            f'Undone: "{preview}"',
-        ]
+        head = f"Rolled back {n} turn(s), removed {removed} message(s)."
+        if mode == "conv":
+            head += " Files kept as-is 文件保持现状."
+        lines = [head, f'Undone: "{preview}"']
         if file_report:
             lines.append("Files restored 文件已恢复:")
             lines.extend(f"  - {r}" for r in file_report)
+        if warning:
+            lines.append(warning)
         lines.append(f"Context is now {app.context_manager.total_tokens} tokens.")
         return "\n".join(lines)
 

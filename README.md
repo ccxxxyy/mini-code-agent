@@ -30,7 +30,7 @@
 
 💰 **Cost Dashboard** — per-model input/output pricing, session + all-time ledger, budget warnings at 80%/100%
 
-⏪ **Undo & Fork** — `/undo` rolls back conversation AND file changes; `/fork` branches into a new session
+⏪ **Undo & Fork** — `/undo` rolls back conversation AND file changes (or either one alone via `--code-only` / `--conv-only`); `/fork` branches into a new session
 
 🎬 **Record & Replay** — `/record` captures tool sequences, `/replay` re-runs them with zero LLM calls + `{{template}}` variables
 
@@ -253,7 +253,7 @@ mini --remote --remote-token "my-secret"
 | `/model [name]` | View or switch LLM model |
 | `/cost [turns\|reset]` | Cost dashboard: per-model breakdown, budget tracking |
 | `/todo [add\|done\|start\|fail\|delete\|clear]` | Persistent task list with dependency graph |
-| `/undo [N]` | Roll back N turns — files restored too |
+| `/undo [N]` | Roll back N turns — files restored too; `--code-only` / `--conv-only` for selective restore |
 | `/fork [N]` | Branch conversation into a new session |
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |

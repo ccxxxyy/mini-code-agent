@@ -590,7 +590,7 @@
 - [x] /undo 还原该轮修改的文件（写回旧内容）
 - [x] /undo 找回该轮删除的文件（从快照恢复）
 - [x] 超过 30MB 的文件不快照，undo 时明确提示需手动恢复
-- [x] 只保留最近 5 轮快照（自动清理）
+- [x] 只保留最近 N 轮快照（自动清理；默认 5，`[memory] undo_keep_turns` 可配——见文末 /undo 检查点增强检查项）
 - [x] 会话结束快照目录自动清空（零残留）
 - [x] 恢复报告逐文件显示在 /undo 输出里
 
@@ -1675,3 +1675,16 @@
 - [x] 26 个新测试（test_mcp_native.py），1301→1327 全过
 - [x] 真实 LLM 验证 6/6：native 降级消息 / 降级后 dispatch 连接 / tool_search 发现工具 / mcp_call 调用成功 / eager 直接调用 / eager 下 tool_search 不存在
 - [ ] 官方 Anthropic API 补验：`defer_loading` 字段 + `tool_reference` 回传（需官方 API key）
+
+## /undo 检查点增强检查项（tech-notes §113）
+
+- [x] `/undo [N] --code-only` 仅恢复文件——对话、total_turns、current_turn_id 全部不动
+- [x] `/undo [N] --conv-only` 仅回滚对话——文件保持现状，对应快照丢弃（discard_turns）
+- [x] `--code-only` 与 `--conv-only` 同时给报 usage（互斥）
+- [x] `--code-only` 无文件改动时明确报告 nothing to restore（不静默成功）
+- [x] 默认 `/undo [N]` 双回滚行为完全回归（既有 10 个 undo 测试不动全过）
+- [x] `[memory] undo_keep_turns` 配置快照保留轮数（默认 5，下限钳制 1）
+- [x] TOML → ConfigLoader → FileSnapshotStore.keep_turns 端到端传导
+- [x] `/undo N` 覆盖超出保留窗口的轮次时输出警告（文件改动未恢复），--code-only 全超窗时接在 nothing to restore 之后；--conv-only 不警告；窗口内无警告回归
+- [x] 10 个新测试，1327→1337 全过
+- [x] 真实 LLM 三轮会话验证三模式，终态文件系统与语义一致（a 无 / b 有 / c 无）；keep_turns=2 场景警告行真实输出

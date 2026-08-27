@@ -76,7 +76,7 @@ Different data lives for different durations. Understanding lifecycles avoids th
 | Data | Lifecycle | After a crash |
 |---|---|---|
 | Conversation history | Within the session (force-persisted every turn) | Recoverable (prompt at startup) |
-| Undo file snapshots | Within the session, and only the last 5 turns are kept | Lost (undo is a within-session operation by design) |
+| Undo file snapshots | Within the session, and only the last N turns are kept (`undo_keep_turns`, default 5) | Lost (undo is a within-session operation by design) |
 | Steps of an **in-progress** recording (not stopped) | In memory — within the session | **Lost**, must re-record |
 | **Saved** recording files | Permanent on disk | Unaffected |
 | Template variable values (`/replay x k=v`) | **Single replay** — discarded after use, never persisted nor added to the session | — |
@@ -221,6 +221,7 @@ session_cleanup_days = 30    # Properly closed sessions older than this are clea
 crashed_session_cleanup_days = 40  # Crashed sessions older than this are also cleaned up (0 = keep forever) — longer than 30 days because crash sessions have recovery value
 compress_max_failures = 3    # Compression circuit breaker: skip after N consecutive ineffective compressions (0 = disabled) — prevents infinite loops when the already-read-files list gets too long
 llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
+undo_keep_turns = 5          # /undo file snapshots: keep the last N turns — raise for deeper file rollback
 recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)
 recall_top_k = 5             # Maximum number of entries the LLM picks during selective recall
 recall_timeout = 8.0         # Recall prefetch timeout in seconds — selection runs in parallel with the main LLM call (no first-token latency added); on timeout, head entries are injected instead

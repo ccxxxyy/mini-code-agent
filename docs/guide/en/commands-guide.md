@@ -2,7 +2,7 @@
 
 > 中文版 (Chinese version): [../commands-guide.md](../commands-guide.md)
 
-Complete syntax, parameters and examples for all 26 visible commands. Slash commands execute locally with zero token consumption (except those that trigger LLM calls, such as `/compact` and `/team`, all of which are marked). Typing `/` pops up an alphabetically sorted dropdown completion menu.
+Complete syntax, parameters and examples for all 27 visible commands. Slash commands execute locally with zero token consumption (except those that trigger LLM calls, such as `/compact` and `/team`, all of which are marked). Typing `/` pops up an alphabetically sorted dropdown completion menu.
 
 > For the source and toggles of each output line, see output-guide.md; for configuration options, see config-guide.md.
 
@@ -59,12 +59,15 @@ In one line: `/clear` wipes the blackboard (same board — the old photo on disk
 
 **Remote-mode UI sync**: after `/session new`, `/session load` or `/fork` swaps the session, the server detects the session-object change and broadcasts a `history_reset` event to all browsers (clearing the chat area), then replays the adopted session's history — what the browser shows and what the server works on always match.
 
-### /undo [N]
-Roll back the most recent N turns (default 1) — **both conversation and files are rolled back** (file snapshots are only kept for the last 5 turns; files modified by bash commands cannot be recovered).
+### /undo [N] [--code-only | --conv-only]
+Roll back the most recent N turns (default 1) — by default **both conversation and files are rolled back**. Two optional flags (mutually exclusive) enable selective restore: `--code-only` restores files only and keeps the conversation (the discussion is valuable but the changes must go); `--conv-only` rolls back the conversation only and keeps files as-is (the changes are right but the conversation went off track; the undone turns' snapshots are discarded, so those files can no longer be restored later).
 ```
-/undo        # Roll back 1 turn
-/undo 3      # Roll back 3 turns
+/undo                  # Roll back 1 turn (conversation + files)
+/undo 3                # Roll back 3 turns
+/undo --code-only      # Restore only the last turn's file changes, conversation untouched
+/undo 2 --conv-only    # Roll back only the last 2 conversation turns, files kept as-is
 ```
+File snapshots keep the last 5 turns by default (raise via `[memory] undo_keep_turns`); when the rollback range covers turns beyond the retention window, a warning reports that those turns' file changes were not restored; files modified by bash commands cannot be recovered.
 
 ### /fork [N]
 Deep-copy the current conversation into a new session branch (optionally roll back N turns before forking).
