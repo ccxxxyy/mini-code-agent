@@ -19,7 +19,7 @@ IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".idea", ".vscod
 
 
 class GrepParams(BaseModel):
-    """Pydantic model for grep parameters (P46). Auto-generates ToolSchema."""
+    """Pydantic model for grep parameters. Auto-generates ToolSchema."""
 
     pattern: str = Field(description="Regular expression pattern to search for")
     path: str | None = Field(

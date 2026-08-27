@@ -760,10 +760,10 @@ async def test_circuit_breaker_resets_on_success():
     cm.set_compressor(NoOpCompressor())
 
     conv = Conversation()
-    # Short content: with the summary anchor (P71) the digest survives
+    # Short content: with the summary anchor the digest survives
     # SlidingWindow, so at this degenerate 200-token window a 100-char-per-msg
     # digest would outweigh the savings and read as "ineffective".
-    # 短内容：摘要锚点（P71）让 digest 在 SlidingWindow 后存活，200 token 的
+    # 短内容：摘要锚点让 digest 在 SlidingWindow 后存活，200 token 的
     # 极端窗口下 100 字符/条的 digest 会抵消节省量、被判"无效"。
     for _ in range(20):
         conv.messages.append(make_msg(content="hi", token_count=25))

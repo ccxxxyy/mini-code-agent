@@ -3593,3 +3593,82 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 后续问答中发现文档与代码不符：config-guide 写着 `[llm] extra = {}` "透传给 API 的额外参数"，但 openai_provider 的请求体构造从未读取 `config.extra`——qwen3 这类"参数开关思考"的混合模型（需要请求体带 `enable_thinking: true`）因此无法开启思考。修复：body 构造后 `body.setdefault(k, v)` 逐键透传（setdefault 防止覆盖 model/messages/stream 等核心字段）。
 
 真实验证（阿里云 MaaS 网关 + qwen3.6-plus）：该网关默认吐思考（不传参也有 1410 字符思考流）；`extra = {enable_thinking = false}` 后 thinking 降为 0——透传确实控制行为。顺带取证思考的质量价值：关思考后模型把 9.11 vs 9.9 答错（答 9.11），开思考答对（9.9）。1 个新测试（透传 + 核心字段防覆盖），1275→1276。
+
+# §111 记忆子系统体验增强（后台整固节律 + 并行 recall 预取）
+
+## 111.1 背景
+
+来自 roadmap B13，对照扫描的两处程度差距。① 整固：mini 只有阈值触发（>20 条，SESSION_END 提取末尾）与手动 `/memory consolidate`——小而陈旧的记忆集永远合不到；mewcode autoDream 在 ≥24h 且 ≥5 会话后**后台** fork 合并去重（锁文件 + 失败回滚），用户无感。② recall：mini 的 LLM 选择性召回（P52）串行 await 在 PRE_LLM 注入路径上，一次完整 LLM 往返直接加进首 token 延迟；mewcode 的选择器与主 LLM 调用**并行预取**（8s 超时，工具执行后非阻塞注入）——recall 延迟成本归零。
+
+## 111.2 实现
+
+**后台整固**（`memory/consolidation.py` 新增 `ConsolidationScheduler`）：
+- **双门槛**：`run_once()` 对用户级 + 项目级两个作用域各自检查——距该作用域上次整固 ≥ `consolidate_min_hours`（默认 24）且期间活跃新会话 ≥ `consolidate_min_sessions`（默认 5，项目作用域只数本项目会话，按 `session_store.list_sessions()` 的 `last_active` 判定）。状态存 `~/.mini-agent/memory/consolidation_state.json`（per-scope key：`user` / `project:<posix 路径>`）。**记录的是"尝试"而非"成功合并"**——无可合并（no_merge）也记录本次时间戳，否则无可合并的记忆集每次启动都烧一次 LLM 调用，违背"节律"本意。
+- **锁文件**：`consolidation.lock` 以 `open("x")` 独占创建；已存在且 mtime 在 10 分钟内 → 返回 `{"lock": "held"}` 跳过（多实例并发保护）；超龄视为崩溃残留接管（初版 1h，真实验证发现残锁会静默拦节律太久后降为 600s，见 §111.4）。运行后释放，别人的锁不删。
+- **回滚**：保存前把记忆文件复制为 `.bak`，保存抛异常时从备份复原、返回 `rolled_back`；成功后删备份。
+- **合并逻辑零新增**：复用 `MemoryConsolidator.consolidate()`（P53），后台模式不受 20 条阈值限制（≥2 条即可）——这正是被补的差距。
+- **接线**（`app.py`）：`run()` 启动阶段 `asyncio.create_task(self._background_consolidate())`（`auto_consolidate = true` 默认开），任务自兜异常；退出 finally 取消未完成任务。`PersistentMemory` 新增公共访问器 `user_memory_path()`/`project_memory_path()`/`user_dir`（备份与状态文件定位用）。
+
+**并行 recall 预取**（`memory/recall.py` 新增 `RecallPrefetcher`）：
+- `poll()` 语义：**首次调用** `asyncio.create_task(wait_for(select_relevant, recall_timeout))` 发射后立即返回 None——主 LLM 调用不受阻，挑选藏在其延迟后面跑；**后续调用 await 任务**——通常已完成（残余等待 ≈ 0），最坏受任务整体 8s 超时约束。超时/异常降级头部截断 `entries[:10]` 注入（召回绝不打断主请求，与 P52 的 fail-safe 哲学一致）。
+- 接线（`app.py` `_pre_llm_inject_memory`）：`> recall_threshold` 时走预取器（app 级单例，惰性构造）；`≤ threshold` 保持原样当轮直接注入头部条目（零额外调用）。`_adopt_session` 换会话时取消并重置预取器（未完成的挑选按旧会话消息算的）；退出 finally 取消。
+
+**中途设计修正（真实验证暴露）**：初版 poll 是纯非阻塞轮询——未完成返回 None、本轮跳过注入。端到端验证失败：flash 类快模型 round 1（工具调用生成）约 1s 就结束，round 2 poll 时 recall（约 1.6s）还没完成，两轮回合从头到尾注不上。修正为 mewcode 语义：首轮发射放行、后续轮 await 残余——首 token 延迟仍为零，注入保证从第二次 LLM 调用起可用。
+
+## 111.3 连锁修复：PRE_LLM hook 的 system_prompt 修改晚一轮生效（潜伏缺陷）
+
+端到端验证第一次失败暴露的**既有缺陷**：`agent_loop._think()` 在 PRE_LLM hook 运行**之前**就快照了 `api_messages = conversation.to_api_messages()`——hook 对 `system_prompt` 的修改（记忆注入正是这么做的）进不了当轮请求，只能晚一轮生效。**这意味着自 P52 以来，旧串行 recall 阻塞了首 token 换来的注入其实也从未进过当轮请求**（单轮无工具回合等于从未注入），单测没抓住是因为断言的是 `conversation.system_prompt` 而非 LLM 实际收到的 messages。修复：hook 前记录 `system_prompt`，hook 后发现变化则重建 `api_messages`（精确、零常态开销）。回归测试用捕获型 MockLLM 断言**LLM 实际收到的** system 消息含注入文本。
+
+## 111.4 验证
+
+**单测**：25 个新增（`test_memory_scheduler.py` 12 个：双门槛四向拦截/放行、锁占用跳过与过期接管、锁释放、保存失败回滚复原、尝试记录防重烧、<2 条跳过 LLM、项目作用域会话过滤与落盘；`test_memory_recall.py` 预取 7 个：首 poll 立即 None、二次 poll await 残余、超时降级、不阻塞计时、重复 poll 幂等、cancel 重置、LLM 失败降级；`test_agent_loop.py` 1 个：PRE_LLM 注入进当轮请求回归；复验补接 remote 后 Application 启停助手 4 个 + 取消中途释放锁 1 个），共 25 个，全量 1276→1301 全过，ruff clean。
+
+**真实 LLM 验证**（`experiments/verify_memory_cadence.py`，deepseek-v4-flash，7/7 ALL PASS）：
+- A1 双门槛满足 → 真实合并 6→4 条（3 条 tab 缩进主题并为 1 条且信息保留），状态已记录、锁已释放，耗时 3.4s；A2 立即重跑 → gated（时间门槛拦住，不再烧 LLM）；A3 锁占用 → held；A4 保存点注入 OSError → rolled_back 且文件字节级复原。
+- B1 首次 poll 0.0s（对照串行往返 1.6s——这就是省下的首 token 延迟），2s 后二次 poll 残余等待 0.0s，埋点条目（虚构编辑器名）命中；B2 超时 0.01s → 降级头部截断 10 条不报错。
+- C1 端到端：临时 USERPROFILE 预埋 15 条记忆，`mini-agent -p` 跑含 read_file 的真实回合——第二次 LLM 调用注入生效，模型根据注入记忆答出虚构编辑器名 "VimStar9000"，退出码 0。全管道（PersistentMemory 加载 → 预取 → PRE_LLM 注入 → api_messages 重建 → 模型回答）取证闭环。
+- **终端/remote 真实路径复验**（隔离 USERPROFILE + 门槛降为 0h/1 会话 + 管道 stdin 驱动真实 TUI）：终端第一次启动（会话数 0）正确 gated；第二次启动后台整固完成——state 双 scope 落盘、15→13 条（三条 tab 主题合并为一条且信息保留）、无锁/备份残留、TUI 全程无感。remote 模式（`--remote`）同样完成整固（state 双 scope 时间戳落在运行窗口内），证实两模式共用接线生效。复验中两个实测发现：① 合并 LLM 调用在 15 条记忆时实测 12-24s（6 条时仅 3s），启动后立刻退出会取消本次整固——state 未记录、锁由 run_once finally 正确释放（新增取消中途释放锁的单测），下次启动自然重试，节律不丢；② 验证脚本插桩代码（无 finally）曾残留锁、导致后续启动被 held 静默拦一小时——据此把 `LOCK_MAX_AGE_SECONDS` 从 3600 降为 600（整固本身分钟级，崩溃残锁最多挡节律 10 分钟）。
+
+## 111.5 诚实边界（机制 / 后果 / 取舍 / 升级路径）
+
+### ① 首轮注入不到（> 阈值时）
+
+**机制**：记忆条数 > `recall_threshold`(10) 时要走 LLM 挑选。为不让挑选阻塞主请求，本回合第一次 PRE_LLM 只**发射**预取任务就立即放行——此时挑选结果还不存在，第一次 LLM 调用的 system_prompt 里没有记忆；第二次 PRE_LLM（通常在工具执行后）才 await 结果并注入。
+
+**后果分场景**：
+- 多轮回合（有工具调用）：只有第一次调用"裸奔"，第二次起保证有记忆。挑选（实测 ~1.6s）通常藏在第一轮流式延迟后面完成，残余等待 ≈ 0（验证取证 `second_poll_residual_s: 0.0`）。
+- 单轮回合（模型直接回答不调工具）：整轮拿不到注入。例如用户第一句就问记忆相关问题且模型不调工具，答案没有记忆依据；下一回合的第一次调用会补上（任务已完成，poll 直接返回）。
+
+**取舍**：这是"零首 token 延迟"的**结构性代价**——想让挑选进第一次调用就必须等它，等它就是把 1.6s 加回首 token。mewcode"工具执行后非阻塞注入"是同一取舍。触发面小：记忆 >10 条 **且** 单轮无工具 **且** 恰好问到记忆内容才受影响。≤ 阈值不受影响：直接取头部条目当轮注入零额外调用（且该"当轮"是 §111.3 修复后才真正成立——修复前注入永远晚一轮，连旧串行实现阻塞换来的注入都从没进过当轮请求）。
+
+**升级路径**（按性价比排序）：a) headless `-p` 模式改回串行 await——一次性问答最常见单轮场景、无交互首 token 延迟不敏感，正确性优先于延迟，改动约 3 行（hook 里判 headless 标志）；b) pending 时先注入头部截断、挑选完成后**替换**注入段——需要把幂等 marker 从"存在即跳过"改为"可更新区段"，复杂度中等，收益是单轮回合至少有降级记忆；c) 首 poll 加有界宽限等待（如 300ms）——对 1.6s 的挑选杯水车薪，不推荐。
+
+### ② 后台整固只在终端交互模式启动
+
+**机制**：`create_task(_background_consolidate())` 只接在 `app.run()`（终端 TUI 生命周期）。headless `-p` 是一次性进程，设计上就跳过 SESSION hooks 与记忆提取（防 CI 每跑留档/烧 LLM），整固同理——CI 每次 `-p` 都可能触发整固调用，慢、烧钱、还可能并发打架。remote 有自己的启动流程，未接线——**不是做不到**：`_background_consolidate` 是 Application 上的 UI 无关方法，remote 加一行 `create_task` 即可（与 B7 会话持久化"UI 无关方法 + 按模式接线"同模式）。
+
+**后果**：纯 remote 用户的记忆只靠阈值触发（>20 条）与手动 `/memory consolidate`，享受不到节律。终端用户不受影响。
+
+**升级路径（已执行）**：接线逻辑提取为 Application 公共方法 `start_background_consolidation()` / `stop_background_consolidation()`（幂等：已禁用/已在跑则 no-op），终端 `app.run()` 与 remote `server.start()`（serve 前启动、shutdown finally 取消）共用；4 个新测试（启用创建/禁用 no-op/重复调用不重建/未启动 stop 不抛）。headless 维持不跑（是设计而非欠账）。
+
+### ③ 锁不是严格的跨进程原子锁
+
+**机制**：`open(lock, "x")` 独占创建在单一文件系统上是原子的，正常并发（两实例同时启动）能正确互斥。竞态窗口在**过期接管**路径：实例 A 和 B 同时 stat 到锁 mtime 超龄（持有者早已崩溃），各自 write_text 覆盖锁，都认为自己拿到了——check-then-act 不原子。
+
+**取舍——最坏后果分析**：两实例并发整固，各自 load → LLM 合并 → save，后写者覆盖先写者。合并是**语义幂等**操作：输入同一批条目，两次结果都是"语义等价的更精简集合"，覆盖掉哪个都不丢信息（不是计数器并发丢更新那类错误）。触发条件极苛刻：两实例同启 + 锁恰好过期 + 双门槛同满足 + stat 同毫秒。
+
+**升级路径**：OS 级文件锁（Unix `fcntl.flock` / Windows `msvcrt.locking`）平台分叉封装，或接管时"写入自己的 token 后回读校验"（cheap CAS 近似）。前者重、后者约 10 行——但两者防的都是一个"结果仍正确"的窗口。
+
+### ④ 状态与项目记忆的全局性
+
+**机制**：整固状态统一存于用户目录单文件 `~/.mini-agent/memory/consolidation_state.json`，per-scope key（`user` / `project:<绝对路径 posix>`）。两个含义：**门槛互不干扰**——每个 key 有自己的 last_run，项目 A 整固过不影响项目 B，用户级与项目级各算各的（这是选 per-scope 而非全局单时间戳的原因）；**项目移动/重命名 = 新作用域**——key 变了查无此键，视为从未整固：时间门槛直接放行（无 last_run 可比），会话门槛按新路径下的会话数从 0 攒起（旧会话元数据里 `project_dir` 还是旧路径），所以移动后**攒满 5 个新会话才第一次整固**，不会立刻乱跑。副作用只是旧 key 成为 state 里一行死数据（几十字节，无害）。
+
+**为什么不放项目内**：`<project>/.mini-agent/` 会让 state 进 git 视野（要维护 .gitignore），且用户级作用域没有"项目"可放；统一放用户目录读写点单一。
+
+**升级路径**：state 迁到项目内（`.mini-agent/consolidation_state.json` + gitignore 处理）可让项目移动后状态跟随；或 key 改用项目内容指纹（如首个 commit hash）代替路径。两者都为"项目移动"这一低频事件服务。
+
+### 判定：哪些值得升级
+
+- **② remote 接线：已完成**——判定为唯一值得升级的边界后随即实施（见上方升级路径），remote 模式现与终端共享整固节律。
+- **① 升级路径 a（headless 串行 await）：可选**——场景真实（`-p` 单轮问答）、改动小，但 headless 本就定位"跳过记忆提取"的轻量模式，是否让它反而在 recall 上更重，需要一个真实使用反馈再定。
+- **③④：不值得**——③ 防的是"结果仍正确"的极小概率窗口，④ 服务的是低频事件且现方案降级行为（攒满门槛才跑）本身安全。为它们加跨平台文件锁/状态迁移的复杂度，收益不成比例。

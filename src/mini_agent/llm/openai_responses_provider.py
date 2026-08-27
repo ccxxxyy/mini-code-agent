@@ -232,9 +232,9 @@ class OpenAIResponsesProvider(LLMProvider):
             body["tools"] = self._convert_tools(tools)
 
         # Responses API uses max_output_tokens, not max_tokens.
-        # agent_loop sends max_tokens in kwargs for recovery retries (P44).
+        # agent_loop sends max_tokens in kwargs for recovery retries.
         # Responses API 用 max_output_tokens 而非 max_tokens。
-        # agent_loop 重试时通过 kwargs 传 max_tokens（P44），需映射。
+        # agent_loop 重试时通过 kwargs 传 max_tokens，需映射。
         max_out = kwargs.get("max_tokens") or self._config.max_tokens
         if max_out:
             body["max_output_tokens"] = max_out
@@ -243,7 +243,7 @@ class OpenAIResponsesProvider(LLMProvider):
             body["temperature"] = self._config.temperature
 
         # Request-side reasoning control; summary makes reasoning stream back
-        # as response.reasoning_summary_text.delta events (B12)
+        # as response.reasoning_summary_text.delta events (tech-notes §110)
         # 发送侧 reasoning 控制；summary 让推理以 reasoning_summary_text 事件流回
         if self._config.thinking:
             effort = self._config.extra.get("reasoning_effort", "medium")

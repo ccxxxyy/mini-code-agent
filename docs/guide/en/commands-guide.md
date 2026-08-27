@@ -255,6 +255,13 @@ List all registered tools (built-in + MCP, including search hints in dispatch mo
 /memory import <dir>         # Import from a .md directory (dedupe by id, restore scope)
 ```
 
+**Automatic memory behaviors (no command needed, all on by default)**:
+
+- **Auto extraction**: at session end (exit / close) the LLM extracts facts worth remembering across sessions into project- or user-level memory (`[memory] auto_extract = false` to disable).
+- **Auto recall**: every session injects memories into the system prompt. With ≤10 entries all are injected; above 10, an LLM picks the ≤5 most relevant to your current message — the selection runs **in parallel** with the main LLM call (no first-token latency added), degrading to head entries after an 8s timeout. Note: above the threshold, the turn's **first** LLM call has no memories yet (the selection was just fired); injection is guaranteed from the second call (after a tool round) or the next turn. Tune via `recall_threshold` / `recall_top_k` / `recall_timeout`.
+- **Auto consolidation (background cadence)**: every startup (both terminal and `--remote`) checks two gates — ≥24 hours since the last consolidation **and** ≥5 sessions active since — and when both pass, an LLM merges semantically related memories in the background, invisibly; a lock file guards concurrent instances and failed saves roll back. Tune via `consolidate_min_hours` / `consolidate_min_sessions`, disable with `auto_consolidate = false`. Independent of this cadence, threshold-triggered consolidation (>20 entries, at session-end extraction) and manual `/memory consolidate` still apply.
+- **Watching it work**: `~/.mini-agent/memory/consolidation_state.json` records each scope's last consolidation time — a `user` / `project:...` key appearing in it means a consolidation attempt ran (when the gates are not met the file may just be an empty `{}`). To see a trigger immediately: temporarily set the two gates to `0.0` and `1`, then start twice (this genuinely merges your memories; remove the config afterwards to restore the default cadence). Note the merge is a real LLM call (can take 10+ seconds with many memories); exiting right after startup cancels this run — the state is not recorded and the next startup simply retries, so no cadence is lost.
+
 ### /todo — Persistent Task List (survives restarts)
 ```
 /todo                        # List tasks

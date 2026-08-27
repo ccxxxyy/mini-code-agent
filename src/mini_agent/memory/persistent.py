@@ -54,6 +54,19 @@ class PersistentMemory:
     def _project_path(self, project_dir: Path) -> Path:
         return project_dir / self._project_file
 
+    def project_memory_path(self, project_dir: Path) -> Path:
+        """Location of the project memory file. 项目记忆文件路径。"""
+        return self._project_path(project_dir)
+
+    def user_memory_path(self) -> Path:
+        """Location of the user memory file. 用户记忆文件路径。"""
+        return self._user_path()
+
+    @property
+    def user_dir(self) -> Path:
+        """User-level memory directory. 用户级记忆目录。"""
+        return self._user_dir
+
     async def load_project_memory(self, project_dir: Path) -> list[MemoryEntry]:
         path = self._project_path(project_dir)
         return self._load_file(path)

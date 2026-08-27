@@ -1,4 +1,4 @@
-"""Tests for tool_search and mcp_call tools + dispatch mode (P51).
+"""Tests for tool_search and mcp_call tools + dispatch mode.
 工具搜索/延迟加载的测试。"""
 
 from __future__ import annotations

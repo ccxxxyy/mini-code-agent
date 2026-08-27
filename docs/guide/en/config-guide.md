@@ -223,7 +223,11 @@ compress_max_failures = 3    # Compression circuit breaker: skip after N consecu
 llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
 recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)
 recall_top_k = 5             # Maximum number of entries the LLM picks during selective recall
+recall_timeout = 8.0         # Recall prefetch timeout in seconds — selection runs in parallel with the main LLM call (no first-token latency added); on timeout, head entries are injected instead
 consolidation_threshold = 20 # Automatically run LLM semantic consolidation when memory count exceeds this (0 = disabled)
+auto_consolidate = true      # Background consolidation at startup: memories are merged invisibly when both gates pass (lock guards concurrency, failures roll back)
+consolidate_min_hours = 24.0 # Background consolidation gate 1: hours since the last run
+consolidate_min_sessions = 5 # Background consolidation gate 2: new sessions active since the last run
 # persistent_memory_dir = "~/.mini-agent/memory"     # User-level memory directory
 # project_memory_file = ".mini-agent/memory.json"    # Project-level memory file
 

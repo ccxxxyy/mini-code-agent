@@ -1,4 +1,4 @@
-"""Tests for remote/browser mode (P57). 远程/浏览器模式测试。"""
+"""Tests for remote/browser mode. 远程/浏览器模式测试。"""
 
 from __future__ import annotations
 

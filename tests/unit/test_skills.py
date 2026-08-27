@@ -125,7 +125,7 @@ def test_missing_name_skipped(tmp_path):
     assert len(reg.list_skills()) == 0
 
 
-# --- Install / Uninstall (P55) ---
+# --- Install / Uninstall ---
 
 
 def _reg_for(target: Path) -> SkillRegistry:
@@ -178,7 +178,7 @@ def test_uninstall_not_found(tmp_path):
     assert not reg.uninstall("nonexistent", tmp_path)
 
 
-# --- Reload (P56) ---
+# --- Reload ---
 
 
 def test_reload_picks_up_new_skill(tmp_path):
@@ -256,7 +256,7 @@ def test_load_all_clears_stale(tmp_path):
 
 def test_programmatic_register_survives_load_all(tmp_path):
     reg = SkillRegistry(skill_dirs=[tmp_path])
-    reg.register(Skill(name="plugin-skill", description="P83", prompt="stay"))
+    reg.register(Skill(name="plugin-skill", description="registered from code", prompt="stay"))
     assert reg.get("plugin-skill") is not None
 
     reg.load_all()

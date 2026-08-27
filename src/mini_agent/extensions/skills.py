@@ -64,7 +64,7 @@ class SkillRegistry:
         """Programmatically register a skill (plugin API).
         Survives load_all()/reload() -- unlike SKILL.md packs it has no disk
         presence, so it is kept in a separate dict merged after each rescan.
-        编程式注册技能（插件 API，P83）。load_all()/reload() 后仍保留——
+        编程式注册技能（插件 API）。load_all()/reload() 后仍保留——
         与 SKILL.md 技能包不同它没有磁盘存在，因此单独存放并在每次重扫后合并。"""
         self._external[skill.name] = skill
         self._skills[skill.name] = skill
@@ -140,7 +140,7 @@ class SkillRegistry:
         return matched
 
     def reload(self, conversation: Conversation) -> tuple[int, list[str]]:
-        """Hot-reload: rescan disk, update active skill prompts (P56).
+        """Hot-reload: rescan disk, update active skill prompts.
         热重载：重新扫描磁盘，更新活跃 skill 的 prompt。
         Returns (loaded_count, lost_skills).
         返回 (加载数量, 丢失的 skill 列表)。"""
@@ -155,7 +155,7 @@ class SkillRegistry:
         return len(self._skills), lost
 
     async def install(self, source: str, target_dir: Path) -> str:
-        """Install a skill from a local path or git URL into target_dir (P55).
+        """Install a skill from a local path or git URL into target_dir.
         从本地路径或 git URL 安装技能到 target_dir。"""
         target_dir.mkdir(parents=True, exist_ok=True)
         src_path = Path(source).expanduser()
@@ -201,7 +201,7 @@ class SkillRegistry:
         return skill.name
 
     def uninstall(self, name: str, target_dir: Path) -> bool:
-        """Uninstall a skill by removing its directory from target_dir (P55).
+        """Uninstall a skill by removing its directory from target_dir.
         通过删除 target_dir 中的目录来卸载技能。"""
         if not target_dir.is_dir():
             return False

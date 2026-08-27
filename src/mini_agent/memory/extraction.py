@@ -1,9 +1,9 @@
 """Memory extraction -- LLM-based structured extraction from conversations.
 记忆提取——用 LLM 从对话中结构化提取值得跨会话记住的事实。
 
-P30 upgrade: replaces the P4 regex heuristic with an LLM call that outputs
+LLM upgrade: replaces the earlier regex heuristic with an LLM call that outputs
 JSON. Falls back silently on any failure (extraction must never block exit).
-P30 升级：用 LLM 调用（JSON 输出）替代 P4 的正则启发式。
+LLM 升级：用 LLM 调用（JSON 输出）替代早期的正则启发式。
 失败时静默降级（提取绝不阻断退出）。
 """
 
@@ -81,7 +81,7 @@ class MemoryExtractor:
         return new_entries
 
     async def _maybe_consolidate(self, project_dir: Path | None) -> None:
-        """Consolidate memories when they grow beyond the threshold (P53).
+        """Consolidate memories when they grow beyond the threshold.
         记忆超过阈值时触发合并。Fail-safe: never raises. 绝不抛异常。"""
         try:
             if project_dir:

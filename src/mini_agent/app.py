@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -22,6 +23,7 @@ from mini_agent.memory.compressor import (
     SlidingWindow,
 )
 from mini_agent.memory.context import ContextManager
+from mini_agent.memory.recall import RecallPrefetcher
 from mini_agent.memory.session_store import SessionStore
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import (
@@ -279,6 +281,11 @@ class Application:
         self.context_manager.set_compressor(compressor)
         self.session_store = SessionStore()
         self._last_autosave: float = 0.0
+        # Memory subsystem background workers: startup consolidation task and
+        # parallel recall prefetch (tech-notes §111)
+        # 记忆子系统后台工作件：启动整固任务与并行召回预取
+        self._consolidation_task: asyncio.Task | None = None
+        self._recall_prefetcher: RecallPrefetcher | None = None
 
         self.agent_loop = AgentLoop(
             llm=self._llm,
@@ -480,7 +487,7 @@ class Application:
         self.slash_commands = SlashCommandRegistry()
         register_builtin_commands(self)
 
-        # Plugin ecosystem (P83): pip packages / local files registering
+        # Plugin ecosystem: pip packages / local files registering
         # tools, commands, skills -- loaded before completion wiring so
         # plugin commands land in the `/` dropdown.
         # 插件生态：pip 包 / 本地文件注册工具、命令、技能——在补全接线前
@@ -626,7 +633,7 @@ class Application:
         # 启动时预热探测上下文窗口，让首轮溢出检查就用上真实值
         await self._llm.prepare()
         await self._connect_mcp_servers()
-        # Stale worktree cleanup (P54): clean worktrees older than N days
+        # Stale worktree cleanup: clean worktrees older than N days
         # 过期 worktree 清理：清除超龄的干净 worktree
         if self.config.security.worktree_max_age_days > 0:
             try:
@@ -651,6 +658,10 @@ class Application:
             except Exception:
                 logger.debug("stale session cleanup failed", exc_info=True)
                 pass
+        # Background memory consolidation: time + session-count gated, runs
+        # invisibly while the user works (tech-notes §111)
+        # 后台记忆整固：时间+会话数双门槛，用户工作时无感运行
+        self.start_background_consolidation()
         await self._maybe_restore_session()
         await self.event_bus.emit(SessionStartEvent(session_id=self.session.metadata.session_id))
         try:
@@ -753,6 +764,10 @@ class Application:
                 # 硬杀进程丢掉最后一轮。斜杠命令仍走节流。
                 await self._autosave(force=True)
         finally:
+            # Stop background memory workers before teardown 收尾前停掉记忆后台工作件
+            await self.stop_background_consolidation()
+            if self._recall_prefetcher is not None:
+                self._recall_prefetcher.cancel()
             await self.event_bus.emit(SessionEndEvent(session_id=self.session.metadata.session_id))
             # SESSION_END hook: auto-extract memories, cleanup, etc.
             # SESSION_END hook：自动提取记忆、清理等
@@ -826,6 +841,48 @@ class Application:
                 msg = f"累计总预算警告: {spent} / {cap} ({t_ratio * 100:.0f}%)"
                 self.terminal.console.print(f"  [{w}]{msg}[/{w}]")
 
+    def start_background_consolidation(self) -> None:
+        """Launch the gated background consolidation task once (terminal and
+        remote modes both call this at startup; no-op when disabled or
+        already running). 启动门槛化后台整固任务（终端与远程模式共用；
+        已禁用或已在跑则 no-op）。"""
+        if not self.config.memory.auto_consolidate:
+            return
+        if self._consolidation_task is not None and not self._consolidation_task.done():
+            return
+        self._consolidation_task = asyncio.create_task(self._background_consolidate())
+
+    async def stop_background_consolidation(self) -> None:
+        """Cancel a still-running consolidation task; never raises.
+        取消仍在运行的整固任务；绝不抛异常。"""
+        if self._consolidation_task is not None and not self._consolidation_task.done():
+            self._consolidation_task.cancel()
+            try:
+                await self._consolidation_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def _background_consolidate(self) -> None:
+        """Run gated memory consolidation in the background; never raises.
+        后台运行门槛化记忆整固；绝不抛异常。"""
+        try:
+            from mini_agent.memory.consolidation import ConsolidationScheduler
+            from mini_agent.memory.persistent import PersistentMemory
+
+            scheduler = ConsolidationScheduler(
+                PersistentMemory(),
+                self.session_store,
+                self._llm,
+                min_hours=self.config.memory.consolidate_min_hours,
+                min_sessions=self.config.memory.consolidate_min_sessions,
+            )
+            outcomes = await scheduler.run_once(self.session.metadata.project_dir)
+            logger.debug("background consolidation outcomes: %s", outcomes)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("background consolidation failed", exc_info=True)
+
     async def _autosave(self, force: bool = False) -> None:
         """Throttled auto-save; failures are silent (retried next turn).
         节流的自动保存；失败静默（下轮重试）。"""
@@ -861,10 +918,14 @@ class Application:
                 if marker not in sp:
                     mem_cfg = app.config.memory
                     if len(entries) > mem_cfg.recall_threshold:
-                        # Selective recall: LLM picks the most relevant (P52)
-                        # 选择性召回：LLM 挑选最相关的记忆
-                        from mini_agent.memory.recall import MemoryRecall
-
+                        # Selective recall, prefetched in parallel with
+                        # the main LLM call: the first round fires the task
+                        # and proceeds unblocked; later rounds await the
+                        # selection (usually already done); timeout/failure
+                        # degrades to head-truncation
+                        # 选择性召回，与主 LLM 调用并行预取：首轮发射任务后
+                        # 直接放行；后续轮 await 结果（通常已完成）；
+                        # 超时/失败降级头部截断
                         last_user = next(
                             (
                                 m.content
@@ -873,10 +934,15 @@ class Application:
                             ),
                             "",
                         )
-                        recall = MemoryRecall(app._llm)
-                        selected = await recall.select_relevant(
+                        if app._recall_prefetcher is None:
+                            app._recall_prefetcher = RecallPrefetcher(
+                                app._llm, timeout=mem_cfg.recall_timeout
+                            )
+                        selected = await app._recall_prefetcher.poll(
                             entries, last_user, top_k=mem_cfg.recall_top_k
                         )
+                        if selected is None:
+                            return HookResult()
                     else:
                         selected = entries[:10]
                     if selected:
@@ -938,6 +1004,11 @@ class Application:
         切换到已加载的会话（同步修复 ToolContext 的过期引用）。"""
         self.session = loaded
         self._tool_context.session = loaded
+        # Reset recall prefetch: the pending selection was keyed to the old
+        # session's message 重置召回预取：未完成的挑选是按旧会话消息算的
+        if self._recall_prefetcher is not None:
+            self._recall_prefetcher.cancel()
+            self._recall_prefetcher = None
         self.context_manager.reset_state()
         self.context_manager.adopt_boundary(loaded.conversation)
         # Restore skill registry state from the boundary -- WITHOUT

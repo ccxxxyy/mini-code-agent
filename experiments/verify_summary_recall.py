@@ -1,4 +1,4 @@
-"""P67 无污染摘要召回验证：证明 LLM 能从压缩摘要（而非残留历史）恢复信息。
+"""无污染摘要召回验证：证明 LLM 能从压缩摘要（而非残留历史）恢复信息。
 
 运行：uv run python experiments/verify_summary_recall.py
 

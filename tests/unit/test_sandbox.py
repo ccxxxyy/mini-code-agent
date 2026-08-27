@@ -1,4 +1,4 @@
-"""Tests for OS-level sandbox (P41).
+"""Tests for OS-level sandbox.
 OS 级沙箱的测试。"""
 
 from pathlib import Path

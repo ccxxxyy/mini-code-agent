@@ -1,4 +1,4 @@
-"""Tests for user-defined permission rule files (P40).
+"""Tests for user-defined permission rule files.
 用户自定义权限规则文件的测试。"""
 
 from pathlib import Path

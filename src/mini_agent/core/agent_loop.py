@@ -67,7 +67,7 @@ def _denied_message(tool_name: str, reason: str) -> str:
 
 
 def _mail_prefix(mail) -> str:
-    """Format the injection prefix by message type (P58.4 structured protocol).
+    """Format the injection prefix by message type (structured protocol).
     按消息类型格式化注入前缀（结构化协议）。"""
     if mail.type == "request":
         return f"[Request from agent '{mail.sender}' request_id={mail.request_id}]"
@@ -436,9 +436,18 @@ class AgentLoop:
             stage=HookStage.PRE_LLM,
             metadata={"message_count": len(api_messages), "tool_count": len(tool_schemas)},
         )
+        sp_before_hook = conversation.system_prompt
         pre_llm_result = await self._hooks.run(pre_llm_ctx)
         if pre_llm_result.action == HookAction.BLOCK:
             return LLMResponse(content=pre_llm_result.reason or "(blocked by PRE_LLM hook)")
+        # api_messages was snapshotted above -- without a rebuild, a hook's
+        # system_prompt edit (memory injection) would only reach the NEXT
+        # LLM call, one round late (latent since selective recall landed,
+        # exposed by real-run)
+        # api_messages 在上方已快照——不重建的话 hook 对 system_prompt 的
+        # 修改（记忆注入）只能进下一次 LLM 调用，晚一轮生效
+        if conversation.system_prompt != sp_before_hook:
+            api_messages = conversation.to_api_messages()
 
         # Context compression: check BEFORE every LLM call (not just after
         # tool results) so pure-conversation turns also get compressed.
@@ -458,7 +467,7 @@ class AgentLoop:
 
         # max_tokens recovery: if the response was cut off (finish_reason
         # "length"), retry with a doubled limit -- up to 3 retries, keeping
-        # the last result if still truncated (P44).
+        # the last result if still truncated.
         # max_tokens 恢复：回答被截断（finish_reason "length"）时翻倍限制
         # 重试——最多 3 次，仍截断则保留最后一次结果。
 

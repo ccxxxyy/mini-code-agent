@@ -126,7 +126,7 @@ def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _schema_from_model(name: str, description: str, model: type) -> ToolSchema:
-    """Build a ToolSchema from a Pydantic BaseModel (P46).
+    """Build a ToolSchema from a Pydantic BaseModel.
     从 Pydantic BaseModel 自动生成 ToolSchema。"""
     raw_schema = model.model_json_schema()
     resolved = _resolve_refs(raw_schema)
@@ -162,7 +162,7 @@ class Tool(ABC):
     @property
     def schema(self) -> ToolSchema:
         """Return the tool's schema. Auto-generated from params_model when
-        available (P46); subclasses without params_model must override.
+        available; subclasses without params_model must override.
         返回工具 schema。有 params_model 时自动生成；否则子类必须覆盖。"""
         if self.params_model is not None:
             return _schema_from_model(self._name, self._description, self.params_model)

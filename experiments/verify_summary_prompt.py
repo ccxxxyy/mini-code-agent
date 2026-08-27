@@ -1,4 +1,4 @@
-"""P67 真实 LLM 验证：结构化摘要 prompt（<analysis> + 9 节 <summary>）。
+"""真实 LLM 验证：结构化摘要 prompt（<analysis> + 9 节 <summary>）。
 
 运行：uv run python experiments/verify_summary_prompt.py
 验证点：

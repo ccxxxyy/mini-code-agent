@@ -1,4 +1,4 @@
-"""Tests for memory consolidation (P53). 记忆合并测试。"""
+"""Tests for memory consolidation. 记忆合并测试。"""
 
 from __future__ import annotations
 

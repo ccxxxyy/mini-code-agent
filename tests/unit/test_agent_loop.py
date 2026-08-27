@@ -334,7 +334,7 @@ async def test_tool_callbacks(tool_context):
     assert ended == ["read_file"]
 
 
-# --- max_tokens recovery (P44) max_tokens 恢复 ---
+# --- max_tokens recovery max_tokens 恢复 ---
 
 
 class KwargsMockLLM(MockLLM):
@@ -673,7 +673,7 @@ async def test_write_tool_still_deferred_not_cached(tool_context):
     assert executed == ["Y"], f"expected ['Y'], got {executed}"
 
 
-# --- Plan mode (P49) ---
+# --- Plan mode ---
 
 
 def test_plan_mode_hides_write_schemas(tool_context):
@@ -835,4 +835,50 @@ async def test_delete_file_routes_through_path_check(tool_context):
     tool_msgs = [m for m in conv.messages if m.tool_result is not None]
     assert any(m.tool_result.is_error for m in tool_msgs), (
         "delete_file on ~/.ssh/id_rsa must be DENIED, not silently granted"
+    )
+
+
+async def test_pre_llm_hook_system_prompt_edit_reaches_same_round(tool_context):
+    """A PRE_LLM hook's system_prompt edit must reach the SAME round's request.
+    回归测试：PRE_LLM hook 对 system_prompt 的修改（记忆注入）必须进入当轮
+    请求——修复前 api_messages 在 hook 之前快照，注入永远晚一轮生效。
+    """
+    from mini_agent.tools.hooks import HookContext, HookManager, HookResult, HookStage
+
+    class _CapturingLLM(MockLLM):
+        def __init__(self, scripts):
+            super().__init__(scripts)
+            self.seen_messages: list[list[dict]] = []
+
+        async def stream(self, messages, tools=None, **kwargs):
+            self.seen_messages.append(messages)
+            async for chunk in super().stream(messages, tools, **kwargs):
+                yield chunk
+
+    llm = _CapturingLLM([text_response("ok")])
+    conv = Conversation(system_prompt="base prompt")
+    hooks = HookManager()
+
+    async def inject(ctx: HookContext) -> HookResult:
+        conv.system_prompt = conv.system_prompt + "\n\n--- Relevant memories ---\n- likes tabs"
+        return HookResult()
+
+    hooks.register(HookStage.PRE_LLM, inject)
+
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    loop = AgentLoop(
+        llm=llm,
+        tool_registry=registry,
+        event_bus=EventBus(),
+        config=AgentConfig(self_verify=False),
+        tool_context=tool_context,
+        hook_manager=hooks,
+    )
+    await loop.run(conv)
+
+    first_call = llm.seen_messages[0]
+    system = next(m for m in first_call if m["role"] == "system")
+    assert "Relevant memories" in system["content"], (
+        "PRE_LLM injection must be visible to the same round's LLM request"
     )

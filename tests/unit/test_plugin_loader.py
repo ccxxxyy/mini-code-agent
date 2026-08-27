@@ -1,4 +1,4 @@
-"""Tests for the plugin ecosystem loader (P83)."""
+"""Tests for the plugin ecosystem loader."""
 
 import logging
 import types

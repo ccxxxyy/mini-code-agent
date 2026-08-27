@@ -165,9 +165,9 @@ async def test_dangerous_command_no_ui_denied(path_guard):
 
 
 async def test_git_state_changing_commands_flagged(path_guard):
-    # All git state-changing commands need confirmation (P34.3 hardening
+    # All git state-changing commands need confirmation (hardening
     # after the LLM autonomously attempted a commit)
-    # 全部 git 状态修改命令需确认（P34.3 加固——LLM 曾擅自尝试 commit）
+    # 全部 git 状态修改命令需确认（加固——LLM 曾擅自尝试 commit）
     assert PermissionManager.is_dangerous_command("git push origin main --force")
     assert PermissionManager.is_dangerous_command("git push origin main")
     assert PermissionManager.is_dangerous_command("git commit -m 'auto'")

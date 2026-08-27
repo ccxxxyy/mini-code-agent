@@ -141,7 +141,7 @@ async def test_delete_project_memory(tmp_path: Path):
     assert len(await pm.load_project_memory(proj)) == 0
 
 
-# --- MemoryExtractor (LLM-based, P30) ---
+# --- MemoryExtractor (LLM-based) ---
 
 
 class _MockExtractionLLM:

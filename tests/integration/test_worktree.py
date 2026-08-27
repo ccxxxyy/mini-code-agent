@@ -116,7 +116,7 @@ async def test_merge_back(git_repo):
     assert (git_repo / "feature.txt").is_file()
 
 
-# --- P54: lifecycle enhancements ---
+# --- Worktree lifecycle enhancements ---
 
 
 async def test_create_symlinks_dependency_dirs(git_repo):

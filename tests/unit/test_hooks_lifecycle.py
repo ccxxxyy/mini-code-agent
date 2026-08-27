@@ -130,7 +130,7 @@ async def test_session_end_receives_metadata():
     assert received[0]["extra"] == 42
 
 
-# --- Extended lifecycle stages (P50) ---
+# --- Extended lifecycle stages ---
 
 
 def test_all_stages_unique():

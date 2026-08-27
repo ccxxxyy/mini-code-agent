@@ -1,4 +1,4 @@
-"""Tests for memory export/import interop (4.6/P61). 记忆导出/导入互操作的测试。"""
+"""Tests for memory export/import interop. 记忆导出/导入互操作的测试。"""
 
 from pathlib import Path
 

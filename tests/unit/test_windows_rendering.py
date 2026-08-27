@@ -1,4 +1,4 @@
-"""Windows terminal adaptation tests (P34). Windows 终端适配测试。
+"""Windows terminal adaptation tests. Windows 终端适配测试。
 
 Simulates legacy Windows console conditions (16 colors, GBK codepage)
 without needing a real CMD window.

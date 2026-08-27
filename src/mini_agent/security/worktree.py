@@ -10,7 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Dependency dirs symlinked into new worktrees so agents skip reinstall (P54)
+# Dependency dirs symlinked into new worktrees so agents skip reinstall
 # 创建 worktree 时符号链接的依赖目录——Agent 免重装依赖
 _LINK_DIRS = ("node_modules", ".venv", "vendor")
 
@@ -86,7 +86,7 @@ class WorktreeManager:
         return worktree_path
 
     def _link_dependency_dirs(self, worktree_path: Path) -> None:
-        """Symlink dependency dirs from the main repo into the worktree (P54).
+        """Symlink dependency dirs from the main repo into the worktree.
         把主仓库的依赖目录符号链接到 worktree——免重装依赖。
         Windows without developer mode lacks symlink permission: skip silently.
         Windows 无开发者模式时缺少符号链接权限：静默跳过。"""
@@ -169,13 +169,13 @@ class WorktreeManager:
         )
 
     async def has_uncommitted_changes(self, worktree_path: Path) -> bool:
-        """Check whether a worktree has uncommitted changes (P54).
+        """Check whether a worktree has uncommitted changes.
         检查 worktree 是否有未提交的更改。"""
         info = await self.status(worktree_path)
         return not info.is_clean
 
     async def cleanup_stale(self, max_age_days: int) -> list[str]:
-        """Remove worktrees older than max_age_days. Dirty ones are kept (P54).
+        """Remove worktrees older than max_age_days. Dirty ones are kept.
         清理超过 max_age_days 的过期 worktree。有未提交更改的保留。
 
         Returns the list of removed paths. Individual failures are skipped

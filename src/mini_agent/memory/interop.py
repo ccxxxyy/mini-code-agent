@@ -1,4 +1,4 @@
-"""Memory export/import -- mewcode-compatible Markdown interop (4.6/P61).
+"""Memory export/import -- mewcode-compatible Markdown interop.
 记忆导出/导入——与 mewcode 兼容的 Markdown 互操作格式。
 
 Export format: one .md file per entry with YAML-style frontmatter, plus a

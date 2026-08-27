@@ -1,4 +1,4 @@
-"""Tests for @file inline references (P39).
+"""Tests for @file inline references.
 @文件内联引用的测试。"""
 
 from pathlib import Path

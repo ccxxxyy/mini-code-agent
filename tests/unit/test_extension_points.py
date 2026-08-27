@@ -1,5 +1,5 @@
-"""Tests for extension point wiring (#4/#12/#13 from P76, #2/#6/#11/#14 from P77).
-扩展点接入的测试（P76: #4/#12/#13, P77: #2/#6/#11/#14）。
+"""Tests for extension point wiring (items #4/#12/#13 and #2/#6/#11/#14).
+扩展点接入的测试（#4/#12/#13 与 #2/#6/#11/#14）。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.asyncio
 
 
 # ═══════════════════════════════════════════════════════════════
-# P76: #4 ProviderRegistry.list_providers() in /model
+# #4 ProviderRegistry.list_providers() in /model
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -52,7 +52,7 @@ async def test_model_command_handler_output_contains_providers():
 
 
 # ═══════════════════════════════════════════════════════════════
-# P76: #12 UserMessageEvent.is_slash_command
+# #12 UserMessageEvent.is_slash_command
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -145,7 +145,7 @@ async def test_trace_renders_normal_user_message():
 
 
 # ═══════════════════════════════════════════════════════════════
-# P76: #13 LLMRequestEvent.estimated_tokens
+# #13 LLMRequestEvent.estimated_tokens
 # ═══════════════════════════════════════════════════════════════
 
 

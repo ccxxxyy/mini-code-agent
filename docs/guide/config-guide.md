@@ -223,7 +223,11 @@ compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳�
 llm_summarize = true         # LLM 语义摘要压缩（默认开启）；false 退回提取式截断（无 LLM 调用）
 recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入）
 recall_top_k = 5             # 选择性召回时 LLM 挑选的最大条数
+recall_timeout = 8.0         # 召回预取超时秒数——挑选与主 LLM 调用并行（不增加首 token 延迟），超时降级注入头部条目
 consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并（0 = 禁用）
+auto_consolidate = true      # 启动时后台整固：双门槛满足时无感合并记忆（锁防并发、失败回滚）
+consolidate_min_hours = 24.0 # 后台整固门槛一：距上次整固的小时数
+consolidate_min_sessions = 5 # 后台整固门槛二：期间活跃的新会话数
 # persistent_memory_dir = "~/.mini-agent/memory"     # 用户级记忆目录
 # project_memory_file = ".mini-agent/memory.json"    # 项目级记忆文件
 
