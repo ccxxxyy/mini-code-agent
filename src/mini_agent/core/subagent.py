@@ -59,6 +59,16 @@ def _task_snippet(task: str, limit: int = 80) -> str:
     return flat[:limit] + ("..." if len(flat) > limit else "")
 
 
+def _extract_structured_output(conversation: Conversation) -> dict | None:
+    """Extract the last synthetic_output call's arguments from a conversation.
+    从对话中提取最后一次 synthetic_output 调用的参数。"""
+    for msg in reversed(conversation.messages):
+        for tc in msg.tool_calls:
+            if tc.name == "synthetic_output":
+                return dict(tc.arguments) if tc.arguments else None
+    return None
+
+
 def _intersect_tools(
     type_tools: tuple[str, ...] | None,
     caller_tools: list[str] | None,
@@ -82,6 +92,7 @@ class SubAgentResult:
     tokens_used: int = 0
     worktree_path: Path | None = None
     error: str | None = None
+    structured_output: dict | None = None
 
 
 class SubAgent:
@@ -289,6 +300,7 @@ class SubAgent:
                 tokens_used=self._loop.last_turn_tokens,
                 worktree_path=self._worktree_path,
                 error=error,
+                structured_output=_extract_structured_output(self._conversation),
             )
         except Exception as e:
             return SubAgentResult(
@@ -621,6 +633,7 @@ class SubAgentManager:
                         error=data.get("error"),
                         tool_calls_made=int(data.get("tool_calls_made", 0)),
                         tokens_used=int(data.get("tokens_used", 0)),
+                        structured_output=data.get("structured_output"),
                     )
             await asyncio.sleep(0.5)
 
@@ -761,12 +774,19 @@ class SubAgentManager:
         output = result.output[: self.NOTIFY_MAX_CHARS]
         if len(result.output) > self.NOTIFY_MAX_CHARS:
             output += "\n... (truncated)"
+        structured_block = ""
+        if result.structured_output:
+            structured_block = (
+                "\nStructured output:\n```json\n"
+                + json.dumps(result.structured_output, ensure_ascii=False, indent=2, default=str)
+                + "\n```\n"
+            )
         self.mailbox.send(
             sender=result.agent_id,
             recipient="main",
             content=(
                 f"[Background agent '{result.agent_id}' {status}]\n"
-                f"Task: {result.task}\nResult:\n{output}"
+                f"Task: {result.task}{structured_block}\nResult:\n{output}"
             ),
         )
         self._background_ids.discard(result.agent_id)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1645,10 +1646,12 @@ def _format_agent_result(r) -> str:
         branch = r.worktree_path.name
         lines.append(f"- Worktree: {r.worktree_path}")
         lines.append(f"- Merge with: `git merge {branch}` (then clean up the worktree)")
+    if r.structured_output:
+        lines.append("- Structured output:")
+        lines.append("```json")
+        lines.append(json.dumps(r.structured_output, ensure_ascii=False, indent=2, default=str))
+        lines.append("```")
     if r.output:
-        # The output IS the deliverable -- never amputate the answer.
-        # Only guard against pathological megabyte outputs.
-        # 输出就是交付物——不截断答案，只防病态超大输出。
         output = r.output
         if len(output) > 8000:
             output = output[:8000] + f"\n... (truncated, {len(r.output)} chars total)"

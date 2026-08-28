@@ -42,6 +42,7 @@ EXPECTED_CATEGORIES = {
     "load_skill": ToolCategory.READ,
     "send_message": ToolCategory.READ,
     "wait_message": ToolCategory.READ,
+    "synthetic_output": ToolCategory.READ,
     "write_file": ToolCategory.WRITE,
     "edit_file": ToolCategory.WRITE,
     "delete_file": ToolCategory.WRITE,

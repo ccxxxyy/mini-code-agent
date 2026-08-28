@@ -205,7 +205,7 @@ thinking = false             # Request-side extended thinking: Anthropic thinkin
 [tools]
 bash_timeout = 120.0         # bash command timeout (seconds)
 max_file_size = 10000000     # File read cap (bytes)
-enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill"]
+enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # Extra allowed paths outside the project (default empty)
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # Paths forbidden to access
 enforce_read_before_edit = true  # Read-before-edit gate : edit/overwrite-write requires a prior read with no external change since; false disables
@@ -377,10 +377,10 @@ Budget: {iteration_budget} rounds.
 |---|---|---|---|
 | `name` | Yes | — | Type identifier, used in `/spawn --type <name>`. Only lowercase letters, digits, underscores, hyphens (`[a-z0-9_-]+`) |
 | `description` | No | `""` | One-line description shown in the `spawn_agents` tool schema for the LLM to choose from |
-| `allowed_tools` | No | All tools | Whitelist of tools this agent type can use. **Omit to allow all 20 built-in tools.** One per line, format `  - tool_name` |
+| `allowed_tools` | No | All tools | Whitelist of tools this agent type can use. **Omit to allow all 21 built-in tools.** One per line, format `  - tool_name` |
 | `max_iterations` | No | `30` | Max iteration rounds (think-act loop cap); agent is force-stopped when exceeded |
 
-**Values for `allowed_tools`** (pick from the 20 built-in tools in `[tools] enabled_tools`):
+**Values for `allowed_tools`** (pick from the 21 built-in tools in `[tools] enabled_tools`):
 
 | Tool name | Purpose | Read-only |
 |---|---|---|
@@ -400,6 +400,7 @@ Budget: {iteration_budget} rounds.
 | `exit_plan_mode` | Request to exit plan mode (requires user approval; rejection stays read-only) | — |
 | `task_create` / `task_get` / `task_list` / `task_update` | Task board CRUD | — |
 | `load_skill` / `install_skill` | Load/install skills | — |
+| `synthetic_output` | Sub-agent returns structured JSON result | Yes |
 
 **Typical combinations**: read-only review agents use `[read_file, glob, grep, bash]`; full-capability workers omit the field entirely (omit = all tools).
 

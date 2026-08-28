@@ -18,7 +18,15 @@ class AgentTypeDefinition:
     description: str = ""
 
 
-_READ_ONLY_TOOLS = ("read_file", "glob", "grep", "bash", "send_message", "wait_message")
+_READ_ONLY_TOOLS = (
+    "read_file",
+    "glob",
+    "grep",
+    "bash",
+    "send_message",
+    "wait_message",
+    "synthetic_output",
+)
 
 _EXPLORE_PROMPT = """\
 You are a read-only research agent. Your job is to explore the codebase, \
@@ -85,7 +93,11 @@ Platform: {platform}
 Shell: {shell}
 
 Do NOT create, modify, or delete any files. Only use read-only tools.
-After your investigation, end your final message with exactly one of:
+After your investigation, you MUST call the synthetic_output tool to return \
+your structured verdict before writing any text conclusion. Example:
+  synthetic_output(pass=true)  or  synthetic_output(pass=false, failures=[...])
+This is mandatory — never skip it. Then end your final message with exactly \
+one of:
   PASS — the condition holds
   FAIL — the condition does not hold
 Include a brief explanation before the verdict.
@@ -121,7 +133,7 @@ AGENT_TYPES: dict[str, AgentTypeDefinition] = {
         system_prompt=_VERIFY_PROMPT,
         allowed_tools=_READ_ONLY_TOOLS,
         max_iterations=20,
-        description="Read-only verifier (PASS/FAIL output)",
+        description="Read-only verifier (structured verdict via synthetic_output + PASS/FAIL)",
     ),
 }
 

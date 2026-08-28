@@ -59,7 +59,7 @@ mini-code-agent/
 │       │   ├── __init__.py
 │       │   ├── base.py              # Tool ABC, ToolRegistry, ToolContext
 │       │   ├── file_state_cache.py    # Read-before-edit enforcement
-│       │   ├── builtin/             # 20 core tools
+│       │   ├── builtin/             # 21 core tools
 │       │   │   ├── __init__.py
 │       │   │   ├── read_file.py     # ReadFile tool
 │       │   │   ├── write_file.py    # WriteFile tool
@@ -73,7 +73,7 @@ mini-code-agent/
 │       │   │   ├── wait_message.py  # Inter-agent messaging (receive)
 │       │   │   ├── tool_search.py   # Dynamic tool discovery (MCP dispatch)
 │       │   │   ├── mcp_call.py      # MCP tool invocation
-│       │   │   ├── ask_user.py      # Structured question to user│       │   │   ├── exit_plan_mode.py # LLM exits plan mode for review│       │   │   ├── task_create.py    # Create task on board│       │   │   ├── task_get.py       # Get task details│       │   │   ├── task_list.py      # List all tasks│       │   │   ├── task_update.py    # Update task status/description│       │   │   ├── load_skill.py     # Activate installed skill│       │   │   └── install_skill.py  # Install skill from path/URL│       │   ├── mcp/                 # MCP client integration
+│       │   │   ├── ask_user.py      # Structured question to user│       │   │   ├── exit_plan_mode.py # LLM exits plan mode for review│       │   │   ├── task_create.py    # Create task on board│       │   │   ├── task_get.py       # Get task details│       │   │   ├── task_list.py      # List all tasks│       │   │   ├── task_update.py    # Update task status/description│       │   │   ├── load_skill.py     # Activate installed skill│       │   │   ├── install_skill.py  # Install skill from path/URL│       │   │   └── synthetic_output.py # Sub-agent structured JSON output│       │   ├── mcp/                 # MCP client integration
 │       │   │   ├── __init__.py
 │       │   │   ├── client.py        # MCPManager — manages server connections
 │       │   │   ├── transport.py     # Transport abstractions (stdio, HTTP)
@@ -488,6 +488,7 @@ class ToolConfig:
         "ask_user", "exit_plan_mode", "task_create", "task_get",
         "task_list", "task_update",
         "load_skill", "install_skill",
+        "synthetic_output",
     ])
     bash_timeout: float = 120.0
     max_file_size: int = 10_000_000       # 10MB
@@ -1488,6 +1489,7 @@ class SubAgentResult:
     tokens_used: int = 0
     worktree_path: Path | None = None
     error: str | None = None
+    structured_output: dict | None = None  # B17: synthetic_output 工具调用的 JSON
 
 
 @dataclass
@@ -2294,7 +2296,7 @@ class ReadFileTool(Tool):
         )
 ```
 
-全部 20 个内置工具（`tools/builtin/__init__.py` 的 `ALL_BUILTIN_TOOLS`）：
+全部 21 个内置工具（`tools/builtin/__init__.py` 的 `ALL_BUILTIN_TOOLS`）：
 
 | Tool | 用途 | 安全检查 |
 |------|------|----------|
@@ -2318,6 +2320,7 @@ class ReadFileTool(Tool):
 | `task_update` | 更新任务状态或描述 | 无限制 |
 | `load_skill` | 激活已安装的技能（注入 prompt） | 无限制 |
 | `install_skill` | 从路径或 git URL 安装技能 | 无限制 |
+| `synthetic_output` | 子 Agent 以结构化 JSON 返回结果 | 无限制（READ） |
 
 其中 `tool_search` + `mcp_call` 构成 MCP 的 **dispatch 模式**：不把每个 MCP 工具注册进 LLM 的工具列表（大量 MCP 工具会撑爆 schema 上下文），而是让 LLM 先用 `tool_search` 懒发现、再用 `mcp_call` 转发调用。Anthropic 官方端点还支持 **native 模式**：工具注册到 ToolRegistry 但带 `defer_loading: true`，服务端隐藏 schema 直到模型调 `tool_search` 返回 `tool_reference` 块展开——无需 `mcp_call` 中转，且 tools[] 数组不变保护 prompt cache 前缀。非 Anthropic 端点配置 native 会自动降级为 dispatch。
 
@@ -2864,10 +2867,10 @@ Main Agent (user-facing)
 
 | 类型 | 工具集 | max_iterations | 用途 |
 |------|--------|----------------|------|
-| `explore` | 只读（read_file/glob/grep/bash/send_message/wait_message） | 30 | 代码库调研 |
+| `explore` | 只读（read_file/glob/grep/bash/send_message/wait_message/synthetic_output） | 30 | 代码库调研 |
 | `plan` | 只读（同上） | 30 | 产出实现计划 |
 | `worker` | 不限（默认类型） | 50 | 全能力执行 |
-| `verify` | 只读（同上） | 20 | 验证，末尾输出 PASS/FAIL |
+| `verify` | 只读（同上） | 20 | 验证，必须调用 synthetic_output 返回结构化判定 + 末尾 PASS/FAIL |
 
 未指定类型时回退 `DEFAULT_AGENT_TYPE="worker"` 的提示词/工具，但**保留调用方的迭代预算**（P80）——`config.max_agent_iterations` 用户可配，不能被类型档案静默覆盖。类型工具列表与调用方 `allowed_tools` 取交集。
 
@@ -2899,7 +2902,7 @@ async def spawn(
 
 `SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估——`SubAgentManager` 持有主权限管理器，`spawn()` 经 `PermissionManager.child_view()` 给每个进程内子 Agent 派生 `ChildPermissionManager` 子视图：规则/会话授权/写文件集按引用共享、mode 实时委托父级、需弹窗一律失败安全拒绝；此前进程内子 Agent 完全没有权限门控，只有 pane worker 有），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
 
-**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。**斜杠命令执行期间**完成的投递（如 re-attach 竞态中 agent 恰好完成）不经 `_BG_INTERRUPT`——主循环在每条斜杠命令结束后检查 `has_pending` 并立即走同一处理链；`interrupt_input()` 仅在 prompt 真正运行时才保存缓冲并中断（两次 prompt 之间缓冲区是上一次已提交文本，保存会把残留预填进下一次输入行）。`spawn_agents` 工具默认 `background=false` 保持阻塞语义（LLM 调用方需要全部结果再继续是常态）。**`/spawn` 斜杠命令则默认走 `spawn_background()` 路径**（完成后自动投递结果，无需 `/spawn wait`）；`--wait` 为阻塞式 opt-in（进度面板+内联完整结果），`--background` 保留为 no-op 别名。进度面板（`SubAgentBoard.run_while(detachable=True)`）期间**单击 Esc 转后台**：面板返回 `BOARD_DETACHED` 哨兵、等待任务刻意不 cancel（`wait()` 内 `asyncio.wait_for` 会级联杀死 agent 本体），由 `adopt_pending_wait()` 接管既有任务——ids 加入 `_background_ids` 并登记进 `_adopted_waits` 供重新附着，完成后 `_deliver_result()` 投递 mailbox。EscWatcher 双层防误触：启动观察窗 300ms 持续排空输入缓冲（提示符移交控制台瞬间终端会产生杂散转义序列）+ 孤立 Esc 判别（`` 后 30ms 内还有字节 = 转义序列，整段丢弃；人按的 Esc 是孤立单字节）。转后台后空提示符按 Esc（prompt_toolkit 绑定自动提交 `/spawn wait`，仅空缓冲且无补全菜单时生效）或手动 `/spawn wait [id]` 命中登记组即**重新附着**：面板套回原任务（绝不新起 wait()，会抢 `_active`），拿到结果后 `reclaim_adopted_wait()` 取消后台投递（`deliver_task.done()` 判定竞态：投递已发出则如实提示而不重复打印）。
+**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符；若有 `structured_output` 则附带 JSON 代码块）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。**斜杠命令执行期间**完成的投递（如 re-attach 竞态中 agent 恰好完成）不经 `_BG_INTERRUPT`——主循环在每条斜杠命令结束后检查 `has_pending` 并立即走同一处理链；`interrupt_input()` 仅在 prompt 真正运行时才保存缓冲并中断（两次 prompt 之间缓冲区是上一次已提交文本，保存会把残留预填进下一次输入行）。`spawn_agents` 工具默认 `background=false` 保持阻塞语义（LLM 调用方需要全部结果再继续是常态）。**`/spawn` 斜杠命令则默认走 `spawn_background()` 路径**（完成后自动投递结果，无需 `/spawn wait`）；`--wait` 为阻塞式 opt-in（进度面板+内联完整结果），`--background` 保留为 no-op 别名。进度面板（`SubAgentBoard.run_while(detachable=True)`）期间**单击 Esc 转后台**：面板返回 `BOARD_DETACHED` 哨兵、等待任务刻意不 cancel（`wait()` 内 `asyncio.wait_for` 会级联杀死 agent 本体），由 `adopt_pending_wait()` 接管既有任务——ids 加入 `_background_ids` 并登记进 `_adopted_waits` 供重新附着，完成后 `_deliver_result()` 投递 mailbox。EscWatcher 双层防误触：启动观察窗 300ms 持续排空输入缓冲（提示符移交控制台瞬间终端会产生杂散转义序列）+ 孤立 Esc 判别（`` 后 30ms 内还有字节 = 转义序列，整段丢弃；人按的 Esc 是孤立单字节）。转后台后空提示符按 Esc（prompt_toolkit 绑定自动提交 `/spawn wait`，仅空缓冲且无补全菜单时生效）或手动 `/spawn wait [id]` 命中登记组即**重新附着**：面板套回原任务（绝不新起 wait()，会抢 `_active`），拿到结果后 `reclaim_adopted_wait()` 取消后台投递（`deliver_task.done()` 判定竞态：投递已发出则如实提示而不重复打印）。
 
 **摘要式上下文 fork**：`spawn_agents` 工具的 `inherit_context=true` 或 `/spawn --fork` 把父对话的 LLM 摘要注入子 agent system prompt 的 `[Inherited context ...]` 段——子 agent 出生时"知道"之前的讨论。摘要经 `memory/compressor.py` 的公开函数 `summarize_conversation()` 生成（复用 P67 的 9 节结构化摘要，LLM 失败回退提取式 digest），每次 spawn 调用生成一次、同批 agent 共享（冻结快照，回避 fork 一致性问题）。`context_summary` 参数透传 `spawn/spawn_parallel/spawn_background` 三层，与 `background` 模式可组合。摘要生成前后 `build_context_summary()` 发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`——app.py 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready"），TraceRenderer 订阅在 `/trace on` 下显示 `ctx` 行。`background=true + inherit_context=true` 时摘要+spawn 整体放进后台 `asyncio.Task`，`execute()` 立即返回（消息列表浅拷贝防竞态）。`spawn_pane` 与 `/team` 未纳入。
 
@@ -3258,7 +3261,7 @@ hook_manager.register(HookStage.PRE_TOOL, dangerous_cmd_hook, priority=10)
 9. `core/agent_loop.py` -- Full ReAct loop
 10. `ui/terminal.py` -- Extend: tool call rendering, spinners, confirmations
 
-注：此阶段的 6 个内置工具最终扩至 20 个（`delete_file`、`spawn_agents`、`send_message`、`wait_message`、`tool_search`、`mcp_call` 在后续阶段加入）。
+注：此阶段的 6 个内置工具最终扩至 21 个（`delete_file`、`spawn_agents`、`send_message`、`wait_message`、`tool_search`、`mcp_call`、`synthetic_output` 等在后续阶段加入）。
 
 **交付物**：Agent 能接收如"读取 README 并总结"的任务，自主调用 ReadFile，处理结果并回答。多步工具链正常运行。
 

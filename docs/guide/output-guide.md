@@ -182,7 +182,7 @@
 | 用户输入行 bold 亮浅蓝着色 + 上下亮浅蓝横线 | `input_handler.py` `create_prompt_style` 根样式 + `terminal.py` `_input_rule` | `> 输入文字` 行打字时和回车后均为 bold 亮浅蓝（theme.user_input），回车后上下各一条同色横线框住输入行，滚动历史中与 dim 的 trace/工具输出直接可辨 |
 | 斜杠命令输出 | `builtin_commands.py` 各 handler 返回的字符串；默认纯文本原样打印，带 `MARKDOWN_RESULT` 哨兵的（spawn 报告）走 Markdown 渲染，行内代码（文件名/agent id）亮橙色 | 输入 `/xxx` 时 |
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn --wait`、`/spawn wait` 或 `/team` 期间 |
-| 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
+| 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 + `Structured output:` JSON 代码块 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` / `_format_agent_result`（B17 synthetic_output） | `/spawn wait` 收多个结果时；子 agent 调用了 `synthetic_output` 工具时额外显示结构化 JSON 块 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
 | `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | 后台 agent（`spawn_agents background=true` / `/spawn` 默认派发 / Esc 转后台）完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果；斜杠命令执行期间完成的投递在命令结束后立即处理 |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` 的 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` 订阅者 | `inherit_context=true` 或 `/spawn --fork` 时摘要 LLM 调用开始/完成；`/trace on` 下同时显示 `ctx` trace 行 |

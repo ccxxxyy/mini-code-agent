@@ -24,7 +24,7 @@
 
 ## Features
 
-🔧 **20 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call, ask_user, exit_plan_mode, task CRUD, load/install_skill
+🔧 **21 Built-in Tools** — read/write/edit/delete files, bash, glob, grep, spawn agents, send/wait message, tool_search, mcp_call, ask_user, exit_plan_mode, task CRUD, load/install_skill, synthetic_output
 
 🤖 **Multi-Agent** — `/spawn` parallel agents, `/spawn --pane` visible terminal-pane workers (tmux / Windows Terminal, separate processes), `/team` auto-planned orchestration, strong/weak model mixing, cross-agent mailbox messaging (send_message / wait_message); the LLM can also spawn agents in **background mode** (`spawn_agents background=true`) — it keeps working and receives each result as a message on completion; **fork mode** (`inherit_context=true` / `/spawn --fork`) injects a summary of the current conversation into sub-agents so "implement what we discussed" just works
 
@@ -309,7 +309,7 @@ See [config.toml.example](config.toml.example) for all options. Full guide: [doc
 mini-code-agent/
 ├── src/mini_agent/
 │   ├── core/        # Agent loop, state, sub-agents, teams, planner, mailbox, pane worker, cost tracker, task store, tool recorder, agent types, spawn backends
-│   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/native/dispatch) + hook system
+│   ├── tools/       # 21 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/native/dispatch) + hook system
 │   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
 │   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/unshare/seatbelt/windows dual-mode), worktree isolation, remote confirm (cross-process)
 │   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, Esc watcher (double-Esc cancel / single-Esc board detach)

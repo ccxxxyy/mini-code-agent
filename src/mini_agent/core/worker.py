@@ -151,18 +151,18 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
 
     result = await agent.run()
 
-    _write_result(
-        spec.result_path,
-        {
-            "agent_id": result.agent_id,
-            "task": result.task,
-            "success": result.success,
-            "output": result.output,
-            "error": result.error,
-            "tool_calls_made": result.tool_calls_made,
-            "tokens_used": result.tokens_used,
-        },
-    )
+    payload: dict = {
+        "agent_id": result.agent_id,
+        "task": result.task,
+        "success": result.success,
+        "output": result.output,
+        "error": result.error,
+        "tool_calls_made": result.tool_calls_made,
+        "tokens_used": result.tokens_used,
+    }
+    if result.structured_output is not None:
+        payload["structured_output"] = result.structured_output
+    _write_result(spec.result_path, payload)
 
     status = "OK" if result.success else f"FAILED: {result.error}"
     print(

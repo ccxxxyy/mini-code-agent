@@ -205,7 +205,7 @@ thinking = false             # 发送侧 extended thinking：Anthropic thinking 
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
 max_file_size = 10000000     # 文件读取上限（字节）
-enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill"]
+enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # 额外放行的项目外路径（默认空）
 denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]   # 禁止访问的路径
 enforce_read_before_edit = true  # 编辑前必读门：edit/覆盖 write 前必须先 read 且读后未被外部改动；false 关闭
@@ -375,10 +375,10 @@ Budget: {iteration_budget} rounds.
 |---|---|---|---|
 | `name` | ✅ 是 | — | 类型标识符，用于 `/spawn --type <name>`。只允许小写字母、数字、下划线、连字符（`[a-z0-9_-]+`） |
 | `description` | 否 | `""` | 一行描述，出现在 `spawn_agents` 工具的 schema 中供 LLM 参考选择 |
-| `allowed_tools` | 否 | 全部工具 | 该类型 agent 可使用的工具白名单。**省略则可用全部 20 个内置工具**。每行一个，格式 `  - 工具名` |
+| `allowed_tools` | 否 | 全部工具 | 该类型 agent 可使用的工具白名单。**省略则可用全部 21 个内置工具**。每行一个，格式 `  - 工具名` |
 | `max_iterations` | 否 | `30` | agent 的最大迭代轮数（think→act 循环上限），超过后强制停止 |
 
-**`allowed_tools` 可填的工具名**（从 `[tools] enabled_tools` 的 20 个内置工具中选）：
+**`allowed_tools` 可填的工具名**（从 `[tools] enabled_tools` 的 21 个内置工具中选）：
 
 | 工具名 | 用途 | 只读 |
 |---|---|---|
@@ -398,6 +398,7 @@ Budget: {iteration_budget} rounds.
 | `exit_plan_mode` | 请求退出计划模式（需用户批准计划，拒绝则保持只读） | — |
 | `task_create` / `task_get` / `task_list` / `task_update` | 任务板 CRUD | — |
 | `load_skill` / `install_skill` | 加载/安装技能 | — |
+| `synthetic_output` | 子 agent 以结构化 JSON 返回结果 | ✅ |
 
 **典型组合**：只读审查类 agent 填 `[read_file, glob, grep, bash]`；全能 worker 不写此字段（省略 = 全部可用）。
 

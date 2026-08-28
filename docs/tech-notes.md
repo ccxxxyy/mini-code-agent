@@ -855,7 +855,7 @@ merge_back(branch)  → git merge --no-ff；失败时 diff --diff-filter=U 列�
 
 - **复用 AgentLoop**：SubAgent 内部就是一个标准 AgentLoop + 专属 Conversation（系统提示词强调"专注单任务、自主决策、最终消息即报告"）
 - **隔离三件套**：克隆的 ToolRegistry（`clone()` + 白名单过滤）、独立 Session、可选 worktree 作为 working_dir
-- **结果封装**：SubAgentResult 携带 agent_id/task/success/output/tool_calls_made/tokens_used/worktree_path/error
+- **结果封装**：SubAgentResult 携带 agent_id/task/success/output/tool_calls_made/tokens_used/worktree_path/error/structured_output
 
 **SubAgentManager** = 生命周期管理器：
 
@@ -1849,7 +1849,7 @@ P46 的 `_schema_from_model()` 只提取 `type/description/default/enum` 四个�
 
 `AgentTypeDefinition(frozen=True)` 包含三个控制维度：
 1. **system_prompt** — 专属 prompt 模板（explore 强调只读、verify 要求 PASS/FAIL 结尾）
-2. **allowed_tools** — 工具白名单 tuple（explore/plan/verify 只含 read_file/glob/grep/bash；worker 为 None 表示全部）
+2. **allowed_tools** — 工具白名单 tuple（explore/plan/verify 只含 read_file/glob/grep/bash/send_message/wait_message/synthetic_output；worker 为 None 表示全部）
 3. **max_iterations** — 迭代上限覆盖（explore/plan=30, verify=20, worker=50）
 
 参数透传链：`SubAgent.__init__(agent_type=)` → 选择 prompt + 合并工具白名单 + 浅拷贝 config 覆盖迭代上限。`SubAgentManager.spawn(agent_type="explore")` 名称解析为 `AgentTypeDefinition`。`SpawnAgentsTool` 和 `/spawn --type` 暴露给 LLM 和用户。
@@ -3800,3 +3800,35 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 **终验与诚实边界**：三项修复（双层防误触 / 命令后即时投递处理 / 输入行残留）经用户真实终端全部实测通过——面板不再秒转后台、空提示符 Esc 重附生效、结果即时打印、输入行干净。噪声根因（提示符移交瞬间的终端转义序列）是推断——双层防御实测有效，但若某终端产生"孤立且晚于 300ms 到达"的杂散  仍会漏判，届时需加诊断日志定位。设计取舍明账：① 面板期间 Esc 之外的按键被静默消费（面板非输入框）；② 观察窗对面板与流式双 Esc 同样生效——面板出现后/每轮流式开始后 0.3s 内的真实 Esc 被吸收（需再按）；③ 空提示符 Esc 有 prompt_toolkit 序列消歧的约半秒延迟；④ 存在转后台组时"Esc 后立即打字"会先触发重附、后打的字落入下一提示符（重附手势即空提示符 Esc）；⑤ `/spawn wait` 优先重附转后台组，同时有 pane agent 待收结果时会被组挡一次。以上边界已同步 commands-guide 中英。
 
 **测试补强收尾**：① 按键绑定抽出 `build_key_bindings()` 使绑定层可直接测试——shift+tab 调 cycler+invalidate / 无 cycler 不注册 / bare escape 提交 provider 命令 / provider 返回 None 不动作 / escape+enter 插入换行，5 个绑定测试补上此前"只测逻辑函数不测绑定"的缺口；② 主循环命令后收件箱处理抽出 `_process_pending_deliveries()` 并加分支测试；③ 遗留 flaky `test_parallel_faster_than_serial` 加固——延迟 0.1s/阈值 0.35s 改为 0.2s/0.5s，留出 0.3s 调度开销余量（高负载稳定）且仍排除串行（串行不可能低于 0.6s），不删测试保留"并行确实并行"的守护。+6 测试 →1363。
+
+---
+
+## §115 B17 SyntheticOutput 结构化输出工具
+
+**前因**：子 agent 产出只有自然语言报告 + 正则提取 deliverables 的启发式，无法被程序可靠消费。mewcode 的 `SyntheticOutput` 工具让子 agent 以 JSON 返回结构化结果（如 verify agent 的 `{pass: bool, failures: [...]}`），父方无需从文本解析。
+
+**方案**：新增 `SyntheticOutputTool`（`tools/builtin/synthetic_output.py`，READ 类别）——schema 用 `additionalProperties: true` 的开放 object，`execute` 把全部 kwargs 原样 `json.dumps` 返回。`SubAgentResult` 新增 `structured_output: dict | None` 字段；`_extract_structured_output()` 辅助函数从对话中反向扫描最后一次 `synthetic_output` 工具调用的 arguments 提取；`SubAgent.run()` 成功路径填充该字段。
+
+**集成点**：
+- `_format_agent_result()`（builtin_commands.py）：有 structured_output 时插入 `Structured output:` + fenced JSON 代码块
+- `_deliver_result()`（subagent.py）：后台完成通知附带 JSON 块
+- `worker.py`：pane worker 结果序列化/反序列化新增 `structured_output` 字段
+- `_READ_ONLY_TOOLS` 加入 `synthetic_output`：explore/plan/verify 类型均可使用
+- verify prompt **强制**子 agent 调用 `synthetic_output`（"you MUST call ... This is mandatory — never skip it"）再给文本 verdict
+- 注册：`ALL_BUILTIN_TOOLS` + `enabled_tools` + `EXPECTED_CATEGORIES` + e2e snapshot
+
+### 115.1 verify prompt 措辞加强
+
+初版 verify prompt 用建议语气（"call the synthetic_output tool"），真实 LLM 验证时 verify agent 完全跳过了 synthetic_output 调用——只输出文本 PASS，`Structured output:` + JSON 代码块未出现。改为强制语气（"you MUST call ... This is mandatory — never skip it"）+ 给出调用示例（`synthetic_output(pass=true)`），重跑后 verify agent 确实调用了 synthetic_output，`Structured output:` 块正确出现。教训：对 sub-agent 的工具使用引导必须用命令式措辞而非建议式——agent prompt 不像用户对话，模型会自行判断"建议"是否值得遵循。
+
+### 115.2 真实 LLM 验证
+
+4 项验证全部通过：
+1. `/tools` 输出 21 个工具，`synthetic_output` 出现在列表中
+2. `/spawn --wait --type verify`：verify agent 调用 synthetic_output 返回 `{"pass": "true"}`，`Structured output:` + JSON 代码块 + PASS verdict 全部出现（Tools: 3 = read_file/synthetic_output/glob 或 grep）
+3. `/spawn --wait` worker agent：读 pyproject.toml 返回 `{"project_name": "mini-code-agent", "found": "true"}`，JSON 原样透传未被转述，`Structured output:` 代码块格式正确
+4. `/spawn --type explore` 不调用 synthetic_output 时输出中无 `Structured output:` 行——回归正常
+
+注意：LLM 传参时布尔值可能变字符串（`"true"` 而非 `true`），因为 schema 是 `additionalProperties: true` 无类型约束——这是预期行为，不是工具 bug。后台模式（`background=true`）的结果经 mailbox 投递给主 LLM，主 LLM 会自行格式化输出，此时 `Structured output:` 代码块不直接可见（需看 `--wait` 前台路径）。
+
+**验证**：12 个新测试（工具类别/schema/执行/空参数/嵌套结构/提取正常/多次取最后/无调用返回 None/默认 None/有值/格式包含/格式不包含），1375 全过。

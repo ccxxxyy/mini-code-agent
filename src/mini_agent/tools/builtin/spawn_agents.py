@@ -42,7 +42,7 @@ class SpawnAgentsParams(BaseModel):
         default=None,
         description=(
             "Agent type: 'explore' (read-only research), 'plan' (read-only planning), "
-            "'worker' (full tools, default), 'verify' (read-only, PASS/FAIL judgment)"
+            "'worker' (full tools, default), 'verify' (read-only, structured verdict + PASS/FAIL)"
         ),
     )
     background: bool = Field(

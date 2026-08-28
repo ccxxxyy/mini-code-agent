@@ -47,6 +47,7 @@ class ToolConfig:
             "task_update",
             "load_skill",
             "install_skill",
+            "synthetic_output",
         ]
     )
     bash_timeout: float = 120.0

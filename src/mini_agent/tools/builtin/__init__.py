@@ -11,6 +11,7 @@ from mini_agent.tools.builtin.mcp_call import MCPCallTool
 from mini_agent.tools.builtin.read_file import ReadFileTool
 from mini_agent.tools.builtin.send_message import SendMessageTool
 from mini_agent.tools.builtin.spawn_agents import SpawnAgentsTool
+from mini_agent.tools.builtin.synthetic_output import SyntheticOutputTool
 from mini_agent.tools.builtin.task_create import TaskCreateTool
 from mini_agent.tools.builtin.task_get import TaskGetTool
 from mini_agent.tools.builtin.task_list import TaskListTool
@@ -40,6 +41,7 @@ ALL_BUILTIN_TOOLS = [
     TaskUpdateTool,
     LoadSkillTool,
     InstallSkillTool,
+    SyntheticOutputTool,
 ]
 
 __all__ = [
@@ -63,5 +65,6 @@ __all__ = [
     "TaskUpdateTool",
     "LoadSkillTool",
     "InstallSkillTool",
+    "SyntheticOutputTool",
     "ALL_BUILTIN_TOOLS",
 ]

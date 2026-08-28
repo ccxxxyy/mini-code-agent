@@ -104,7 +104,7 @@
 | PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
 | 插件生态 ✅ | P83 实现：`extensions/plugin_loader.py` 四钩子契约（register/register_tools/commands/skills）+ 双通道发现（`mini_agent.plugins` entry point + `plugin_dirs` 本地文件），`/plugins` 命令展示 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |
-| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 20 个） |
+| 文件变更汇总 ✅ | P24 实现：轮末显示本轮文件清单（+绿新建/~黄修改/-红删除）+ delete_file 专用工具（第 8 个内置工具，当前 21 个） |
 | 上下文感知 ✅ | P25 实现：启动自动注入项目指令文件（AGENT.md/CLAUDE.md/.mini-agent/instructions.md 优先级递减）+ 用户级全局指令 |
 | 对话分叉/回滚 ✅ | P26 实现：/undo 轮次回滚 + /fork 深拷贝分叉（差异化能力——CC 服务端历史做不到） |
 | 操作级撤销 ✅ | P27 实现：每轮文件快照（默认 5 轮保留可配置/30MB 上限/磁盘存储会话结束清空），/undo 新建删掉/修改还原/删除找回；B15 增强：--code-only/--conv-only 选择性恢复 + undo_keep_turns 容量配置 |
@@ -538,7 +538,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 ### B. 真差距
 
 ✅ **B1 LLM 可自主调用的流程工具集（核心批次已完成）**
-mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、`exit_plan_mode.py`（计划审批）、`task_create/get/list/stop/update.py`（任务板）、`team_create/team_delete.py`（常驻队友）、`enter_worktree/exit_worktree.py`（工作树）、`load_skill/install_skill.py`（技能）。其中 ask_user/exit_plan_mode/task CRUD/load_skill/install_skill 已在 B1 核心+技能两批次实现（20 个内置工具）；仅 team(依赖常驻队友系统) 和 worktree(使用场景窄) 未做。
+mewcode `mewcode/tools/` 的流程工具：`ask_user.py`（结构化提问）、`exit_plan_mode.py`（计划审批）、`task_create/get/list/stop/update.py`（任务板）、`team_create/team_delete.py`（常驻队友）、`enter_worktree/exit_worktree.py`（工作树）、`load_skill/install_skill.py`（技能）。其中 ask_user/exit_plan_mode/task CRUD/load_skill/install_skill 已在 B1 核心+技能两批次实现；仅 team(依赖常驻队友系统) 和 worktree(使用场景窄) 未做。
 **已实现（核心批次 6 + 技能批次 2 = 8 工具）**：核心批次——`ask_user`（结构化提问 + 终端 Rich Panel UI）、`exit_plan_mode`（计划审批闭环）、`task_create`/`task_get`/`task_list`/`task_update`（任务板 CRUD）；技能批次——`load_skill`（激活已安装技能）、`install_skill`（从路径或 git URL 安装技能，不弹权限）。ToolContext 扩展 4 字段（task_store/agent_loop_ref/ask_user_callback/skill_registry），app.py 装配注入。工具总数 12→20。20 个新测试 + 集成测试工具注册断言更新。真实 LLM 验证 task_create 自主调用成功。
 **后续批次（未纳入本次）**：worktree 工具（enter/exit）、team 工具（create/delete）。
 
@@ -650,10 +650,11 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **评估**：全部非必需，按使用痛感排优先级：①>②>③>④。工作量：各自小。
 已实现：① Terminal 内 Rich Live（transient）只读工具组——≥2 条全成功折叠为 `✓ Done (N tool uses · Xs)`，单条/出错按原格式展开，弹窗/流式/错误等边界统一 `flush_tool_group()` 收束；② prompt_toolkit `s-tab` 绑定循环四模式，plan 提示词注入/移除集中到 `set_permission_mode`（/mode、/plan、循环、exit_plan 四入口共用）；③ 采用"a 后追问一行"折中——按 a 再问 `save permanently? [y/N]` 默认否，y 才写项目 permissions.toml（与 /allow --save 同文件同格式），其余 "always" 消费处把新值安全降级；④ 进度面板 detachable 模式单击 Esc 转后台——**刻意不 cancel 等待任务**（`wait()` 内 `asyncio.wait_for` 会级联杀死 agent 本体），改为 `adopt_pending_wait()` 接管既有任务并复用后台投递链（完成提示 + mailbox 自动投递）。用户实测后增补两项：折叠可配置（顶级 `collapse_tool_calls`，按用户要求默认 false 不折叠、显式 true 开启）；转后台后可**重新附着**——空提示符按 Esc（自动提交 /spawn wait）或手动输命令，面板回来、结果直取，后台投递被取消防双投递，可反复切换；EscWatcher 双层防误触——启动观察窗 300ms 持续排空 + 孤立 Esc 判别（ 后紧跟字节 = 终端转义序列，丢弃），实测修复"没按 Esc 面板每次秒转后台"；斜杠命令结束后立即处理收件箱投递（修 re-attach 竞态下结果延迟显示）；interrupt_input 仅 prompt 运行中生效（修输入行残留 /spawn wait）。17 个新测试，1337→1354 全过。真实 LLM 验证：折叠一行如实出现、危险命令 a→y 落盘且重启免弹窗、/spawn --wait 回归正常；shift+tab、Esc 转后台、空提示符 Esc 重附、防误触与残留修复均经用户真实终端实测通过；已知边界（面板期间打字丢弃 / 观察窗 300ms / Esc 半秒消歧延迟 / Esc 后立即打字先触发重附）记录于 commands-guide 与 tech-notes；绑定层与命令后投递分支测试补齐、遗留 flaky 耗时测试加固，1337→1363 全过。详见 tech-notes §114。
 
-☐ **B17 SyntheticOutput 结构化输出工具**
+✅ **B17 SyntheticOutput 结构化输出工具**
 **来源**：全模块面对照扫描的完全缺失项。mewcode 的 `SyntheticOutput` 工具（tools/synthetic_output.py，68 行）让子 agent 以机器可读的结构化 JSON 返回结果（schema 约束），父方/调用方无需从自然语言报告里解析字段——服务于"子 agent 产出要被程序消费"的场景（如 verify agent 返回 {pass: bool, failures: [...]}）。mini 子 agent 只有自然语言报告 + 正则提取 deliverables 的启发式。
 **方案**：新增 `synthetic_output` 内置工具（READ 类别）：接受任意 JSON 参数原样存入 SubAgentResult 的结构化字段；`_format_agent_result` 与后台投递消息附带该 JSON 块；agent_types 的 verify prompt 引导使用。
 **验证要点**：子 agent 调用后父方拿到结构化字段 / 不调用时行为不变 / JSON 透传不被转述改写。工作量：小。
+已实现：`SyntheticOutputTool`（READ 类别，additionalProperties schema）接受任意 JSON kwargs 原样返回；`SubAgentResult.structured_output` 新字段由 `_extract_structured_output()` 从对话的最后一次 synthetic_output 工具调用中提取；`_format_agent_result` 和 `_deliver_result` 附带 JSON 代码块；verify prompt 强制要求调用 synthetic_output（"you MUST call ... This is mandatory"，初版建议措辞 LLM 会跳过，加强后实测生效）；`_READ_ONLY_TOOLS` 包含 synthetic_output 供 explore/plan/verify 类型使用；pane worker 结果序列化同步。12 个新测试，1375 个全过。真实 LLM 验证：verify agent 调用 synthetic_output 返回 `{"pass": "true"}` + PASS verdict、worker agent 读 pyproject.toml 返回 `{"project_name": "mini-code-agent", "found": "true"}` 原样透传、`--wait` 前台路径 `Structured output:` + JSON 代码块格式正确、不调用时行为不变。
 
 ☐ **B18 worktree 重型目录软链**
 **来源**：全模块面对照扫描的程度差距。mewcode worktree/setup.py 在创建 worktree 时把重型目录（默认 node_modules/.venv/vendor，可配 `symlink_directories`）从主工作区**软链**进 worktree——避免每个隔离 agent 重装依赖/复制巨型目录，创建秒级完成且不多占磁盘。mini 的 worktree 隔离（/spawn --isolated）每个 worktree 是干净 checkout，Python 项目里子 agent 要么没有 .venv 可用、要么依赖重建。
