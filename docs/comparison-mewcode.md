@@ -247,7 +247,7 @@
 - `mcp_call` 新工具：LLM 调用 dispatch 模式发现的工具（server + tool + arguments）
 - `ToolContext.mcp_manager` 字段注入
 - B14 native 模式：MCP 工具注册到 ToolRegistry 但带 `defer_loading: true`，Anthropic 服务端隐藏 schema 直到 `tool_search` 返回 `tool_reference` 块展开；`anthropic-beta` header 自动附加；非 Anthropic 端点自动降级 dispatch；meta 工具按模式动态注销
-- 20 个内置工具（原 8 + tool_search + mcp_call + send_message + wait_message + ask_user + exit_plan_mode + task_create/get/list/update + load_skill + install_skill）
+- 21 个内置工具（原 8 + tool_search + mcp_call + send_message + wait_message + ask_user + exit_plan_mode + task_create/get/list/update + load_skill + install_skill + synthetic_output）
 
 ---
 

@@ -274,7 +274,7 @@ mini-code-agent/
 │       ├── cli.py              # CLI 入口
 │       ├── app.py              # 应用编排器
 │       ├── core/               # Agent 引擎（ReAct 循环、状态机、SubAgent、团队、Planner、Mailbox、Pane Worker、成本跟踪、任务存储、工具录制、Agent 类型、窗格后端）
-│       ├── tools/              # 工具系统（20 内置工具 + MCP 协议 stdio/HTTP/SSE eager/native/dispatch + Hook 11 阶段）
+│       ├── tools/              # 工具系统（21 内置工具 + MCP 协议 stdio/HTTP/SSE eager/native/dispatch + Hook 11 阶段）
 │       ├── memory/             # 记忆系统（四级压缩级联、持久记忆、会话存储、提取、召回、合并、文件快照、溢写缓存、项目上下文）
 │       ├── security/           # 安全层（权限、路径守卫、审计、OS 沙箱 bwrap/unshare/seatbelt/Windows 双模式、worktree 隔离、跨进程权限确认）
 │       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、Esc 监听：双击取消/单击面板转后台）

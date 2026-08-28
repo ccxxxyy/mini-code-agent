@@ -56,6 +56,7 @@ def test_application_tools_registered(monkeypatch, tmp_path):
         "task_update",
         "load_skill",
         "install_skill",
+        "synthetic_output",
     }
 
 
