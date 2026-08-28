@@ -63,6 +63,8 @@
 
 **证据**：`extensions/builtin_commands.py`（1815 行）、`tests/` 目录无 `test_builtin_commands.py`。
 
+**✅ 已修复**：新增 `tests/unit/test_builtin_commands.py` 45 个测试，直接覆盖此前零覆盖的 18 个命令处理函数（clear/model/compact/tools/plugins/trace/explain/audit/theme/plan/mode/allow/deny/quit/exit/session/memory/skill/spawn 信息子命令）。已有专门测试文件的命令（undo/fork/todo/cost/record/replay/help/status）不重复。详见 tech-notes §118。
+
 ### 2.3 异步方法内的同步文件 I/O
 
 所有文件工具（read_file/write_file/edit_file/grep）在 `async def execute()` 里用同步的 `Path.read_text()` / `Path.write_text()`。这在事件循环线程上阻塞 I/O。grep 工具最严重：遍历目录树，逐文件同步读取全部内容到内存（最大 5MB/文件），再 `.splitlines()` 产生第二份拷贝。大型代码库可能读数百 MB，全程阻塞事件循环。
