@@ -89,6 +89,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **证据**：`.github/workflows/ci.yml` 的 test 步骤：`uv run pytest tests/ -v`（无 `--cov`）。
 
+**✅ 已修复**：CI test job 的 pytest 命令改为 `uv run pytest tests/ -v --cov --cov-report=term-missing`，`pyproject.toml` 中已有的 `[tool.coverage.run]`（source/omit）和 `[tool.coverage.report]`（`fail_under=80`）配置现在在 CI 中真正生效。本地验证 1438 测试全过，覆盖率 86.70%（门禁 80%）。
+
 ### 2.6 Windows 平台无 CI 覆盖
 
 项目有大量 Windows 特定代码（EscWatcher msvcrt 分支、junction 回退、sandbox Low Integrity 模式、终端 GBK 解码、mintty 适配），但 CI 只在 `ubuntu-latest` 跑。Windows 上的回归只能靠开发者手动验证。
@@ -138,6 +140,6 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 **主要的技术债务集中在两个方向**：
 
 1. **大文件拆分**：`app.py`（1298 行）和 `builtin_commands.py`（1815 行）需要拆分。前者的 `__init__` 应该提取工厂函数（✅ 已完成——拆为 16 个装配方法，见 §2.1 与 tech-notes §117）；后者应该按命令分文件或分组。
-2. **CI 补全**：覆盖率门禁实际启用、Windows 矩阵、类型检查。这三项是低成本高收益的改进。
+2. **CI 补全**：~~覆盖率门禁实际启用~~（✅ 已完成）、Windows 矩阵、类型检查。后两项是低成本高收益的改进。
 
 同步 I/O 问题已修复（✅ 见 §2.3 与 tech-notes §119）：文件工具与 SessionStore 的阻塞 I/O 均经 `asyncio.to_thread` 移出事件循环，大型代码库上 grep 扫描不再阻塞其他并发任务（如流式输出、ESC 中断监听）。
