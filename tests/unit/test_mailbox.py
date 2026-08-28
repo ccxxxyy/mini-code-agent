@@ -573,9 +573,17 @@ async def test_concurrent_processes_no_message_loss(tmp_path):
         "for i in range(20)]"
     ).format(src=str(Path(__file__).parents[2] / "src"), box=str(tmp_path / "mailboxes"))
 
-    procs = [subprocess.Popen([sys.executable, "-c", script, f"writer{n}"]) for n in range(4)]
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, f"writer{n}"],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for n in range(4)
+    ]
     for p in procs:
-        assert p.wait(timeout=60) == 0
+        _, stderr = p.communicate(timeout=60)
+        assert p.returncode == 0, f"writer crashed (exit {p.returncode}):\n{stderr}"
 
     messages = mb.drain("target")
     assert len(messages) == 80  # 4 procs x 20 msgs, zero lost
@@ -632,6 +640,74 @@ async def test_fresh_lock_times_out(tmp_path, monkeypatch):
     Path(f"{inbox}.lock").write_text("", encoding="utf-8")  # fresh lock
 
     with pytest.raises(TimeoutError):
+        mb.send(sender="main", recipient="agent_a", content="never lands")
+
+
+async def test_lock_acquire_retries_permission_error(tmp_path, monkeypatch):
+    """Windows delete-pending: os.open(O_EXCL) raises PermissionError while
+    an AV process still holds the just-unlinked lock -- must be retried like
+    ordinary contention, not crash the sender.
+    Windows delete-pending：杀毒进程握着刚被 unlink 的锁时 O_EXCL 抛
+    PermissionError——须按普通锁竞争重试，不能炸掉发送方。"""
+    import os as _os
+
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+
+    real_open = _os.open
+    failed = {"n": 0}
+
+    def flaky_open(path, flags, mode=0o777, **kwargs):
+        if str(path).endswith(".lock") and failed["n"] == 0:
+            failed["n"] += 1
+            raise PermissionError(13, "delete pending", str(path))
+        return real_open(path, flags, mode, **kwargs)
+
+    monkeypatch.setattr("mini_agent.core.mailbox.os.open", flaky_open)
+    assert mb.send(sender="main", recipient="agent_a", content="survived")
+    assert failed["n"] == 1
+    assert mb.drain("agent_a")[0].content == "survived"
+
+
+async def test_atomic_write_retries_permission_error(tmp_path, monkeypatch):
+    """os.replace transiently blocked (AV holding tmp/destination) -> retry
+    succeeds and the message lands.
+    os.replace 被瞬时占用（杀毒持有临时/目标文件）-> 重试成功，消息落盘。"""
+    import os as _os
+
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+
+    real_replace = _os.replace
+    failed = {"n": 0}
+
+    def flaky_replace(src, dst):
+        if failed["n"] < 2:
+            failed["n"] += 1
+            raise PermissionError(13, "in use", str(dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("mini_agent.core.mailbox.os.replace", flaky_replace)
+    assert mb.send(sender="main", recipient="agent_a", content="landed")
+    assert failed["n"] == 2
+    assert mb.drain("agent_a")[0].content == "landed"
+
+
+async def test_atomic_write_permission_error_exhausted(tmp_path, monkeypatch):
+    """os.replace permanently blocked -> PermissionError propagates after
+    retries exhaust (caller must know the write failed).
+    os.replace 持续被占 -> 重试耗尽后异常上抛（调用方必须知道写失败）。"""
+    mb = make_mailbox(tmp_path)
+    mb.register("main")
+    mb.register("agent_a")
+
+    def always_fail(src, dst):
+        raise PermissionError(13, "in use", str(dst))
+
+    monkeypatch.setattr("mini_agent.core.mailbox.os.replace", always_fail)
+    with pytest.raises(PermissionError):
         mb.send(sender="main", recipient="agent_a", content="never lands")
 
 

@@ -97,7 +97,7 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **证据**：`.github/workflows/ci.yml` 的 `runs-on: ubuntu-latest`。
 
-**✅ 已修复**：test job 矩阵扩展为 `os: [ubuntu-latest, windows-latest] × python: [3.11, 3.12]`（4 个组合），`fail-fast: false` 保证单平台失败不掩盖其他组合结果。Windows 特定代码（msvcrt/junction/GBK 解码等分支）的回归现在由 CI 自动捕获。
+**✅ 已修复**：test job 矩阵扩展为 `os: [ubuntu-latest, windows-latest] × python: [3.11, 3.12]`（4 个组合），`fail-fast: false` 保证单平台失败不掩盖其他组合结果。Windows 特定代码（msvcrt/junction/GBK 解码等分支）的回归现在由 CI 自动捕获。首轮 windows-latest 运行即抓到真缺陷——mailbox 文件锁在 Defender 实时扫描下的 delete-pending `PermissionError` 竞态（本机无法复现），已修复（见 tech-notes §122.4），证明该矩阵不是摆设。
 
 ### 2.7 类型系统漏洞：`ToolContext` 六字段 `Any`
 
