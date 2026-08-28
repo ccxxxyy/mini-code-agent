@@ -122,35 +122,58 @@ class Application:
     """Main application -- agent conversation loop. 主应用——Agent 对话循环。"""
 
     def __init__(self, config: AgentConfig) -> None:
+        """Composition root: each _setup_* wires ONE subsystem; calls run in
+        dependency order (later steps use attributes set by earlier ones).
+        组合根：每个 _setup_* 只装配一个子系统；按依赖顺序调用
+        （后面的步骤使用前面步骤设置的属性）。"""
         self.config = config
         self.event_bus = EventBus()
+        self._working_dir = Path.cwd()
 
+        self._setup_terminal()
+        self._setup_session()
+        self._setup_llm_and_tools()
+        self._setup_security()
+        self._setup_hooks()
+        self._setup_memory()
+        self._setup_agent_loop()
+        self._setup_subagents()
+        self._setup_event_notifications()
+        self._setup_process_tools()
+        self._setup_observers()
+        self._setup_services()
+        self._setup_startup_mode()
+        self._setup_extensions()
+        self._wire_terminal()
+        self._wire_agent_callbacks()
+
+    def _setup_terminal(self) -> None:
+        """Theme preference + terminal renderer. 主题偏好 + 终端渲染器。"""
         # Load persisted theme preference 加载持久化的主题偏好
         from mini_agent.ui.themes import get_theme
 
         theme_path = Path.home() / ".mini-agent" / ".theme"
         if theme_path.is_file():
             try:
-                config.theme = theme_path.read_text(encoding="utf-8").strip() or "default"
+                self.config.theme = theme_path.read_text(encoding="utf-8").strip() or "default"
             except OSError:
                 pass
-        active_theme = get_theme(config.theme)
+        self.terminal = Terminal(theme=get_theme(self.config.theme))
+        self.terminal.collapse_tool_calls = self.config.collapse_tool_calls
 
-        self.terminal = Terminal(theme=active_theme)
-        self.terminal.collapse_tool_calls = config.collapse_tool_calls
+    def _setup_session(self) -> None:
+        """Session + system prompt + instruction-file injection.
+        会话 + 系统提示词 + 指令文件注入。"""
         self.session = Session()
-
-        working_dir = Path.cwd()
         platform = f"{sys.platform} ({'Windows' if sys.platform == 'win32' else 'Unix'})"
-        shell = detect_shell()
         self.session.conversation.system_prompt = SYSTEM_PROMPT.format(
-            model=config.llm.model,
-            working_dir=working_dir,
+            model=self.config.llm.model,
+            working_dir=self._working_dir,
             platform=platform,
-            shell=shell,
+            shell=detect_shell(),
         )
-        self.session.metadata.model = config.llm.model
-        self.session.metadata.project_dir = working_dir
+        self.session.metadata.model = self.config.llm.model
+        self.session.metadata.project_dir = self._working_dir
 
         # Context awareness: auto-inject project/user instruction files
         # 上下文感知：自动注入项目/用户指令文件
@@ -160,49 +183,52 @@ class Application:
         )
 
         self._context_file_loaded: str | None = None
-        _marker = "\n\n--- Project instructions ---\n"
-        _parts: list[str] = []
-        _depth = config.context.max_include_depth
-        _user_inst = load_user_instructions(
-            config.context.user_instructions_file, config.context.max_chars, _depth
+        marker = "\n\n--- Project instructions ---\n"
+        parts: list[str] = []
+        ctx = self.config.context
+        user_inst = load_user_instructions(
+            ctx.user_instructions_file, ctx.max_chars, ctx.max_include_depth
         )
-        if _user_inst:
-            _parts.append("[user instructions]\n" + _user_inst)
-        _proj = load_project_instructions(
-            working_dir, config.context.instruction_files, config.context.max_chars, _depth
+        if user_inst:
+            parts.append("[user instructions]\n" + user_inst)
+        proj = load_project_instructions(
+            self._working_dir, ctx.instruction_files, ctx.max_chars, ctx.max_include_depth
         )
-        if _proj:
-            self._context_file_loaded = _proj[0]
-            _parts.append(f"[{_proj[0]}]\n{_proj[1]}")
-        if _parts and _marker not in self.session.conversation.system_prompt:
-            self.session.conversation.system_prompt += _marker + "\n\n".join(_parts)
+        if proj:
+            self._context_file_loaded = proj[0]
+            parts.append(f"[{proj[0]}]\n{proj[1]}")
+        if parts and marker not in self.session.conversation.system_prompt:
+            self.session.conversation.system_prompt += marker + "\n\n".join(parts)
 
-        self._llm = ProviderRegistry.create(config.llm)
+    def _setup_llm_and_tools(self) -> None:
+        """LLM provider + tool registry + ToolContext.
+        LLM Provider + 工具 registry + 工具上下文。"""
+        self._llm = ProviderRegistry.create(self.config.llm)
 
         # Tool registry with all builtin tools 包含所有内置工具的工具 registry
         self.tool_registry = ToolRegistry()
         for tool_class in ALL_BUILTIN_TOOLS:
             tool = tool_class()
-            if tool.schema.name in config.tools.enabled_tools:
+            if tool.schema.name in self.config.tools.enabled_tools:
                 self.tool_registry.register(tool)
 
         from mini_agent.tools.file_state_cache import FileStateCache
 
-        tool_context = ToolContext(
-            working_dir=working_dir,
+        self._tool_context = ToolContext(
+            working_dir=self._working_dir,
             session=self.session,
             event_bus=self.event_bus,
-            config=config,
-            file_state=FileStateCache() if config.tools.enforce_read_before_edit else None,
+            config=self.config,
+            file_state=(FileStateCache() if self.config.tools.enforce_read_before_edit else None),
         )
-        self._tool_context = tool_context
 
-        # Security: path guard + permission manager wired to terminal confirm
-        # 安全：路径守卫 + 权限管理器接入终端确认
+    def _setup_security(self) -> None:
+        """Path guard + permission manager + OS sandbox.
+        路径守卫 + 权限管理器接入终端确认 + OS 级沙箱。"""
         path_guard = PathGuard(
-            tool_config=config.tools,
-            security_config=config.security,
-            project_dir=working_dir,
+            tool_config=self.config.tools,
+            security_config=self.config.security,
+            project_dir=self._working_dir,
         )
 
         # Permission dialogs offer the persist follow-up ("a" -> save rule?);
@@ -213,17 +239,17 @@ class Application:
             return await self.terminal.confirm(prompt, offer_persist=True)
 
         self.permission_manager = PermissionManager(
-            config=config.security,
+            config=self.config.security,
             path_guard=path_guard,
             confirm_callback=_confirm_with_persist,
             event_bus=self.event_bus,
         )
-        self.permission_manager.working_dir = working_dir
+        self.permission_manager.working_dir = self._working_dir
         pm = self.permission_manager
         pm.shared_written_files = pm._session_written_files
         self.permission_manager.load_rule_files(
             user_file=Path.home() / ".mini-agent" / "permissions.toml",
-            project_file=working_dir / ".mini-agent" / "permissions.toml",
+            project_file=self._working_dir / ".mini-agent" / "permissions.toml",
         )
 
         # OS-level sandbox (Linux bwrap/unshare / macOS seatbelt / Windows admin
@@ -231,7 +257,7 @@ class Application:
         # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low
         # Integrity；非管理员无文件保护、不打启动警告）
         self.sandbox_warning: str | None = None
-        if config.security.sandbox:
+        if self.config.security.sandbox:
             import platform
             import tempfile
 
@@ -240,15 +266,15 @@ class Application:
             os_sandbox = create_sandbox()
             if os_sandbox and os_sandbox.available():
                 sb_config = SandboxConfig(
-                    allow_write=[str(working_dir), tempfile.gettempdir()],
+                    allow_write=[str(self._working_dir), tempfile.gettempdir()],
                     deny_write=[str(Path.home() / ".mini-agent")],
-                    network=config.security.sandbox_network,
+                    network=self.config.security.sandbox_network,
                 )
                 bash_tool = self.tool_registry.get("bash")
                 if bash_tool:
                     bash_tool.sandbox = os_sandbox
                     bash_tool.sandbox_config = sb_config
-                if config.security.sandbox_auto_allow:
+                if self.config.security.sandbox_auto_allow:
                     self.permission_manager.sandbox_auto_allow = True
             else:
                 system = platform.system()
@@ -268,23 +294,27 @@ class Application:
                         "[sandbox] sandbox=true but no backend available — sandbox is NOT active."
                     )
 
+    def _setup_hooks(self) -> None:
+        """Hook manager: builtin lifecycle hooks + declarative config rules.
+        Hook 管理器：内置生命周期 hook + 声明式配置规则。"""
         self.hook_manager = HookManager()
         self._register_builtin_hooks()
         # Declarative rules from `[[hooks]]` config (block/confirm/command/notify)
         # `[[hooks]]` 配置的声明式规则（阻止/确认/命令/通知）
         n_rules = register_hook_rules(
             self.hook_manager,
-            config.hooks,
+            self.config.hooks,
             command_runner=self._run_hook_command,
             notify_callback=self.terminal.show_info,
         )
         if n_rules:
             self.terminal.show_info(f"Loaded {n_rules} hook rule(s) from config")
 
-        # Memory: context manager + compressor + session store
-        # 记忆：上下文管理器 + 压缩器 + 会话存储
-        self.context_manager = ContextManager(config.memory)
-        if config.memory.llm_summarize:
+    def _setup_memory(self) -> None:
+        """Context manager + compressor + session store + background-worker
+        fields. 上下文管理器 + 压缩器 + 会话存储 + 后台工作件字段。"""
+        self.context_manager = ContextManager(self.config.memory)
+        if self.config.memory.llm_summarize:
             compressor = Compressor(
                 strategies=[
                     DropToolResults(),
@@ -303,12 +333,15 @@ class Application:
         self._consolidation_task: asyncio.Task | None = None
         self._recall_prefetcher: RecallPrefetcher | None = None
 
+    def _setup_agent_loop(self) -> None:
+        """Agent loop + undo snapshots + oversized-result spill cache.
+        Agent 循环 + 撤销快照 + 超大结果溢写缓存。"""
         self.agent_loop = AgentLoop(
             llm=self._llm,
             tool_registry=self.tool_registry,
             event_bus=self.event_bus,
-            config=config,
-            tool_context=tool_context,
+            config=self.config,
+            tool_context=self._tool_context,
             permission_manager=self.permission_manager,
             hook_manager=self.hook_manager,
             context_manager=self.context_manager,
@@ -321,7 +354,7 @@ class Application:
         from mini_agent.memory.file_snapshots import FileSnapshotStore
 
         self.agent_loop.snapshot_store = FileSnapshotStore(
-            working_dir / ".mini-agent" / "undo_snapshots",
+            self._working_dir / ".mini-agent" / "undo_snapshots",
             keep_turns=self.config.memory.undo_keep_turns,
         )
 
@@ -331,26 +364,27 @@ class Application:
 
         self.result_cache = ToolResultCache(
             Path.home() / ".mini-agent" / "cache" / "results" / self.session.metadata.session_id,
-            threshold_chars=config.memory.spill_threshold_chars,
-            aggregate_chars=config.memory.aggregate_spill_chars,
+            threshold_chars=self.config.memory.spill_threshold_chars,
+            aggregate_chars=self.config.memory.aggregate_spill_chars,
         )
         self.agent_loop.result_cache = self.result_cache
 
-        # SubAgent + Worktree: /spawn and /team use these
-        # SubAgent + Worktree：/spawn 和 /team 命令使用
+    def _setup_subagents(self) -> None:
+        """Worktree + sub-agent manager + cross-agent mailbox (/spawn, /team).
+        Worktree + 子 Agent 管理器 + 跨 Agent 收件箱（/spawn、/team）。"""
         self.worktree_manager = WorktreeManager(
-            repo_dir=working_dir,
-            symlink_dirs=config.security.worktree_symlink_dirs,
+            repo_dir=self._working_dir,
+            symlink_dirs=self.config.security.worktree_symlink_dirs,
         )
-        worker_llm = ProviderRegistry.create_for_role(config, "worker")
-        worker_profile = config.llm_profiles.get(config.worker_profile)
-        worker_model = worker_profile.model if worker_profile else config.llm.model
+        worker_llm = ProviderRegistry.create_for_role(self.config, "worker")
+        worker_profile = self.config.llm_profiles.get(self.config.worker_profile)
+        worker_model = worker_profile.model if worker_profile else self.config.llm.model
         self.subagent_manager = SubAgentManager(
             llm=worker_llm,
             tool_registry=self.tool_registry,
-            config=config,
+            config=self.config,
             event_bus=self.event_bus,
-            working_dir=working_dir,
+            working_dir=self._working_dir,
             worktree_manager=self.worktree_manager,
             model_name=worker_model,
             confirm_callback=self.terminal.confirm,
@@ -359,20 +393,23 @@ class Application:
 
         # Inject SubAgentManager into ToolContext so spawn_agents tool can use it
         # 注入 SubAgentManager 到 ToolContext，供 spawn_agents 工具使用
-        tool_context.subagent_manager = self.subagent_manager
+        self._tool_context.subagent_manager = self.subagent_manager
 
         # Cross-agent mailbox: main agent inbox + send_message tool access
         # 跨 Agent 收件箱：主 Agent 收件箱 + send_message 工具接入
         self.mailbox = self.subagent_manager.mailbox
         self.mailbox.register("main")
-        tool_context.mailbox = self.mailbox
+        self._tool_context.mailbox = self.mailbox
         self.agent_loop.mailbox = self.mailbox
+
+    def _setup_event_notifications(self) -> None:
+        """Terminal notices for background-agent completion and context
+        summarization. 后台 agent 完成与上下文摘要的终端提示订阅。"""
+        from mini_agent.models.events import SubAgentCompleteEvent
 
         # Background agent completion notice : terminal hint when a
         # background-spawned agent finishes (result itself arrives via mailbox)
         # 后台 agent 完成提示：终端提醒（结果本身经 mailbox 注入下一轮对话）
-        from mini_agent.models.events import SubAgentCompleteEvent
-
         async def _on_background_complete(event: SubAgentCompleteEvent) -> None:
             if event.background:
                 status = "finished" if event.success else "FAILED"
@@ -396,13 +433,14 @@ class Application:
         self.event_bus.on(ContextSummaryStartEvent, _on_ctx_summary_start)
         self.event_bus.on(ContextSummaryDoneEvent, _on_ctx_summary_done)
 
-        # Process tools: expose plan-mode control + ask_user callback
-        # 流程工具：暴露计划模式控制 + 结构化提问回调
+    def _setup_process_tools(self) -> None:
+        """Process tools: expose plan-mode control + ask_user callback.
+        流程工具：暴露计划模式控制 + 结构化提问回调。"""
         import types as _types
 
         from mini_agent.models.permissions import PermissionMode
 
-        tool_context.agent_loop_ref = _types.SimpleNamespace(
+        self._tool_context.agent_loop_ref = _types.SimpleNamespace(
             get_plan_mode=lambda: self.agent_loop.plan_mode,
             # Route through the mode switch so leaving plan mode also resets
             # the permission matrix. 经模式切换器走——退出 plan 同步复位权限矩阵。
@@ -410,35 +448,27 @@ class Application:
                 PermissionMode.PLAN if v else PermissionMode.DEFAULT
             ),
         )
-        tool_context.ask_user_callback = self.terminal.ask_structured
+        self._tool_context.ask_user_callback = self.terminal.ask_structured
+
+    def _setup_observers(self) -> None:
+        """Pure event-bus subscribers: trace/teach renderers, audit logger,
+        tool recorder, cost tracker. 纯事件订阅者：trace/教学渲染器、
+        审计日志、工具录制器、成本跟踪器。"""
+        theme = self.terminal.theme
 
         # Trace renderer: /trace shows agent internals in real time
         # Trace 渲染器：/trace 实时展示 Agent 内部状态
-        self.trace_renderer = TraceRenderer(self.terminal.console, theme=active_theme)
+        self.trace_renderer = TraceRenderer(self.terminal.console, theme=theme)
         self.trace_renderer.attach(self.event_bus)
 
         # Teach renderer: /explain shows tool explanations
         # 教学渲染器：/explain 显示工具解释
-        self.teach_renderer = TeachRenderer(self.terminal.console, theme=active_theme)
+        self.teach_renderer = TeachRenderer(self.terminal.console, theme=theme)
         self.teach_renderer.attach(self.event_bus)
 
         # Audit logger: /audit writes tool calls to JSONL
         # 审计日志：/audit 将工具调用写入 JSONL
-        audit_dir = Path.home() / ".mini-agent"
-        self.audit_logger = AuditLogger(audit_dir)
-
-        # MCP manager: connects remote tool servers at startup
-        # MCP 管理器：启动时连接远程工具服务器
-        from mini_agent.tools.mcp.client import MCPManager
-
-        self.mcp_manager = MCPManager()
-        self._tool_context.mcp_manager = self.mcp_manager
-
-        # Persistent task system (S12): /todo command 持久化任务系统
-        from mini_agent.core.task_store import TaskStore
-
-        self.task_store = TaskStore(working_dir)
-        self._tool_context.task_store = self.task_store
+        self.audit_logger = AuditLogger(Path.home() / ".mini-agent")
         self.audit_logger.attach(self.event_bus)
 
         # Tool recorder: /record captures tool calls, /replay re-runs them
@@ -453,29 +483,49 @@ class Application:
         from mini_agent.core.cost_tracker import CostTracker
 
         self.cost_tracker = CostTracker(
-            config.cost, ledger_path=Path.home() / ".mini-agent" / "cost_ledger.json"
+            self.config.cost, ledger_path=Path.home() / ".mini-agent" / "cost_ledger.json"
         )
         self.cost_tracker.attach(self.event_bus)
-        self.agent_loop.model_name = config.llm.model
+        self.agent_loop.model_name = self.config.llm.model
 
-        # Startup permission mode: [security].approval_mode, or plan when
-        # enable_plan_mode is set (back-compat).
-        # 启动权限模式：[security].approval_mode；enable_plan_mode 兼容旧配置。
+    def _setup_services(self) -> None:
+        """MCP manager + persistent task store. MCP 管理器 + 持久化任务系统。"""
+        # MCP manager: connects remote tool servers at startup
+        # MCP 管理器：启动时连接远程工具服务器
+        from mini_agent.tools.mcp.client import MCPManager
+
+        self.mcp_manager = MCPManager()
+        self._tool_context.mcp_manager = self.mcp_manager
+
+        # Persistent task system (S12): /todo command 持久化任务系统
+        from mini_agent.core.task_store import TaskStore
+
+        self.task_store = TaskStore(self._working_dir)
+        self._tool_context.task_store = self.task_store
+
+    def _setup_startup_mode(self) -> None:
+        """Startup permission mode: [security].approval_mode, or plan when
+        enable_plan_mode is set (back-compat).
+        启动权限模式：[security].approval_mode；enable_plan_mode 兼容旧配置。"""
+        from mini_agent.models.permissions import PermissionMode
+
         try:
-            _startup_mode = PermissionMode(config.security.approval_mode)
+            startup_mode = PermissionMode(self.config.security.approval_mode)
         except ValueError:
             logger.warning(
                 "invalid approval_mode %r (valid: %s) — using default",
-                config.security.approval_mode,
+                self.config.security.approval_mode,
                 "/".join(m.value for m in PermissionMode),
             )
-            _startup_mode = PermissionMode.DEFAULT
-        if config.enable_plan_mode:
-            _startup_mode = PermissionMode.PLAN
-        self.set_permission_mode(_startup_mode)
+            startup_mode = PermissionMode.DEFAULT
+        if self.config.enable_plan_mode:
+            startup_mode = PermissionMode.PLAN
+        self.set_permission_mode(startup_mode)
 
-        # Skill system
-        self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in config.skill_dirs])
+    def _setup_extensions(self) -> None:
+        """Skills, custom agent types, event listeners, slash commands,
+        plugins. 技能、自定义 Agent 类型、事件监听插件、斜杠命令、插件生态。"""
+        self.skill_registry = SkillRegistry(skill_dirs=[Path(d) for d in self.config.skill_dirs])
         self.skill_registry.load_all()
         self._tool_context.skill_registry = self.skill_registry
         # Recovery attachment includes skill state after compression
@@ -488,7 +538,7 @@ class Application:
         # 自定义 Agent 类型：从 agent_dirs 加载 *.md 定义
         from mini_agent.core.agent_type_loader import load_agent_types
 
-        n_agent_types = load_agent_types(config.agent_dirs)
+        n_agent_types = load_agent_types(self.config.agent_dirs)
         if n_agent_types:
             self.terminal.show_info(f"Loaded {n_agent_types} custom agent type(s)")
 
@@ -496,7 +546,7 @@ class Application:
         # 事件监听插件：外部代码监听总线全部事件（统计/调试）
         from mini_agent.extensions.event_listeners import load_event_listeners
 
-        self.loaded_listeners = load_event_listeners(config.listener_dirs, self.event_bus)
+        self.loaded_listeners = load_event_listeners(self.config.listener_dirs, self.event_bus)
         if self.loaded_listeners:
             self.terminal.show_info(
                 f"Loaded {len(self.loaded_listeners)} event listener(s): "
@@ -519,18 +569,23 @@ class Application:
             slash_commands=self.slash_commands,
             skill_registry=self.skill_registry,
             event_bus=self.event_bus,
-            config=config,
+            config=self.config,
         )
-        self.loaded_plugins = load_plugins(config.plugin_dirs, plugin_ctx, config.disabled_plugins)
+        self.loaded_plugins = load_plugins(
+            self.config.plugin_dirs, plugin_ctx, self.config.disabled_plugins
+        )
         if self.loaded_plugins:
             self.terminal.show_info(
                 f"Loaded {len(self.loaded_plugins)} plugin(s): "
                 + ", ".join(p.name for p in self.loaded_plugins)
             )
 
+    def _wire_terminal(self) -> None:
+        """Prompt-side wiring: completions, toolbar, mode cycler, Esc behavior.
+        输入侧接线：补全、底部工具栏、权限模式循环、Esc 行为。"""
         # Wire slash command completions + @file completions to terminal
         # 将斜杠命令补全 + @文件补全接入终端
-        self.terminal.set_working_dir(working_dir)
+        self.terminal.set_working_dir(self._working_dir)
         self.terminal.set_slash_commands(
             [(c.name, c.description) for c in self.slash_commands.list_commands()]
         )
@@ -555,6 +610,11 @@ class Application:
         from mini_agent.ui.esc_watcher import EscWatcher
 
         self._esc_watcher = EscWatcher()
+
+    def _wire_agent_callbacks(self) -> None:
+        """Agent-loop -> terminal rendering callbacks: streaming, thinking,
+        tool-call display. Agent 循环 → 终端渲染回调：流式输出、思考过程、
+        工具调用展示。"""
 
         # Wire agent loop callbacks to terminal rendering 将 Agent 循环回调接入终端渲染
         def _on_stream_start() -> None:
