@@ -1688,3 +1688,27 @@
 - [x] `/undo N` 覆盖超出保留窗口的轮次时输出警告（文件改动未恢复），--code-only 全超窗时接在 nothing to restore 之后；--conv-only 不警告；窗口内无警告回归
 - [x] 10 个新测试，1327→1337 全过
 - [x] 真实 LLM 三轮会话验证三模式，终态文件系统与语义一致（a 无 / b 有 / c 无）；keep_turns=2 场景警告行真实输出
+
+## B16 交互 UX 小项包检查项（tech-notes §114）
+
+- [x] 只读工具（read_file/glob/grep）同轮 ≥2 次且全部成功折叠为一行 `✓ Done (N tool uses · Xs)`（耗时按最后一条结果时刻计）
+- [x] 折叠为 opt-in：顶级 `collapse_tool_calls = true` 开启，**默认 false 不折叠**（逐条 ╭─/╰─）
+- [x] 单条只读工具不折叠、任一条出错整组展开（错误留在屏上）、非只读工具穿插先收束组
+- [x] 弹窗/流式开始/错误/轮末/KeyboardInterrupt 等边界统一 flush，Live 不与 prompt_toolkit 输入交错
+- [x] shift+tab 在输入提示符循环 default → accept-edits → plan → bypass，底部工具栏实时显示
+- [x] plan 系统提示词注入/移除集中到 `set_permission_mode`（/mode、/plan、shift+tab、exit_plan 四入口一致，无重复注入）
+- [x] 权限弹窗按 a 后追问 `save permanently? [y/N]`：默认回车不写盘；y 写入项目 permissions.toml（与 /allow --save 同文件同格式）且立即生效、重启自动加载
+- [x] 追问仅权限弹窗出现（offer_persist 参数）；CONFIRM hook / 子 agent pane 弹窗不追问，"always-save" 一律降级为 "always"
+- [x] `/spawn --wait` / `/spawn wait` 进度面板单击 Esc 转后台：agent 不中断（等待任务不 cancel，adopt_pending_wait 接管），完成后 mailbox 自动投递（SubAgentCompleteEvent.background=True）
+- [x] 转后台后 `/spawn wait [id]` 重新附着：面板套回原任务、结果直取、后台投递取消防双投递；竞态时如实提示"已投递到收件箱"；可反复 Esc/附着切换
+- [x] 双 Esc 取消流式回归不变；单击 Esc 仅在 detachable 面板生效
+- [x] 17 个新测试（test_interactive_ux.py），1337→1354 全过
+- [x] 真实 LLM 验证：默认逐条显示 / 开启后折叠一行 / a→y 落盘且重启免弹窗 / --wait 回归；shift+tab 与 Esc 转后台经用户真实终端实测通过
+- [x] 空提示符按 Esc 重新附着（自动提交 /spawn wait；有输入内容或补全菜单打开时 Esc 保持原职责；无转后台组时无动作）
+- [x] EscWatcher 双层防误触：启动观察窗 300ms 持续排空（覆盖提示符移交瞬间的终端噪声）+ 孤立 Esc 判别（ 后 30ms 内还有字节 = 转义序列，丢弃不触发）——实测修复"没按 Esc 面板每次秒转后台"
+- [x] 斜杠命令结束后立即处理收件箱投递（修 re-attach 竞态"结果已投递却看不到"——原本要等下一次输入等待）
+- [x] interrupt_input 仅在 prompt 运行中才保存缓冲/中断——修"re-attach 后输入行残留 /spawn wait"（两次 prompt 之间缓冲区是上一次已提交文本）；+3 测试 →1357
+- [x] 三项修复经用户真实终端终验通过：面板不再秒转后台 / 空提示符 Esc 重附生效 / 结果即时打印且输入行干净
+- [x] 已知边界写入 commands-guide 中英与 tech-notes：面板期间打字丢弃 / 300ms 观察窗吸收早按的 Esc（面板与每轮流式开始均适用）/ Esc 判定半秒延迟 / Esc 后立即打字先触发重附
+- [x] 绑定层测试补齐（build_key_bindings 抽出）：shift+tab / bare escape / escape+enter 五项 + 命令后收件箱分支测试
+- [x] 遗留 flaky test_parallel_faster_than_serial 加固（0.2s 延迟/0.5s 阈值，留调度余量仍排除串行）；+6 测试 →1363

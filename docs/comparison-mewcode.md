@@ -26,7 +26,7 @@
 | 渲染 | **Rich**（Console/Panel/Live/Markdown） | **Textual**（Rich 之上的完整 TUI 框架） |
 | 输入 | **prompt_toolkit**（补全/工具栏/历史） | Textual 内置 TextArea 组件 |
 | 布局 | 手动拼（print 顺序控制） | CSS 驱动布局（.tcss 样式表） |
-| 组件 | 流式渲染器/diff 预览/进度面板 | 可折叠工具块/内联对话框/进度树/权限弹窗 |
+| 组件 | 流式渲染器/diff 预览/进度面板/可折叠工具块（opt-in，tech-notes §114） | 可折叠工具块/内联对话框/进度树/权限弹窗 |
 | 分屏 | 无 | Textual 原生支持 |
 | 主题 | 3 套（default/dark/light），代码定义 | CSS 主题，支持自定义 |
 
@@ -36,7 +36,7 @@
 不建议迁移到 Textual——这是架构级重写（~2000 行 app.py 要全部重来），且 mini 的设计哲学是"最小依赖、可读性优先"。Rich + prompt_toolkit 能实现所有需要的功能。
 
 在现有框架上补齐体验差距：
-1. **可折叠工具调用块**：工具调用默认显示简略版（`╭─ read_file file_path=x.txt → ✓ 42 lines`），`/trace on` 时展开详情。当前已基本实现，只需微调格式
+1. **可折叠工具调用块**：工具调用默认显示简略版（`╭─ read_file file_path=x.txt → ✓ 42 lines`），`/trace on` 时展开详情。✅ 已实现：只读工具同轮 ≥2 次折叠为一行 `✓ Done (N tool uses · Xs)` 摘要——opt-in，顶级配置 `collapse_tool_calls = true` 开启、默认不折叠（tech-notes §114）
 2. **内联权限对话框**：当前 `confirm()` 已是 Panel 形式，效果等同 mewcode 的 InlinePermissionWidget；等输入期间并发输出经 patch_stdout 重定向到提示行上方，输入行不被并行工具打断
 3. **进度树**：`/team` 和 `/spawn` 已有进度面板显示，效果已对齐
 
@@ -435,13 +435,13 @@ P79 补齐工具级 scope（拓展点 #9/#15）：`[tools]` 节 + `/allow /deny 
 |---|---|---|
 | 框架 | Rich + prompt_toolkit 手动拼 | **Textual**（完整 TUI 框架，组件/布局/CSS） |
 
-**差距**：mewcode 有完整的 UI 组件（可折叠工具块、内联权限对话框、进度树），mini 的 UI 相对简单。
+**差距**：mewcode 有完整的 UI 组件（可折叠工具块、内联权限对话框、进度树）；mini 已补齐可折叠工具块（opt-in）与 Panel 式权限弹窗，进度面板对齐进度树。
 
 **增强方案**：
 不建议迁移到 Textual——这是架构级重写，且 mini 的设计哲学是"最小依赖、可读性优先"。Rich + prompt_toolkit 组合足够实现所有功能。
 
 替代方案：在现有框架上补齐缺失的 UI 组件：
-1. **可折叠工具调用块**——Rich Panel + 用户按键切换展开/折叠（`/trace on` 已有类似信息，改为默认显示简略版、Ctrl+O 展开详情）
+1. **可折叠工具调用块**——✅ 已实现（B16 时落地，与此处早期设想不同）：不用按键切换，只读工具同轮 ≥2 次自动收束为一行摘要（Rich Live transient），`collapse_tool_calls = true` 开启、默认不折叠（tech-notes §114）
 2. **内联权限对话框**——当前的 `confirm()` 已经是 Panel 形式，足够好
 
 ### 5.2 远程/浏览器模式 ✅ 已实现（P57）

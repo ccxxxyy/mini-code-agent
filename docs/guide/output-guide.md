@@ -87,6 +87,17 @@
 | 内容 | `╭─ 工具名 参数预览`（参数截断 60 字符） |
 | 关闭方法 | `app.py` 中将 `self.agent_loop.on_tool_start` 设为 `None` |
 | 注意 | 如果 ② 已显示过工具名，⑤ 只打参数摘要行 `│ args...` 不重复 `╭─` |
+| 折叠 | 只读工具（read_file/glob/grep）走折叠组，见 ⑤+ |
+
+### ⑤+ 只读工具折叠摘要 `✓ Done (N tool uses · Xs)`
+
+| 项 | 说明 |
+|---|---|
+| 来源 | `ui/terminal.py` 折叠组（Rich Live transient） |
+| 触发 | 只读工具（read_file/glob/grep）在同一轮 LLM 回合内调用 ≥2 次且全部成功 |
+| 行为 | 执行期间 Live 实时显示组内各行 `╭─ 工具名 参数`（完成打 ✓ 标记）；组结束时整组擦除，只留一行 `✓ Done (N tool uses · X.Xs)`（耗时按最后一条结果时刻计，不含 LLM 延迟） |
+| 不折叠的情况 | 组内只有 1 条（无收益，按 ⑤/⑥ 完整显示）；任一条出错（错误必须留在屏上，整组展开）；写类/执行类工具穿插（先收束组再正常显示） |
+| 开启方法 | config.toml 顶级 `collapse_tool_calls = true`（**默认 `false` 不折叠**，逐条 ╭─/╰─ 显示） |
 
 ### ⑥ 工具结果行 `╰─ ✓ N lines, M chars`
 
@@ -173,7 +184,7 @@
 | SubAgent 进度面板 | `ui/board.py` `SubAgentBoard` Rich Live Table | `/spawn --wait`、`/spawn wait` 或 `/team` 期间 |
 | 多 Agent 结果总览表 + `报告 i/N` 分节 + 交付文件行 | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | `/spawn wait` 收多个结果时 |
 | worker 窗格输出（任务头/工具行/流式回答/停留倒计时） | `core/worker.py` stdout 直打 | `/spawn --pane` 的窗格内 |
-| `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | LLM 以 `spawn_agents background=true` 派发的后台 agent 完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果 |
+| `Background agent xxx finished — processing result...` | `app.py` 的 `SubAgentCompleteEvent` 订阅者 | 后台 agent（`spawn_agents background=true` / `/spawn` 默认派发 / Esc 转后台）完成时；自动中断输入等待、drain mailbox 并触发 agent loop 处理结果；斜杠命令执行期间完成的投递在命令结束后立即处理 |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` 的 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` 订阅者 | `inherit_context=true` 或 `/spawn --fork` 时摘要 LLM 调用开始/完成；`/trace on` 下同时显示 `ctx` trace 行 |
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中；等输入期间并发输出（并行工具的 trace/结果行）重定向到提示行上方，输入行不被打断 |
 | thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时，或 Anthropic/Responses 模型开启发送侧 thinking 时（tech-notes §110） |
@@ -195,6 +206,9 @@
 | **切换颜色主题** | `/theme dark` / `/theme light` / `/theme default` |
 | **查看已加载插件详情** | `/plugins`（启动行 `Loaded N plugin(s)` 的展开版：各插件注册的工具/命令/技能） |
 | **禁用某个插件（不再出现在启动行）** | config.toml 顶级 `disabled_plugins = ["<名>"]`，或从 plugin_dirs 目录移走文件 |
+| **开启只读工具折叠（一行摘要）** | config.toml 顶级 `collapse_tool_calls = true`（默认关闭） |
+| **循环切换权限模式** | 输入提示符按 shift+tab（default → accept-edits → plan → bypass），底部工具栏实时显示 |
+| **重新附着转后台的子 agent 面板** | 空的输入提示符按一次 Esc（等价自动提交 `/spawn wait`）；面板内按 Esc 再转回后台 |
 | **查看所有命令** | `/help` |
 
 ---

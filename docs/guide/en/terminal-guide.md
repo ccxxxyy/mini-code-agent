@@ -80,7 +80,7 @@ python -m mini_agent           &:: Directly with Python
 
 ### 4. Git Bash (MINGW64/mintty)
 
-**Compatibility level**: Degraded mode — conversation works normally, but **no completion menu, no bottom toolbar, no double Esc** (mintty's stdin is a pipe, which prompt_toolkit cannot drive).
+**Compatibility level**: Degraded mode — conversation works normally, but **no completion menu, no bottom toolbar, no Esc shortcuts (double-Esc interrupt / single-Esc board detach / Esc-at-prompt re-attach), no shift+tab mode cycling** (mintty's stdin is a pipe, which prompt_toolkit cannot drive).
 
 **How to open**:
 - After installing Git for Windows, search "Git Bash" in the Start menu

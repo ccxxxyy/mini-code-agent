@@ -25,6 +25,12 @@ if TYPE_CHECKING:
 
 _REFRESH_INTERVAL = 0.25
 
+# Sentinel returned by run_while when the user detached with Esc; the still-
+# pending wait task is stashed on ``board.pending_task``.
+# run_while 的哨兵返回值——用户按 Esc 转后台；未完成的等待任务
+# 存放在 board.pending_task。
+BOARD_DETACHED = object()
+
 
 def _phase_colors(theme: Theme) -> dict[str, str]:
     return {
@@ -47,24 +53,46 @@ class SubAgentBoard:
         self._console = console
         self._manager = manager
         self._theme = theme or get_theme("default")
+        self.pending_task: asyncio.Task | None = None
+        self._detachable = False
 
-    async def run_while(self, awaitable: Awaitable[Any]) -> Any:
+    async def run_while(self, awaitable: Awaitable[Any], detachable: bool = False) -> Any:
         """Display the board while `awaitable` runs; return its result.
         在 awaitable 运行期间显示面板，结束后收起并返回其结果。
 
         Exceptions from the awaitable propagate after the board closes.
         awaitable 的异常在面板关闭后原样抛出。
+
+        detachable=True: a single Esc press detaches -- the board closes and
+        BOARD_DETACHED is returned, with the STILL-RUNNING wait task stashed
+        on ``self.pending_task``. The task is deliberately NOT cancelled:
+        ``SubAgentManager.wait`` wraps the agent in ``asyncio.wait_for``,
+        so cancelling the outer wait would kill the agent itself.
+        detachable=True：单击 Esc 转后台——面板收起返回 BOARD_DETACHED，
+        仍在运行的等待任务存入 pending_task。刻意不 cancel 该任务：
+        wait 内部是 wait_for 包装，cancel 外层会级联杀死 agent 本体。
         """
+        from mini_agent.ui.esc_watcher import EscWatcher
+
+        self._detachable = detachable
         task = asyncio.ensure_future(awaitable)
+        watcher = EscWatcher(double=False) if detachable else None
+        if watcher is not None:
+            watcher.start()
         live = Live("", console=self._console, refresh_per_second=4, transient=True)
         live.start()
         try:
             while not task.done():
+                if watcher is not None and watcher.triggered:
+                    self.pending_task = task
+                    return BOARD_DETACHED
                 live.update(self._render())
                 await asyncio.sleep(_REFRESH_INTERVAL)
         finally:
             live.update("")
             live.stop()
+            if watcher is not None:
+                watcher.stop()
         return await task
 
     def _render(self) -> Table:
@@ -72,6 +100,10 @@ class SubAgentBoard:
         table = Table(
             title="SubAgent Progress",
             title_style=f"bold {p}",
+            caption="Esc = move to background (Esc again at the prompt = re-attach)"
+            if self._detachable
+            else None,
+            caption_style="dim",
             border_style="dim",
             expand=False,
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -33,6 +34,8 @@ from mini_agent.security.path_guard import (
 
 if TYPE_CHECKING:
     from mini_agent.events.bus import EventBus
+
+logger = logging.getLogger(__name__)
 
 # Git global-option prefix: tolerates options inserted between `git` and the
 # subcommand (e.g. `git -C /repo push`, `git -c user.name=x commit`). The
@@ -176,9 +179,11 @@ def command_references_sensitive_file(command: str) -> bool:
 
 
 # Callback to ask the user for confirmation.
-# Returns True (allow once), False (deny), or "always" (allow for session).
+# Returns True (allow once), False (deny), "always" (allow for session),
+# or "always-save" (allow for session + persist a rule to permissions.toml).
 # 向用户请求确认的回调。
-# 返回 True（允许一次）、False（拒绝）或 "always"（本会话内始终允许）。
+# 返回 True（允许一次）、False（拒绝）、"always"（本会话内始终允许）
+# 或 "always-save"（会话允许并持久化规则到 permissions.toml）。
 ConfirmCallback = Callable[[str], Awaitable[bool | str]]
 
 # TOML section name per scope (permissions.toml) 各 scope 对应的 TOML 节名
@@ -850,12 +855,36 @@ class PermissionManager:
         if request.context:
             prompt += f"\n({request.context})"
         answer = await self._confirm(prompt)
-        if answer == "always":
+        if answer in ("always", "always-save"):
             self.grant_session_permission(request.scope, request.resource)
-            self.last_decision_reason = "user_confirm:always"
+            if answer == "always-save":
+                self._persist_confirmed_rule(request)
+                self.last_decision_reason = "user_confirm:always-save"
+            else:
+                self.last_decision_reason = "user_confirm:always"
             return PermissionDecision.GRANTED
         self.last_decision_reason = f"user_confirm:{'yes' if answer else 'no'}"
         return PermissionDecision.GRANTED if answer else PermissionDecision.DENIED
+
+    def _persist_confirmed_rule(self, request: PermissionRequest) -> None:
+        """Persist an ALLOW rule from the confirm dialog to the project's
+        permissions.toml (same file and format as /allow --save). Failure
+        must not break the grant -- the session permission already holds.
+        把确认弹窗授予的 ALLOW 规则持久化到项目 permissions.toml
+        （与 /allow --save 同一文件与格式）。写盘失败不影响本次授权
+        ——会话级授权已生效。"""
+        rule = PermissionRule(
+            scope=request.scope,
+            pattern=request.resource,
+            level=PermissionLevel.ALLOW,
+            reason="saved from confirm dialog",
+        )
+        self.add_rule(rule)
+        base = self.working_dir or Path.cwd()
+        try:
+            self.save_rule_to_file(base / ".mini-agent" / "permissions.toml", rule)
+        except OSError:
+            logger.warning("failed to persist confirmed rule", exc_info=True)
 
     @staticmethod
     def _matches(pattern: str, resource: str) -> bool:

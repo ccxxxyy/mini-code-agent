@@ -2208,3 +2208,18 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 - [x] 真实 LLM 三模式验证（deepseek-v4-flash-0731 三轮会话）：--code-only 文件删对话在 / --conv-only 文件在对话删 / 默认双回滚回归；终态文件系统与语义一致
 - [x] 超窗警告（终端实测暴露的静默边界）：undo_ids 中 turn <= current - keep_turns 的轮次输出 Warning（双回滚与 --code-only；--conv-only 不警告）；+3 测试（超窗警告 / code-only 全超窗 / 窗口内无警告），1334→1337；真实 LLM keep_turns=2 场景复现警告行
 - [x] 配置端到端：临时 TOML `undo_keep_turns = 12` → ConfigLoader 读出 → store.keep_turns 传导
+
+## B16 交互 UX 小项包（tech-notes §114）
+
+### 实现
+- [x] `ui/terminal.py` — 只读工具折叠组（Rich Live transient）：`_COLLAPSIBLE_TOOLS = {read_file, glob, grep}`，同轮 ≥2 条全成功折叠为一行 `✓ Done (N tool uses · Xs)`（耗时按最后一条结果时刻计）；单条/出错按原 ╭─/╰─ 展开；`flush_tool_group()` 在弹窗/流式开始/错误/非只读工具进入时统一收束；`collapse_tool_calls` 开关（默认 False 不折叠）
+- [x] `models/config.py` + `app.py` — 顶级配置 `collapse_tool_calls: bool = False`（TOML 顶级标量深合并零胶水），app 启动接线到 Terminal；`_on_tool_assembling` 对只读工具按开关跳过直打
+- [x] `ui/input_handler.py` + `app.py` — prompt_toolkit `s-tab` 绑定调用 `_cycle_permission_mode()`（default→accept-edits→plan→bypass 循环）；plan 系统提示词注入/移除集中到 `set_permission_mode`（/mode、/plan、shift+tab、exit_plan 四入口一致），`_PLAN_MODE_PROMPT` 移入 app.py
+- [x] `ui/terminal.py` + `security/permission.py` — confirm 弹窗按 a 后追问 `save permanently? [y/N]`（默认否）：y 返回 `"always-save"`，`_ask_user` 据此 `add_rule` + `save_rule_to_file` 写项目 permissions.toml；追问仅权限弹窗出现（`offer_persist` 参数，app 接线）；agent_loop hook 确认与 subagent pane 映射把 `"always-save"` 降级为 `"always"`
+- [x] `ui/esc_watcher.py` + `ui/board.py` + `core/subagent.py` + `extensions/builtin_commands.py` — `EscWatcher(double=False)` 单击档；`SubAgentBoard.run_while(detachable=True)` 单击 Esc 返回 `BOARD_DETACHED`（等待任务刻意不 cancel——wait_for 会级联杀死 agent）；`adopt_pending_wait()` 接管既有任务并登记 `_adopted_waits`；`/spawn wait [id]` 命中登记组即重新附着，`reclaim_adopted_wait()` 取消后台投递防双投递（`deliver_task.done()` 判定竞态）
+
+### 测试与验证
+- [x] `tests/unit/test_interactive_ux.py` 17 个测试：折叠/单条展开/出错展开/非只读透传+收束/无组 flush 幂等/默认不折叠 // 循环顺序/plan 提示词注入移除/幂等 // always-save 落盘 + always 不落盘回归 // 单击双击触发/detach 不杀 agent/adopt 投递+background 事件/re-attach 取消投递
+- [x] 1337→1354 全过，ruff clean
+- [x] 二轮实测反馈（tech-notes §114.7）：空提示符 bare escape 绑定重新附着（esc_command_provider 回调，仅空缓冲+无补全菜单生效）；EscWatcher 双层防误触（300ms 启动观察窗持续排空 + 孤立 Esc 判别丢弃转义序列——修"没按 Esc 面板每次秒转后台"，实测确认噪声在启动排空之后到达）；斜杠命令后立即处理收件箱投递（修竞态"结果已投递却看不到"）；interrupt_input 仅 prompt 运行中才保存缓冲（修 re-attach 后输入行残留 /spawn wait）；+3 测试 →1357；三项修复经用户真实终端终验通过，已知边界（打字丢弃/观察窗/半秒延迟/Esc 后立即打字）写入 commands-guide 中英 + tech-notes；绑定层测试补齐（build_key_bindings 抽出，5 项）+ 命令后收件箱分支测试 + flaky 耗时测试加固；+6 测试 →1363
+- [x] 真实 LLM 验证：默认逐条显示（两条 ╰─ ✓ 行）/ 危险命令 a→y 写入 permissions.toml 且重启免弹窗 / `/spawn --wait` 阻塞回归；shift+tab 循环与 Esc 转后台经用户真实终端实测通过

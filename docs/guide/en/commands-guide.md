@@ -113,12 +113,12 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 /spawn --type <t> <task>          # Specify type: explore/plan/worker(default)/verify
 /spawn --fork <task>              # Inherit a summary of the current conversation (for tasks referring to the discussion)
 /spawn --pane <task>              # Run in a visible terminal pane (separate process, watch live)
-/spawn --wait <task>              # Blocking: dispatch + progress panel + result in one command
+/spawn --wait <task>              # Blocking: dispatch + progress panel + result in one command (press Esc during the panel to move it to background)
 /spawn --background <task>        # No-op alias (auto-delivery is the default now)
 /spawn --pane --wait <task>       # Combined: open a pane + block for the result
 ```
 
-**Background auto-delivery is the default**: `/spawn <task>` returns immediately; when the agent finishes, its result is auto-delivered to the main conversation (interrupts input wait, drains mailbox, triggers the agent loop) — no `/spawn wait` needed. Use `--wait` to block for the result instead.
+**Background auto-delivery is the default**: `/spawn <task>` returns immediately; when the agent finishes, its result is auto-delivered to the main conversation (interrupts input wait, drains mailbox, triggers the agent loop) — no `/spawn wait` needed. Use `--wait` to block for the result instead; changed your mind mid-wait? A single Esc detaches it to background (the agent keeps running, the result switches to auto-delivery).
 
 **The two ways of getting results compared** (neither requires manual collection afterwards — they differ in how you wait and what the output looks like):
 
@@ -139,11 +139,20 @@ Rule of thumb: want the LLM to keep working with the result → use the default;
 
 Analogy: default = **takeout delivery** (order and walk away, it knocks when it arrives); `--wait` = **dining in** (order and sit there); the `wait` subcommand = **ordering takeout and then going to the counter to wait for it anyway**. Day to day you only need the default and `--wait`; the `wait` subcommand is essentially only needed after `--pane`.
 
+**Esc detach and re-attach**: while the progress board of `--wait` / `/spawn wait` is showing, a **single Esc press** detaches it — the agent keeps running, the board closes with `Moved to background`, and the result is auto-delivered into the conversation on completion (same as the default dispatch). After detaching, **press Esc once at the empty prompt to re-attach** (equivalent to auto-submitting `/spawn wait`; Esc keeps its usual roles while the input has text or a completion menu is open), or type `/spawn wait` (or `/spawn wait <id>`) manually: the board comes back with live progress and the result prints directly when done (the background delivery is cancelled, so it never appears twice); press Esc again to go back to background — switch as often as you like. In the rare race where the agent finishes at the exact moment of re-attach and delivery already fired, the command says so honestly ("result was already delivered to the inbox") — the result is not lost: it is processed and printed by the LLM right after the command returns.
+
+Known boundaries (all confirmed by real-terminal testing, deliberate trade-offs):
+- **Typing while the board is up is discarded**: the board is not an input box; keys other than Esc are silently consumed by the watcher (no echo, no buffering). Press Esc first, then type.
+- **Esc within 0.3s of the board appearing is ignored**: the anti-false-trigger arming window drains it as startup noise; press again a moment later.
+- **Esc at the prompt has a ~0.5s decision delay**: Esc is a key-sequence prefix and prompt_toolkit must disambiguate — a short pause after pressing is normal.
+- **Esc-then-type mis-trigger**: while a detached group exists, pressing Esc at the empty prompt and typing immediately (e.g. Esc to cancel an IME candidate, then typing) fires the re-attach first and your typed characters land in the next prompt — the re-attach gesture IS "Esc at the empty prompt"; pause half a second before typing to avoid it.
+
 **Collection and management**:
 ```
 /spawn list                       # List active SubAgents (id + phase)
 /spawn wait                       # Wait for ALREADY-running agents (dispatches nothing; multiple results show an overview table)
-/spawn wait <id>                  # Wait for a specific already-running agent (mainly for collecting --pane results)
+                                  # If an Esc-detached wait group exists, re-attaches to it first
+/spawn wait <id>                  # Wait for a specific already-running agent (for --pane results / re-attach)
 /spawn cancel [id]                # Cancel a specific agent / all agents
 ```
 
@@ -181,6 +190,7 @@ View or switch the session-level permission mode. Without parameters, shows the 
 /mode accept-edits   # Switch to accept-edits (aliases acceptedits/accept_edits also work)
 /mode bypass         # Switch to bypass (alias bypasspermissions also works; shows a warning on switch)
 ```
+**Keyboard shortcut**: press **shift+tab** at the input prompt to cycle default → accept-edits → plan → bypass → default without typing a command; the current mode is shown in the bottom toolbar's `mode:` field. The shortcut is fully equivalent to `/mode` / `/plan` (the plan system prompt is injected/removed in sync).
 The four modes:
 
 | Mode | Behavior |
@@ -225,6 +235,7 @@ The scope must be `command`, `path` or `tool`; patterns use glob matching.
 The `tool` scope matches by tool name and is evaluated before command/path checks: allow trusts the tool entirely (dangerous commands are no longer confirmed either); deny blocks the entire tool outright.
 Command-scope allow rules match the plain command only — unlike deny, they do NOT unwrap `cmd /c`-style wrappers (widening deny fails closed, widening allow fails open).
 Without `--save`, rules only apply to the current session; with `--save`, they are written to the project-level permissions.toml and loaded automatically after restart.
+Another persistence entry point: after pressing `a` in the permission confirmation dialog, a one-line follow-up asks `save permanently (project permissions.toml)? [y/N]` — answering `y` is equivalent to running `/allow ... --save` for that exact command/path (plain Enter keeps it session-only, nothing is written).
 Duplicate rules are automatically deduplicated and will not be added twice.
 
 ### /deny — Add DENY permission rules at runtime

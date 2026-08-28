@@ -168,25 +168,60 @@ def _make_history() -> FileHistory | InMemoryHistory:
         return InMemoryHistory()
 
 
-def create_prompt_session(
-    completer: SlashCommandCompleter | None = None,
-    toolbar_provider=None,
-    theme: Theme | None = None,
-    working_dir: Path | None = None,
-) -> PromptSession:
-    """Create a Prompt Toolkit session with multi-line support and completion.
-    创建一个支持多行输入和补全的 Prompt Toolkit session。
-
-    toolbar_provider: optional callable returning the bottom toolbar text
-    (shown under the input line, e.g. current model name).
-    toolbar_provider：可选的回调，返回输入框下方工具栏的文本
-    （例如当前模型名）。
-    """
+def build_key_bindings(mode_cycler=None, esc_command_provider=None) -> KeyBindings:
+    """Build the prompt key bindings (extracted for direct testability).
+    构建输入提示符按键绑定（抽出以便直接测试）。"""
     bindings = KeyBindings()
 
     @bindings.add("escape", "enter")
     def _newline(event) -> None:
         event.current_buffer.insert_text("\n")
+
+    if mode_cycler is not None:
+
+        @bindings.add("s-tab")
+        def _cycle_mode(event) -> None:
+            """shift+tab: cycle permission mode (default -> accept-edits ->
+            plan -> bypass); the bottom toolbar reflects the new mode on
+            redraw. shift+tab 循环权限模式，底部工具栏重绘即显示新模式。"""
+            try:
+                mode_cycler()
+            except Exception:
+                return
+            event.app.invalidate()
+
+    if esc_command_provider is not None:
+        from prompt_toolkit.filters import Condition as _Cond
+
+        @_Cond
+        def _esc_command_ready() -> bool:
+            # Only on an EMPTY buffer with no completion menu open: Esc keeps
+            # its usual roles (dismiss menu, escape+enter newline prefix).
+            # 仅在空缓冲且无补全菜单时生效——Esc 保留原有职责
+            # （关菜单、escape+enter 换行前缀）。
+            try:
+                from prompt_toolkit.application import get_app as _ga
+
+                buf = _ga().current_buffer
+                return not buf.text and buf.complete_state is None
+            except Exception:
+                return False
+
+        @bindings.add("escape", filter=_esc_command_ready, eager=False)
+        def _esc_submit_command(event) -> None:
+            """Bare Esc at an empty prompt: submit the provider's command
+            (e.g. "/spawn wait" to re-attach a detached agent board).
+            空提示符按 Esc：提交回调给出的命令
+            （如 "/spawn wait" 重新附着转后台的面板）。"""
+            try:
+                command = esc_command_provider()
+            except Exception:
+                return
+            if not command:
+                return
+            buf = event.current_buffer
+            buf.text = command
+            buf.validate_and_handle()
 
     def _retrigger_completion(buf: Buffer) -> None:
         """补全菜单只在文本变化时自动刷新，退格/光标移动后需手动重新触发。"""
@@ -211,6 +246,27 @@ def create_prompt_session(
         buf: Buffer = event.current_buffer
         buf.cursor_position = min(len(buf.text), buf.cursor_position + 1)
         _retrigger_completion(buf)
+
+    return bindings
+
+
+def create_prompt_session(
+    completer: SlashCommandCompleter | None = None,
+    toolbar_provider=None,
+    theme: Theme | None = None,
+    working_dir: Path | None = None,
+    mode_cycler=None,
+    esc_command_provider=None,
+) -> PromptSession:
+    """Create a Prompt Toolkit session with multi-line support and completion.
+    创建一个支持多行输入和补全的 Prompt Toolkit session。
+
+    toolbar_provider: optional callable returning the bottom toolbar text
+    (shown under the input line, e.g. current model name).
+    toolbar_provider：可选的回调，返回输入框下方工具栏的文本
+    （例如当前模型名）。
+    """
+    bindings = build_key_bindings(mode_cycler, esc_command_provider)
 
     def _toolbar() -> HTML | None:
         if toolbar_provider is None:

@@ -109,18 +109,22 @@ async def test_spawn_parallel(tmp_path):
 
 
 async def test_parallel_faster_than_serial(tmp_path):
-    """3 agents with 0.1s LLM delay should finish in ~0.1s, not ~0.3s.
-    3 个带 0.1 秒 LLM 延迟的 Agent 应在约 0.1 秒内完成，而不是约 0.3 秒。"""
+    """3 agents with 0.2s LLM delay should finish in ~0.2s, not ~0.6s.
+    Threshold 0.5s leaves a 0.3s scheduling-overhead budget so the test
+    stays stable under full-suite load while still ruling out serial
+    execution (which cannot finish under 0.6s).
+    3 个带 0.2 秒 LLM 延迟的 Agent 应在约 0.2 秒内完成，而非约 0.6 秒。
+    阈值 0.5 秒留出 0.3 秒调度开销余量——全量测试高负载下保持稳定，
+    同时仍能排除串行（串行不可能低于 0.6 秒）。"""
     import time
 
-    mgr = make_manager([text_response("ok")], tmp_path, delay=0.1)
+    mgr = make_manager([text_response("ok")], tmp_path, delay=0.2)
     start = time.monotonic()
     ids = await mgr.spawn_parallel(["a", "b", "c"])
     await mgr.wait_all(ids)
     elapsed = time.monotonic() - start
 
-    # parallel: ~0.1s; serial would be ~0.3s+ 并行约 0.1 秒；串行则需约 0.3 秒以上
-    assert elapsed < 0.35
+    assert elapsed < 0.5
 
 
 async def test_wait_unknown_agent(tmp_path):

@@ -917,7 +917,10 @@ class AgentLoop:
             if reason:
                 prompt += f"\n({reason})"
             answer = await self.confirm_callback(prompt)
-        if answer == "always":
+        # "always-save" degrades to "always" here: hook grants have no
+        # persistence semantics. "always-save" 在此降级为 "always"——
+        # hook 授权无持久化语义。
+        if answer in ("always", "always-save"):
             self._hook_confirm_grants.add(key)
             return True
         return bool(answer)

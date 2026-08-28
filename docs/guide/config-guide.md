@@ -276,6 +276,9 @@ max_agent_iterations = 80    # ReAct 循环最大迭代数（主循环与未指�
 max_consecutive_denials = 1  # 确认框连续被拒 N 次后熔断停机、回问用户（危险命令/项目外路径/hook 确认；
                              # 默认 1 = 拒一次即停；调大可给被拒后修正重试的空间。防止被拒后继续找绕过路径）
 theme = "default"            # "default" | "dark" | "light"
+collapse_tool_calls = false  # 只读工具（read_file/glob/grep）同轮 ≥2 次折叠为一行
+                             # "✓ Done (N tool uses · Xs)" 摘要；默认 false（逐条完整显示），
+                             # 设 true 开启折叠
 streaming_tool_execution = true  # 流式期间工具调用一组装完成就开始执行（false 等流结束再执行）
 enable_plan_mode = false     # 启动时进入只读计划模式（/plan on 运行时切换）；
                              # 等价于 [security].approval_mode = "plan" 且优先级更高
@@ -982,7 +985,7 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 **验证是否生效**：`/trace on` 后触发相关操作，trace 行会显示 `rule:<scope>:<pattern>` 作为判定依据。
 
-**修改后生效**：重启 mini（启动时加载一次）。或在运行中使用 `/allow` `/deny` 命令实时添加规则——带 `--save` 标志的规则会写入项目级 permissions.toml，下次启动自动加载。
+**修改后生效**：重启 mini（启动时加载一次）。或在运行中使用 `/allow` `/deny` 命令实时添加规则——带 `--save` 标志的规则会写入项目级 permissions.toml，下次启动自动加载。权限确认弹窗按 `a` 后也会追问一行是否持久化（y 写入同一文件，默认否）。
 
 **运行时管理**（P78/P79）：
 ```

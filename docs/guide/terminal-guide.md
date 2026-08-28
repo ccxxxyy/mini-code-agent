@@ -80,7 +80,7 @@ python -m mini_agent           &:: 直接用 Python
 
 ### 4. Git Bash（MINGW64/mintty）
 
-**兼容等级**：降级可用——能正常对话，但**无补全菜单、无底部工具栏、无双 Esc**（mintty 的 stdin 是管道，prompt_toolkit 驱动不了）。
+**兼容等级**：降级可用——能正常对话，但**无补全菜单、无底部工具栏、无 Esc 快捷键（双 Esc 中断/单 Esc 面板转后台/空提示符 Esc 重新附着）、无 shift+tab 模式循环**（mintty 的 stdin 是管道，prompt_toolkit 驱动不了）。
 
 **打开方法**：
 - 安装 Git for Windows 后，开始菜单搜 "Git Bash"

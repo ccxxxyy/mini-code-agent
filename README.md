@@ -258,9 +258,9 @@ mini --remote --remote-token "my-secret"
 | `/record start\|stop\|cancel\|list\|delete` | Record tool call sequences |
 | `/replay <name> [k=v ...]` | Replay recorded sequence with template variables |
 | `/plan [on\|off]` | Read-only plan mode; no args = show status (write tools disabled) |
-| `/mode [name]` | View/switch permission mode: default / accept-edits / plan / bypass (deny rules & sensitive paths hold in every mode) |
+| `/mode [name]` | View/switch permission mode: default / accept-edits / plan / bypass — or cycle with shift+tab at the prompt (deny rules & sensitive paths hold in every mode) |
 | `/tools` | List all registered tools (built-in + MCP) |
-| `/spawn <task>` | Dispatch sub-agent, result auto-delivered on completion (`--wait` blocks, `--type`, `--pane` visible terminal pane) |
+| `/spawn <task>` | Dispatch sub-agent, result auto-delivered on completion (`--wait` blocks — Esc detaches to background, Esc at the empty prompt or `/spawn wait` re-attaches; `--type`, `--pane` visible terminal pane) |
 | `/team <task>` | Auto-plan and parallel-execute with sub-agents |
 | `/trace [on\|off]` | Agent internals (phases, permissions, timing); no args = show status |
 | `/explain [on\|off]` | Tool usage explanations; no args = show status |
@@ -312,7 +312,7 @@ mini-code-agent/
 │   ├── tools/       # 20 built-in tools + MCP protocol (stdio/HTTP/SSE, eager/native/dispatch) + hook system
 │   ├── memory/      # Context compression (4-stage cascade), persistent memory, session store, extraction, recall, consolidation, file snapshots, spill cache, project context
 │   ├── security/    # Permissions, path guard, audit, OS sandbox (bwrap/unshare/seatbelt/windows dual-mode), worktree isolation, remote confirm (cross-process)
-│   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, double-Esc watcher
+│   ├── ui/          # Rich terminal, streaming renderer, input handler, components, themes, trace, teach, progress board, Esc watcher (double-Esc cancel / single-Esc board detach)
 │   ├── remote/      # WebSocket server + browser UI (--remote mode, disconnect queuing)
 │   ├── extensions/  # Slash commands (26), skills (4 built-in), hooks (11 stages), event listener + tool/command/skill plugins
 │   ├── llm/         # Provider abstraction: OpenAI Chat Completions + Responses API + Anthropic, token counter
