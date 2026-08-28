@@ -3882,3 +3882,22 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 **不重复覆盖**的命令（已有专门测试文件）：`/undo`（test_undo_fork.py + test_file_snapshots.py）、`/fork`（test_undo_fork.py）、`/todo`（test_task_store.py）、`/cost`（test_cost_tracker.py）、`/record` + `/replay`（test_tool_recorder.py）、`/help` + `/status`（test_agent_e2e.py + test_cost_tracker.py）。`/team` 和 `/spawn` 的实际派发逻辑需 Planner LLM / SubAgent 异步运行，已在 test_subagent/test_spawn_*.py/test_board.py 覆盖。
 
 **验证**：1434 全过（1389+45），ruff check/format 通过。真实 LLM 验证正常。
+
+---
+
+## §119 异步方法内的同步文件 I/O 下放线程（project-assessment §2.3）
+
+**前因**：project-assessment §2.3 指出所有文件工具（read_file/write_file/edit_file/grep）在 `async def execute()` 里直接调用同步的 `Path.read_text()`/`Path.write_text()`，在事件循环线程上阻塞 I/O。grep 最严重：遍历目录树逐文件同步读取全部内容（最大 5MB/文件），大型代码库可能读数百 MB 全程阻塞事件循环——期间流式输出、ESC 中断监听、并发工具全部冻结。SessionStore 的 `list_sessions()`/`cleanup_stale()` 同理逐文件读 JSON（issue #271）。
+
+**方案**：统一用 stdlib 的 `asyncio.to_thread` 下放线程，不引入 aiofiles 依赖（与项目零 SDK/最少依赖的策略一致）。按 I/O 形态分两种粒度：
+
+1. **循环整体下放**（遍历型）：grep 的目录遍历+逐文件读取+匹配循环、glob 的 `glob()`+逐文件 `stat()` 排序，整体提取为同步方法 `_scan()`，`execute()` 里一次 `await asyncio.to_thread(self._scan, ...)`——避免逐文件 to_thread 的线程切换开销，也让整个扫描（含 glob 本身的目录树 I/O）都不占事件循环。SessionStore 的 `list_sessions`/`cleanup_stale` 同样提取为 `_list_sessions_sync`/`_cleanup_stale_sync`。
+2. **逐调用包装**（单文件型）：read_file/edit_file 的 `read_text`、edit_file 的 `write_text` 直接 `await asyncio.to_thread(path.read_text, ...)`；write_file 的 mkdir+write、SessionStore save 的 mkdir+dumps+write、load 的 read+json.loads、delete 的 is_file+unlink 各用局部闭包打包一次下放（json 序列化/解析对大 session 也非平凡，一并移出）。
+
+**范围取舍**：glob 工具不在评估原文清单里，但目录树遍历+逐文件 stat 与 grep 同类，一并修复。单次 `is_file()`/`stat()` 前置检查（单个元数据调用，微秒级）保留在事件循环上——下放的收益低于线程切换成本。
+
+**回归测试**：4 个新测试确定性验证下放生效（非计时断言，无 flaky）——monkeypatch `_scan`/`_list_sessions_sync` 为阻塞在 `threading.Event` 上的包装，事件由事件循环上的并发协程在 50ms 后 set：若扫描仍在循环线程上跑则协程永远无法执行、5s 超时断言失败；read/write/edit 则 spy `asyncio.to_thread` 断言 4 次 I/O（write + read + edit 读写）全部经线程路由。
+
+**验证**：1438 全过（1434+4），ruff check/format 通过。真实 LLM 验证（项目根目录终端）：`uv run mini-agent -p "用 grep 工具在 src 目录搜索 'asyncio.to_thread'..."` → 正确报出本次修复的全部 6 文件 11 处调用点并读出 pyproject.toml 项目名；第二轮 `-p "用 write_file 创建 .scratch_verify271.txt 内容 'hello alpha'，再用 edit_file 把 alpha 改成 beta，最后 read_file 读出"` → 文件实际内容 `hello beta`，write→edit→read 全链路经 to_thread 路径正常。
+
+**量化实测**（`verify_271_loop_block.py`，3000 文件 / 70MB，同进程内把 to_thread 退化为同步直调模拟修复前）：修复前扫描 1932.6ms、事件循环心跳最大间隔 1932.7ms（全程冻结）；修复后扫描 2178.6ms、最大间隔 44.3ms（保持响应）。线程切换代价约 12% 扫描耗时。注：此改进在交互窗口肉眼不可见——ESC 中断只在 LLM 流式期间检查（app.py `_on_stream_delta`）、spinner 由 Rich 独立线程驱动，均不反映工具执行期间的事件循环状态。

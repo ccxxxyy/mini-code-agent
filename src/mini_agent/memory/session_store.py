@@ -3,6 +3,7 @@ session 持久化——以 JSON 文件形式保存/加载/列出/删除 session�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -31,21 +32,31 @@ class SessionStore:
 
     async def save(self, session: Session) -> Path:
         """Save session to disk. Returns the file path. 将 session 保存到磁盘。返回文件路径。"""
-        self._ensure_dir()
         session.metadata.last_active = datetime.now()
         data = _serialize_session(session)
         path = self._path_for(session.metadata.session_id)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        def _write() -> None:
+            self._ensure_dir()
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        await asyncio.to_thread(_write)
         return path
 
     async def load(self, session_id: str) -> Session | None:
         """Load a session by ID. Returns None if not found.
         按 ID 加载 session。未找到时返回 None。"""
         path = self._path_for(session_id)
-        if not path.is_file():
-            return None
+
+        def _read() -> dict[str, Any] | None:
+            if not path.is_file():
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))
+
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = await asyncio.to_thread(_read)
+            if data is None:
+                return None
             return _deserialize_session(data)
         except (json.JSONDecodeError, KeyError):
             log.debug("session load failed", exc_info=True)
@@ -54,6 +65,9 @@ class SessionStore:
     async def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions (metadata only, sorted newest first).
         列出所有已保存的 session（仅元数据，按最新在前排序）。"""
+        return await asyncio.to_thread(self._list_sessions_sync)
+
+    def _list_sessions_sync(self) -> list[dict[str, Any]]:
         self._ensure_dir()
         sessions = []
         for f in self._dir.glob("*.json"):
@@ -80,10 +94,14 @@ class SessionStore:
         """Delete a session file. Returns True if deleted.
         删除一个 session 文件。删除成功返回 True。"""
         path = self._path_for(session_id)
-        if path.is_file():
-            path.unlink()
-            return True
-        return False
+
+        def _delete() -> bool:
+            if path.is_file():
+                path.unlink()
+                return True
+            return False
+
+        return await asyncio.to_thread(_delete)
 
     async def cleanup_stale(self, max_age_days: int = 30, crashed_max_age_days: int = 0) -> int:
         """Delete stale sessions. Normally-closed sessions older than
@@ -94,6 +112,9 @@ class SessionStore:
         crashed_max_age_days 天的也删除（0 = 永久保留）。返回总删除数。"""
         if max_age_days <= 0 and crashed_max_age_days <= 0:
             return 0
+        return await asyncio.to_thread(self._cleanup_stale_sync, max_age_days, crashed_max_age_days)
+
+    def _cleanup_stale_sync(self, max_age_days: int, crashed_max_age_days: int) -> int:
         self._ensure_dir()
         clean_cutoff = datetime.now() - timedelta(days=max_age_days) if max_age_days > 0 else None
         crashed_cutoff = (

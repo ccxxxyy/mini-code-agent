@@ -3,6 +3,7 @@ Glob 工具——按文件名模式查找文件。"""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,11 @@ class GlobTool(Tool):
         if not base.is_dir():
             return self.error_result("", f"Directory not found: {base}")
 
+        # Tree walk + per-file stat are blocking; run off the event loop
+        # 目录遍历和逐文件 stat 是阻塞操作，移出事件循环执行
+        return await asyncio.to_thread(self._scan, pattern, base)
+
+    def _scan(self, pattern: str, base: Path) -> ToolResult:
         try:
             matches = [
                 p

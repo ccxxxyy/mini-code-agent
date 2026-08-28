@@ -3,6 +3,7 @@ EditFile 工具——在文件中进行精确字符串替换。"""
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ class EditFileTool(Tool):
             return self.error_result("", "old_text and new_text are identical")
 
         try:
-            content = file_path.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
         except OSError as e:
             return self.error_result("", f"Failed to read {file_path}: {e}")
 
@@ -82,7 +83,7 @@ class EditFileTool(Tool):
             replaced = 1
 
         try:
-            file_path.write_text(new_content, encoding="utf-8")
+            await asyncio.to_thread(file_path.write_text, new_content, encoding="utf-8")
         except OSError as e:
             return self.error_result("", f"Failed to write {file_path}: {e}")
 

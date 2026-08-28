@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +49,12 @@ class WriteFileTool(Tool):
             if not ok:
                 return self.error_result("", err)
 
-        try:
+        def _write() -> None:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
+
+        try:
+            await asyncio.to_thread(_write)
         except OSError as e:
             return self.error_result("", f"Failed to write {file_path}: {e}")
 

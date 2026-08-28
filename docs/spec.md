@@ -149,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # unit test files, 1434 tests
+│   ├── unit/                        # unit test files, 1438 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2285,7 +2285,10 @@ class ReadFileTool(Tool):
             )
 
         try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
+            # 阻塞读经 asyncio.to_thread 移出事件循环（tech-notes §119）
+            content = await asyncio.to_thread(
+                file_path.read_text, encoding="utf-8", errors="replace"
+            )
         except OSError as e:
             return self.error_result("", f"Failed to read {file_path}: {e}")
 

@@ -1,5 +1,7 @@
 """Tests for session persistence. session 持久化的测试。"""
 
+import asyncio
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -290,3 +292,26 @@ async def test_compact_boundary_absent_loads_all(tmp_path: Path):
     assert len(loaded.conversation.messages) == 2
     assert loaded.conversation.messages[0].content == "old summary"
     assert loaded.conversation.messages[0].compressed is True
+
+
+async def test_list_sessions_runs_off_event_loop(tmp_path: Path):
+    """The listing only completes if the event loop stays free to run the releaser.
+    列出操作仅在事件循环仍能运行 releaser 协程时才能完成——若阻塞循环则超时失败。"""
+    store = SessionStore(session_dir=str(tmp_path))
+    await store.save(Session())
+
+    release = threading.Event()
+    orig_sync = store._list_sessions_sync
+
+    def blocking_sync():
+        assert release.wait(timeout=5), "listing blocked the event loop thread"
+        return orig_sync()
+
+    store._list_sessions_sync = blocking_sync
+
+    async def releaser():
+        await asyncio.sleep(0.05)
+        release.set()
+
+    sessions, _ = await asyncio.gather(store.list_sessions(), releaser())
+    assert len(sessions) == 1

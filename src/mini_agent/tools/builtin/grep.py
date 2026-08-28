@@ -3,6 +3,7 @@ Grep 工具——用正则表达式搜索文件内容。"""
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,18 @@ class GrepTool(Tool):
         except re.error as e:
             return self.error_result("", f"Invalid regex pattern: {e}")
 
+        # Tree walk + per-file reads are blocking; run off the event loop
+        # 目录遍历和逐文件读取是阻塞操作，移出事件循环执行
+        return await asyncio.to_thread(self._scan, regex, pattern, base, include, context_lines)
+
+    def _scan(
+        self,
+        regex: re.Pattern[str],
+        pattern: str,
+        base: Path,
+        include: str | None,
+        context_lines: int,
+    ) -> ToolResult:
         if base.is_file():
             files = [base]
         elif base.is_dir():
