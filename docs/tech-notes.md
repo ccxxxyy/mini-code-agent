@@ -3942,3 +3942,36 @@ run: uv run pytest tests/ -v --cov --cov-report=term-missing
 ## 121.3 验证
 
 本地 `uv run pytest tests/ -v --cov --cov-report=term-missing`：1438 passed，覆盖率 86.70%（门禁 80%），通过。
+
+---
+
+# §122 Windows 平台纳入 CI 矩阵
+
+## 122.1 问题
+
+项目有大量 Windows 特定代码（EscWatcher msvcrt 分支、junction 回退、sandbox Low Integrity 模式、终端 GBK 解码、mintty 适配），但 CI test job 只在 `ubuntu-latest` 跑——这些分支的回归只能靠开发者本机手动验证（project-assessment §2.6 指出）。
+
+## 122.2 修复
+
+test job 从单 OS 双 Python 扩展为二维矩阵：
+
+```yaml
+runs-on: ${{ matrix.os }}
+strategy:
+  fail-fast: false
+  matrix:
+    os: [ubuntu-latest, windows-latest]
+    python-version: ["3.11", "3.12"]
+```
+
+- `fail-fast: false`——单平台失败不取消其余组合，一次 CI 运行看到全部平台结果（诊断跨平台差异时不用反复重跑）
+- job 名带上 OS（`Test (windows-latest, Python 3.11)`），失败一眼定位平台
+- lint 和 build job 保持 ubuntu 单平台（ruff/打包结果与 OS 无关，无需重复）
+
+## 122.3 覆盖率门禁在双平台的行为
+
+两个平台各自独立计算覆盖率并各自受 `fail_under=80` 约束。平台特定分支（`msvcrt`/`sys.platform == "win32"` 等）在对方平台计为未覆盖，但两侧本来就有余量（本地 Windows 实测 86.70%），门禁不受影响。
+
+## 122.4 验证
+
+测试套件的 Windows 兼容性已由开发环境保证——本机即 Windows（cp936），1438 测试 + 覆盖率门禁刚在 §121 全量跑通。windows-latest runner（cp1252 环境）的差异由推送后的真实 CI 运行验证。
