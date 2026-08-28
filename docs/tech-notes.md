@@ -1921,7 +1921,7 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 
 - **不动态提升到 registry**：ToolSearch 找到工具后不把它注册回 ToolRegistry（那样会越用越多），而是通过 mcp_call 中转——保持 registry 干净
 - **搜索是简单子串匹配**：`query.lower() in name.lower() or query.lower() in desc.lower()`——够用，不需要向量搜索或 TF-IDF
-- **ToolContext.mcp_manager 用 Any 类型**：避免循环导入（tools/ 不应 import tools/mcp/client）
+- **ToolContext.mcp_manager 用 Any 类型**：避免循环导入（tools/ 不应 import tools/mcp/client）。（§123 已升级为 `MCPManager | None`——TYPE_CHECKING 条件导入，循环依赖约束不变但类型检查器恢复视力）
 
 # 第五十二部分：选择性记忆召回（P52）
 
@@ -2070,7 +2070,7 @@ P58 学的骨架（每 Agent 一个 JSON 收件箱 + turn 开始前消费注入�
 **为什么**：in-process SubAgent 运行期不可见（只有进度面板）；mewcode 能把队友放进 tmux/iTerm2 窗格实时观看。做窗格意味着 Agent 跨进程，58.5 预告的锁债必须先还。
 
 **前置——Mailbox 跨进程**（`core/mailbox.py` 重写）：
-1. `_with_lock(path, fn)`：O_EXCL 创建 `<file>.lock`（原子原语）+ 指数退避带随机抖动（5ms 起、80ms 封顶，避免多进程同刻醒来对撞）+ 10s 陈旧锁接管（崩溃者遗留）+ 5s 超时抛 TimeoutError——消息没送出去必须让调用方知道
+1. `_with_lock(path, fn)`：O_EXCL 创建 `<file>.lock`（原子原语）+ 指数退避带随机抖动（5ms 起、80ms 封顶，避免多进程同刻醒来对撞）+ 10s 陈旧锁接管（崩溃者遗留）+ 超时抛 TimeoutError——消息没送出去必须让调用方知道（原 5s，§122.4 调至 15s——须大于陈旧锁接管窗口，并补 Windows delete-pending 重试）
 2. 原子写：temp 文件 + `os.replace`，纯读免锁永不见半截文件
 3. **磁盘注册表** `_registry.json`（id → 别名）替换内存 set/dict——worker 进程能解析父进程注册的同伴。这一步 mewcode 也没做（其注册表是进程内单例），是 mini 的必要发明
 4. 唤醒适配：mewcode send-keys 推送服务常驻队友；mini worker 是一次性任务，wait_message 0.5s 轮询天然跨进程收信——无需推送
@@ -3923,13 +3923,13 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 
 ---
 
-# §121 覆盖率门禁接入 CI
+## §121 覆盖率门禁接入 CI
 
-## 121.1 问题
+### 121.1 问题
 
 P22 配置了 `pyproject.toml` 的 `[tool.coverage.run]`（source/omit）和 `[tool.coverage.report]`（`fail_under=80`），但 `.github/workflows/ci.yml` 的 test job 命令是 `uv run pytest tests/ -v`——没有 `--cov` 参数，覆盖率从未在 CI 中实际收集和检查。门禁是摆设（project-assessment §2.5 指出）。
 
-## 121.2 修复
+### 121.2 修复
 
 CI test job 的 pytest 命令改为：
 
@@ -3939,19 +3939,19 @@ run: uv run pytest tests/ -v --cov --cov-report=term-missing
 
 `--cov` 激活 pytest-cov 插件，自动读取 `pyproject.toml` 中已有的 `[tool.coverage.run]` 和 `[tool.coverage.report]` 配置（source 范围、omit 排除列表、fail_under 阈值）。`--cov-report=term-missing` 在 CI 日志中显示未覆盖行号，方便定位。
 
-## 121.3 验证
+### 121.3 验证
 
 本地 `uv run pytest tests/ -v --cov --cov-report=term-missing`：1438 passed，覆盖率 86.70%（门禁 80%），通过。
 
 ---
 
-# §122 Windows 平台纳入 CI 矩阵
+## §122 Windows 平台纳入 CI 矩阵
 
-## 122.1 问题
+### 122.1 问题
 
 项目有大量 Windows 特定代码（EscWatcher msvcrt 分支、junction 回退、sandbox Low Integrity 模式、终端 GBK 解码、mintty 适配），但 CI test job 只在 `ubuntu-latest` 跑——这些分支的回归只能靠开发者本机手动验证（project-assessment §2.6 指出）。
 
-## 122.2 修复
+### 122.2 修复
 
 test job 从单 OS 双 Python 扩展为二维矩阵：
 
@@ -3968,11 +3968,11 @@ strategy:
 - job 名带上 OS（`Test (windows-latest, Python 3.11)`），失败一眼定位平台
 - lint 和 build job 保持 ubuntu 单平台（ruff/打包结果与 OS 无关，无需重复）
 
-## 122.3 覆盖率门禁在双平台的行为
+### 122.3 覆盖率门禁在双平台的行为
 
 两个平台各自独立计算覆盖率并各自受 `fail_under=80` 约束。平台特定分支（`msvcrt`/`sys.platform == "win32"` 等）在对方平台计为未覆盖，但两侧本来就有余量（本地 Windows 实测 86.70%），门禁不受影响。
 
-## 122.4 首轮 CI 暴露真缺陷：Windows delete-pending 竞态
+### 122.4 首轮 CI 暴露真缺陷：Windows delete-pending 竞态
 
 首次 windows-latest 运行即失败：`test_mailbox.py::test_concurrent_processes_no_message_loss` 的 4 个并发写进程之一退出码 1（未捕获异常）。本机 Windows 从未复现——差异不在代码页，而在 **GitHub runner 的 Defender 实时扫描**：杀毒进程短暂持有文件句柄时，`unlink` 进入 delete-pending 状态，此窗口内其他进程的文件操作抛 `PermissionError`（WinError 5）而非预期异常。
 
@@ -3986,8 +3986,41 @@ strategy:
 
 测试侧同步加固：并发测试的子进程原来不捕获 stderr，CI 只看到"exit 1"无从诊断——改为 `communicate()` 捕获并拼进断言消息，下次失败直接看到子进程 traceback。
 
-## 122.5 验证
+### 122.5 验证
 
 - 3 个新单测：抢锁 PermissionError 重试 / os.replace 瞬时失败重试成功 / 持续失败重试耗尽上抛（monkeypatch `mini_agent.core.mailbox.os.*` 注入故障）
 - 本地全量：test_mailbox 42 个全过，1441 测试 + 覆盖率门禁通过，ruff clean
 - 本机即 Windows（cp936），矩阵的 windows 组合语义已预演；Defender 竞态本机无法复现，最终由推送后的真实 windows-latest CI 运行裁决
+
+---
+
+## §123 ToolContext 摘掉 7 个 Any
+
+### 123.1 问题
+
+`ToolContext` 有 7 个字段声明为 `Any`（`mcp_manager`/`mailbox`/`task_store`/`agent_loop_ref`/`ask_user_callback`/`skill_registry`/`file_state`），只有 `subagent_manager` 用了 `TYPE_CHECKING` 条件导入的真实类型。`Any` 让静态类型检查对这些字段完全失效——工具代码里 `ctx.mailbox.sned(...)` 这种拼写错误不会被任何检查器抓到（project-assessment §2.7 指出）。
+
+当初写 `Any` 的原因是循环依赖：`core/`、`extensions/`、`mcp/` 都导入 `tools/base.py`，base 反向运行时导入它们会成环。
+
+### 123.2 修复
+
+三类字段三种处理，运行时零新增导入（文件已有 `from __future__ import annotations`，注解全是惰性字符串）：
+
+1. **具体类**（5 个）：`MCPManager`/`Mailbox`/`TaskStore`/`SkillRegistry`/`FileStateCache` 放进 `TYPE_CHECKING` 块——与 `subagent_manager` 既有先例同模式，类型检查器可见、运行时不导入。
+2. **鸭子类型**（`agent_loop_ref`）：原注释写"SimpleNamespace(get_plan_mode, set_plan_mode)"——这正是 Protocol 的用武之地。新增 `PlanModeControl` Protocol（`get_plan_mode() -> bool` + `set_plan_mode(bool) -> None`），app.py 的 SimpleNamespace 实现结构化满足，无需继承。
+3. **回调**（`ask_user_callback`）：类型别名 `AskUserCallback = Callable[[str, list[str] | None], Awaitable[str]]`，对应 `Terminal.ask_structured` 的真实签名。
+
+顺带修掉同文件仅有的 3 个 mypy 错误：`to_json_schema` 的 `result` dict 被推断为 `dict[str, Collection[str]]`（显式注解 `dict[str, Any]`）；`params_model: type` 与 `_schema_from_model(model: type)` 缺 `BaseModel` 约束（`type[BaseModel]`，pydantic 同样走 `TYPE_CHECKING` 导入）。
+
+### 123.3 边界
+
+安全前提确认：全库 grep 无 `get_type_hints`/`__annotations__` 对 `ToolContext` 的运行时反射——惰性字符串注解永不被求值，`TYPE_CHECKING` 导入不会在运行时炸。`ToolContext` 属冻结接口的支撑类型，本次把 `Any` 收紧为具体类型是纯文档性变更（dataclass 运行时不校验类型），既有调用零破坏。
+
+### 123.4 验证
+
+- `mypy src/mini_agent/tools/base.py` 从 3 错误到零错误（新注解全部可解析）
+- 赋值一致性：mypy 跑 `app.py`，所有 `_tool_context.*` 赋值行干净（暴露的 3 个 assignment 错误全是 `AgentLoop` 自身未注解的 `= None` 属性——§2.8 全库类型检查的范畴，非本次字段）
+- 反证探针：`ctx.mailbox.sned(...)` 拼写错误被 mypy 抓到（`Item "Mailbox" of "Mailbox | None" has no attribute "sned"`）——修复前 `Any` 对任意属性访问永远放行；Optional 类型还额外强制调用方判空
+- 运行时冒烟：`ToolContext` 正常构造；全量 1441 测试 + 覆盖率门禁 + ruff 通过
+
+**探针陷阱**（首轮反证假阴性的教训）：项目包不在 mypy 搜索路径时（`uvx` 隔离环境跑仓库根下的探针文件），`--ignore-missing-imports` 会把 `mini_agent` 整体静默降级为 `Any`——探针"零错误"其实是没检查。必须 `MYPYPATH=src` 让包真正被解析；判断探针是否生效，看报错里是否出现具体类型名（如 `"Mailbox"`）。

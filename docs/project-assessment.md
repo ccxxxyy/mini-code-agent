@@ -103,9 +103,11 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 `tools/base.py:97-108` 的 `ToolContext` 有 7 个字段声明为 `Any`：`mcp_manager`、`mailbox`、`task_store`、`agent_loop_ref`、`ask_user_callback`、`skill_registry`、`file_state`。只有 `subagent_manager` 用了 `TYPE_CHECKING` 条件导入的正确类型。其余 6 个字段使得静态类型检查完全失效。
 
+**✅ 已修复**：7 个字段全部换成真实类型——`MCPManager`/`Mailbox`/`TaskStore`/`SkillRegistry`/`FileStateCache` 走 `TYPE_CHECKING` 条件导入（与 `subagent_manager` 同模式，运行时零循环依赖）；`agent_loop_ref` 新增 `PlanModeControl` Protocol（结构化描述 get/set_plan_mode 切面，app.py 的 SimpleNamespace 实现天然满足）；`ask_user_callback` 类型别名 `AskUserCallback = Callable[[str, list[str] | None], Awaitable[str]]`。顺带修掉同文件 3 个既有类型错误（`to_json_schema` 的 dict 值类型推断、`params_model: type` 缺 `BaseModel` 约束），`mypy src/mini_agent/tools/base.py` 零错误。详见 tech-notes §123。
+
 ### 2.8 全类型注解无实际校验
 
-项目声称"全类型注解"（CLAUDE.md），但 CI 不跑 mypy 或 pyright。`ToolContext` 的 `Any` 字段问题在类型检查下会立即暴露。没有类型检查门禁，类型注解只是注释性质。
+项目声称"全类型注解"（CLAUDE.md），但 CI 不跑 mypy 或 pyright。`ToolContext` 的 `Any` 字段问题（§2.7，已修复）正是类型检查会立即暴露的一类；修复 §2.7 时 mypy 顺带在 `app.py` 暴露了 3 个 `AgentLoop` 未注解属性（tech-notes §123.4），佐证全库门禁的价值。没有类型检查门禁，类型注解只是注释性质。
 
 ### 2.9 魔法数字散落各模块
 
