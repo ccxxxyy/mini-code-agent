@@ -1439,7 +1439,7 @@ tech-notes 34.3 ③ 的实战问题：单请求烧 50 万 token。读大文件 �
 ## 多后端 spawn (comparison 6.4)
 
 ### 前置：Mailbox 跨进程改造
-- [x] `_with_lock` 文件锁：O_EXCL 锁文件 + 指数退避带抖动（5ms→80ms）+ 10s 陈旧锁接管 + 5s 超时抛 TimeoutError
+- [x] `_with_lock` 文件锁：O_EXCL 锁文件 + 指数退避带抖动（5ms→80ms）+ 10s 陈旧锁接管 + 5s 超时抛 TimeoutError（超时后经 tech-notes §122.4 调至 15s 并补 Windows delete-pending 重试）
 - [x] 原子写：temp + os.replace，纯读免锁
 - [x] 磁盘注册表 `_registry.json`（id→别名）替换内存注册，跨进程 resolve/peers/describe_peers
 - [x] '_registry' 保留 id 守卫；reset_all 连注册表与锁残留清理

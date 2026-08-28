@@ -6,7 +6,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mini_agent.events.bus import EventBus
 from mini_agent.models.config import AgentConfig
@@ -14,8 +14,40 @@ from mini_agent.models.message import ToolResult
 from mini_agent.models.permissions import ToolCategory
 from mini_agent.models.session import Session
 
+# Runtime imports of these would create circular dependencies (core/,
+# extensions/ and mcp/ all import this module), so they exist only for the
+# type checker; `from __future__ import annotations` keeps every annotation
+# a lazy string at runtime.
+# 这些模块在运行时导入会形成循环依赖（core/、extensions/、mcp/ 都反过来
+# 导入本模块），故仅供类型检查器使用；`from __future__ import annotations`
+# 保证所有注解在运行时都是惰性字符串。
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from pydantic import BaseModel
+
+    from mini_agent.core.mailbox import Mailbox
     from mini_agent.core.subagent import SubAgentManager
+    from mini_agent.core.task_store import TaskStore
+    from mini_agent.extensions.skills import SkillRegistry
+    from mini_agent.tools.file_state_cache import FileStateCache
+    from mini_agent.tools.mcp.client import MCPManager
+
+    # async (question, choices) -> answer; choices=None means free text
+    # 异步 (问题, 选项) -> 回答；选项为 None 时自由文本输入
+    AskUserCallback = Callable[[str, list[str] | None], Awaitable[str]]
+
+
+class PlanModeControl(Protocol):
+    """The slice of the agent loop that process tools may touch: read and
+    switch plan mode. app.py fulfils it with a SimpleNamespace closing over
+    Application.set_permission_mode.
+    流程工具可触碰的 agent loop 切面：读取与切换计划模式。app.py 用闭包
+    Application.set_permission_mode 的 SimpleNamespace 实现。"""
+
+    def get_plan_mode(self) -> bool: ...
+
+    def set_plan_mode(self, value: bool) -> None: ...
 
 
 @dataclass
@@ -43,7 +75,7 @@ class ToolSchema:
     def to_json_schema(self) -> dict[str, Any]:
         """Convert to OpenAI function calling format. 转换为 OpenAI function calling 格式。"""
         if self.raw_parameters is not None:
-            result = {
+            result: dict[str, Any] = {
                 "type": "function",
                 "function": {
                     "name": self.name,
@@ -94,18 +126,18 @@ class ToolContext:
     event_bus: EventBus
     config: AgentConfig
     subagent_manager: SubAgentManager | None = None
-    mcp_manager: Any = None
+    mcp_manager: MCPManager | None = None
     # Cross-agent messaging: shared Mailbox + this agent's identity
     # 跨 Agent 消息：共享 Mailbox + 本 Agent 身份
-    mailbox: Any = None
+    mailbox: Mailbox | None = None
     agent_id: str = "main"
     # Process tools: task board, plan-mode control, structured user questions
     # 流程工具：任务板、计划模式控制、结构化用户提问
-    task_store: Any = None
-    agent_loop_ref: Any = None  # SimpleNamespace(get_plan_mode, set_plan_mode)
-    ask_user_callback: Any = None  # async (question, choices) -> str
-    skill_registry: Any = None  # extensions/skills.py SkillRegistry
-    file_state: Any = None  # tools/file_state_cache.py FileStateCache (read-before-edit)
+    task_store: TaskStore | None = None
+    agent_loop_ref: PlanModeControl | None = None
+    ask_user_callback: AskUserCallback | None = None
+    skill_registry: SkillRegistry | None = None
+    file_state: FileStateCache | None = None  # read-before-edit guard
 
 
 def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +164,7 @@ def _resolve_refs(schema: dict[str, Any]) -> dict[str, Any]:
     return _resolve(schema)
 
 
-def _schema_from_model(name: str, description: str, model: type) -> ToolSchema:
+def _schema_from_model(name: str, description: str, model: type[BaseModel]) -> ToolSchema:
     """Build a ToolSchema from a Pydantic BaseModel.
     从 Pydantic BaseModel 自动生成 ToolSchema。"""
     raw_schema = model.model_json_schema()
@@ -149,7 +181,7 @@ class Tool(ABC):
     """Base class for all tools (builtin + MCP-adapted).
     所有工具的基类（内置工具 + MCP 适配工具）。"""
 
-    params_model: type | None = None
+    params_model: type[BaseModel] | None = None
     _name: str = ""
     _description: str = ""
     # Side-effect class for the permission mode matrix (mode × category).

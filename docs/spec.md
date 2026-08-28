@@ -150,7 +150,7 @@ mini-code-agent/
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
 │   ├── mocks.py                     # Shared MockLLM + script helpers
-│   ├── unit/                        # unit test files, 1438 tests
+│   ├── unit/                        # unit test files, 1441 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -942,17 +942,25 @@ class ToolContext:
     session: Session
     event_bus: EventBus
     config: AgentConfig
+    # 以下注入字段均为 TYPE_CHECKING 条件导入的真实类型——类型检查器可见、
+    # 运行时零循环依赖（tech-notes §123）
     subagent_manager: SubAgentManager | None = None
-    mcp_manager: Any = None
+    mcp_manager: MCPManager | None = None
     # Cross-agent messaging: shared Mailbox + this agent's identity
-    mailbox: Any = None
+    mailbox: Mailbox | None = None
     agent_id: str = "main"
+    # Process tools: task board, plan-mode control, structured user questions
+    task_store: TaskStore | None = None
+    agent_loop_ref: PlanModeControl | None = None   # Protocol: get/set_plan_mode
+    ask_user_callback: AskUserCallback | None = None  # async (question, choices) -> answer
+    skill_registry: SkillRegistry | None = None
+    file_state: FileStateCache | None = None  # read-before-edit guard
 
 
 class Tool(ABC):
     """Base class for all tools (builtin + MCP-adapted)."""
 
-    params_model: type | None = None  # Pydantic BaseModel for auto schema (P46)
+    params_model: type[BaseModel] | None = None  # Pydantic BaseModel for auto schema (P46)
     category: ToolCategory = ToolCategory.EXTERNAL  # 权限矩阵类别轴，未声明默认 EXTERNAL（保守）
 
     @property
