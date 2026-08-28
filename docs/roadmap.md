@@ -100,7 +100,7 @@
 | 项 | 说明 |
 |---|---|
 | 接口冻结 ✅ | Tool / LLMProvider / HookFn / CompressionStrategy ABC 定稿（CHANGELOG.md），v1.0.0 语义版本承诺向后兼容 |
-| 覆盖率门禁 ✅ | pytest-cov 80.36%（排除 TTY/MCP 层后），fail_under=80 作为 CI 合并条件 |
+| 覆盖率门禁 ✅ | pytest-cov 86.70%（排除 TTY/MCP 层后），fail_under=80，CI test job 已接入 `--cov`（§121 修复） |
 | PyPI 发布 ✅ | P33 实现 + 已成功发布：pip install mini-code-agent 可用 |
 | 插件生态 ✅ | P83 实现：`extensions/plugin_loader.py` 四钩子契约（register/register_tools/commands/skills）+ 双通道发现（`mini_agent.plugins` entry point + `plugin_dirs` 本地文件），`/plugins` 命令展示 |
 | Streaming 中间态 ✅ | P23 实现：on_tool_call_assembling 回调 + Diff 预览（整行背景色 diff） |

@@ -3920,3 +3920,25 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 **范围取舍**：功能特化的 mock 不并入——`SummaryMockLLM`（test_context，摘要标签/失败模式）、`TeamMockLLM`（test_team，规划 JSON）、`_MockLLM`（test_memory_*，合并响应）行为面不同，强行统一只会把特化逻辑参数化进共享类。测试文件内的行为子类（KwargsMockLLM 记录 kwargs、YieldingMockLLM chunk 间让出事件循环、TwoPhaseStreamLLM）保留原地，改继承共享类（内部 `_call_count` 统一为公开 `call_count`）。
 
 **验证**：1438 全过（数量不变——纯重构零新增零删除），ruff check/format 通过，`class MockLLM` 在 tests/unit 归零。16 文件 −350/+49 行。真实 LLM 运行验证不适用（未触及 src/ 任何文件，git diff 确认），全量测试套件即行为等价证明。
+
+---
+
+# §121 覆盖率门禁接入 CI
+
+## 121.1 问题
+
+P22 配置了 `pyproject.toml` 的 `[tool.coverage.run]`（source/omit）和 `[tool.coverage.report]`（`fail_under=80`），但 `.github/workflows/ci.yml` 的 test job 命令是 `uv run pytest tests/ -v`——没有 `--cov` 参数，覆盖率从未在 CI 中实际收集和检查。门禁是摆设（project-assessment §2.5 指出）。
+
+## 121.2 修复
+
+CI test job 的 pytest 命令改为：
+
+```yaml
+run: uv run pytest tests/ -v --cov --cov-report=term-missing
+```
+
+`--cov` 激活 pytest-cov 插件，自动读取 `pyproject.toml` 中已有的 `[tool.coverage.run]` 和 `[tool.coverage.report]` 配置（source 范围、omit 排除列表、fail_under 阈值）。`--cov-report=term-missing` 在 CI 日志中显示未覆盖行号，方便定位。
+
+## 121.3 验证
+
+本地 `uv run pytest tests/ -v --cov --cov-report=term-missing`：1438 passed，覆盖率 86.70%（门禁 80%），通过。
