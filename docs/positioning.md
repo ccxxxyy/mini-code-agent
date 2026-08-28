@@ -129,7 +129,7 @@ A: 目的就是理解底层。框架把 Agent Loop、工具调度都封装掉了
 A: 规模不比，密度可以：1201 个测试零网络依赖约 100 秒跑完、CI 双版本门禁、七阶段 Spec 流程、每个设计决策都有文档记录（tech-notes.md）。小而完备优于大而黑盒。
 
 **Q: 这个项目接下来往哪走？**
-A: P1-P83 共 83 个阶段已完成（1201 个测试），涵盖评测/机制实验/多 Agent 编排/会话自动保存/主题切换/工具并行/双 Esc 中断/长记忆自动化/溢出兜底/TOML 配置/接口冻结（v1.0.0）/覆盖率门禁（80%+）/Diff 预览/文件变更汇总/Windows 终端适配/压缩-重读根治/Anthropic 缓存/流式工具执行/@file 内联/权限规则文件/OS 沙箱（三平台全覆盖，默认开启）/Coordinator 模式/Pydantic Schema 全面增强/远程浏览器模式/Mailbox 跨 Agent 通信/插件生态（P83：pip 包 + 本地文件注册工具/命令/技能）。**PyPI 已发布**（`pip install mini-code-agent`），定位开源的"可读 Agent 参考实现"。
+A: P1-P83 共 83 个阶段已完成（P83 时点 1201 个测试；此后 B 系列增强持续推进，见 roadmap/tech-notes，测试数以 `uv run pytest tests/` 实际输出为准），涵盖评测/机制实验/多 Agent 编排/会话自动保存/主题切换/工具并行/双 Esc 中断/长记忆自动化/溢出兜底/TOML 配置/接口冻结（v1.0.0）/覆盖率门禁（80%+）/Diff 预览/文件变更汇总/Windows 终端适配/压缩-重读根治/Anthropic 缓存/流式工具执行/@file 内联/权限规则文件/OS 沙箱（三平台全覆盖，默认开启）/Coordinator 模式/Pydantic Schema 全面增强/远程浏览器模式/Mailbox 跨 Agent 通信/插件生态（P83：pip 包 + 本地文件注册工具/命令/技能）。**PyPI 已发布**（`pip install mini-code-agent`），定位开源的"可读 Agent 参考实现"。
 
 ---
 

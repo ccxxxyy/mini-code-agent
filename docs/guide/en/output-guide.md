@@ -89,6 +89,17 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Content | `╭─ tool name + argument preview` (arguments truncated at 60 characters) |
 | How to disable | Set `self.agent_loop.on_tool_start` to `None` in `app.py` |
 | Note | If ② has already shown the tool name, ⑤ only prints the argument summary line `│ args...` without repeating `╭─` |
+| Collapse | Read-only tools (read_file/glob/grep) go through the collapsible group, see ⑤+ |
+
+### ⑤+ Read-Only Tool Collapse Summary `✓ Done (N tool uses · Xs)`
+
+| Item | Description |
+|---|---|
+| Source | `ui/terminal.py` collapsible group (Rich Live, transient) |
+| Trigger | Read-only tools (read_file/glob/grep) called ≥2 times within the same LLM round, all successful |
+| Behavior | During execution a Live region shows each `╭─ name args` line in real time (✓ marks completion); when the group ends, the whole group is erased and replaced by a single line `✓ Done (N tool uses · X.Xs)` (elapsed time measured at the last result, LLM latency excluded) |
+| When NOT collapsed | Only 1 entry in the group (no benefit — shown in full per ⑤/⑥); any entry errored (errors must stay on screen — the whole group expands); a write/execute tool interleaves (the group is flushed first) |
+| How to enable | Top-level `collapse_tool_calls = true` in config.toml (**default `false`, no collapsing** — per-call ╭─/╰─ lines) |
 
 ### ⑥ Tool Result Line `╰─ ✓ N lines, M chars`
 
@@ -175,7 +186,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | SubAgent progress board | `ui/board.py` `SubAgentBoard` Rich Live Table | During `/spawn --wait`, `/spawn wait` or `/team` |
 | Multi-agent result overview table + `Report i/N` sections + deliverable file lines | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` | When `/spawn wait` receives multiple results |
 | Worker pane output (task header / tool lines / streaming answer / linger countdown) | `core/worker.py` direct stdout printing | Inside the pane of `/spawn --pane` |
-| `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent spawned via `spawn_agents background=true` completes; automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result |
+| `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent completes (`spawn_agents background=true` / default `/spawn` dispatch / Esc-detached board); automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result; deliveries landing while a slash command runs are processed right after the command returns |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` subscriber of `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` | When `inherit_context=true` or `/spawn --fork` triggers a summary LLM call; `/trace on` also shows `ctx` trace lines |
 | Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit; concurrent output during the input wait (trace/result lines from parallel tools) reroutes above the prompt so the input line is never disrupted |
 | Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content, or Anthropic/Responses models with request-side thinking enabled (tech-notes §110) |
@@ -197,6 +208,9 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | **Switch color theme** | `/theme dark` / `/theme light` / `/theme default` |
 | **View loaded plugin details** | `/plugins` (expanded version of the startup line `Loaded N plugin(s)`: tools/commands/skills registered by each plugin) |
 | **Disable a plugin (remove it from the startup line)** | Set top-level `disabled_plugins = ["<name>"]` in config.toml, or move the file out of the plugin_dirs directory |
+| **Enable read-only tool collapse (one-line summary)** | Top-level `collapse_tool_calls = true` in config.toml (off by default) |
+| **Cycle the permission mode** | Press shift+tab at the input prompt (default → accept-edits → plan → bypass); the bottom toolbar shows the live mode |
+| **Re-attach a detached sub-agent board** | Press Esc once at the empty prompt (auto-submits `/spawn wait`); Esc inside the board detaches again |
 | **View all commands** | `/help` |
 
 ---

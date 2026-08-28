@@ -15,7 +15,7 @@
 **实现**：
 - 流式渲染：`ui/renderer.py` — Rich Live 组件逐段提交式渲染 Markdown（8Hz，代码高亮/粗体），逐 token"边想边输出"；思考流（reasoning_content）dim 直连写入，Live 延迟到首个正文 delta 才启动（tech-notes §100）
 - 多轮对话：`models/message.py` 的 Conversation 全量重放历史，LLM 记住上下文
-- 交互细节：`>` 提示符、输入文字 bold 亮浅蓝着色 + 输入行上下同色横线、输入 `/` 弹出命令下拉菜单（上下键选择/Tab 补全/删字符重新过滤）、输入历史跨会话保留（↑ 键翻历史）、底部工具栏实时显示当前 LLM 和权限模式、工具调用 `╭─ ╰─` 连线展示、每轮 token 用量统计
+- 交互细节：`>` 提示符、输入文字 bold 亮浅蓝着色 + 输入行上下同色横线、输入 `/` 弹出命令下拉菜单（上下键选择/Tab 补全/删字符重新过滤）、输入历史跨会话保留（↑ 键翻历史）、底部工具栏实时显示当前 LLM 和权限模式、工具调用 `╭─ ╰─` 连线展示（顶级配置 `collapse_tool_calls = true` 时只读工具 read_file/glob/grep 同轮 ≥2 次折叠为一行 `✓ Done (N tool uses · Xs)` 摘要、出错则展开；默认关闭不折叠）、shift+tab 循环切换权限模式、每轮 token 用量统计
 - 启动体验：`mini` 一个单词全局启动（同 `claude`）；`mini -p "任务"` 非交互一次性执行（脚本/CI/管道，`--output-format stream-json` 输出 NDJSON 事件流，事件名同远程协议）
 
 **验证**：真实 API 流式验证；终端交互全部手工验证过
@@ -105,11 +105,11 @@
 
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 6 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM/COMMAND/NOTIFY），优先级链 + 否决短路；`[[hooks]]` 配置可声明四种动作——`block`（拒绝）/ `confirm`（弹 y/a/n 确认框）/ `command`（执行 shell 命令）/ `notify`（终端通知行）；支持条件表达式（`condition` 字段，`==`/`!=`/`=~`/`~=` + `and`/`or`）和模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`）；PRE_TOOL 与 POST_TOOL 均可声明式配置
-- 危险命令确认：28 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh/cmd /c——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
+- 危险命令确认：28 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh/cmd /c——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1；权限弹窗按 a 后追问一行是否持久化，y 才写入项目 permissions.toml——默认仅会话级，绝不静默写盘）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
 - 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
 - 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
-- 权限模式矩阵：`/mode` 运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：拒绝 WRITE 与 EXTERNAL 类别工具 + bash 写形态命令拒绝；有权限门控传导时允许 spawn 研究型子 Agent——子 Agent 继承 plan 模式、写操作在权限层被拒，无门控时 spawn 仍禁用）/ `bypass`（除安全底线外全免确认，EXTERNAL 类别工具也免确认放行）四模式；矩阵新增**工具类别轴**：每个工具声明 READ/WRITE/EXECUTE/EXTERNAL 类别（未声明的插件工具默认 EXTERNAL 保守处理），类别门控在路径检查之前评估——install_skill 这类无路径参数的工具也被拦住——且读 `permission_manager.mode` 而非循环标志，对子 Agent 同样生效；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
+- 权限模式矩阵：`/mode` 或输入提示符 shift+tab 循环运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：拒绝 WRITE 与 EXTERNAL 类别工具 + bash 写形态命令拒绝；有权限门控传导时允许 spawn 研究型子 Agent——子 Agent 继承 plan 模式、写操作在权限层被拒，无门控时 spawn 仍禁用）/ `bypass`（除安全底线外全免确认，EXTERNAL 类别工具也免确认放行）四模式；矩阵新增**工具类别轴**：每个工具声明 READ/WRITE/EXECUTE/EXTERNAL 类别（未声明的插件工具默认 EXTERNAL 保守处理），类别门控在路径检查之前评估——install_skill 这类无路径参数的工具也被拦住——且读 `permission_manager.mode` 而非循环标志，对子 Agent 同样生效；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
 - fail-safe：无 UI 时默认拒绝
 - 执行管道：每次工具调用走 PermissionCheck → PRE_TOOL Hook → execute → POST_TOOL Hook
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
@@ -165,8 +165,8 @@
 - 失败即数据：子 Agent 异常转 SubAgentResult(success=False)，不炸编排
 - Mailbox 跨 Agent 通信（P58）：共享文件式收件箱，SubAgent 运行中通过 send_message 互发消息、wait_message 阻塞等待；spawn_parallel 预生成 id 让兄弟 Agent 互见（id + 任务摘要）
 - Mailbox 增强（P58.4）：`to='*'` 广播、request/response 结构化协议（request_id 配对 + approve 表态）、名字寻址（spawn_agents names 参数）、会话级审计留痕（drain 标记已读留盘）
-- 多后端 spawn（comparison 6.4）：`/spawn --pane` 把 SubAgent 跑进可见终端窗格（tmux 分屏 / **Windows Terminal** 分屏或共享窗口标签页——任意终端装了 wt 即可用，独立进程实时观看）；`--wait` 一条命令派发+进度面板+结果；Mailbox 跨进程改造（O_EXCL 文件锁 + 原子写 + 磁盘注册表，4 进程并发写零丢失实测）；worker 协议（spec JSON 进 → 结果 JSON 出，协议文件隔离在工作目录外 + schema 双校验防 LLM 早产桩）；worker 崩溃护栏 + Provider 429 退避重试；真实 LLM 跨进程 E2E + 六轮交互实测迭代
-- 后台派发 + 自动投递：spawn_agents 工具 `background=true` 立即返回，LLM 继续其他工作；子 agent 完成时经 mailbox 向 main 投递含结果的通知（截断 4000 字符），自动中断输入等待并触发 agent loop 处理结果（无需用户手动输入）；终端同步提示完成；工具默认仍阻塞。**`/spawn` 命令默认即后台自动投递**（无需 `--background`，`--wait` 为阻塞式 opt-in）
+- 多后端 spawn（comparison 6.4）：`/spawn --pane` 把 SubAgent 跑进可见终端窗格（tmux 分屏 / **Windows Terminal** 分屏或共享窗口标签页——任意终端装了 wt 即可用，独立进程实时观看）；`--wait` 一条命令派发+进度面板+结果（面板期间单击 Esc 转后台——agent 不中断，结果改为完成后自动投递；空提示符按 Esc 或 `/spawn wait` 可重新附着回面板直取结果，后台投递自动取消防双投递，可反复切换；Esc 监听器双层防误触：启动观察窗 300ms 排空 + 孤立 Esc 判别丢弃终端转义序列噪声；边界：面板期间 Esc 之外按键被静默消费、空提示符 Esc 重附有约半秒序列消歧延迟）；Mailbox 跨进程改造（O_EXCL 文件锁 + 原子写 + 磁盘注册表，4 进程并发写零丢失实测）；worker 协议（spec JSON 进 → 结果 JSON 出，协议文件隔离在工作目录外 + schema 双校验防 LLM 早产桩）；worker 崩溃护栏 + Provider 429 退避重试；真实 LLM 跨进程 E2E + 六轮交互实测迭代
+- 后台派发 + 自动投递：spawn_agents 工具 `background=true` 立即返回，LLM 继续其他工作；子 agent 完成时经 mailbox 向 main 投递含结果的通知（截断 4000 字符），自动中断输入等待并触发 agent loop 处理结果（无需用户手动输入；斜杠命令执行期间完成的投递在命令结束后立即处理，不等下一次输入等待）；终端同步提示完成；工具默认仍阻塞。**`/spawn` 命令默认即后台自动投递**（无需 `--background`，`--wait` 为阻塞式 opt-in）
 - 摘要式上下文 fork：spawn_agents 工具 `inherit_context=true` / `/spawn --fork` 把父对话的 LLM 摘要（P67 9 节结构，失败回退提取式 digest）注入子 agent system prompt——"按我们讨论的去做"类任务子 agent 出生即知上下文；冻结快照回避 fork 一致性问题，与 background 可组合（background+fork 时摘要+spawn 整体后台执行、立即返回）；摘要生成期间终端提示+trace 可见（`ContextSummaryStartEvent`/`ContextSummaryDoneEvent`）
 
 **验证**：8 个单测含并行计时断言（3 个 0.1s Agent 并行 <0.35s）；真实 API E2E：2 个 Agent 并行读不同文件 2.3 秒各自正确报告

@@ -278,6 +278,9 @@ max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutiv
                              # (dangerous command / path outside project / hook confirm; default 1 = one denial stops
                              # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
+collapse_tool_calls = false  # Collapse read-only tools (read_file/glob/grep) called >=2 times in the
+                             # same round into a one-line "✓ Done (N tool uses · Xs)" summary;
+                             # default false (full per-call lines), set true to opt in
 streaming_tool_execution = true  # During streaming, start executing a tool call as soon as it is fully assembled (false waits for the stream to end)
 enable_plan_mode = false     # Enter read-only plan mode at startup (/plan on|off switches at runtime);
                              # equivalent to [security].approval_mode = "plan" and takes precedence
@@ -982,7 +985,7 @@ Evaluation order (first match decides):
 
 **Verifying it works**: after `/trace on`, trigger a relevant operation; the trace line shows `rule:<scope>:<pattern>` as the decision basis.
 
-**When changes take effect**: restart mini (loaded once at startup). Or use the `/allow` `/deny` commands at runtime to add rules live — rules with the `--save` flag are written to the project-level permissions.toml and load automatically next startup.
+**When changes take effect**: restart mini (loaded once at startup). Or use the `/allow` `/deny` commands at runtime to add rules live — rules with the `--save` flag are written to the project-level permissions.toml and load automatically next startup. The permission confirmation dialog also asks a one-line follow-up after `a` — answer y to persist to the same file (default: session-only).
 
 **Runtime management** (P78/P79):
 ```

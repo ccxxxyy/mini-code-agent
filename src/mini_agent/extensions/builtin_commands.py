@@ -1270,14 +1270,6 @@ def _make_theme(app: Application) -> HandlerFn:
     return handler
 
 
-_PLAN_MODE_PROMPT = (
-    "\n\n[PLAN MODE] You are in read-only planning mode. "
-    "You can ONLY use read_file, glob, grep, bash for research. "
-    "write_file, edit_file, delete_file are disabled. "
-    "Analyze and plan, do NOT attempt to modify files."
-)
-
-
 def _make_plan(app: Application) -> HandlerFn:
     async def handler(args: str, ctx: Any) -> str:
         from mini_agent.models.permissions import PermissionMode
@@ -1286,16 +1278,10 @@ def _make_plan(app: Application) -> HandlerFn:
 
         if sub == "on":
             app.set_permission_mode(PermissionMode.PLAN)
-            conv = app.session.conversation
-            if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
-                conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
             return "Plan mode **ON** — write tools disabled (read-only)."
 
         if sub == "off":
             app.set_permission_mode(PermissionMode.DEFAULT)
-            conv = app.session.conversation
-            if conv.system_prompt:
-                conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
             return "Plan mode **OFF** — all tools re-enabled."
 
         if sub:
@@ -1353,14 +1339,8 @@ def _make_mode(app: Application) -> HandlerFn:
             return f"Unknown mode `{sub}`. Valid: {valid}"
 
         mode = PermissionMode(target)
-        # Keep the plan-mode system prompt in sync with the matrix switch
-        # plan 提示词与矩阵切换保持同步
-        conv = app.session.conversation
-        if mode is PermissionMode.PLAN:
-            if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
-                conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
-        elif conv.system_prompt:
-            conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
+        # Plan-prompt injection/removal is centralized in set_permission_mode
+        # plan 提示词注入/移除已集中在 set_permission_mode
         app.set_permission_mode(mode)
 
         msg = f"Permission mode: **{target}** — {_MODE_DESCRIPTIONS[target]}"
@@ -1387,7 +1367,9 @@ def _make_spawn(app: Application) -> HandlerFn:
                 "  `/spawn -p <task1> | <task2>` — parallel dispatch "
                 "(results auto-delivered)\n"
                 "  `/spawn --wait <task>` — dispatch a NEW task AND block for "
-                "its result with a live progress board (combines with --pane)\n"
+                "its result with a live progress board (combines with --pane; "
+                "press Esc to move it to background, `/spawn wait` to "
+                "re-attach)\n"
                 "  `/spawn --isolated <task>` — run in git worktree\n"
                 "  `/spawn --pane <task>` — run in a visible terminal pane "
                 "(tmux/WT session: split pane; wt installed elsewhere: tab in "
@@ -1418,15 +1400,45 @@ def _make_spawn(app: Application) -> HandlerFn:
             return "\n".join(lines)
 
         if first == "wait":
-            from mini_agent.ui.board import SubAgentBoard
+            from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
             board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
+
+            # Re-attach an Esc-detached wait: board over the SAME pending
+            # task (a fresh wait() would race it over _active); the
+            # foreground takes the result back by cancelling the background
+            # delivery. Esc again keeps it detached.
+            # 重新附着被 Esc 转后台的等待：面板套在原有任务上（新起 wait()
+            # 会与之抢 _active）；前台通过取消后台投递把结果拿回来；
+            # 再按 Esc 则保持后台。
+            adopted = mgr.find_adopted_wait(agent_id)
+            if adopted is not None:
+                outcome = await board.run_while(adopted["wait_task"], detachable=True)
+                if outcome is BOARD_DETACHED:
+                    return _detached_message(adopted["ids"])
+                if not mgr.reclaim_adopted_wait(adopted):
+                    return (
+                        "Agent(s) finished while re-attaching; the result was "
+                        "already delivered to the conversation inbox."
+                    )
+                results = outcome if isinstance(outcome, list) else [outcome]
+                if len(results) == 1:
+                    return MARKDOWN_RESULT + _format_agent_result(results[0])
+                return MARKDOWN_RESULT + _format_agent_results_overview(results)
+
             if agent_id:
-                result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
+                if result is BOARD_DETACHED:
+                    mgr.adopt_pending_wait([agent_id], board.pending_task)
+                    return _detached_message([agent_id])
                 return MARKDOWN_RESULT + _format_agent_result(result)
-            results = await board.run_while(mgr.wait_all(timeout=900))
+            all_ids = mgr.list_active()
+            results = await board.run_while(mgr.wait_all(timeout=900), detachable=True)
+            if results is BOARD_DETACHED:
+                mgr.adopt_pending_wait(all_ids, board.pending_task)
+                return _detached_message(all_ids)
             if not results:
                 return "No agents to wait for."
             if len(results) == 1:
@@ -1486,10 +1498,13 @@ def _make_spawn(app: Application) -> HandlerFn:
                     return "No task provided."
                 agent_id = await mgr.spawn_pane(task_text, agent_type=agent_type_name)
                 if auto_wait:
-                    from mini_agent.ui.board import SubAgentBoard
+                    from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
                     board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
-                    result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                    result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
+                    if result is BOARD_DETACHED:
+                        mgr.adopt_pending_wait([agent_id], board.pending_task)
+                        return _detached_message([agent_id])
                     return MARKDOWN_RESULT + _format_agent_result(result)
                 return (
                     f"SubAgent spawned in terminal pane: `{agent_id}`\n"
@@ -1499,7 +1514,7 @@ def _make_spawn(app: Application) -> HandlerFn:
                 )
 
             if auto_wait and task_text and not task_text.startswith("-p "):
-                from mini_agent.ui.board import SubAgentBoard
+                from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
                 agent_id = await mgr.spawn(
                     task_text,
@@ -1508,7 +1523,10 @@ def _make_spawn(app: Application) -> HandlerFn:
                     context_summary=context_summary,
                 )
                 board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
-                result = await board.run_while(mgr.wait(agent_id, timeout=900))
+                result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
+                if result is BOARD_DETACHED:
+                    mgr.adopt_pending_wait([agent_id], board.pending_task)
+                    return _detached_message([agent_id])
                 return MARKDOWN_RESULT + _format_agent_result(result)
 
             if task_text.startswith("-p "):
@@ -1550,6 +1568,17 @@ def _make_spawn(app: Application) -> HandlerFn:
             return str(e)
 
     return handler
+
+
+def _detached_message(agent_ids: list[str]) -> str:
+    """Message shown after Esc detaches a blocking wait to the background.
+    Esc 把阻塞等待转后台后显示的消息。"""
+    ids = ", ".join(f"`{aid}`" for aid in agent_ids) or "(none)"
+    return (
+        f"Moved to background: {ids}\n"
+        "Agent(s) keep running; results will be auto-delivered on completion. "
+        "Re-attach: press Esc at the empty prompt, or run `/spawn wait`."
+    )
 
 
 def _format_agent_results_overview(results) -> str:

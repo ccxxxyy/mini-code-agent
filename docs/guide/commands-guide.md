@@ -113,12 +113,12 @@
 /spawn --type <t> <task>          # 指定类型：explore/plan/worker(默认)/verify
 /spawn --fork <task>              # 继承当前对话摘要（任务引用了之前讨论时用）
 /spawn --pane <task>              # 在可见终端窗格运行（独立进程，实时观看）
-/spawn --wait <task>              # 阻塞式：派发+进度面板+结果一条命令完成
+/spawn --wait <task>              # 阻塞式：派发+进度面板+结果一条命令完成（面板期间按 Esc 转后台）
 /spawn --background <task>        # no-op 别名（自动投递已是默认行为）
 /spawn --pane --wait <task>       # 组合：弹窗格 + 阻塞等结果
 ```
 
-**默认即后台自动投递**：`/spawn <task>` 派发后立即返回，agent 完成时结果自动投递到主对话（中断输入等待、drain mailbox、触发 agent loop），无需 `/spawn wait`。想阻塞等结果用 `--wait`。
+**默认即后台自动投递**：`/spawn <task>` 派发后立即返回，agent 完成时结果自动投递到主对话（中断输入等待、drain mailbox、触发 agent loop），无需 `/spawn wait`。想阻塞等结果用 `--wait`；阻塞等待中途反悔按一次 Esc 即转后台（agent 不中断，结果改为自动投递）。
 
 **两种拿结果方式对比**（两者都不需要事后手动收集，区别在等待方式与输出形态）：
 
@@ -139,11 +139,20 @@
 
 类比：默认 = **点外卖**（下单就走，送到敲门）；`--wait` = **堂食**（点单坐店里等）；`wait` 子命令 = **下了外卖单又跑去店里柜台等**。日常只需要默认和 `--wait` 两个；`wait` 子命令基本只在用了 `--pane` 之后才需要。
 
+**Esc 转后台与重新附着**：`--wait` / `/spawn wait` 的进度面板期间**单击 Esc** 即转后台——agent 不中断继续跑，面板收起并提示 `Moved to background`，完成后结果自动投递进对话（同默认派发）。转后台后**在空的输入提示符按一次 Esc 即重新附着**（等价于自动提交 `/spawn wait`；输入框有内容或补全菜单打开时 Esc 保持原职责），也可手动输 `/spawn wait`（或 `/spawn wait <id>`）：面板回来继续显示进度，等到结果直接打印（后台投递自动取消，不会出现两份）；再按 Esc 又回后台，可反复切换。极小概率在重新附着的瞬间 agent 恰好完成且投递已发出，此时命令会如实提示"结果已投递到收件箱"——结果不会丢，命令结束后立即由 LLM 处理并打印。
+
+已知边界（均为实测确认的设计取舍）：
+- **面板期间打字会被丢弃**：面板不是输入框，Esc 之外的按键被监听器静默消费（不回显、不缓存）；想输命令先 Esc 出来
+- **面板出现后 0.3 秒内的 Esc 无效**：防误触观察窗会把它当启动噪声排掉，稍等再按一次即可
+- **空提示符 Esc 有约半秒判定延迟**：Esc 是组合键序列前缀，prompt_toolkit 需等待消歧——按下后稍候，属正常
+- **按 Esc 后立即打字的误触**：存在转后台组时，空提示符按 Esc 又马上打字（如按 Esc 取消输入法候选再输入），Esc 会先触发重新附着、后打的字落到下一个提示符——重附手势就是"空提示符按 Esc"，打字前留半秒即可避开
+
 **收集与管理**：
 ```
 /spawn list                       # 列出活跃 SubAgent（id + 阶段）
 /spawn wait                       # 等已在跑的全部 agent（不派发新任务；多结果显示总览表）
-/spawn wait <id>                  # 等指定的已在跑 agent（主要用于收 --pane 结果）
+                                  # 若有 Esc 转后台的等待组，优先重新附着到它
+/spawn wait <id>                  # 等指定的已在跑 agent（主要用于收 --pane 结果 / 重新附着）
 /spawn cancel [id]                # 取消指定/全部
 ```
 
@@ -181,6 +190,7 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 /mode accept-edits   # 切换到 accept-edits（别名 acceptedits/accept_edits 也可）
 /mode bypass         # 切换到 bypass（别名 bypasspermissions 也可，切换时显示警告）
 ```
+**快捷键**：在输入提示符按 **shift+tab** 即按 default → accept-edits → plan → bypass → default 顺序循环切换，无需输命令；当前模式看底部工具栏 `mode:` 字段。快捷键与 `/mode`、`/plan` 完全等价（plan 系统提示词同步注入/移除）。
 四种模式：
 
 | 模式 | 行为 |
@@ -224,7 +234,8 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。  
 `tool` scope 按工具名匹配，在命令/路径检查之前评估：allow 整体信任该工具（危险命令也不再确认）；deny 直接拦截整个工具。  
 `command` 类 allow 规则只匹配命令本体，不像 deny 那样解包 `cmd /c` 等包装形态（扩大 deny 是收紧、扩大 allow 是放松）。  
-不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。  
+不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。
+另一条持久化入口：权限确认弹窗按 `a` 后会追问一行 `save permanently (project permissions.toml)? [y/N]`——回 `y` 等价于对该确切命令/路径执行了 `/allow ... --save`（默认回车不写盘，仅会话级）。  
 重复规则自动去重，不会重复添加。
 
 ### /deny — 运行时添加 DENY 权限规则

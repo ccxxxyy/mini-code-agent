@@ -237,3 +237,9 @@ class AgentConfig:
         default_factory=lambda: ["~/.mini-agent/agents", "./.mini-agent/agents"]
     )
     theme: str = "default"
+    # Collapse read-only tool calls (read_file/glob/grep) into a one-line
+    # summary when >=2 run in the same round. Default OFF: full per-call
+    # lines; opt in with true.
+    # 只读工具同轮 >=2 次时折叠为一行摘要。默认关闭（逐条完整显示），
+    # 设 true 才折叠。
+    collapse_tool_calls: bool = False

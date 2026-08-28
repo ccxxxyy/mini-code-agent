@@ -110,6 +110,13 @@ like "对" / "嗯" / "好" / "right" / "ok" / "yes" only acknowledge \
 understanding -- they do NOT lift the constraint. When in doubt, ask: \
 "现在可以动手了吗？ / Ready to proceed with changes?\""""
 
+_PLAN_MODE_PROMPT = (
+    "\n\n[PLAN MODE] You are in read-only planning mode. "
+    "You can ONLY use read_file, glob, grep, bash for research. "
+    "write_file, edit_file, delete_file are disabled. "
+    "Analyze and plan, do NOT attempt to modify files."
+)
+
 
 class Application:
     """Main application -- agent conversation loop. 主应用——Agent 对话循环。"""
@@ -130,6 +137,7 @@ class Application:
         active_theme = get_theme(config.theme)
 
         self.terminal = Terminal(theme=active_theme)
+        self.terminal.collapse_tool_calls = config.collapse_tool_calls
         self.session = Session()
 
         working_dir = Path.cwd()
@@ -196,10 +204,18 @@ class Application:
             security_config=config.security,
             project_dir=working_dir,
         )
+
+        # Permission dialogs offer the persist follow-up ("a" -> save rule?);
+        # hook/sub-agent confirms reuse the plain dialog without it.
+        # 权限弹窗带持久化追问（a 后问是否存规则）；hook/子 agent 确认
+        # 复用无追问的普通弹窗。
+        async def _confirm_with_persist(prompt: str) -> bool | str:
+            return await self.terminal.confirm(prompt, offer_persist=True)
+
         self.permission_manager = PermissionManager(
             config=config.security,
             path_guard=path_guard,
-            confirm_callback=self.terminal.confirm,
+            confirm_callback=_confirm_with_persist,
             event_bus=self.event_bus,
         )
         self.permission_manager.working_dir = working_dir
@@ -520,6 +536,18 @@ class Application:
         # 底部工具栏：在输入框下方显示当前 LLM
         self.terminal.set_toolbar_provider(self._toolbar_text)
 
+        # shift+tab cycles the permission mode at the prompt
+        # 输入提示符按 shift+tab 循环切换权限模式
+        self.terminal.set_mode_cycler(self._cycle_permission_mode)
+
+        # Esc at an empty prompt re-attaches an Esc-detached agent board
+        # (submits "/spawn wait"); no detached group = Esc stays inert.
+        # 空提示符按 Esc 重新附着转后台的面板（自动提交 /spawn wait）；
+        # 无转后台组时 Esc 保持原样无动作。
+        self.terminal.set_esc_command_provider(
+            lambda: "/spawn wait" if self.subagent_manager.has_adopted_waits else None
+        )
+
         # Double-Esc interrupt watcher 双 Esc 中断监听器
         from mini_agent.ui.esc_watcher import EscWatcher
 
@@ -554,9 +582,19 @@ class Application:
         # 流式工具调用组装：LLM 开始生成参数时立即显示工具名，无需等 JSON 组装完。
         _assembling_shown: set[str] = set()
 
+        from mini_agent.ui.terminal import _COLLAPSIBLE_TOOLS
+
         def _on_tool_assembling(name: str) -> None:
+            # Read-only tools skip the early print: they render inside the
+            # collapsible group at on_tool_start (a direct print here would
+            # land outside the group and break the collapse).
+            # 只读工具跳过提前直打：它们在 on_tool_start 时进入折叠组渲染
+            # （这里直打会落在组外，破坏折叠）。
+            if name in _COLLAPSIBLE_TOOLS and self.terminal.collapse_tool_calls:
+                return
             if name not in _assembling_shown:
                 _assembling_shown.add(name)
+                self.terminal.flush_tool_group()
                 p = self.terminal.theme.primary
                 self.terminal.console.print(
                     f"\n  [dim]╭─[/dim] [{p}]{name}[/{p}] [dim]...[/dim]",
@@ -738,6 +776,7 @@ class Application:
                         self.terminal.show_error(f"Command failed: {type(e).__name__}: {e}")
                     finally:
                         await self._autosave()
+                    await self._process_pending_deliveries()
                     continue
 
                 # USER_INPUT hook: can block a turn before it reaches the LLM
@@ -1101,9 +1140,10 @@ class Application:
 
     def set_permission_mode(self, mode) -> None:
         """Switch the session permission mode; keeps the loop's plan-mode
-        flag in sync (schema filtering + act-phase intercept live there).
-        切换会话权限模式；同步 loop 的 plan 标志（schema 过滤和 act 拦截
-        在 loop 层）。"""
+        flag AND the plan system-prompt marker in sync (every entry point --
+        /mode, /plan, shift+tab cycle, exit_plan tool -- goes through here).
+        切换会话权限模式；同步 loop 的 plan 标志与 plan 系统提示词
+        （/mode、/plan、shift+tab 循环、exit_plan 工具全部经此入口）。"""
         import asyncio
 
         from mini_agent.models.events import PermissionModeChangedEvent
@@ -1112,12 +1152,35 @@ class Application:
         old = self.permission_manager.mode
         self.permission_manager.mode = mode
         self.agent_loop.plan_mode = mode is PermissionMode.PLAN
+        conv = self.session.conversation
+        if mode is PermissionMode.PLAN:
+            if _PLAN_MODE_PROMPT not in (conv.system_prompt or ""):
+                conv.system_prompt = (conv.system_prompt or "") + _PLAN_MODE_PROMPT
+        elif conv.system_prompt and _PLAN_MODE_PROMPT in conv.system_prompt:
+            conv.system_prompt = conv.system_prompt.replace(_PLAN_MODE_PROMPT, "")
         if old is not mode:
             event = PermissionModeChangedEvent(old_mode=old.value, new_mode=mode.value)
             try:
                 asyncio.get_running_loop().create_task(self.event_bus.emit(event))
             except RuntimeError:
                 pass  # startup: no loop yet, initial mode needs no event 启动期无事件循环
+
+    def _cycle_permission_mode(self) -> str:
+        """Advance to the next permission mode (shift+tab at the prompt).
+        Returns the new mode's name for toolbar display.
+        切到下一个权限模式（输入提示符按 shift+tab）。返回新模式名。"""
+        from mini_agent.models.permissions import PermissionMode
+
+        order = [
+            PermissionMode.DEFAULT,
+            PermissionMode.ACCEPT_EDITS,
+            PermissionMode.PLAN,
+            PermissionMode.BYPASS,
+        ]
+        current = self.permission_manager.mode
+        nxt = order[(order.index(current) + 1) % len(order)] if current in order else order[0]
+        self.set_permission_mode(nxt)
+        return nxt.value
 
     async def _handle_turn(self, user_input: str) -> None:
         from mini_agent.ui.input_handler import expand_at_refs
@@ -1130,6 +1193,17 @@ class Application:
         self.session.conversation.append(Message(role=Role.USER, content=user_input))
         self.session.metadata.total_turns += 1
         await self._run_agent_and_report()
+
+    async def _process_pending_deliveries(self) -> None:
+        """Process background results delivered WHILE a slash command ran
+        (e.g. an agent finishing during a /spawn wait re-attach race) --
+        they would otherwise sit in the mailbox until the next input wait
+        (real-run: "why is there no result" after the re-attach race).
+        处理斜杠命令执行期间投递的后台结果（如 re-attach 竞态中 agent
+        恰好完成）——否则要等到下次输入等待才被处理
+        （实测：竞态提示后用户问"为什么没有结果"）。"""
+        if self.mailbox.has_pending("main"):
+            await self._handle_background_delivery()
 
     async def _handle_background_delivery(self) -> None:
         """Process mailbox results from completed background agents.
@@ -1157,6 +1231,7 @@ class Application:
         执行 agent loop 并显示轮次统计。"""
         try:
             await self.agent_loop.run(self.session.conversation)
+            self.terminal.flush_tool_group()
             if self.agent_loop.stopped_early:
                 if self.agent_loop.stop_reason == "confirm_denied":
                     self.terminal.show_error(
@@ -1189,6 +1264,7 @@ class Application:
             self.terminal.console.print()
         except KeyboardInterrupt:
             self.agent_loop.cancel()
+            self.terminal.flush_tool_group()
             self.terminal.show_info("Interrupted.")
             self.terminal.console.print()
         except Exception as e:

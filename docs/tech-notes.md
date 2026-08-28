@@ -3746,3 +3746,57 @@ mini 无法被脚本/CI/管道调用——CLI 只有交互 TUI、--remote、--wo
 ### 113.4 终端实测暴露的静默边界：超窗轮次的恢复警告
 
 三模式验证通过后，用户终端实测 `undo_keep_turns = 2` + `/undo 3` 暴露一个 UX 缺口：第 1 轮快照已被 `begin_turn` 清理，输出只列了恢复的 2 个文件，对"没恢复的那轮"完全静默——与"too_large 必须明确提示"同一原则（用户必须知道哪些没恢复），却在保留窗口这条边上漏了。当场补上：`undo_ids` 中 `turn <= current_turn_id - keep_turns` 的轮次即被清理过的，双回滚与 `--code-only` 输出 `Warning: N turn(s) beyond snapshot retention (undo_keep_turns=K) -- file changes there were NOT restored`；`--code-only` 全部超窗时警告接在 "nothing to restore" 之后（区分"没改文件"和"改了但恢复不了"）。`--conv-only` 不警告（文件本来就故意保留）。注意警告说的是"该轮次的文件改动（若有）未恢复"——快照已删，无法回溯该轮是否真改过文件，措辞保持诚实。3 个新测试（超窗警告+超窗文件确实未恢复 / code-only 全超窗双信息 / 默认窗口内无警告回归），1334→1337；真实 LLM 复现原场景，警告行如实输出。
+
+---
+
+## 114 B16 交互 UX 小项包（折叠工具块 / shift+tab 模式循环 / 弹窗持久化追问 / Esc 转后台）
+
+**背景**：对照扫描收集的四个交互小项，各自独立、共同点是"减少高频操作的摩擦"。只读工具密集的轮次每次调用打两行连线（╭─/╰─）刷屏；切权限模式要输 `/mode accept-edits` 全名；弹窗 "a" 只授权本会话、持久化要另跑 `/allow --save`；`/spawn --wait` 的进度面板期间按什么都没用，等久了只能干等或 Ctrl+C 砸掉。
+
+### 114.1 可折叠工具调用块：Live transient + 边界统一收束
+
+只读工具（read_file/glob/grep）进入 Terminal 内的"折叠组"：组以 Rich Live（transient=True）实时显示各条 `╭─ 名字 参数` 行，结果到达打 ✓ 标记；组收束（`flush_tool_group()`）时 transient 自动擦除，≥2 条且全部成功折叠为一行 `✓ Done (N tool uses · Xs)`，单条或含未完成条目按原格式补打完整行对——单条折叠没有信息密度收益，反而丢参数预览。
+
+两个关键设计：
+- **计时用最后一条结果的时刻**而非 flush 时刻——flush 发生在下一轮流式开始时，中间隔着 LLM 首 token 延迟，用 flush 时刻会把 LLM 延迟算进工具耗时。
+- **边界统一收束**：确认弹窗、ask_yes_no/ask_structured、show_error、流式开始、非只读工具进入、轮结束、KeyboardInterrupt 全部先 flush——Live 活跃期间弹 prompt_toolkit 输入框会打架，错误行必须留在屏上（出错的组整体展开不折叠）。app 层的流式组装直打（`_on_tool_assembling`）对只读工具跳过：提前直打会落在组外破坏折叠，代价是工具名晚半拍出现（组装完成时）。
+
+### 114.2 shift+tab 循环 + plan 提示词注入集中化
+
+prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→accept-edits→plan→bypass），底部工具栏本就实时显示 `mode:`，`event.app.invalidate()` 即可见。顺手修了一个潜伏的不一致：plan 提示词（[PLAN MODE] 系统提示段）的注入/移除原先散在 `/mode` 和 `/plan` 两个命令 handler 里各写一份，新增循环入口就有第三份——集中进 `set_permission_mode()`，四个入口（/mode、/plan、shift+tab、exit_plan 工具）走同一逻辑，消除"某个入口切到 plan 但提示词没注入"的缝隙。
+
+### 114.3 弹窗持久化：追问一行而非静默写盘
+
+评估过三案：a 直接写盘（mewcode 行为，最顺手但静默写盘、且会话级授权入口消失）、新增第四选项 p、a 后追问一行。选定追问式：按 a 后追加 `save permanently (project permissions.toml)? [y/N]`，默认回车不写盘——写盘必须显式确认，且保留了纯会话授权。落盘复用 `save_rule_to_file()`（与 `/allow --save` 同文件同格式），规则 pattern 用弹窗的完整 resource 字符串（窄授权，与会话授权语义一致）。confirm 回调新增返回值 `"always-save"`，非权限语义的消费处（CONFIRM hook、pane 协议映射）一律等同 "always" 降级——它们没有持久化概念。
+
+### 114.4 Esc 转后台：为什么不能 cancel
+
+进度面板（SubAgentBoard）加 detachable 模式：单击 Esc（EscWatcher 新增 `double=False` 单击档）返回哨兵 `BOARD_DETACHED`，未完成的等待任务存 `pending_task`。**坑在这里**：直觉做法"cancel 掉前台等待、重新发起后台等待"会杀死 agent——`SubAgentManager.wait()` 内部是 `asyncio.wait_for(entry.task_handle)`，cancel 外层等待会级联 cancel agent 本体任务；而重新 `wait()` 也不行，`wait()` 完成时会把 agent 从 `_active` pop 掉，两个并发 wait 会竞态。正确做法是 `adopt_pending_wait()` **接管既有任务**：agent id 加入 `_background_ids`（此后 `wait()` 完成发出的 SubAgentCompleteEvent 自带 background=True，复用整条"完成提示 + interrupt_input + mailbox 自动投递"链），新任务只 await 原等待任务再逐个投递结果。`/team` 的面板不加 detach——团队编排的中途脱离语义需要单独设计。
+
+### 114.5 验证
+
+15 个新测试（折叠/展开/出错/非只读透传/无组 flush 幂等 / 循环顺序/提示词注入移除/幂等 / always-save 落盘+always 不落盘回归 / 单击双击触发/detach 不杀 agent/adopt 投递+background 事件），1337→1352 全过。真实 LLM 验证：并行读两文件折叠行 `✓ Done (2 tool uses · 0.2s)` 如实出现且无残留行对；危险命令弹窗 a→y 后规则写入项目 permissions.toml、重启后同命令免弹窗；`/spawn --wait` 阻塞路径回归正常。shift+tab 与 Esc 按键本体当时留待真实 TTY 手工验证（管道环境无法注入按键）——后续经用户真实终端全部实测通过，过程与暴露的问题见 §114.6/§114.7。
+
+### 114.6 用户实测后的两项增补：折叠开关与重新附着
+
+四项落地后用户真实终端验证全部通过（shift+tab 循环、Esc 转后台均实测生效），随即提出两个增强：折叠要可关（有人就想看逐条明细）；转后台之后要能"回去看面板"。
+
+**折叠开关**：顶级配置 `collapse_tool_calls`（AgentConfig 新字段，TOML 顶级标量走 `_merge` 反射零胶水）。按用户要求**默认 false 不折叠**（逐条 ╭─/╰─ 是默认体验，折叠是 opt-in）；开启后 `show_tool_call` 进组、app 层组装直打对只读工具跳过。
+
+**重新附着（re-attach）**：`adopt_pending_wait` 把转后台的等待组登记进 `_adopted_waits`（ids + 原等待任务 + 投递任务）；`/spawn wait [id]` 命中登记组时**把面板套回原任务**——绝不新起 `wait()`（会与原等待抢 `_active`，见 114.4）。等到结果后 `reclaim_adopted_wait()` 取消后台投递、撤销后台标记，前台直接打印结果；再按 Esc 则原样保持后台，可反复切换。竞态处理：重新附着的瞬间 agent 恰好完成、投递任务可能先于前台恢复执行——`reclaim` 以 `deliver_task.done()` 判定，投递已发出则命令如实回"结果已投递到收件箱"而不重复打印；反向顺序里 cancel 一个已被调度但未恢复的任务会在其 await 点抛 CancelledError（`except Exception` 不捕获 BaseException，正常传播），投递不会发生——两个方向都不会双投递。+2 测试 →1354。
+
+### 114.7 二轮实测反馈：Esc 切换闭环与残留按键防误触
+
+用户实测 re-attach 暴露两个交互断点：① 面板期间键盘被 EscWatcher 整体消费，想输 `/spawn wait` 输不进去（设计如此——面板不是 REPL），但正确路径"先 Esc 出来再输命令"对用户不直觉；② 用户的自然预期是 **Esc 切出去、再按 Esc 切回来**——而 Esc 在主提示符处原本是死键。另有前一轮实测记录里出现过"没按 Esc 面板却秒转后台"的误触发。
+
+**Esc 切换闭环**：prompt_toolkit 新增 bare `escape` 绑定（`esc_command_provider` 回调注入，app 接线为"存在转后台组时返回 `/spawn wait`"）——空提示符按 Esc 即自动提交 `/spawn wait` 完成重新附着，与面板内 Esc 转后台构成对称切换。守卫条件：仅**空缓冲且无补全菜单**时生效（Condition filter），Esc 保留关菜单、`escape+enter` 换行前缀等原职责；bare escape 是多键序列前缀，prompt_toolkit 按 ttimeout 消歧后触发（约半秒延迟，可接受）。无转后台组时回调返回 None，Esc 照旧无动作。
+
+**残留按键防误触（三轮实测迭代）**：初版修复只在启动时一次性排空缓冲（`while _kbhit(): _getch()`），用户复测**仍然每次秒转后台且并未按 Esc**——说明杂散 `` 是在排空之后、提示符移交控制台的瞬间才到达的（终端产生的转义序列/应答，其首字节就是 ``，被当成了 Esc 按键）。终版双层修复：① **启动观察窗**（`_ARM_GRACE = 0.3s`）——启动后持续排空 300ms 才开始判定，覆盖移交瞬间的全部噪声；② **孤立 Esc 判别**（`_SEQUENCE_WINDOW = 30ms`）——读到 `` 后等 30ms，后面还有字节到达即为转义序列（CSI 应答等），整段丢弃不触发；人按的 Esc 是孤立单字节。双 Esc 流式中断同样受益。测试改用假时钟 + 定时按键源（`_KeyClock`）精确模拟到达时序：观察窗后孤立 Esc 触发 / 双击触发 / 启动即在缓冲的键不触发 / `[1R` 序列不触发。
+
+**竞态投递的即时处理**：re-attach 竞态分支（投递已发出）只回一句"结果已投递到收件箱"，但收件箱处理原本只在**输入等待被打断**时触发（`interrupt_input` → `_BG_INTERRUPT`）——斜杠命令执行期间的投递会一直躺到下一次输入等待，用户看到的就是"为什么没有结果"。修复：主循环每条斜杠命令结束后检查 `mailbox.has_pending("main")`，有投递立即走 `_handle_background_delivery()`（通用修复，覆盖一切命令期间完成的后台投递，不只 re-attach 竞态）。
+
+**输入行残留修复**：用户复测发现每次 re-attach 后输入行都预填着 `/spawn wait`。根因在 `interrupt_input()`：后台完成通知会无条件保存 prompt 缓冲区文本作为下次输入的默认值（本意是保住用户打了一半的消息），但**两次 prompt 之间**缓冲区里留着的是上一次已提交的文本——面板期间触发的 interrupt 把 "/spawn wait" 存了下来，预填进下一次输入行。修复：仅在 `app.is_running` 时保存缓冲并 exit；prompt 未运行时两个动作都跳过（本就无输入可保、无 app 可中断）。该 bug 与 re-attach 无关、一直存在，只是命令期间的后台投递此前罕见。+3 测试 →1357。
+
+**终验与诚实边界**：三项修复（双层防误触 / 命令后即时投递处理 / 输入行残留）经用户真实终端全部实测通过——面板不再秒转后台、空提示符 Esc 重附生效、结果即时打印、输入行干净。噪声根因（提示符移交瞬间的终端转义序列）是推断——双层防御实测有效，但若某终端产生"孤立且晚于 300ms 到达"的杂散  仍会漏判，届时需加诊断日志定位。设计取舍明账：① 面板期间 Esc 之外的按键被静默消费（面板非输入框）；② 观察窗对面板与流式双 Esc 同样生效——面板出现后/每轮流式开始后 0.3s 内的真实 Esc 被吸收（需再按）；③ 空提示符 Esc 有 prompt_toolkit 序列消歧的约半秒延迟；④ 存在转后台组时"Esc 后立即打字"会先触发重附、后打的字落入下一提示符（重附手势即空提示符 Esc）；⑤ `/spawn wait` 优先重附转后台组，同时有 pane agent 待收结果时会被组挡一次。以上边界已同步 commands-guide 中英。
+
+**测试补强收尾**：① 按键绑定抽出 `build_key_bindings()` 使绑定层可直接测试——shift+tab 调 cycler+invalidate / 无 cycler 不注册 / bare escape 提交 provider 命令 / provider 返回 None 不动作 / escape+enter 插入换行，5 个绑定测试补上此前"只测逻辑函数不测绑定"的缺口；② 主循环命令后收件箱处理抽出 `_process_pending_deliveries()` 并加分支测试；③ 遗留 flaky `test_parallel_faster_than_serial` 加固——延迟 0.1s/阈值 0.35s 改为 0.2s/0.5s，留出 0.3s 调度开销余量（高负载稳定）且仍排除串行（串行不可能低于 0.6s），不删测试保留"并行确实并行"的守护。+6 测试 →1363。

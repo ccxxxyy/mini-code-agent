@@ -16,6 +16,11 @@ from mini_agent.ui.themes import Theme, get_theme
 
 _BG_INTERRUPT = object()
 
+# Read-only tools whose call/result line pairs collapse into a one-line
+# summary when >=2 run in the same round (heavy read bursts flood the screen).
+# 只读工具——同一轮 >=2 次时调用/结果行对折叠为一行摘要（密集读刷屏）。
+_COLLAPSIBLE_TOOLS = frozenset({"read_file", "glob", "grep"})
+
 
 def _markdown_styles(theme: Theme) -> RichTheme:
     """Override Rich's default markdown colors (purple headings are hard to
@@ -48,12 +53,24 @@ class Terminal:
         self._completer = SlashCommandCompleter()
         self._prompt_session = None
         self._toolbar_provider = None
+        self._mode_cycler = None
+        self._esc_command_provider = None
         self._working_dir: Path | None = None
         self._bg_interrupt_event: asyncio.Event | None = None
         self._saved_buffer_text: str = ""
         self._pending_input_task: asyncio.Task | None = None
         self._live_started = False
         self._thinking_written = False
+        # Collapsible read-only tool group (Rich Live, transient); the flag
+        # mirrors config `collapse_tool_calls` (app wires it at startup;
+        # default OFF -- full per-call lines).
+        # 可折叠只读工具组（Rich Live，transient 擦除）；开关镜像配置
+        # `collapse_tool_calls`（app 启动时接线；默认关闭——逐条完整显示）。
+        self.collapse_tool_calls: bool = False
+        self._ro_live = None
+        self._ro_entries: list[dict] = []
+        self._ro_start: float = 0.0
+        self._ro_last_done: float = 0.0
 
     def set_working_dir(self, working_dir: Path) -> None:
         self._working_dir = working_dir
@@ -86,6 +103,21 @@ class Terminal:
     def set_toolbar_provider(self, provider) -> None:
         self._toolbar_provider = provider
 
+    def set_mode_cycler(self, cycler) -> None:
+        """Callable invoked by shift+tab to cycle the permission mode.
+        shift+tab 触发的权限模式循环回调。"""
+        self._mode_cycler = cycler
+        self._prompt_session = None  # rebuild with the binding 重建以带上绑定
+
+    def set_esc_command_provider(self, provider) -> None:
+        """Callable consulted when Esc is pressed at an empty prompt --
+        returns a command string to submit (e.g. "/spawn wait" re-attach)
+        or None/"" for no action.
+        空提示符按 Esc 时咨询的回调——返回要提交的命令
+        （如 "/spawn wait" 重新附着），None/"" 表示不动作。"""
+        self._esc_command_provider = provider
+        self._prompt_session = None  # rebuild with the binding 重建以带上绑定
+
     def _ensure_prompt_session(self) -> None:
         if self._prompt_session is None:
             self._prompt_session = create_prompt_session(
@@ -93,6 +125,8 @@ class Terminal:
                 toolbar_provider=self._toolbar_provider,
                 theme=self.theme,
                 working_dir=self._working_dir,
+                mode_cycler=self._mode_cycler,
+                esc_command_provider=self._esc_command_provider,
             )
 
     @staticmethod
@@ -116,8 +150,18 @@ class Terminal:
         if self._prompt_session is not None:
             try:
                 app = self._prompt_session.app
-                self._saved_buffer_text = app.current_buffer.text
-                app.exit(result=_BG_INTERRUPT)
+                # Only when the prompt is actually running: between prompts
+                # the buffer still holds the LAST SUBMITTED text (e.g.
+                # "/spawn wait"), and saving it would pre-fill the next
+                # prompt with a stale leftover (real-run: "/spawn wait"
+                # reappeared in the input line after every re-attach).
+                # 仅在 prompt 正在运行时处理：两次 prompt 之间缓冲区还留着
+                # 上一次提交的文本（如 "/spawn wait"），存下来会把残留预填
+                # 进下一次输入行（实测：每次 re-attach 后输入行都残留
+                # "/spawn wait"）。
+                if app.is_running:
+                    self._saved_buffer_text = app.current_buffer.text
+                    app.exit(result=_BG_INTERRUPT)
             except Exception:
                 pass
 
@@ -201,15 +245,28 @@ class Terminal:
             if ctx is not None:
                 ctx.__exit__(None, None, None)
 
-    async def confirm(self, prompt: str) -> bool | str:
+    _SAVE_FOLLOWUP = "save permanently (project permissions.toml)? [y/N] > "
+
+    async def confirm(self, prompt: str, offer_persist: bool = False) -> bool | str:
         """Ask user for confirmation.
-        Returns True (allow once), False (deny), or "always" (allow for session).
+        Returns True (allow once), False (deny), "always" (allow for session),
+        or "always-save" (allow + persist a rule to permissions.toml).
+        offer_persist=True (permission-manager dialogs only): after "a" a
+        one-line follow-up asks whether to persist -- default is No, so
+        nothing is written to disk without an explicit yes. Other consumers
+        (CONFIRM hooks, sub-agent pane protocol) have no persistence
+        semantics, so they never see the follow-up.
         Note: denying a dangerous command stops the whole goal at once (the
         loop's dangerous-denial breaker, threshold 1) -- no need to deny again.
-        返回 True（允许一次）、False（拒绝）、"always"（本会话总是允许）。
+        返回 True（允许一次）、False（拒绝）、"always"（本会话总是允许）、
+        "always-save"（允许并持久化规则到 permissions.toml）。
+        offer_persist=True（仅权限管理器弹窗）：按 a 后追问一行是否持久化
+        ——默认否，不显式确认绝不写盘；其他消费方（CONFIRM hook、子 agent
+        pane 协议）无持久化语义，不出现追问。
         注意：拒绝一条危险命令会一次性停止整个目标（循环的危险命令熔断，
         阈值 1）——不必再逐条拒绝。
         """
+        self.flush_tool_group()
         w = self.theme.warning
         e = self.theme.error
         self.console.print()
@@ -235,13 +292,29 @@ class Terminal:
             except EOFError:
                 return False  # non-interactive: safe default 无交互时安全默认拒绝
             if answer in ("a", "always"):
-                return "always"
+                if not offer_persist:
+                    return "always"
+                try:
+                    save = input(self._SAVE_FOLLOWUP).strip().lower()
+                except EOFError:
+                    return "always"
+                return "always-save" if save in ("y", "yes") else "always"
             return answer in ("y", "yes")
 
         try:
             tmp = _PS()
         except Exception:
             return _plain_confirm()
+
+        async def _ask_save() -> bool | str:
+            if not offer_persist:
+                return "always"
+            try:
+                save = (await self._prompt_protected(tmp, self._SAVE_FOLLOWUP)).strip().lower()
+            except Exception:
+                return "always"
+            return "always-save" if save in ("y", "yes") else "always"
+
         while True:
             try:
                 answer = (await self._prompt_protected(tmp, "allow? [y/a/n] > ")).strip().lower()
@@ -250,13 +323,14 @@ class Terminal:
             if answer in ("y", "yes"):
                 return True
             if answer in ("a", "always"):
-                return "always"
+                return await _ask_save()
             if answer in ("n", "no"):
                 return False
 
     async def ask_yes_no(self, prompt: str) -> bool:
         """Plain yes/no using a temporary prompt (does not pollute the main session).
         使用临时提示的朴素是/否（不污染主输入 session 的默认 message）。"""
+        self.flush_tool_group()
         from prompt_toolkit import PromptSession as _PS
 
         def _plain_input() -> bool:
@@ -290,6 +364,7 @@ class Terminal:
         """Structured question for the ask_user tool.
         ask_user 工具用的结构化提问。有 choices 时显示编号选项,
         无 choices 时自由文本输入。"""
+        self.flush_tool_group()
         from prompt_toolkit import PromptSession as _PS
         from rich.panel import Panel
 
@@ -331,6 +406,7 @@ class Terminal:
         # 而 Live 活跃期间 console.print 会被拦截——每次 print 成为 Live 区
         # 上方的独立行块，end="" 失效，每个小增量各自成行（碎行 bug）。
         # 思考期间无 Live = 直连顺序写入，终端保持真实光标列位。
+        self.flush_tool_group()
         self.console.print()
         self._live_started = False
         self._thinking_written = False
@@ -363,6 +439,7 @@ class Terminal:
         return result
 
     def show_error(self, error: str) -> None:
+        self.flush_tool_group()
         self.console.print(f"  [bold {self.theme.error}]✗[/bold {self.theme.error}] {error}")
         self.console.print()
 
@@ -370,31 +447,133 @@ class Terminal:
         self.console.print(f"  [dim]{message}[/dim]")
 
     def show_tool_call(self, name: str, args: dict) -> None:
-        p = self.theme.primary
+        if self.collapse_tool_calls and name in _COLLAPSIBLE_TOOLS:
+            self._ro_add(name, args)
+            return
+        self.flush_tool_group()
         arg_preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
-        self.console.print(
-            f"\n  [dim]╭─[/dim] [bold {p}]{name}[/bold {p}] [dim]{arg_preview}[/dim]",
-            highlight=False,
-        )
+        self._print_tool_call_line(name, arg_preview)
 
     def show_tool_result(
         self, name: str, output: str, is_error: bool = False, metadata: dict | None = None
     ) -> None:
         if is_error:
+            # Errors must stay on screen: expand the group (call lines
+            # reprinted), then print the error line normally.
+            # 错误必须留在屏上：展开组（补打调用行）后按原样打错误行。
+            self.flush_tool_group()
             preview = output[:300] + "..." if len(output) > 300 else output
             e = self.theme.error
             self.console.print(f"  [dim]╰─[/dim] [{e}]✗ {preview}[/{e}]", highlight=False)
-        else:
-            lines = output.count("\n") + 1
-            chars = len(output)
+            return
+        if name in _COLLAPSIBLE_TOOLS and self._ro_result(name, output):
+            return
+        self._print_tool_ok_line(output.count("\n") + 1, len(output))
+        # Diff preview for edit_file edit_file 的 diff 预览
+        if metadata and metadata.get("diff"):
+            self._render_diff(metadata["diff"])
+
+    def _print_tool_call_line(self, name: str, arg_preview: str) -> None:
+        p = self.theme.primary
+        self.console.print(
+            f"\n  [dim]╭─[/dim] [bold {p}]{name}[/bold {p}] [dim]{arg_preview}[/dim]",
+            highlight=False,
+        )
+
+    def _print_tool_ok_line(self, lines: int, chars: int) -> None:
+        s = self.theme.success
+        self.console.print(
+            f"  [dim]╰─[/dim] [{s}]✓[/{s}] [dim]{lines} lines, {chars} chars[/dim]",
+            highlight=False,
+        )
+
+    # --- Collapsible read-only tool group 可折叠只读工具组 ---
+
+    def _ro_add(self, name: str, args: dict) -> None:
+        """Add a read-only tool call to the live group (starting it if needed).
+        把一次只读工具调用加入实时组（组不存在则启动）。"""
+        import time as _time
+
+        from rich.live import Live
+
+        if self._ro_live is None:
+            live = Live("", console=self.console, refresh_per_second=8, transient=True)
+            try:
+                live.start()
+            except Exception:
+                # Live unavailable (nested live / odd console): print normally
+                # Live 不可用（嵌套 live/特殊控制台）：退回普通打印
+                arg_preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
+                self._print_tool_call_line(name, arg_preview)
+                return
+            self._ro_live = live
+            self._ro_entries = []
+            self._ro_start = _time.monotonic()
+            self._ro_last_done = self._ro_start
+        preview = ", ".join(f"{k}={self._truncate_value(v)}" for k, v in args.items())
+        self._ro_entries.append(
+            {"name": name, "preview": preview, "done": False, "lines": 0, "chars": 0}
+        )
+        self._ro_refresh()
+
+    def _ro_result(self, name: str, output: str) -> bool:
+        """Record a result inside the live group. False = no pending entry
+        (group already flushed) -- caller prints the normal result line.
+        在实时组内记录结果。False = 无待完成条目（组已被 flush），
+        调用方按普通结果行打印。"""
+        import time as _time
+
+        if self._ro_live is None:
+            return False
+        for entry in self._ro_entries:
+            if entry["name"] == name and not entry["done"]:
+                entry["done"] = True
+                entry["lines"] = output.count("\n") + 1
+                entry["chars"] = len(output)
+                self._ro_last_done = _time.monotonic()
+                self._ro_refresh()
+                return True
+        return False
+
+    def _ro_refresh(self) -> None:
+        if self._ro_live is None:
+            return
+        from rich.text import Text
+
+        p, s = self.theme.primary, self.theme.success
+        rows = []
+        for e in self._ro_entries:
+            mark = f" [{s}]✓[/{s}]" if e["done"] else ""
+            rows.append(f"  [dim]╭─[/dim] [{p}]{e['name']}[/{p}] [dim]{e['preview']}[/dim]{mark}")
+        self._ro_live.update(Text.from_markup("\n".join(rows)))
+
+    def flush_tool_group(self) -> None:
+        """Finalize the read-only group: >=2 fully-done calls collapse into a
+        one-line summary; otherwise reprint the buffered lines in the normal
+        format (pending entries get their result line later via
+        show_tool_result, which falls through once the group is gone).
+        收束只读组：>=2 条且全部完成折叠为一行摘要；否则按普通格式补打
+        缓冲行（未完成条目的结果行稍后经 show_tool_result 正常补上）。"""
+        if self._ro_live is None:
+            return
+        live, entries = self._ro_live, self._ro_entries
+        self._ro_live = None
+        self._ro_entries = []
+        live.update("")
+        live.stop()
+        done_count = sum(1 for e in entries if e["done"])
+        if len(entries) >= 2 and done_count == len(entries):
+            elapsed = self._ro_last_done - self._ro_start
             s = self.theme.success
             self.console.print(
-                f"  [dim]╰─[/dim] [{s}]✓[/{s}] [dim]{lines} lines, {chars} chars[/dim]",
+                f"\n  [{s}]✓[/{s}] [dim]Done ({len(entries)} tool uses · {elapsed:.1f}s)[/dim]",
                 highlight=False,
             )
-            # Diff preview for edit_file edit_file 的 diff 预览
-            if metadata and metadata.get("diff"):
-                self._render_diff(metadata["diff"])
+            return
+        for e in entries:
+            self._print_tool_call_line(e["name"], e["preview"])
+            if e["done"]:
+                self._print_tool_ok_line(e["lines"], e["chars"])
 
     def _render_diff(self, diff_text: str) -> None:
         """Render a colored unified diff with full-width background.

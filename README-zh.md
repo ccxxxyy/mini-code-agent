@@ -277,9 +277,9 @@ mini-code-agent/
 │       ├── tools/              # 工具系统（20 内置工具 + MCP 协议 stdio/HTTP/SSE eager/native/dispatch + Hook 11 阶段）
 │       ├── memory/             # 记忆系统（四级压缩级联、持久记忆、会话存储、提取、召回、合并、文件快照、溢写缓存、项目上下文）
 │       ├── security/           # 安全层（权限、路径守卫、审计、OS 沙箱 bwrap/unshare/seatbelt/Windows 双模式、worktree 隔离、跨进程权限确认）
-│       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、双 Esc 中断）
+│       ├── ui/                 # TUI 终端界面（终端、流式渲染、输入处理、组件、主题、Trace、Teach、进度面板、Esc 监听：双击取消/单击面板转后台）
 │       ├── remote/             # 远程/浏览器模式（WebSocket 服务器 + 嵌入式 HTML/JS 客户端、断连排队）
-│       ├── extensions/         # 扩展协议（27 个斜杠命令、4 个技能包、事件监听插件、插件生态 plugin_loader）
+│       ├── extensions/         # 扩展协议（28 个斜杠命令、4 个技能包、事件监听插件、插件生态 plugin_loader）
 │       ├── llm/                # LLM Provider 抽象层（OpenAI Chat Completions + Responses API + Anthropic、Token 计数）
 │       ├── events/             # 事件总线（异步发布订阅、5 个内置订阅者共 17 个订阅）
 │       ├── config/             # 分层配置加载（TOML + 环境变量 + CLI）、Shell/平台检测
@@ -409,7 +409,7 @@ mini-code-agent/
 ```
 /spawn 读取README统计总行数          # 派生 agent 立即返回，完成后结果自动投递
 /spawn -p 分析src结构 | 分析测试覆盖   # 用 | 分隔并行派生多个（结果同样自动投递）
-/spawn --wait 跑一遍测试              # 阻塞式：派发新任务+进度面板+结果一条命令返回
+/spawn --wait 跑一遍测试              # 阻塞式：派发新任务+进度面板+结果一条命令返回（面板期间按 Esc 转后台）
 /spawn --isolated 重构这个模块        # 在独立 Git worktree 中执行（改动隔离）
 /spawn --type explore 分析项目结构    # 指定类型：explore/plan/worker(默认)/verify
 /spawn --fork 按我们讨论的去实现      # 继承当前对话摘要（子 agent 知道之前聊了什么）
@@ -419,7 +419,7 @@ mini-code-agent/
 /spawn cancel [id]                   # 取消指定/全部 agent
 ```
 
-注意：`/spawn` 派生后立即返回（不阻塞输入框），**完成后结果自动投递到对话**，无需手动收集；想阻塞等结果用 `--wait`。`--background` 参数仍可用（no-op 别名，自动投递已是默认）。
+注意：`/spawn` 派生后立即返回（不阻塞输入框），**完成后结果自动投递到对话**，无需手动收集；想阻塞等结果用 `--wait`；面板期间单击 Esc 即转后台（agent 不中断，结果自动投递），之后在空提示符按 Esc（或输 `/spawn wait`）可重新附着回面板。`--background` 参数仍可用（no-op 别名，自动投递已是默认）。
 
 LLM 自主调用 `spawn_agents` 工具时也支持后台模式：`background=true` 立即返回 agent id，LLM 继续做其他工作，每个子 agent 完成时其结果以消息形式自动注入对话（终端同步提示完成）。默认仍为阻塞模式。
 
@@ -968,7 +968,7 @@ command = "ruff format $TOOL_ARGS.file_path"
 | `/spawn <任务>` | 派生后台 SubAgent（详见上方多 Agent 章节） |
 | `/team <任务>` | LLM 规划 + 并行执行（详见上方多 Agent 章节） |
 | `/plan [on\|off]` | Plan 模式（只读规划，不执行工具），无参数显示当前状态 |
-| `/mode [名称]` | 查看/切换权限模式：default / accept-edits / plan / bypass（deny 规则和敏感路径所有模式下有效） |
+| `/mode [名称]` | 查看/切换权限模式：default / accept-edits / plan / bypass——输入提示符按 shift+tab 也可循环切换（deny 规则和敏感路径所有模式下有效） |
 | `/tools` | 列出已注册工具 |
 | `/skill [list\|activate\|deactivate\|install\|uninstall\|reload]` | 技能包管理 |
 | `/plugins` | 列出已加载插件（各自注册的工具/命令/技能） |

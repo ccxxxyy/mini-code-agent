@@ -120,7 +120,7 @@ mini-code-agent/
 │       │   ├── trace.py             # Trace renderer (real-time agent internals)
 │       │   ├── teach.py             # Teach mode renderer (tool chain explanation)
 │       │   ├── board.py             # Progress board (sub-agent status display)
-│       │   └── esc_watcher.py       # Double-Esc cancellation watcher
+│       │   └── esc_watcher.py       # Esc watcher (double-Esc cancel / single-Esc detach)
 │       │
 │       ├── extensions/              # === EXTENSION PROTOCOLS ===
 │       │   ├── __init__.py
@@ -606,6 +606,9 @@ class AgentConfig:
     )
     disabled_plugins: list[str] = field(default_factory=list)  # 按 entry-point 名或文件名禁用
     theme: str = "default"
+    # 只读工具（read_file/glob/grep）同轮 >=2 次折叠为一行 "✓ Done (N tool uses · Xs)"
+    # 摘要；默认 False 不折叠（逐条完整显示），设 True 开启
+    collapse_tool_calls: bool = False
 ```
 
 ### 3.5 权限类型 (`models/permissions.py`)
@@ -1194,10 +1197,12 @@ class PermissionManager:
     # Session permission mode (matrix): default / accept-edits / plan /
     # bypass. Evaluated AFTER explicit rules (deny rules and sensitive
     # paths hold in every mode). Switched via Application.set_permission_mode
-    # (which keeps agent_loop.plan_mode in sync); /mode command at runtime.
+    # (which keeps agent_loop.plan_mode AND the plan system-prompt marker in
+    # sync); at runtime via /mode, /plan, or shift+tab cycling at the prompt.
     # 会话权限模式（矩阵）：在显式规则之后判定——deny 规则和敏感路径在
     # 所有模式下有效。经 Application.set_permission_mode 切换（同步
-    # agent_loop.plan_mode）；运行时用 /mode 命令。
+    # agent_loop.plan_mode 与 plan 系统提示词）；运行时可用 /mode、/plan
+    # 或输入提示符 shift+tab 循环切换。
     mode: PermissionMode = PermissionMode.DEFAULT
 
     def add_rule(self, rule: PermissionRule, *, _silent: bool = False) -> bool:
@@ -1302,7 +1307,11 @@ class Terminal:
     def interrupt_input(self) -> None:
         """Signal get_user_input() to return _BG_INTERRUPT for
         background agent result processing. Called by
-        _on_background_complete event handler."""
+        _on_background_complete event handler. Only saves the buffer
+        and exits when the prompt app is actually RUNNING -- between
+        prompts the buffer still holds the last submitted text, and
+        saving it would pre-fill the next prompt with a stale leftover
+        (real-run: "/spawn wait" residue after board re-attach)."""
         ...
 
     async def render_stream(
@@ -1319,8 +1328,13 @@ class Terminal:
         """Display tool execution result."""
         ...
 
-    async def confirm(self, prompt: str) -> bool:
-        """Ask user for yes/no confirmation."""
+    async def confirm(self, prompt: str, offer_persist: bool = False) -> bool | str:
+        """Ask user for confirmation: True (allow once) / False (deny) /
+        "always" (session grant). offer_persist=True (permission-manager
+        dialogs only): after "a" a one-line follow-up asks whether to
+        persist -- yes returns "always-save" (PermissionManager writes the
+        rule to project permissions.toml). Hook / sub-agent consumers never
+        see the follow-up and treat "always-save" as "always"."""
         ...
 
     @staticmethod
@@ -1557,6 +1571,26 @@ class SubAgentManager:
     async def wait_all(
         self, agent_ids: list[str], timeout: float | None = None
     ) -> list[SubAgentResult]: ...
+
+    def adopt_pending_wait(
+        self, agent_ids: list[str], wait_task: asyncio.Task
+    ) -> None:
+        """Esc-detach: take over an EXISTING foreground wait task (never
+        cancel it / never start a new wait) -- ids join _background_ids,
+        the group registers in _adopted_waits for re-attach, results are
+        mailbox-delivered on completion."""
+        ...
+
+    def find_adopted_wait(self, agent_id: str = "") -> dict | None:
+        """Look up a detached wait group for /spawn wait re-attach
+        (empty id = first group)."""
+        ...
+
+    def reclaim_adopted_wait(self, entry: dict) -> bool:
+        """Re-attach took the result in the foreground: cancel background
+        delivery, drop background marking. False = delivery already fired
+        (result is in the mailbox)."""
+        ...
 
     def cancel(self, agent_id: str) -> None: ...
     def cancel_all(self) -> None: ...
@@ -2865,7 +2899,7 @@ async def spawn(
 
 `SubAgent` 构造时克隆工具注册表并**立即注销 `spawn_agents`**（递归防护：子 Agent 不能再派生子 Agent），可选接收 `permission_manager`（P82，子 Agent 也走权限评估——`SubAgentManager` 持有主权限管理器，`spawn()` 经 `PermissionManager.child_view()` 给每个进程内子 Agent 派生 `ChildPermissionManager` 子视图：规则/会话授权/写文件集按引用共享、mode 实时委托父级、需弹窗一律失败安全拒绝；此前进程内子 Agent 完全没有权限门控，只有 pane worker 有），并拥有独立的溢写缓存目录（`cache/results/subagent_<id>`，结束时清理）。结果收集经 `wait()/wait_all()`，完成时发射 `SubAgentCompleteEvent`；熔断终止（迭代上限/取消）计为失败而非成功。事件命名为 `SubAgentSpawnEvent` / `SubAgentCompleteEvent`。
 
-**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。`spawn_agents` 工具默认 `background=false` 保持阻塞语义（LLM 调用方需要全部结果再继续是常态）。**`/spawn` 斜杠命令则默认走 `spawn_background()` 路径**（完成后自动投递结果，无需 `/spawn wait`）；`--wait` 为阻塞式 opt-in（进度面板+内联完整结果），`--background` 保留为 no-op 别名。
+**后台模式**：`spawn_agents` 工具的 `background=true` 参数走 `SubAgentManager.spawn_background()`——立即返回 agent ids（不阻塞 LLM），每个 agent 由 notifier 协程 `_notify_on_complete` 等待，完成时经 mailbox 向 'main' 投递含结果的通知（截断 4000 字符）。`SubAgentCompleteEvent.background` 字段区分前/后台完成，app.py 订阅后终端提示并调用 `terminal.interrupt_input()` 中断输入等待——主循环收到 `_BG_INTERRUPT` 哨兵后自动 drain mailbox、注入合成消息、运行 `agent_loop.run()` 处理结果（无需用户手动输入）。TTY 路径用 `prompt_session.app.exit()` 中断并保存/恢复用户部分输入；非 TTY 路径用 `asyncio.wait(FIRST_COMPLETED)` 竞争。`Mailbox.has_pending()` 提供无锁只读查询，避免空消息时发合成消息。**斜杠命令执行期间**完成的投递（如 re-attach 竞态中 agent 恰好完成）不经 `_BG_INTERRUPT`——主循环在每条斜杠命令结束后检查 `has_pending` 并立即走同一处理链；`interrupt_input()` 仅在 prompt 真正运行时才保存缓冲并中断（两次 prompt 之间缓冲区是上一次已提交文本，保存会把残留预填进下一次输入行）。`spawn_agents` 工具默认 `background=false` 保持阻塞语义（LLM 调用方需要全部结果再继续是常态）。**`/spawn` 斜杠命令则默认走 `spawn_background()` 路径**（完成后自动投递结果，无需 `/spawn wait`）；`--wait` 为阻塞式 opt-in（进度面板+内联完整结果），`--background` 保留为 no-op 别名。进度面板（`SubAgentBoard.run_while(detachable=True)`）期间**单击 Esc 转后台**：面板返回 `BOARD_DETACHED` 哨兵、等待任务刻意不 cancel（`wait()` 内 `asyncio.wait_for` 会级联杀死 agent 本体），由 `adopt_pending_wait()` 接管既有任务——ids 加入 `_background_ids` 并登记进 `_adopted_waits` 供重新附着，完成后 `_deliver_result()` 投递 mailbox。EscWatcher 双层防误触：启动观察窗 300ms 持续排空输入缓冲（提示符移交控制台瞬间终端会产生杂散转义序列）+ 孤立 Esc 判别（`` 后 30ms 内还有字节 = 转义序列，整段丢弃；人按的 Esc 是孤立单字节）。转后台后空提示符按 Esc（prompt_toolkit 绑定自动提交 `/spawn wait`，仅空缓冲且无补全菜单时生效）或手动 `/spawn wait [id]` 命中登记组即**重新附着**：面板套回原任务（绝不新起 wait()，会抢 `_active`），拿到结果后 `reclaim_adopted_wait()` 取消后台投递（`deliver_task.done()` 判定竞态：投递已发出则如实提示而不重复打印）。
 
 **摘要式上下文 fork**：`spawn_agents` 工具的 `inherit_context=true` 或 `/spawn --fork` 把父对话的 LLM 摘要注入子 agent system prompt 的 `[Inherited context ...]` 段——子 agent 出生时"知道"之前的讨论。摘要经 `memory/compressor.py` 的公开函数 `summarize_conversation()` 生成（复用 P67 的 9 节结构化摘要，LLM 失败回退提取式 digest），每次 spawn 调用生成一次、同批 agent 共享（冻结快照，回避 fork 一致性问题）。`context_summary` 参数透传 `spawn/spawn_parallel/spawn_background` 三层，与 `background` 模式可组合。摘要生成前后 `build_context_summary()` 发射 `ContextSummaryStartEvent`/`ContextSummaryDoneEvent`——app.py 订阅显示终端提示（"Summarizing conversation for context fork..." / "Context summary ready"），TraceRenderer 订阅在 `/trace on` 下显示 `ctx` 行。`background=true + inherit_context=true` 时摘要+spawn 整体放进后台 `asyncio.Task`，`execute()` 立即返回（消息列表浅拷贝防竞态）。`spawn_pane` 与 `/team` 未纳入。
 

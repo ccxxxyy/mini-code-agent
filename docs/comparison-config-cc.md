@@ -261,7 +261,7 @@ deny = ["delete_file"]
 | 规则格式 | `工具名(参数模式)` 统一格式 | 三个 scope 分离：`[commands]` `[paths]` `[tools]` |
 | 存储位置 | 内嵌 `settings.json` | 独立 `permissions.toml` |
 | 全局模式 | `defaultMode`：default / acceptEdits / plan / bypassPermissions | `approval_mode`（同四模式，`/mode` 运行时切换）+ `permission_mode` 兜底轴（allow / ask / deny，CC 无） |
-| 运行时管理 | 弹窗选 "Always allow" 自动写入 | `/allow` `/deny` 命令 + 弹窗 y/a/n |
+| 运行时管理 | 弹窗选 "Always allow" 自动写入 | `/allow` `/deny` 命令 + 弹窗 y/a/n（a 后追问一行可选持久化写入 permissions.toml，默认仅会话级） |
 | 工具级控制 | `Read(*)` / `Write(src/**)` | `[tools]` 节按工具名（`deny = ["delete_file"]`） |
 | 路径级控制 | 参数模式里写路径 | 独立 `[paths]` 节，支持项目内路径拦截 |
 

@@ -386,6 +386,9 @@ class SubAgentManager:
         # Keep notifier task references so they aren't garbage-collected
         # 保存通知任务引用，防止被垃圾回收
         self._notify_tasks: set[asyncio.Task] = set()
+        # Esc-detached wait groups, re-attachable via /spawn wait
+        # Esc 转后台的等待组，可经 /spawn wait 重新附着
+        self._adopted_waits: list[dict] = []
         if mailbox is None:
             mailbox = Mailbox(working_dir / ".mini-agent" / "mailboxes")
             # Fresh session owns the default mailbox: wipe last session's
@@ -637,7 +640,7 @@ class SubAgentManager:
         if self._confirm_callback is None:
             return "n"
         answer = await self._confirm_callback(prompt)
-        if answer == "always":
+        if answer in ("always", "always-save"):
             return "a"
         return "y" if answer else "n"
 
@@ -746,6 +749,11 @@ class SubAgentManager:
         """Wait for one background agent and deliver its result to 'main'.
         等待单个后台 agent 完成并把结果投递给 'main'。"""
         result = await self.wait(agent_id, timeout=3600)
+        self._deliver_result(result)
+
+    def _deliver_result(self, result: SubAgentResult) -> None:
+        """Deliver a finished agent's result to the 'main' mailbox.
+        把已完成 agent 的结果投递到 'main' 收件箱。"""
         if result.success:
             status = "completed successfully"
         else:
@@ -754,13 +762,84 @@ class SubAgentManager:
         if len(result.output) > self.NOTIFY_MAX_CHARS:
             output += "\n... (truncated)"
         self.mailbox.send(
-            sender=agent_id,
+            sender=result.agent_id,
             recipient="main",
             content=(
-                f"[Background agent '{agent_id}' {status}]\nTask: {result.task}\nResult:\n{output}"
+                f"[Background agent '{result.agent_id}' {status}]\n"
+                f"Task: {result.task}\nResult:\n{output}"
             ),
         )
-        self._background_ids.discard(agent_id)
+        self._background_ids.discard(result.agent_id)
+
+    def adopt_pending_wait(self, agent_ids: list[str], wait_task: asyncio.Task) -> None:
+        """Convert a detached foreground wait into background delivery: the
+        ids join ``_background_ids`` (so the SubAgentCompleteEvent emitted
+        when the wait finishes carries background=True, reusing the whole
+        notify + interrupt_input + mailbox chain), and a task awaits the
+        EXISTING wait task -- never a new wait() call, which would race the
+        first one over ``_active`` -- then delivers each result to 'main'.
+        The group is also registered so ``/spawn wait`` can re-attach.
+        把被 Esc 转后台的前台等待转换为后台投递：ids 加入 _background_ids
+        （wait 完成时发出的 SubAgentCompleteEvent 即带 background=True，
+        复用完成提示 + interrupt_input + mailbox 整条链）；新任务 await
+        原有等待任务（不再新起 wait()——那会和第一个 wait 抢 _active），
+        完成后逐个投递结果。同时登记该组，供 /spawn wait 重新附着。"""
+        for agent_id in agent_ids:
+            self._background_ids.add(agent_id)
+
+        entry: dict = {"ids": list(agent_ids), "wait_task": wait_task}
+
+        async def _deliver_when_done() -> None:
+            try:
+                outcome = await wait_task
+            except Exception:
+                return  # wait errors already surface via the agent result
+            finally:
+                if entry in self._adopted_waits:
+                    self._adopted_waits.remove(entry)
+            results = outcome if isinstance(outcome, list) else [outcome]
+            for result in results:
+                self._deliver_result(result)
+
+        task = asyncio.create_task(_deliver_when_done())
+        entry["deliver_task"] = task
+        self._adopted_waits.append(entry)
+        self._notify_tasks.add(task)
+        task.add_done_callback(self._notify_tasks.discard)
+
+    @property
+    def has_adopted_waits(self) -> bool:
+        """True when at least one Esc-detached wait group can be re-attached.
+        存在可重新附着的转后台等待组时为 True。"""
+        return bool(self._adopted_waits)
+
+    def find_adopted_wait(self, agent_id: str = "") -> dict | None:
+        """Find a detached (adopted) wait group for re-attach. Empty id =
+        the first group. Returns the registry entry or None.
+        查找可重新附着的已转后台等待组。id 为空取第一组。"""
+        if not agent_id:
+            return self._adopted_waits[0] if self._adopted_waits else None
+        for entry in self._adopted_waits:
+            if agent_id in entry["ids"]:
+                return entry
+        return None
+
+    def reclaim_adopted_wait(self, entry: dict) -> bool:
+        """Re-attach took the result in the foreground: cancel the background
+        delivery and drop the background marking. Returns False when delivery
+        already fired (result is in the mailbox) -- caller should say so
+        instead of printing the result twice.
+        前台重新附着已拿到结果：取消后台投递并撤销后台标记。投递已发生
+        （结果已进收件箱）返回 False——调用方应如实说明而非重复打印。"""
+        deliver_task: asyncio.Task = entry["deliver_task"]
+        if deliver_task.done():
+            return False
+        deliver_task.cancel()
+        if entry in self._adopted_waits:
+            self._adopted_waits.remove(entry)
+        for agent_id in entry["ids"]:
+            self._background_ids.discard(agent_id)
+        return True
 
     def cancel(self, agent_id: str) -> None:
         entry = self._active.get(agent_id)
