@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -13,60 +12,15 @@ from pydantic import BaseModel, Field
 from mini_agent.core.agent_loop import VERIFY_NUDGE, AgentLoop
 from mini_agent.core.agent_state import AgentPhase
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
+from mini_agent.llm.base import StreamChunk, ToolCallDelta
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import Conversation, Role, ToolResult
 from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolRegistry
 from mini_agent.tools.builtin import EditFileTool, ReadFileTool, WriteFileTool
+from tests.mocks import MockLLM, text_response, tool_call_response
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    """Mock provider that replays scripted responses. 按脚本重放响应的 mock provider。"""
-
-    def __init__(self, scripts: list[list[StreamChunk]]) -> None:
-        self._scripts = scripts
-        self._call_count = 0
-
-    async def stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[StreamChunk]:
-        script = self._scripts[min(self._call_count, len(self._scripts) - 1)]
-        self._call_count += 1
-        for chunk in script:
-            yield chunk
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
-
-
-def text_response(text: str) -> list[StreamChunk]:
-    return [StreamChunk(delta=text), StreamChunk(finish_reason="stop")]
-
-
-def tool_call_response(name: str, arguments: dict) -> list[StreamChunk]:
-    return [
-        StreamChunk(
-            tool_call_deltas=[
-                ToolCallDelta(
-                    index=0,
-                    id="call_1",
-                    name=name,
-                    arguments_delta=json.dumps(arguments),
-                )
-            ]
-        ),
-        StreamChunk(finish_reason="tool_calls"),
-    ]
 
 
 def make_loop(scripts, tool_context, registry=None, config=None):
@@ -418,8 +372,8 @@ class YieldingMockLLM(MockLLM):
     竞态（抢先提交的工具任务在检测到截断前真正跑完）所必需。"""
 
     async def stream(self, messages, tools=None, **kwargs):
-        script = self._scripts[min(self._call_count, len(self._scripts) - 1)]
-        self._call_count += 1
+        script = self._scripts[min(self.call_count, len(self._scripts) - 1)]
+        self.call_count += 1
         for chunk in script:
             await asyncio.sleep(0)  # let eagerly-created tool tasks run
             yield chunk
@@ -752,7 +706,7 @@ async def test_self_verify_triggers_on_tool_turn(tool_context):
     conv = Conversation()
     result = await loop.run(conv)
 
-    assert llm._call_count == 3
+    assert llm.call_count == 3
     assert "Verified" in result or "data" in result
     assert all(m.content != VERIFY_NUDGE for m in conv.messages)
 
@@ -767,7 +721,7 @@ async def test_self_verify_skips_simple_answer(tool_context):
     result = await loop.run(conv)
 
     assert result == "42"
-    assert llm._call_count == 1
+    assert llm.call_count == 1
 
 
 async def test_self_verify_disabled(tool_context):
@@ -786,7 +740,7 @@ async def test_self_verify_disabled(tool_context):
     conv = Conversation()
     result = await loop.run(conv)
 
-    assert llm._call_count == 2
+    assert llm.call_count == 2
     assert result == "done"
 
 

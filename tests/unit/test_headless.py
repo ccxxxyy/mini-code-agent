@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import AsyncIterator
-from typing import Any
 
 import pytest
 
 from mini_agent.cli import parse_args
-from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
+from tests.mocks import MockLLM, text_response, tool_call_response
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,47 +29,6 @@ async def test_parse_args_prompt_defaults():
 
 
 # --- Runner harness 运行器测试替身 ---
-
-
-class MockLLM(LLMProvider):
-    """Yields a fixed answer; optionally a tool call first or an error.
-    固定回答；可选先产出一个工具调用或抛错。"""
-
-    def __init__(self, text: str = "Done.", tool_call: dict | None = None, error: bool = False):
-        self._text = text
-        self._tool_call = tool_call
-        self._calls = 0
-        self._error = error
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        if self._error:
-            raise RuntimeError("boom")
-        self._calls += 1
-        if self._tool_call and self._calls == 1:
-            yield StreamChunk(
-                tool_call_deltas=[
-                    ToolCallDelta(
-                        index=0,
-                        id="tc1",
-                        name=self._tool_call["name"],
-                        arguments_delta=json.dumps(self._tool_call["args"]),
-                    )
-                ]
-            )
-            yield StreamChunk(finish_reason="tool_calls")
-            return
-        yield StreamChunk(delta=self._text)
-        yield StreamChunk(finish_reason="stop")
-
-    async def prepare(self) -> None:
-        pass
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 def make_app(tmp_path, llm: MockLLM):
@@ -135,7 +92,7 @@ async def test_stream_json_valid_ndjson_and_order(tmp_path, monkeypatch):
 async def test_stream_json_tool_events(tmp_path, monkeypatch):
     app = make_app(
         tmp_path,
-        MockLLM(text="done", tool_call={"name": "glob", "args": {"pattern": "*.md"}}),
+        MockLLM([tool_call_response("glob", {"pattern": "*.md"}), text_response("done")]),
     )
     code, out = await run_headless_captured(app, "list md files", "stream-json", monkeypatch)
     assert code == 0
@@ -152,7 +109,7 @@ async def test_dangerous_command_denied_not_hung(tmp_path, monkeypatch):
     (no confirm UI) instead of hanging. 需确认的命令被拒不挂起。"""
     app = make_app(
         tmp_path,
-        MockLLM(text="ok", tool_call={"name": "bash", "args": {"command": "rm -rf /tmp/x"}}),
+        MockLLM([tool_call_response("bash", {"command": "rm -rf /tmp/x"}), text_response("ok")]),
     )
     code, out = await run_headless_captured(app, "delete it", "stream-json", monkeypatch)
     assert code == 0  # denial is a normal outcome, not a crash 拒绝是正常结局
@@ -169,7 +126,7 @@ async def test_dangerous_command_denied_not_hung(tmp_path, monkeypatch):
 
 
 async def test_llm_error_exits_1_with_error_event(tmp_path, monkeypatch):
-    app = make_app(tmp_path, MockLLM(error=True))
+    app = make_app(tmp_path, MockLLM(error=RuntimeError("boom")))
     code, out = await run_headless_captured(app, "hi", "stream-json", monkeypatch)
     assert code == 1
     events = [json.loads(ln) for ln in out.splitlines() if ln.strip()]

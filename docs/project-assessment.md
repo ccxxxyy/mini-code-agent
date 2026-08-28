@@ -81,6 +81,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **证据**：`test_agent_loop.py`、`test_subagent.py`、`test_board.py`、`test_file_changes.py`、`test_headless.py`、`test_hooks_lifecycle.py`、`test_mailbox.py`、`test_spawn_agents_tool.py`、`test_spawn_pane.py`、`test_spawn_team.py`、`test_tool_parallel.py` 各有独立 MockLLM。
 
+**✅ 已修复**：新增 `tests/mocks.py` 统一实现（scripts 脚本重放 + text/delay/error 参数覆盖全部变体，公开 `call_count`），实际消除 13 处定义（评估列出的 11 处 + `test_extension_points.py` 嵌套类 + `test_tool_categories.py` 非 ABC 版本），3 个跨文件导入方（test_hooks/test_streaming_execution/test_tool_result_cache 原从 test_agent_loop 导入）同步改从共享模块导入。功能特化的 SummaryMockLLM/TeamMockLLM/_MockLLM 不并入。16 文件 −350/+49 行，1438 测试数量不变全过。详见 tech-notes §120。
+
 ### 2.5 覆盖率门禁未接入 CI
 
 `pyproject.toml` 配了 `fail_under = 80`，但 CI 的 pytest 命令（`.github/workflows/ci.yml`）没有 `--cov` 参数，覆盖率从未实际收集和检查。这个门禁是摆设。

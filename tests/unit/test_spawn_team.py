@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -15,27 +14,9 @@ from mini_agent.models.config import AgentConfig
 from mini_agent.models.events import SubAgentCompleteEvent, SubAgentSpawnEvent
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    def __init__(self, text: str = "Done.", delay: float = 0.0):
-        self._text = text
-        self._delay = delay
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        if self._delay:
-            await asyncio.sleep(self._delay)
-        yield StreamChunk(delta=self._text)
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 def make_manager(tmp_path, text="Done.", delay=0.0) -> tuple[SubAgentManager, EventBus]:
@@ -43,7 +24,7 @@ def make_manager(tmp_path, text="Done.", delay=0.0) -> tuple[SubAgentManager, Ev
     registry.register(ReadFileTool())
     bus = EventBus()
     mgr = SubAgentManager(
-        llm=MockLLM(text, delay=delay),
+        llm=MockLLM(text=text, delay=delay),
         tool_registry=registry,
         config=AgentConfig(),
         event_bus=bus,

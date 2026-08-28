@@ -252,7 +252,7 @@ async def test_hook_rule_blocks_tool_in_agent_loop(tool_context):
     from mini_agent.tools.base import ToolRegistry
     from mini_agent.tools.builtin import WriteFileTool
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import MockLLM, text_response, tool_call_response
+    from tests.mocks import MockLLM, text_response, tool_call_response
 
     target = tool_context.working_dir / "locked.txt"
     mgr = HookManager()
@@ -437,7 +437,7 @@ def _make_confirm_loop(tool_context, mgr, responses):
     from mini_agent.models.config import AgentConfig
     from mini_agent.tools.base import ToolRegistry
     from mini_agent.tools.builtin import WriteFileTool
-    from tests.unit.test_agent_loop import MockLLM
+    from tests.mocks import MockLLM
 
     registry = ToolRegistry()
     registry.register(WriteFileTool())
@@ -454,7 +454,7 @@ def _make_confirm_loop(tool_context, mgr, responses):
 async def test_confirm_rule_approved_executes_tool(tool_context):
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "confirmed.txt"
     mgr = HookManager()
@@ -486,7 +486,7 @@ async def test_confirm_rule_approved_executes_tool(tool_context):
 async def test_confirm_rule_denied_blocks_tool(tool_context):
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "denied.txt"
     mgr = HookManager()
@@ -520,7 +520,7 @@ async def test_confirm_rule_denied_blocks_tool(tool_context):
 async def test_confirm_without_callback_denies(tool_context):
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "no_ui.txt"
     mgr = HookManager()
@@ -543,7 +543,7 @@ async def test_confirm_without_callback_denies(tool_context):
 async def test_confirm_always_grants_session(tool_context):
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     t1 = tool_context.working_dir / "always1.txt"
     t2 = tool_context.working_dir / "always2.txt"
@@ -580,7 +580,7 @@ async def test_confirm_condition_match_fires(tool_context):
     """Condition matches → confirm dialog fires."""
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "confirm_cond.txt"
     mgr = HookManager()
@@ -622,7 +622,7 @@ async def test_confirm_condition_no_match_passes(tool_context):
     """Condition does not match → no confirm, tool executes directly."""
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "no_match.txt"
     mgr = HookManager()
@@ -663,7 +663,7 @@ async def test_confirm_condition_denied_blocks(tool_context):
     """Condition matches + user denies → tool blocked."""
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "denied_cond.txt"
     mgr = HookManager()
@@ -703,7 +703,7 @@ async def test_confirm_condition_always_grants(tool_context):
     """Condition matches + user says 'always' → second call auto-granted."""
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     t1 = tool_context.working_dir / "always1.txt"
     t2 = tool_context.working_dir / "always2.txt"
@@ -746,7 +746,7 @@ async def test_confirm_condition_without_callback_denies(tool_context):
     """Condition matches but no callback (headless) → safe deny."""
     from mini_agent.models.message import Conversation, Message, Role
     from mini_agent.tools.hooks import register_hook_rules
-    from tests.unit.test_agent_loop import text_response, tool_call_response
+    from tests.mocks import text_response, tool_call_response
 
     target = tool_context.working_dir / "headless.txt"
     mgr = HookManager()

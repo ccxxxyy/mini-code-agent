@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-
 import pytest
 
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import Conversation, Message, Role
 from mini_agent.models.session import Session
@@ -21,29 +17,13 @@ from mini_agent.tools.hooks import (
     HookResult,
     HookStage,
 )
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
 
 
-class MockLLM(LLMProvider):
-    def __init__(self):
-        self.call_count = 0
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        self.call_count += 1
-        yield StreamChunk(delta="hello")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
-
-
 def make_loop(tmp_path, hooks: HookManager | None = None) -> tuple[AgentLoop, MockLLM]:
-    llm = MockLLM()
+    llm = MockLLM(text="hello")
     hm = hooks or HookManager()
     loop = AgentLoop(
         llm=llm,

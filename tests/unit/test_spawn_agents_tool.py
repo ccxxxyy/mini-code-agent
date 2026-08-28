@@ -3,40 +3,18 @@ SpawnAgentsTool（LLM 自主派生子代理）测试。"""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-
 import pytest
 
 from mini_agent.core.subagent import SubAgentManager
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.session import Session
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import SpawnAgentsTool
 from mini_agent.tools.builtin.read_file import ReadFileTool
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    def __init__(self, text: str = "Done.", fail: bool = False):
-        self._text = text
-        self._fail = fail
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        if self._fail:
-            raise ConnectionError("boom")
-        yield StreamChunk(delta=self._text)
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 def make_ctx(tmp_path, with_manager: bool = True, fail: bool = False) -> ToolContext:
@@ -46,7 +24,7 @@ def make_ctx(tmp_path, with_manager: bool = True, fail: bool = False) -> ToolCon
     mgr = None
     if with_manager:
         mgr = SubAgentManager(
-            llm=MockLLM(fail=fail),
+            llm=MockLLM(error=ConnectionError("boom") if fail else None),
             tool_registry=registry,
             config=AgentConfig(),
             event_bus=bus,

@@ -3901,3 +3901,22 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 **验证**：1438 全过（1434+4），ruff check/format 通过。真实 LLM 验证（项目根目录终端）：`uv run mini-agent -p "用 grep 工具在 src 目录搜索 'asyncio.to_thread'..."` → 正确报出本次修复的全部 6 文件 11 处调用点并读出 pyproject.toml 项目名；第二轮 `-p "用 write_file 创建 .scratch_verify271.txt 内容 'hello alpha'，再用 edit_file 把 alpha 改成 beta，最后 read_file 读出"` → 文件实际内容 `hello beta`，write→edit→read 全链路经 to_thread 路径正常。
 
 **量化实测**（`verify_271_loop_block.py`，3000 文件 / 70MB，同进程内把 to_thread 退化为同步直调模拟修复前）：修复前扫描 1932.6ms、事件循环心跳最大间隔 1932.7ms（全程冻结）；修复后扫描 2178.6ms、最大间隔 44.3ms（保持响应）。线程切换代价约 12% 扫描耗时。注：此改进在交互窗口肉眼不可见——ESC 中断只在 LLM 流式期间检查（app.py `_on_stream_delta`）、spinner 由 Rich 独立线程驱动，均不反映工具执行期间的事件循环状态。
+
+---
+
+## §120 MockLLM 去重：13 份复制收敛为 tests/mocks.py 单一实现（project-assessment §2.4）
+
+**前因**：project-assessment §2.4 指出至少 11 个测试文件各自复制了几乎相同的 MockLLM 类（脚本化 StreamChunk 重放模式），新增测试需要再复制一份（issue #273）。动手排查实际有 13 处定义——评估清单外还有 `test_extension_points.py` 的函数内嵌套版和 `test_tool_categories.py` 的非 LLMProvider 裸版；且 test_hooks/test_streaming_execution/test_tool_result_cache 三个文件跨文件从 test_agent_loop 导入其 MockLLM——事实上的"共享"已经存在，只是寄生在一个测试文件里。
+
+**方案**：新增 `tests/mocks.py`（tests 本就是包，`from tests.mocks import ...` 与既有跨文件导入惯例一致），一个 MockLLM 覆盖全部 6 种变体：
+
+- `scripts`：每次 stream() 调用消费一个 chunk 列表，超出后重复最后一个（原 agent_loop/subagent 语义）
+- `text="Done."`：单条文本回答的简写（原 file_changes/mailbox 等固定文本变体）
+- `delay`：调用前挂起（原 board/team 并发测试变体）
+- `error`：抛异常替代产出（原 headless 的 RuntimeError 与 spawn_agents 的 ConnectionError 统一为传入异常实例）
+- 公开 `call_count`（原 hooks_lifecycle 的计数断言）
+- headless 的 `tool_call=` 参数改用脚本组合表达：`MockLLM([tool_call_response(...), text_response(...)])`
+
+**范围取舍**：功能特化的 mock 不并入——`SummaryMockLLM`（test_context，摘要标签/失败模式）、`TeamMockLLM`（test_team，规划 JSON）、`_MockLLM`（test_memory_*，合并响应）行为面不同，强行统一只会把特化逻辑参数化进共享类。测试文件内的行为子类（KwargsMockLLM 记录 kwargs、YieldingMockLLM chunk 间让出事件循环、TwoPhaseStreamLLM）保留原地，改继承共享类（内部 `_call_count` 统一为公开 `call_count`）。
+
+**验证**：1438 全过（数量不变——纯重构零新增零删除），ruff check/format 通过，`class MockLLM` 在 tests/unit 归零。16 文件 −350/+49 行。真实 LLM 运行验证不适用（未触及 src/ 任何文件，git diff 确认），全量测试套件即行为等价证明。
