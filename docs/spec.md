@@ -149,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # unit test files, 1389 tests
+│   ├── unit/                        # unit test files, 1434 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py

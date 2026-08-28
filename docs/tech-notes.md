@@ -3870,3 +3870,15 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 新增 `tests/unit/test_app.py`（10 个测试）守护装配产物完整性——此前 app.py 是全项目唯一无对应测试文件的大文件：子系统属性齐全（21 项非 None）、ToolContext 注入完整（session/event_bus/config/working_dir/subagent_manager/mailbox/mcp_manager/task_store/skill_registry/agent_loop_ref/ask_user_callback 全部断言）、agent_loop 回调接线（confirm/snapshot/result_cache/mailbox/model_name + 7 个流式与工具回调）、mailbox "main" 已注册、系统提示词含模型名与工作目录、plan-mode 经 agent_loop_ref 往返切换同步权限矩阵、启动模式三分支（accept-edits 配置生效 / 非法值回退 default / enable_plan_mode 兼容）、仅注册 enabled_tools 内工具。
 
 **验证**：1389 全过（1379+10），ruff check/format 通过。真实 LLM 验证（项目根目录终端窗口）：`uv run mini-agent -p "读取 pyproject.toml 并告诉我项目名和版本号"` → 输出 "项目名是 **mini-code-agent**，版本号是 **1.1.0**"，扩展加载提示（"Loaded 1 custom agent type(s)" / "Loaded 1 event listener(s): stats"）正常出现——重构后的组合根完整装配了工具调用、扩展加载、headless 输出全链路。
+
+---
+
+## §118 builtin_commands.py 零测试覆盖补全（project-assessment §2.2）
+
+**前因**：project-assessment §2.2 指出 `extensions/builtin_commands.py` 是全项目最大文件（1815 行、28 个命令处理函数），没有对应的 `test_builtin_commands.py`——命令行为只通过其他测试文件间接覆盖，部分命令完全无测试。
+
+**方案**：新增 `tests/unit/test_builtin_commands.py`（45 个测试），直接测试此前零覆盖的 18 个命令处理函数：`/clear`（清除保留 system_prompt）、`/model`（无参列出 / 裸名切换）、`/compact`（压缩后 token 变化）、`/tools`（列出已注册工具）、`/plugins`（空插件输出）、`/trace`（开关 + 状态查询）、`/explain`（开关）、`/audit`（开关）、`/theme`（列出 / 切换 / 未知主题报错）、`/plan`（on/off 同步权限矩阵 / 状态查询 / 非法参数）、`/mode`（显示当前 / 切换 / alias / 非法值报错 / bypass 警告）、`/allow` + `/deny`（添加 / 列出 / remove / 无参空 / 非法 scope / 缺 pattern）、`/quit` + `/exit`（抛 SystemExit）、`/session`（save / new / tag / untag / tags / list 空 / list 有数据 / delete 未找到 / usage）、`/memory`（add+list / delete / 空列表）、`/skill`（空列表）、`/spawn`（无参 usage / list 空 / cancel 空）。
+
+**不重复覆盖**的命令（已有专门测试文件）：`/undo`（test_undo_fork.py + test_file_snapshots.py）、`/fork`（test_undo_fork.py）、`/todo`（test_task_store.py）、`/cost`（test_cost_tracker.py）、`/record` + `/replay`（test_tool_recorder.py）、`/help` + `/status`（test_agent_e2e.py + test_cost_tracker.py）。`/team` 和 `/spawn` 的实际派发逻辑需 Planner LLM / SubAgent 异步运行，已在 test_subagent/test_spawn_*.py/test_board.py 覆盖。
+
+**验证**：1434 全过（1389+45），ruff check/format 通过。真实 LLM 验证正常。
