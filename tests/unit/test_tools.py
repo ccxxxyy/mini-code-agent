@@ -1,6 +1,8 @@
 """Tests for the tool system and builtin tools. 工具系统与内置工具的测试。"""
 
+import asyncio
 import sys
+import threading
 from typing import Literal
 
 import pytest
@@ -359,6 +361,81 @@ async def test_grep_context_lines(tool_context):
 async def test_grep_invalid_regex(tool_context):
     result = await GrepTool().execute(tool_context, pattern="[invalid")
     assert result.is_error
+
+
+# --- Async offload: blocking I/O must not run on the event loop ---
+# 异步下放：阻塞 I/O 不得在事件循环线程上执行
+
+
+@pytest.mark.asyncio
+async def test_grep_scan_runs_off_event_loop(tool_context):
+    """The scan only completes if the event loop stays free to run the releaser.
+    扫描仅在事件循环仍能运行 releaser 协程时才能完成——若扫描阻塞循环则超时失败。"""
+    (tool_context.working_dir / "a.txt").write_text("hello", encoding="utf-8")
+    tool = GrepTool()
+    release = threading.Event()
+    orig_scan = tool._scan
+
+    def blocking_scan(*args):
+        assert release.wait(timeout=5), "scan blocked the event loop thread"
+        return orig_scan(*args)
+
+    tool._scan = blocking_scan
+
+    async def releaser():
+        await asyncio.sleep(0.05)
+        release.set()
+
+    result, _ = await asyncio.gather(tool.execute(tool_context, pattern="hello"), releaser())
+    assert not result.is_error
+    assert result.metadata["matches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_glob_scan_runs_off_event_loop(tool_context):
+    (tool_context.working_dir / "a.py").write_text("", encoding="utf-8")
+    tool = GlobTool()
+    release = threading.Event()
+    orig_scan = tool._scan
+
+    def blocking_scan(*args):
+        assert release.wait(timeout=5), "scan blocked the event loop thread"
+        return orig_scan(*args)
+
+    tool._scan = blocking_scan
+
+    async def releaser():
+        await asyncio.sleep(0.05)
+        release.set()
+
+    result, _ = await asyncio.gather(tool.execute(tool_context, pattern="*.py"), releaser())
+    assert not result.is_error
+    assert result.metadata["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_file_tools_offload_io_to_thread(tool_context, monkeypatch):
+    """read/write/edit route their file I/O through asyncio.to_thread.
+    read/write/edit 的文件 I/O 均经 asyncio.to_thread 下放线程。"""
+    calls: list = []
+    orig_to_thread = asyncio.to_thread
+
+    async def spy(fn, *args, **kwargs):
+        calls.append(fn)
+        return await orig_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy)
+
+    f = tool_context.working_dir / "t.txt"
+    r1 = await WriteFileTool().execute(tool_context, file_path=str(f), content="alpha beta")
+    r2 = await ReadFileTool().execute(tool_context, file_path=str(f))
+    r3 = await EditFileTool().execute(
+        tool_context, file_path=str(f), old_text="alpha", new_text="gamma"
+    )
+    assert not r1.is_error and not r2.is_error and not r3.is_error
+    # write + read + edit-read + edit-write
+    assert len(calls) >= 4
+    assert f.read_text(encoding="utf-8") == "gamma beta"
 
 
 # --- Pydantic schema for all other tools ---

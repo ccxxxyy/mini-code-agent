@@ -73,6 +73,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **证据**：`tools/builtin/grep.py:82-83`、`tools/builtin/read_file.py:51`、`memory/session_store.py:59-76`。
 
+**✅ 已修复**：全部阻塞文件 I/O 经 `asyncio.to_thread` 移出事件循环——grep/glob 的目录遍历+逐文件读取循环整体提取为 `_scan()` 同步方法下放线程；read_file/write_file/edit_file 的 `read_text`/`write_text` 逐调用包装；SessionStore 的 save/load/list_sessions/delete/cleanup_stale 全部下放（读循环提取为 `_list_sessions_sync`/`_cleanup_stale_sync`）。新增 4 个事件循环不阻塞回归测试（threading.Event 确定性验证）。详见 tech-notes §119。
+
 ### 2.4 测试基础设施重复：MockLLM 复制了 11 份
 
 项目有一致的 MockLLM 模式（脚本化的 StreamChunk 序列），但在至少 11 个测试文件中各自独立定义了几乎相同的 MockLLM 类，而不是放在 conftest.py 或共享 fixture 里。新增测试需要再复制一份。
@@ -136,4 +138,4 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 1. **大文件拆分**：`app.py`（1298 行）和 `builtin_commands.py`（1815 行）需要拆分。前者的 `__init__` 应该提取工厂函数（✅ 已完成——拆为 16 个装配方法，见 §2.1 与 tech-notes §117）；后者应该按命令分文件或分组。
 2. **CI 补全**：覆盖率门禁实际启用、Windows 矩阵、类型检查。这三项是低成本高收益的改进。
 
-同步 I/O 在当前使用规模下不是实际瓶颈（终端 Agent 通常操作小文件），但如果项目规模扩大或用于大型代码库，grep 工具的全文件同步读取会成为性能瓶颈。
+同步 I/O 问题已修复（✅ 见 §2.3 与 tech-notes §119）：文件工具与 SessionStore 的阻塞 I/O 均经 `asyncio.to_thread` 移出事件循环，大型代码库上 grep 扫描不再阻塞其他并发任务（如流式输出、ESC 中断监听）。

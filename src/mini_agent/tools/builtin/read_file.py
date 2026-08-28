@@ -3,6 +3,7 @@ ReadFile 工具——读取文件内容并附带行号。"""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,9 @@ class ReadFileTool(Tool):
             return self.error_result("", f"File too large (> {max_size} bytes): {file_path}")
 
         try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
+            content = await asyncio.to_thread(
+                file_path.read_text, encoding="utf-8", errors="replace"
+            )
         except OSError as e:
             return self.error_result("", f"Failed to read {file_path}: {e}")
 
