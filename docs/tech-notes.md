@@ -3942,3 +3942,52 @@ run: uv run pytest tests/ -v --cov --cov-report=term-missing
 ## 121.3 验证
 
 本地 `uv run pytest tests/ -v --cov --cov-report=term-missing`：1438 passed，覆盖率 86.70%（门禁 80%），通过。
+
+---
+
+# §122 Windows 平台纳入 CI 矩阵
+
+## 122.1 问题
+
+项目有大量 Windows 特定代码（EscWatcher msvcrt 分支、junction 回退、sandbox Low Integrity 模式、终端 GBK 解码、mintty 适配），但 CI test job 只在 `ubuntu-latest` 跑——这些分支的回归只能靠开发者本机手动验证（project-assessment §2.6 指出）。
+
+## 122.2 修复
+
+test job 从单 OS 双 Python 扩展为二维矩阵：
+
+```yaml
+runs-on: ${{ matrix.os }}
+strategy:
+  fail-fast: false
+  matrix:
+    os: [ubuntu-latest, windows-latest]
+    python-version: ["3.11", "3.12"]
+```
+
+- `fail-fast: false`——单平台失败不取消其余组合，一次 CI 运行看到全部平台结果（诊断跨平台差异时不用反复重跑）
+- job 名带上 OS（`Test (windows-latest, Python 3.11)`），失败一眼定位平台
+- lint 和 build job 保持 ubuntu 单平台（ruff/打包结果与 OS 无关，无需重复）
+
+## 122.3 覆盖率门禁在双平台的行为
+
+两个平台各自独立计算覆盖率并各自受 `fail_under=80` 约束。平台特定分支（`msvcrt`/`sys.platform == "win32"` 等）在对方平台计为未覆盖，但两侧本来就有余量（本地 Windows 实测 86.70%），门禁不受影响。
+
+## 122.4 首轮 CI 暴露真缺陷：Windows delete-pending 竞态
+
+首次 windows-latest 运行即失败：`test_mailbox.py::test_concurrent_processes_no_message_loss` 的 4 个并发写进程之一退出码 1（未捕获异常）。本机 Windows 从未复现——差异不在代码页，而在 **GitHub runner 的 Defender 实时扫描**：杀毒进程短暂持有文件句柄时，`unlink` 进入 delete-pending 状态，此窗口内其他进程的文件操作抛 `PermissionError`（WinError 5）而非预期异常。
+
+`mailbox.py` 三处中招：
+
+1. **`_with_lock` 抢锁**：`os.open(O_CREAT|O_EXCL)` 只捕获 `FileExistsError`——锁文件 delete-pending 时抛的是 `PermissionError`，直接炸掉发送进程。修复：`except (FileExistsError, PermissionError)` 按普通锁竞争退避重试。
+2. **`_atomic_write` 替换**：`os.replace` 在 Defender 持有刚写完的临时文件（或目标文件）时抛 `PermissionError`。修复：重试 5 次（递增 sleep），耗尽后上抛（调用方必须知道写失败）。
+3. **`_with_lock` 释放**：finally 里的 `lock.unlink` 同样可能被瞬时占用。修复：重试 5 次，仍失败则放弃删除并 log warning——超龄后由陈旧锁接管机制回收，不炸持有者。
+
+顺带修正一个潜伏设计缺陷：`LOCK_TIMEOUT`（5s）**小于** `STALE_LOCK_AGE`（10s）——崩溃者遗留的锁会让所有等待者先超时、永远轮不到接管分支。`LOCK_TIMEOUT` 调到 15s（必须大于 STALE_LOCK_AGE，注释已写明依赖关系；`test_fresh_lock_times_out` 用 monkeypatch 缩短超时，不受影响）。
+
+测试侧同步加固：并发测试的子进程原来不捕获 stderr，CI 只看到"exit 1"无从诊断——改为 `communicate()` 捕获并拼进断言消息，下次失败直接看到子进程 traceback。
+
+## 122.5 验证
+
+- 3 个新单测：抢锁 PermissionError 重试 / os.replace 瞬时失败重试成功 / 持续失败重试耗尽上抛（monkeypatch `mini_agent.core.mailbox.os.*` 注入故障）
+- 本地全量：test_mailbox 42 个全过，1441 测试 + 覆盖率门禁通过，ruff clean
+- 本机即 Windows（cp936），矩阵的 windows 组合语义已预演；Defender 竞态本机无法复现，最终由推送后的真实 windows-latest CI 运行裁决

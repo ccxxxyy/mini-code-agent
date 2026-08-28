@@ -97,6 +97,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **证据**：`.github/workflows/ci.yml` 的 `runs-on: ubuntu-latest`。
 
+**✅ 已修复**：test job 矩阵扩展为 `os: [ubuntu-latest, windows-latest] × python: [3.11, 3.12]`（4 个组合），`fail-fast: false` 保证单平台失败不掩盖其他组合结果。Windows 特定代码（msvcrt/junction/GBK 解码等分支）的回归现在由 CI 自动捕获。首轮 windows-latest 运行即抓到真缺陷——mailbox 文件锁在 Defender 实时扫描下的 delete-pending `PermissionError` 竞态（本机无法复现），已修复（见 tech-notes §122.4），证明该矩阵不是摆设。
+
 ### 2.7 类型系统漏洞：`ToolContext` 六字段 `Any`
 
 `tools/base.py:97-108` 的 `ToolContext` 有 7 个字段声明为 `Any`：`mcp_manager`、`mailbox`、`task_store`、`agent_loop_ref`、`ask_user_callback`、`skill_registry`、`file_state`。只有 `subagent_manager` 用了 `TYPE_CHECKING` 条件导入的正确类型。其余 6 个字段使得静态类型检查完全失效。
@@ -140,6 +142,6 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 **主要的技术债务集中在两个方向**：
 
 1. **大文件拆分**：`app.py`（1298 行）和 `builtin_commands.py`（1815 行）需要拆分。前者的 `__init__` 应该提取工厂函数（✅ 已完成——拆为 16 个装配方法，见 §2.1 与 tech-notes §117）；后者应该按命令分文件或分组。
-2. **CI 补全**：~~覆盖率门禁实际启用~~（✅ 已完成）、Windows 矩阵、类型检查。后两项是低成本高收益的改进。
+2. **CI 补全**：~~覆盖率门禁实际启用~~（✅ 已完成）、~~Windows 矩阵~~（✅ 已完成）、类型检查。剩余一项是低成本高收益的改进。
 
 同步 I/O 问题已修复（✅ 见 §2.3 与 tech-notes §119）：文件工具与 SessionStore 的阻塞 I/O 均经 `asyncio.to_thread` 移出事件循环，大型代码库上 grep 扫描不再阻塞其他并发任务（如流式输出、ESC 中断监听）。

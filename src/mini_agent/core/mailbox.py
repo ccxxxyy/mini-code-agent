@@ -45,15 +45,26 @@ log = logging.getLogger(__name__)
 VALID_MESSAGE_TYPES = frozenset({"text", "request", "response"})
 
 # Give up acquiring a lock after this many seconds -- the caller must know
-# the message was NOT delivered rather than silently dropping it.
+# the message was NOT delivered rather than silently dropping it. Must
+# exceed STALE_LOCK_AGE, otherwise a crashed holder's lock would time out
+# every waiter before the takeover branch ever fires.
 # 抢锁超时上限——到点抛异常让调用方知道消息没写进去，不能静默丢。
-LOCK_TIMEOUT = 5.0
+# 必须大于 STALE_LOCK_AGE，否则崩溃者遗留的锁会让所有等待者先超时、
+# 永远轮不到接管分支。
+LOCK_TIMEOUT = 15.0
 # A lock file older than this is considered abandoned by a crashed holder.
 # 锁文件超过此秒数视为持有者已崩溃，可强行接管。
 STALE_LOCK_AGE = 10.0
 # Backoff ceiling so high contention doesn't back off forever.
 # 退避上限，高并发下不会越退越久。
 MAX_LOCK_BACKOFF = 0.08
+# Windows: antivirus/indexer briefly holds files open, turning unlink into
+# a delete-pending state and making os.replace/os.open raise transient
+# PermissionError. Retry a few times before treating it as fatal.
+# Windows 下杀毒/索引进程短暂持有文件句柄，unlink 进入 delete-pending、
+# os.replace/os.open 抛瞬时 PermissionError——重试几次再当真失败。
+_TRANSIENT_RETRIES = 5
+_TRANSIENT_SLEEP = 0.02
 
 _REGISTRY_NAME = "_registry.json"
 
@@ -113,7 +124,14 @@ class Mailbox:
                 fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
                 os.close(fd)
                 break
-            except FileExistsError:
+            except (FileExistsError, PermissionError):
+                # PermissionError: Windows delete-pending -- the holder just
+                # unlinked the lock while AV keeps a handle open; O_EXCL then
+                # fails with WinError 5 instead of FileExistsError. Same
+                # remedy as contention: back off and retry.
+                # PermissionError 即 Windows delete-pending：持有者刚 unlink
+                # 而杀毒进程还握着句柄，O_EXCL 报 WinError 5 而非
+                # FileExistsError——按普通锁竞争退避重试即可。
                 try:
                     if time.time() - lock.stat().st_mtime > STALE_LOCK_AGE:
                         lock.unlink(missing_ok=True)
@@ -129,7 +147,16 @@ class Mailbox:
         try:
             return fn()
         finally:
-            lock.unlink(missing_ok=True)
+            for _ in range(_TRANSIENT_RETRIES):
+                try:
+                    lock.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(_TRANSIENT_SLEEP)
+            else:
+                # Leave it: stale takeover reclaims after STALE_LOCK_AGE.
+                # 放弃删除：超龄后由陈旧锁接管机制回收。
+                log.warning("mailbox: could not remove %s; stale takeover will recover", lock.name)
 
     # ── registry (id -> name), on disk 磁盘注册表 ────────────────
 
@@ -322,7 +349,17 @@ class Mailbox:
 
 def _atomic_write(path: Path, data: dict) -> None:
     """Write JSON via temp file + os.replace so readers never see a partial
-    file. 临时文件 + os.replace 原子写，读者永不见半截文件。"""
+    file. os.replace retries transient PermissionError (Windows AV briefly
+    holding the freshly written temp file or the destination open).
+    临时文件 + os.replace 原子写，读者永不见半截文件。os.replace 对瞬时
+    PermissionError 重试（Windows 杀毒进程短暂持有刚写完的临时文件或目标）。"""
     tmp = path.with_suffix(f".tmp{os.getpid()}")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(_TRANSIENT_RETRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == _TRANSIENT_RETRIES - 1:
+                raise
+            time.sleep(_TRANSIENT_SLEEP * (attempt + 1))
