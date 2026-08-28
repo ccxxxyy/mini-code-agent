@@ -3,38 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
 
 import pytest
 from rich.console import Console
 
 from mini_agent.core.subagent import SubAgentManager
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.ui.board import SubAgentBoard
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    def __init__(self, delay: float = 0.0):
-        self._delay = delay
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        if self._delay:
-            await asyncio.sleep(self._delay)
-        yield StreamChunk(delta="Done.")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 def make_manager(tmp_path, delay=0.0) -> SubAgentManager:

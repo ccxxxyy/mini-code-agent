@@ -25,4 +25,5 @@ uv run ruff format src/ tests/   # 格式化
 - Python 3.11+，全类型注解
 - ruff line-length 100，target py311
 - 测试放 tests/unit/ 和 tests/integration/，用 pytest + pytest-asyncio (auto mode)
+- 测试需要 LLM mock 时从 `tests/mocks.py` 导入共享 `MockLLM`（scripts 重放/text/delay/error）和 `text_response`/`tool_call_response`，不要在测试文件里重新定义
 - 工具类实现 Tool ABC（schema 属性 + execute 方法），注册到 ToolRegistry

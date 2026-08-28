@@ -278,7 +278,7 @@ async def test_agent_loop_spills_large_tool_output(tmp_path: Path):
     from mini_agent.models.session import Session
     from mini_agent.tools.base import ToolContext, ToolRegistry
     from mini_agent.tools.builtin import ReadFileTool
-    from tests.unit.test_agent_loop import (
+    from tests.mocks import (
         MockLLM,
         text_response,
         tool_call_response,
@@ -330,7 +330,7 @@ async def test_agent_loop_aggregate_budget_spills_parallel_results(tmp_path: Pat
     from mini_agent.models.session import Session
     from mini_agent.tools.base import ToolContext, ToolRegistry
     from mini_agent.tools.builtin import ReadFileTool
-    from tests.unit.test_agent_loop import MockLLM, text_response
+    from tests.mocks import MockLLM, text_response
 
     work = tmp_path / "work"
     work.mkdir()
@@ -389,7 +389,7 @@ async def test_agent_loop_spill_readback_not_respilled(tmp_path: Path):
     from mini_agent.models.session import Session
     from mini_agent.tools.base import ToolContext, ToolRegistry
     from mini_agent.tools.builtin import ReadFileTool
-    from tests.unit.test_agent_loop import MockLLM, text_response, tool_call_response
+    from tests.mocks import MockLLM, text_response, tool_call_response
 
     work = tmp_path / "work"
     work.mkdir()

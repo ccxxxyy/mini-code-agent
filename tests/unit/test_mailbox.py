@@ -4,19 +4,17 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from mini_agent.core.mailbox import Mailbox
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.session import Session
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin.send_message import SendMessageTool
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
 
@@ -370,19 +368,6 @@ async def test_wait_message_no_mailbox(tmp_path):
 
 
 # --- AgentLoop inbox delivery ---
-
-
-class MockLLM(LLMProvider):
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        yield StreamChunk(delta="Done.")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 async def test_agent_loop_delivers_inbox_messages(tmp_path):

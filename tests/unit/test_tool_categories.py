@@ -24,6 +24,7 @@ from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import ChildPermissionManager, PermissionManager
 from mini_agent.tools.base import Tool, ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ALL_BUILTIN_TOOLS
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
 
@@ -249,21 +250,6 @@ async def test_child_reason_isolated_from_parent(parent_pm):
 
 
 # --- spawn propagation 派生传播 ---
-
-
-class MockLLM:
-    async def stream(self, messages, tools=None, **kwargs):
-        from mini_agent.llm.base import StreamChunk
-
-        yield StreamChunk(delta="Done.")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 async def test_spawn_passes_child_permission_view(tmp_path, parent_pm):

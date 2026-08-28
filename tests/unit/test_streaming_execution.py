@@ -17,7 +17,7 @@ from mini_agent.security.path_guard import PathGuard
 from mini_agent.security.permission import PermissionManager
 from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool
-from tests.unit.test_agent_loop import MockLLM, text_response, tool_call_response
+from tests.mocks import MockLLM, text_response, tool_call_response
 
 pytestmark = pytest.mark.asyncio
 
@@ -140,8 +140,8 @@ async def test_streaming_tool_starts_before_stream_end(tmp_path):
             self.loop_ref = loop_ref
 
         async def stream(self, messages, tools=None, **kwargs):
-            if self._call_count == 0:
-                self._call_count += 1
+            if self.call_count == 0:
+                self.call_count += 1
                 # Tool call 0 complete (index advance signal via chunk split)
                 yield StreamChunk(
                     tool_call_deltas=[tcd(0, "c1", "read_file", json.dumps({"file_path": str(f1)}))]

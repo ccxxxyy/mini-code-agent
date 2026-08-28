@@ -6,9 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -22,9 +20,9 @@ from mini_agent.core.spawn_backends import (
 from mini_agent.core.subagent import SubAgentManager
 from mini_agent.core.worker import WorkerSpec, run_worker
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.tools.base import ToolRegistry
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
 
@@ -175,19 +173,6 @@ async def test_worker_spec_roundtrip(tmp_path):
 # --- worker end-to-end (in-process, MockLLM) worker 全链路 ---
 
 
-class MockLLM(LLMProvider):
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        yield StreamChunk(delta="Task finished.")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
-
-
 async def test_run_worker_writes_result_and_registers_mailbox(tmp_path, monkeypatch):
     """run_worker: reads spec -> runs SubAgent -> writes result JSON; the
     shared mailbox registry sees the worker come and go.
@@ -199,7 +184,9 @@ async def test_run_worker_writes_result_and_registers_mailbox(tmp_path, monkeypa
     config = AgentConfig()
     config.self_verify = False
     monkeypatch.setattr(loader_mod.ConfigLoader, "load", staticmethod(lambda **kw: config))
-    monkeypatch.setattr(reg_mod.ProviderRegistry, "create", staticmethod(lambda cfg: MockLLM()))
+    monkeypatch.setattr(
+        reg_mod.ProviderRegistry, "create", staticmethod(lambda cfg: MockLLM(text="Task finished."))
+    )
 
     mailbox_dir = tmp_path / "mailboxes"
     mb = Mailbox(mailbox_dir)
@@ -233,7 +220,7 @@ async def test_run_worker_writes_result_and_registers_mailbox(tmp_path, monkeypa
 
 def make_manager(tmp_path) -> SubAgentManager:
     return SubAgentManager(
-        llm=MockLLM(),
+        llm=MockLLM(text="Task finished."),
         tool_registry=ToolRegistry(),
         config=AgentConfig(),
         event_bus=EventBus(),

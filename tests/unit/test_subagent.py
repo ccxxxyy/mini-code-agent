@@ -1,60 +1,18 @@
 """Tests for SubAgent dispatch with mock LLM. 使用 mock LLM 测试 SubAgent 调度。"""
 
 import asyncio
-import json
-from collections.abc import AsyncIterator
-from typing import Any
 
 import pytest
 
 from mini_agent.core.agent_types import get_agent_type
 from mini_agent.core.subagent import SubAgent, SubAgentManager
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk, ToolCallDelta
 from mini_agent.models.config import AgentConfig
 from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool, WriteFileTool
+from tests.mocks import MockLLM, text_response, tool_call_response
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    """Replays a fixed script for every sub-agent. 为每个 SubAgent 重放固定脚本。"""
-
-    def __init__(self, scripts: list[list[StreamChunk]], delay: float = 0.0):
-        self._scripts = scripts
-        self._delay = delay
-        self._call_count = 0
-
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        if self._delay:
-            await asyncio.sleep(self._delay)
-        script = self._scripts[min(self._call_count, len(self._scripts) - 1)]
-        self._call_count += 1
-        for chunk in script:
-            yield chunk
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
-
-
-def text_response(text: str) -> list[StreamChunk]:
-    return [StreamChunk(delta=text), StreamChunk(finish_reason="stop")]
-
-
-def tool_call_response(name: str, args: dict) -> list[StreamChunk]:
-    return [
-        StreamChunk(
-            tool_call_deltas=[
-                ToolCallDelta(index=0, id="c1", name=name, arguments_delta=json.dumps(args))
-            ]
-        ),
-        StreamChunk(finish_reason="tool_calls"),
-    ]
 
 
 def make_manager(scripts, tmp_path, delay=0.0):

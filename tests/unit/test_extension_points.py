@@ -252,36 +252,19 @@ async def test_plan_is_complete_governs_team_loop():
 
 async def test_team_uses_plan_is_complete(tmp_path):
     """AgentTeam.start() terminates when plan.is_complete becomes True."""
-    from collections.abc import AsyncIterator
-    from typing import Any
 
     from mini_agent.core.planner import Planner
     from mini_agent.core.subagent import SubAgentManager
     from mini_agent.core.team import AgentTeam, TeamConfig, TeamMember
     from mini_agent.events.bus import EventBus
-    from mini_agent.llm.base import LLMProvider, StreamChunk
     from mini_agent.models.config import AgentConfig
     from mini_agent.tools.base import ToolRegistry
     from mini_agent.tools.builtin import ReadFileTool
+    from tests.mocks import MockLLM, text_response
 
-    class MockLLM(LLMProvider):
-        def __init__(self):
-            self._calls = 0
-
-        async def stream(self, messages, tools=None, **kw: Any) -> AsyncIterator[StreamChunk]:
-            self._calls += 1
-            text = '[{"description":"a"},{"description":"b"}]' if self._calls == 1 else "done"
-            yield StreamChunk(delta=text)
-            yield StreamChunk(finish_reason="stop")
-
-        def count_tokens(self, text: str) -> int:
-            return len(text) // 4
-
-        @property
-        def context_window(self) -> int:
-            return 128_000
-
-    llm = MockLLM()
+    llm = MockLLM(
+        [text_response('[{"description":"a"},{"description":"b"}]'), text_response("done")]
+    )
     registry = ToolRegistry()
     registry.register(ReadFileTool())
     manager = SubAgentManager(

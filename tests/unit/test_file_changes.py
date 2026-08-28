@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-
 import pytest
 
 from mini_agent.core.agent_loop import AgentLoop
 from mini_agent.events.bus import EventBus
-from mini_agent.llm.base import LLMProvider, StreamChunk
 from mini_agent.models.config import AgentConfig
 from mini_agent.models.message import ToolCall
 from mini_agent.models.session import Session
@@ -17,21 +13,9 @@ from mini_agent.tools.base import ToolContext, ToolRegistry
 from mini_agent.tools.builtin.delete_file import DeleteFileTool
 from mini_agent.tools.builtin.edit_file import EditFileTool
 from mini_agent.tools.builtin.write_file import WriteFileTool
+from tests.mocks import MockLLM
 
 pytestmark = pytest.mark.asyncio
-
-
-class MockLLM(LLMProvider):
-    async def stream(self, messages, tools=None, **kwargs: Any) -> AsyncIterator[StreamChunk]:
-        yield StreamChunk(delta="done")
-        yield StreamChunk(finish_reason="stop")
-
-    def count_tokens(self, text: str) -> int:
-        return len(text) // 4
-
-    @property
-    def context_window(self) -> int:
-        return 128_000
 
 
 def make_loop(tmp_path) -> AgentLoop:
