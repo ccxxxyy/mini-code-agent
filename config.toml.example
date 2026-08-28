@@ -46,6 +46,7 @@
 # sandbox = true             # OS 沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity），默认开启
 # sandbox_auto_allow = false # 沙箱下危险命令免确认（deny 规则仍拦）
 # sandbox_network = false    # 允许沙箱内网络访问
+# worktree_symlink_dirs = [".venv", "node_modules", "vendor"]  # Dirs symlinked into worktrees ([] = disable) 链接进 worktree 的目录（空列表禁用）
 
 [context]
 # 上下文感知：项目指令文件名及优先级（第一个命中即用）

@@ -249,6 +249,7 @@ denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional d
 # sh -c/bash -c/powershell -Command/pwsh -c) — these are not configurable, but can be
 # allowed via allowed_commands or made confirmation-free via sandbox_auto_allow.
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree isolation directory
+worktree_symlink_dirs = [".venv", "node_modules", "vendor"]  # Heavy dirs symlinked into worktrees ([] = disable; Windows auto-falls back to junction)
 worktree_max_age_days = 7    # Clean worktrees older than this many days are cleaned up automatically at startup (0 = disabled)
 sandbox = true               # OS-level sandbox (Linux bwrap/unshare / macOS seatbelt / Windows dual-mode), on by default
 sandbox_auto_allow = false   # Dangerous commands skip confirmation under the sandbox (deny rules still block)

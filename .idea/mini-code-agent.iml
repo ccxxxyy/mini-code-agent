@@ -5,6 +5,10 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/benchmarks/workspaces" />
+      <excludeFolder url="file://$MODULE_DIR$/.mini-agent/worktrees/agent-8267884f/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.mini-agent/worktrees/agent-84f59c8a/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.mini-agent/worktrees/agent-bd3c0af4/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.mini-agent/worktrees/agent-fe22c61d/.venv" />
     </content>
     <orderEntry type="jdk" jdkName="uv (mini-code-agent)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

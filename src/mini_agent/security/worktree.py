@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Dependency dirs symlinked into new worktrees so agents skip reinstall
-# 创建 worktree 时符号链接的依赖目录——Agent 免重装依赖
-_LINK_DIRS = ("node_modules", ".venv", "vendor")
+_DEFAULT_SYMLINK_DIRS = (".venv", "node_modules", "vendor")
 
 
 @dataclass
@@ -57,9 +57,17 @@ class WorktreeManager:
     """Manages git worktree creation, tracking, and cleanup.
     管理 git worktree 的创建、跟踪与清理。"""
 
-    def __init__(self, repo_dir: Path, base_dir: str = ".mini-agent/worktrees") -> None:
+    def __init__(
+        self,
+        repo_dir: Path,
+        base_dir: str = ".mini-agent/worktrees",
+        symlink_dirs: list[str] | None = None,
+    ) -> None:
         self._repo_dir = repo_dir
         self._base_dir = repo_dir / base_dir
+        self._symlink_dirs = (
+            symlink_dirs if symlink_dirs is not None else list(_DEFAULT_SYMLINK_DIRS)
+        )
 
     async def create(self, branch_name: str, base_ref: str = "HEAD") -> Path:
         """Create a new worktree on a new branch. Returns the worktree path.
@@ -88,17 +96,26 @@ class WorktreeManager:
     def _link_dependency_dirs(self, worktree_path: Path) -> None:
         """Symlink dependency dirs from the main repo into the worktree.
         把主仓库的依赖目录符号链接到 worktree——免重装依赖。
-        Windows without developer mode lacks symlink permission: skip silently.
-        Windows 无开发者模式时缺少符号链接权限：静默跳过。"""
-        for dep in _LINK_DIRS:
+        Windows without developer mode: fall back to junction (mklink /J).
+        Windows 无开发者模式：回退到 junction（mklink /J）。"""
+        for dep in self._symlink_dirs:
             src = self._repo_dir / dep
             dst = worktree_path / dep
             if src.is_dir() and not dst.exists():
                 try:
                     dst.symlink_to(src, target_is_directory=True)
                 except OSError:
-                    logger.debug("symlink dep failed: %s", dep, exc_info=True)
-                    pass
+                    if sys.platform == "win32":
+                        try:
+                            subprocess.run(
+                                ["cmd", "/c", "mklink", "/J", str(dst), str(src)],
+                                check=True,
+                                capture_output=True,
+                            )
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            logger.debug("junction fallback failed: %s", dep, exc_info=True)
+                    else:
+                        logger.debug("symlink dep failed: %s", dep, exc_info=True)
 
     async def remove(self, worktree_path: Path, force: bool = False) -> None:
         """Remove a worktree. Refuses if it has uncommitted changes unless force.
@@ -110,12 +127,31 @@ class WorktreeManager:
                     f"Worktree has uncommitted changes: {worktree_path}. Use force=True."
                 )
 
+        self._unlink_dependency_dirs(worktree_path)
+
         args = ["worktree", "remove", str(worktree_path)]
         if force:
             args.append("--force")
         code, _out, err = await _run_git(*args, cwd=self._repo_dir)
         if code != 0:
             raise WorktreeError(f"git worktree remove failed: {err}")
+
+    def _unlink_dependency_dirs(self, worktree_path: Path) -> None:
+        """Remove symlinks/junctions in the worktree before deletion.
+        删除前先断开 worktree 内的符号链接/junction——防止 git worktree remove
+        递归删除时跟随链接误删主仓库的真身目录。"""
+        for dep in self._symlink_dirs:
+            dst = worktree_path / dep
+            if not dst.exists() and not dst.is_symlink():
+                continue
+            try:
+                if dst.is_symlink():
+                    dst.unlink()
+                elif sys.platform == "win32" and dst.is_dir():
+                    # junction: rmdir without /s removes the mount point only
+                    dst.rmdir()
+            except OSError:
+                logger.debug("unlink dep failed: %s", dep, exc_info=True)
 
     async def list(self) -> list[WorktreeInfo]:
         """List all worktrees of the repository. 列出仓库的所有 worktree。"""

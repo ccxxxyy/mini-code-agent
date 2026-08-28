@@ -234,6 +234,7 @@ LLM 自动分解任务 → 按角色匹配团队成员 → 并行执行 → 汇�
 scope 必须是 `command`、`path` 或 `tool`，pattern 使用 glob 匹配。  
 `tool` scope 按工具名匹配，在命令/路径检查之前评估：allow 整体信任该工具（危险命令也不再确认）；deny 直接拦截整个工具。  
 `command` 类 allow 规则只匹配命令本体，不像 deny 那样解包 `cmd /c` 等包装形态（扩大 deny 是收紧、扩大 allow 是放松）。  
+**子 agent 注意**：LLM 发出的实际命令可能与你预期不同——Windows 上可能包在 `cmd /c` 里，或用 `python3` 而非 `python`。如果 `/allow command "python -c *"` 对子 agent 不生效，试 `/allow command "*python*-c *"` 覆盖包装形态，或用 `/allow tool bash` 整体信任 bash（跳过所有命令级检查，慎用）。  
 不带 `--save` 只在当前会话生效；带 `--save` 写入项目级 permissions.toml，重启后自动加载。
 另一条持久化入口：权限确认弹窗按 `a` 后会追问一行 `save permanently (project permissions.toml)? [y/N]`——回 `y` 等价于对该确切命令/路径执行了 `/allow ... --save`（默认回车不写盘，仅会话级）。  
 重复规则自动去重，不会重复添加。

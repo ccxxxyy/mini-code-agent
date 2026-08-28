@@ -2,7 +2,7 @@
 
 > 本文档逐条对照项目最初的 18 项需求（12 项核心功能 + 6 大技术层面），
 > 说明每一项的实现位置、实现方式与验证证据。
-> 当前版本 v1.1.0，1201 个测试全部通过（1 skipped）。
+> 当前版本 v1.1.0，1379 个测试全部通过（1 skipped）。
 
 ---
 
@@ -181,8 +181,9 @@
 - WorktreeManager：create（新分支+工作树到 `.mini-agent/worktrees/`）/ remove（脏树保护，未提交变更拒绝删除）/ list / status / merge_back（--no-ff 合并 + 冲突检测 + 自动 abort 保持仓库干净）
 - 自动接入：`SubAgentManager.spawn(isolation="worktree")` 自动创建工作树并把子 Agent 的 working_dir 切进去——多个 Agent 的文件修改天然隔离
 - TeamConfig.isolation="worktree" 让整个团队每个成员各占一棵工作树
+- 重型目录软链：`worktree_symlink_dirs` 可配列表（默认 .venv/node_modules/vendor，空列表禁用）自动链接进 worktree——Agent 免重装依赖；Windows 符号链接失败回退 junction；删除前先断开链接防误删主仓库
 
-**验证**：6 个真实 git 仓库集成测试（创建/脏树保护/合并/冲突）
+**验证**：15 个真实 git 仓库集成测试（创建/脏树保护/合并/冲突/链接配置/空列表禁用/删除安全）
 
 ---
 
@@ -269,7 +270,7 @@
 | 维度 | 数据 |
 |---|---|
 | 源文件 | 112 个 Python 文件，五层架构（交互/引擎/工具/记忆/安全）+ EventBus 解耦 |
-| 测试 | 1201 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
+| 测试 | 1379 个测试全部通过（1 skipped，约 100 秒，零网络依赖），单元 64 文件 + 集成 5 文件 |
 | 工具 | 21 个内置工具（read_file / write_file / edit_file / delete_file / bash / glob / grep / spawn_agents / send_message / wait_message / tool_search / mcp_call / ask_user / exit_plan_mode / task_create / task_get / task_list / task_update / load_skill / install_skill / synthetic_output），LLM 自主决定使用 |
 | CI | GitHub Actions 三个 Job（Lint / Test 双 Python 版本 / Build）全绿 |
 | E2E | 真实 LLM API 验证：自主工具调用、并行 SubAgent、Team 编排、流式渲染、/trace 全链路 |

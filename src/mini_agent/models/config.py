@@ -142,6 +142,9 @@ class SecurityConfig:
         default_factory=lambda: ["rm -rf /", "sudo", "curl|sh", "wget|sh"]
     )
     worktree_base_dir: str = ".mini-agent/worktrees"
+    worktree_symlink_dirs: list[str] = field(
+        default_factory=lambda: [".venv", "node_modules", "vendor"]
+    )
     # Stale worktrees older than this are auto-removed at startup (0 = off)
     # 超过此天数的过期 worktree 启动时自动清理（0 = 禁用）
     worktree_max_age_days: int = 7

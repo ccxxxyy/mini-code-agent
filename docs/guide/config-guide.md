@@ -248,6 +248,7 @@ denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # 无条件拒绝
 # sh -c/bash -c/powershell -Command/pwsh -c/cmd /c）——这些不可配，但可通过
 # allowed_commands 放行或 sandbox_auto_allow 免确认。
 worktree_base_dir = ".mini-agent/worktrees"  # Git worktree 隔离目录
+worktree_symlink_dirs = [".venv", "node_modules", "vendor"]  # 链接进 worktree 的重型目录（空列表禁用；Windows 符号链接失败自动回退 junction）
 worktree_max_age_days = 7    # 超过此天数的干净 worktree 启动时自动清理（0 = 禁用）
 sandbox = true               # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 双模式），默认开启
 sandbox_auto_allow = false   # 沙箱下危险命令免确认（deny 规则仍拦）

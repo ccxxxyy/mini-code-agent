@@ -149,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # 66 unit test files, 1201 tests
+│   ├── unit/                        # unit test files, 1379 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -546,6 +546,9 @@ class SecurityConfig:
         "rm -rf /", "sudo", "curl|sh", "wget|sh"
     ])
     worktree_base_dir: str = ".mini-agent/worktrees"
+    worktree_symlink_dirs: list[str] = field(
+        default_factory=lambda: [".venv", "node_modules", "vendor"]
+    )  # 链接进 worktree 的重型目录（空列表禁用）
     worktree_max_age_days: int = 7        # 过期 worktree 启动时自动清理（0 = 禁用）
     sandbox: bool = True                  # OS 级沙箱（Linux bwrap/unshare / macOS seatbelt / Windows 管理员 Low Integrity / 非管理员无文件保护——限制仅文档说明），默认开启
     sandbox_auto_allow: bool = False
@@ -2781,15 +2784,20 @@ class PathGuard:
 class WorktreeManager:
     """Git worktree 的创建、跟踪与清理。"""
 
-    def __init__(self, repo_dir: Path, base_dir: str = ".mini-agent/worktrees") -> None: ...
+    def __init__(self, repo_dir: Path, base_dir: str = ".mini-agent/worktrees",
+                 symlink_dirs: list[str] | None = None) -> None: ...
 
     async def create(self, branch_name: str, base_ref: str = "HEAD") -> Path:
         """git worktree add <base_dir>/<branch_name> -b <branch_name> <base_ref>
-        创建后把依赖目录 node_modules/.venv/vendor 符号链接进新 worktree
-        （P54，Agent 免重装依赖；Windows 无开发者模式缺符号链接权限时静默跳过）。"""
+        创建后把 symlink_dirs 中存在于主仓库的目录链接进 worktree（B18，
+        可配列表默认 .venv/node_modules/vendor，空列表禁用；Windows 符号
+        链接失败时回退 junction mklink /J，非 Windows 温和降级）。"""
         ...
 
-    async def remove(self, worktree_path: Path, force: bool = False) -> None: ...
+    async def remove(self, worktree_path: Path, force: bool = False) -> None:
+        """移除前先 _unlink_dependency_dirs 断开所有链接——防止 git worktree
+        remove 递归删除时跟随链接误删主仓库真身。"""
+        ...
     async def list(self) -> list[WorktreeInfo]: ...
     async def status(self, worktree_path: Path) -> WorktreeInfo: ...
     async def has_uncommitted_changes(self, worktree_path: Path) -> bool: ...

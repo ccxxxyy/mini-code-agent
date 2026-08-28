@@ -133,6 +133,54 @@ async def test_create_symlinks_dependency_dirs(git_repo):
     assert (linked / "marker.txt").is_file()
 
 
+async def test_symlink_dirs_configurable(git_repo):
+    """Custom symlink_dirs list is respected. 自定义 symlink_dirs 列表生效。"""
+    custom = git_repo / "my_deps"
+    custom.mkdir()
+    (custom / "lib.txt").write_text("custom", encoding="utf-8")
+
+    mgr = WorktreeManager(git_repo, symlink_dirs=["my_deps"])
+    wt = await mgr.create("custom-deps")
+
+    linked = wt / "my_deps"
+    if not linked.exists():
+        pytest.skip("symlink not permitted")
+    assert (linked / "lib.txt").is_file()
+    # default dirs NOT linked since only "my_deps" was specified
+    assert not (wt / ".venv").exists() or not (wt / ".venv").is_symlink()
+
+
+async def test_symlink_dirs_empty_disables(git_repo):
+    """Empty symlink_dirs disables linking. 空列表禁用链接。"""
+    venv = git_repo / ".venv"
+    venv.mkdir()
+
+    mgr = WorktreeManager(git_repo, symlink_dirs=[])
+    wt = await mgr.create("no-deps")
+
+    assert not (wt / ".venv").is_symlink()
+
+
+async def test_remove_worktree_preserves_original(git_repo):
+    """Removing a worktree must not delete the original dir in the main repo.
+    删除 worktree 不得误删主仓库的原始目录。"""
+    venv = git_repo / ".venv"
+    venv.mkdir()
+    (venv / "packages.txt").write_text("kept", encoding="utf-8")
+
+    mgr = WorktreeManager(git_repo)
+    wt = await mgr.create("safe-rm")
+
+    linked = wt / ".venv"
+    if not linked.exists():
+        pytest.skip("symlink not permitted")
+
+    await mgr.remove(wt, force=True)
+    assert not wt.exists()
+    assert venv.is_dir()
+    assert (venv / "packages.txt").read_text(encoding="utf-8") == "kept"
+
+
 async def test_has_uncommitted_changes(git_repo):
     mgr = WorktreeManager(git_repo)
     wt = await mgr.create("check-changes")

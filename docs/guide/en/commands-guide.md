@@ -234,6 +234,7 @@ Teaching mode: prints an explanatory panel before each tool call (why this tool 
 The scope must be `command`, `path` or `tool`; patterns use glob matching.
 The `tool` scope matches by tool name and is evaluated before command/path checks: allow trusts the tool entirely (dangerous commands are no longer confirmed either); deny blocks the entire tool outright.
 Command-scope allow rules match the plain command only — unlike deny, they do NOT unwrap `cmd /c`-style wrappers (widening deny fails closed, widening allow fails open).
+**Sub-agent caveat**: The actual command the LLM sends may differ from what you expect — on Windows it may be wrapped in `cmd /c`, or use `python3` instead of `python`. If `/allow command "python -c *"` doesn't work for a sub-agent, try `/allow command "*python*-c *"` to cover wrapped forms, or use `/allow tool bash` to trust bash entirely (skips all command-level checks — use with caution).
 Without `--save`, rules only apply to the current session; with `--save`, they are written to the project-level permissions.toml and loaded automatically after restart.
 Another persistence entry point: after pressing `a` in the permission confirmation dialog, a one-line follow-up asks `save permanently (project permissions.toml)? [y/N]` — answering `y` is equivalent to running `/allow ... --save` for that exact command/path (plain Enter keeps it session-only, nothing is written).
 Duplicate rules are automatically deduplicated and will not be added twice.

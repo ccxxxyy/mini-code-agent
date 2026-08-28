@@ -656,10 +656,11 @@ mewcode 压缩恢复附件含 skill 调用记录（`record_skill_invocation/snap
 **验证要点**：子 agent 调用后父方拿到结构化字段 / 不调用时行为不变 / JSON 透传不被转述改写。工作量：小。
 已实现：`SyntheticOutputTool`（READ 类别，additionalProperties schema）接受任意 JSON kwargs 原样返回；`SubAgentResult.structured_output` 新字段由 `_extract_structured_output()` 从对话的最后一次 synthetic_output 工具调用中提取；`_format_agent_result` 和 `_deliver_result` 附带 JSON 代码块；verify prompt 强制要求调用 synthetic_output（"you MUST call ... This is mandatory"，初版建议措辞 LLM 会跳过，加强后实测生效）；`_READ_ONLY_TOOLS` 包含 synthetic_output 供 explore/plan/verify 类型使用；pane worker 结果序列化同步。12 个新测试，1375 个全过。真实 LLM 验证：verify agent 调用 synthetic_output 返回 `{"pass": "true"}` + PASS verdict、worker agent 读 pyproject.toml 返回 `{"project_name": "mini-code-agent", "found": "true"}` 原样透传、`--wait` 前台路径 `Structured output:` + JSON 代码块格式正确、不调用时行为不变。
 
-☐ **B18 worktree 重型目录软链**
+✅ **B18 worktree 重型目录软链**
 **来源**：全模块面对照扫描的程度差距。mewcode worktree/setup.py 在创建 worktree 时把重型目录（默认 node_modules/.venv/vendor，可配 `symlink_directories`）从主工作区**软链**进 worktree——避免每个隔离 agent 重装依赖/复制巨型目录，创建秒级完成且不多占磁盘。mini 的 worktree 隔离（/spawn --isolated）每个 worktree 是干净 checkout，Python 项目里子 agent 要么没有 .venv 可用、要么依赖重建。
 **方案**：`SecurityConfig` 新增 `worktree_symlink_dirs: list[str] = [".venv", "node_modules", "vendor"]`；WorktreeManager 创建后对存在于主工作区的目录建符号链接（Windows 用 junction 回退，无权限时警告降级不失败）；文档明示风险——软链目录是共享可写的，并行 agent 同时写依赖目录仍会冲突（典型场景只读使用，可接受）。
 **验证要点**：worktree 内 .venv 可用 / Windows junction 生效或温和降级 / 配置为空列表禁用 / 删除 worktree 不误删主工作区真身。工作量：小-中。
+已实现：`SecurityConfig.worktree_symlink_dirs` 可配字段（默认 `[".venv", "node_modules", "vendor"]`，空列表禁用）；`WorktreeManager` 构造函数接受 `symlink_dirs` 参数，app.py 从 config 注入；`_link_dependency_dirs` 用可配列表替换硬编码 `_LINK_DIRS`，Windows 符号链接失败时回退 junction（`mklink /J`），非 Windows 温和降级不失败；新增 `_unlink_dependency_dirs` 在 `remove()` 前断开所有链接——防止 `git worktree remove` 递归删除时跟随链接误删主仓库真身（Windows 实测确认此问题存在）；`config.toml.example` 新增字段说明。4 个新集成测试（自定义列表 / 空列表禁用 / 删除保留原始 / 默认回归），1379 个全过。真实 LLM 验证（Windows）：worktree 内 `.venv` 为 Junction 确认回退生效 / `worktree_symlink_dirs = []` 后无 `.venv` 确认禁用 / 注释恢复后 junction 回来确认默认值回归 / 主仓库 `.venv/Scripts/` 全程完好确认删除安全。
 
 ### C. 文档过时
 

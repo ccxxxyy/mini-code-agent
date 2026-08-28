@@ -1,4 +1,4 @@
-"""Tests for the SyntheticOutput structured output tool (B17).
+"""Tests for the SyntheticOutput structured output tool.
 SyntheticOutput 结构化输出工具测试。"""
 
 from __future__ import annotations
