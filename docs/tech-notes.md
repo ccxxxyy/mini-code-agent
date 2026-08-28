@@ -1178,7 +1178,7 @@ report = await team.start(task)
 
 `SubAgentManager` 和 `WorktreeManager` 是首次在 Application 中实例化。之前只有 AgentLoop（单 Agent 循环），现在加了多 Agent 基础设施：
 
-- `WorktreeManager(repo_dir=working_dir)` — worktree 隔离能力
+- `WorktreeManager(repo_dir=working_dir, symlink_dirs=config.security.worktree_symlink_dirs)` — worktree 隔离能力（B18 加入可配 symlink_dirs）
 - `SubAgentManager(llm=worker_llm, ...)` — worker LLM 用 `create_for_role(config, "worker")` 创建
 - 两个新事件 `SubAgentSpawnEvent` / `SubAgentCompleteEvent` 在 spawn/wait 时 emit，供未来进度面板（roadmap 2.2）和审计日志使用
 
@@ -1978,7 +1978,7 @@ HookStage 定义了 7 个枚举值，但只有 4 个真正触发（PRE_TOOL/POST
 
 ## 54.2 实现：三项生命周期能力
 
-1. **依赖符号链接**：`create()` 末尾 `_link_dependency_dirs()`——主仓库的 `node_modules`/`.venv`/`vendor` 存在则 symlink 进 worktree。Windows 无开发者模式缺符号链接权限 → OSError 静默跳过（worktree 仍可用，只是要重装依赖）
+1. **依赖符号链接**：`create()` 末尾 `_link_dependency_dirs()`——`SecurityConfig.worktree_symlink_dirs` 可配列表（默认 `.venv`/`node_modules`/`vendor`，空列表禁用）中存在于主仓库的目录 symlink 进 worktree。Windows 符号链接失败时回退 junction（`mklink /J`），非 Windows 温和降级；`remove()` 前 `_unlink_dependency_dirs()` 先断开链接防止 `git worktree remove` 跟随链接误删主仓库真身（B18）
 2. **过期清理**：`cleanup_stale(max_age_days)`——扫描 base_dir，目录 mtime 超龄且 `status().is_clean` 的删除 worktree + `git branch -D` 删分支。app 启动时自动调用（`worktree_max_age_days=7` 可配，0 禁用）
 3. **变更可见**：`/spawn wait` 结果显示 worktree 路径 + `git merge <branch>` 提示——用户知道隔离产出在哪、怎么合并
 
@@ -3832,3 +3832,19 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 注意：LLM 传参时布尔值可能变字符串（`"true"` 而非 `true`），因为 schema 是 `additionalProperties: true` 无类型约束——这是预期行为，不是工具 bug。后台模式（`background=true`）的结果经 mailbox 投递给主 LLM，主 LLM 会自行格式化输出，此时 `Structured output:` 代码块不直接可见（需看 `--wait` 前台路径）。
 
 **验证**：12 个新测试（工具类别/schema/执行/空参数/嵌套结构/提取正常/多次取最后/无调用返回 None/默认 None/有值/格式包含/格式不包含），1375 全过。
+
+---
+
+## §116 B18 worktree 重型目录软链（配置化 + junction 回退 + 删除安全）
+
+**前因**：P54 的 `_link_dependency_dirs` 用硬编码 `_LINK_DIRS = ("node_modules", ".venv", "vendor")` 创建符号链接；不可配、Windows 无开发者模式只能跳过（Agent 要重装依赖）、且 `git worktree remove` 在 Windows 上会跟随符号链接/junction 递归删除主仓库的真身目录。
+
+**方案**：
+
+1. **可配列表**：`SecurityConfig.worktree_symlink_dirs`（默认 `[".venv", "node_modules", "vendor"]`，空列表禁用）；`WorktreeManager` 构造函数新增 `symlink_dirs` 参数，app.py 从 config 注入；模块常量改名 `_DEFAULT_SYMLINK_DIRS`（仅作构造函数默认值）
+
+2. **Windows junction 回退**：`_link_dependency_dirs` 中 `symlink_to` 抛 `OSError` 时，Windows 上用 `subprocess.run(["cmd", "/c", "mklink", "/J", dst, src])` 创建 junction（不需要开发者模式权限）；junction 失败再温和降级；非 Windows 直接 debug 日志
+
+3. **删除安全**：新增 `_unlink_dependency_dirs()`，`remove()` 在调用 `git worktree remove` 前先遍历 `_symlink_dirs` 断开所有链接——符号链接用 `unlink()`，Windows junction 用 `rmdir()`（只移除挂载点不删内容）。实测 Windows 上不做此步 `git worktree remove --force` 会跟随 junction 递归删除主仓库的 `.venv` 全部内容
+
+**验证**：4 个新集成测试（自定义列表生效 + 默认目录不链接 / 空列表完全禁用 / 删除 worktree 后原始目录及内容完好 / 默认链接回归），1379 全过。真实 LLM 验证（Windows 终端）：`/spawn --isolated --wait` 创建的 worktree 内 `.venv` 为 Junction（`IO_REPARSE_TAG_MOUNT_POINT`，目标指向主仓库）确认 junction 回退生效；项目 config.toml 设 `worktree_symlink_dirs = []` 后 worktree 内无 `.venv` 确认空列表禁用生效；注释掉后重启 junction 恢复确认默认值回归；主仓库 `.venv/Scripts/` 全程完好确认删除安全。另发现 `/allow command "python -c *"` 对子 agent 不生效（LLM 实际命令可能被 `cmd /c` 包装或用 `python3`，allow 不解包），已在 commands-guide 中英文补充子 agent 场景实操提示。

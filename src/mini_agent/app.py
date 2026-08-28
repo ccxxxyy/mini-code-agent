@@ -338,7 +338,10 @@ class Application:
 
         # SubAgent + Worktree: /spawn and /team use these
         # SubAgent + Worktree：/spawn 和 /team 命令使用
-        self.worktree_manager = WorktreeManager(repo_dir=working_dir)
+        self.worktree_manager = WorktreeManager(
+            repo_dir=working_dir,
+            symlink_dirs=config.security.worktree_symlink_dirs,
+        )
         worker_llm = ProviderRegistry.create_for_role(config, "worker")
         worker_profile = config.llm_profiles.get(config.worker_profile)
         worker_model = worker_profile.model if worker_profile else config.llm.model

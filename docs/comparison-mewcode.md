@@ -625,8 +625,9 @@ P80 补齐默认类型接线（拓展点 #10）：`SubAgent.__init__` 未指定�
 |---|---|---|
 | Git worktree | **完整生命周期管理**：符号链接/过期清理/变更检测 (P54) | 完整生命周期管理（符号链接/过期清理/变更检测） |
 
-**已完成**（P54）：
-- `create()` 自动符号链接 `node_modules`/`.venv`/`vendor`（Windows 无权限静默跳过）
+**已完成**（P54 + B18）：
+- `create()` 自动符号链接 `worktree_symlink_dirs` 可配列表（默认 `.venv`/`node_modules`/`vendor`，空列表禁用）；Windows 符号链接失败回退 junction（`mklink /J`）
+- `remove()` 前 `_unlink_dependency_dirs()` 断开链接——防 `git worktree remove` 跟随链接误删主仓库真身
 - `cleanup_stale(max_age_days)` — 启动时清理超龄的干净 worktree（脏的保留，不丢未提交工作）+ 删除对应分支
 - `SecurityConfig.worktree_max_age_days = 7`（0 = 禁用）
 - `has_uncommitted_changes()` 便捷检测方法
