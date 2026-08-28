@@ -3848,3 +3848,25 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 3. **删除安全**：新增 `_unlink_dependency_dirs()`，`remove()` 在调用 `git worktree remove` 前先遍历 `_symlink_dirs` 断开所有链接——符号链接用 `unlink()`，Windows junction 用 `rmdir()`（只移除挂载点不删内容）。实测 Windows 上不做此步 `git worktree remove --force` 会跟随 junction 递归删除主仓库的 `.venv` 全部内容
 
 **验证**：4 个新集成测试（自定义列表生效 + 默认目录不链接 / 空列表完全禁用 / 删除 worktree 后原始目录及内容完好 / 默认链接回归），1379 全过。真实 LLM 验证（Windows 终端）：`/spawn --isolated --wait` 创建的 worktree 内 `.venv` 为 Junction（`IO_REPARSE_TAG_MOUNT_POINT`，目标指向主仓库）确认 junction 回退生效；项目 config.toml 设 `worktree_symlink_dirs = []` 后 worktree 内无 `.venv` 确认空列表禁用生效；注释掉后重启 junction 恢复确认默认值回归；主仓库 `.venv/Scripts/` 全程完好确认删除安全。另发现 `/allow command "python -c *"` 对子 agent 不生效（LLM 实际命令可能被 `cmd /c` 包装或用 `python3`，allow 不解包），已在 commands-guide 中英文补充子 agent 场景实操提示。
+
+---
+
+## §117 组合根拆分：Application.__init__ 约 500 行 → 25 行
+
+**前因**：project-assessment §2.1 指出组合根臃肿——审计时 `Application.__init__` 433 行（124-557），实际动手时已增长到约 500 行（124-625），把 20+ 个子系统的装配逻辑、回调注册、事件订阅、UI 回调绑定全部堆在一个方法里，没有任何拆分；且 1298 行的 app.py 没有对应的单元测试文件（issue #267）。
+
+**方案**：不引入 builder/工厂对象——`Application(config)` 公开构造接口和全部 `self.*` 属性名保持不变（20+ 个测试文件与 `cli.py`/`remote/server.py` 直接构造并访问属性，改属性面代价远大于收益）。把 `__init__` 按子系统拆成 16 个 `_setup_*`/`_wire_*` 装配方法，`__init__` 本体压缩为 25 行的按依赖顺序调用清单（组合根读起来是目录而非实现）：terminal → session → llm_and_tools → security → hooks → memory → agent_loop → subagents → event_notifications → process_tools → observers → services → startup_mode → extensions → wire_terminal → wire_agent_callbacks。
+
+**关键取舍**：
+
+1. **局部变量提升**：原 `working_dir` 局部变量在 13 处被跨段使用，提升为 `self._working_dir`（`__init__` 中一次 `Path.cwd()`）；`active_theme` 改由 `self.terminal.theme` 取回；`tool_context` 统一经已有的 `self._tool_context` 引用。其余局部（`path_guard`/`worker_llm`/`compressor` 等）只在单段使用，留在各自方法内。
+2. **装配顺序逐段保持原样**。唯一无害重排：`audit_logger.attach()` 原来隔在 MCPManager/TaskStore 创建之后（创建与 attach 分离 14 行），现挪回创建处——MCPManager/TaskStore 不订阅事件总线，订阅者相对顺序 trace→teach→audit→recorder→cost 与原来一致。
+3. **方法内 import 保持原位**：延迟 import（如 `FileStateCache`、`MCPManager`）随代码段进入对应方法，不上提为模块级——保持原有的启动开销分布。
+
+拆分后最大方法 `_wire_agent_callbacks` 72 行（流式/工具展示回调闭包）、`_setup_security` 71 行（权限 + 沙箱分支），其余均 <60 行。app.py 1298→1363 行（方法头 + docstring 的代价，换来每段可单独阅读/测试）。
+
+### 117.1 装配单元测试
+
+新增 `tests/unit/test_app.py`（10 个测试）守护装配产物完整性——此前 app.py 是全项目唯一无对应测试文件的大文件：子系统属性齐全（21 项非 None）、ToolContext 注入完整（session/event_bus/config/working_dir/subagent_manager/mailbox/mcp_manager/task_store/skill_registry/agent_loop_ref/ask_user_callback 全部断言）、agent_loop 回调接线（confirm/snapshot/result_cache/mailbox/model_name + 7 个流式与工具回调）、mailbox "main" 已注册、系统提示词含模型名与工作目录、plan-mode 经 agent_loop_ref 往返切换同步权限矩阵、启动模式三分支（accept-edits 配置生效 / 非法值回退 default / enable_plan_mode 兼容）、仅注册 enabled_tools 内工具。
+
+**验证**：1389 全过（1379+10），ruff check/format 通过。真实 LLM 验证（项目根目录终端窗口）：`uv run mini-agent -p "读取 pyproject.toml 并告诉我项目名和版本号"` → 输出 "项目名是 **mini-code-agent**，版本号是 **1.1.0**"，扩展加载提示（"Loaded 1 custom agent type(s)" / "Loaded 1 event listener(s): stats"）正常出现——重构后的组合根完整装配了工具调用、扩展加载、headless 输出全链路。

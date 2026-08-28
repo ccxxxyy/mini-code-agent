@@ -149,7 +149,7 @@ mini-code-agent/
 │
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
-│   ├── unit/                        # unit test files, 1379 tests
+│   ├── unit/                        # unit test files, 1389 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -687,6 +687,8 @@ class PermissionDecision(StrEnum):
 ### 4.1 `app.py` -- 应用编排器
 
 职责：装配所有层，管理应用生命周期，提供顶层 `run()` 入口。
+
+`__init__` 是纯组合根：本体只是一份按依赖顺序调用的清单，实际装配拆在 16 个 `_setup_*`/`_wire_*` 方法里（每个方法只装配一个子系统），公开属性面见下。装配测试见 `tests/unit/test_app.py`（tech-notes §117）。
 
 ```python
 class Application:

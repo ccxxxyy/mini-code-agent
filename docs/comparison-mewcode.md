@@ -33,7 +33,7 @@
 **差距**：Textual 是完整的 TUI 框架（类似终端里的 React），组件化程度高、布局灵活；mini 是 Rich + prompt_toolkit 手动拼接。
 
 **增强方案**：
-不建议迁移到 Textual——这是架构级重写（~2000 行 app.py 要全部重来），且 mini 的设计哲学是"最小依赖、可读性优先"。Rich + prompt_toolkit 能实现所有需要的功能。
+不建议迁移到 Textual——这是架构级重写（~1400 行 app.py 要全部重来），且 mini 的设计哲学是"最小依赖、可读性优先"。Rich + prompt_toolkit 能实现所有需要的功能。
 
 在现有框架上补齐体验差距：
 1. **可折叠工具调用块**：工具调用默认显示简略版（`╭─ read_file file_path=x.txt → ✓ 42 lines`），`/trace on` 时展开详情。✅ 已实现：只读工具同轮 ≥2 次折叠为一行 `✓ Done (N tool uses · Xs)` 摘要——opt-in，顶级配置 `collapse_tool_calls = true` 开启、默认不折叠（tech-notes §114）
