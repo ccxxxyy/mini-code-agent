@@ -274,3 +274,35 @@ def test_merge_top_level_scalars(monkeypatch, tmp_path):
     config = ConfigLoader.load()
     assert config.theme == "dark"
     assert config.max_agent_iterations == 30
+
+
+def test_profile_roles_from_toml_survive_without_env(monkeypatch, tmp_path):
+    """TOML-set planner/worker_profile must not be wiped by the unset-env
+    default (regression: unconditional env assign cleared TOML values).
+    TOML 配置的混编 profile 不能被未设置的环境变量空缺省清掉（回归：
+    无条件 env 赋值曾清空 TOML 值）。"""
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text(
+        'planner_profile = "smart"\nworker_profile = "fast"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MINI_AGENT_PLANNER_PROFILE", raising=False)
+    monkeypatch.delenv("MINI_AGENT_WORKER_PROFILE", raising=False)
+
+    config = ConfigLoader.load()
+    assert config.planner_profile == "smart"
+    assert config.worker_profile == "fast"
+
+
+def test_profile_roles_env_overrides_toml(monkeypatch, tmp_path):
+    toml_dir = tmp_path / ".mini-agent"
+    toml_dir.mkdir()
+    (toml_dir / "config.toml").write_text('planner_profile = "smart"\n', encoding="utf-8")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MINI_AGENT_PLANNER_PROFILE", "env-wins")
+
+    config = ConfigLoader.load()
+    assert config.planner_profile == "env-wins"

@@ -109,7 +109,7 @@ winpty uv run mini      # Source install + winpty
 | Windows Terminal | ✅ | ✅ Full color | ✅ | ✅ | ⭐⭐⭐ |
 | PowerShell | ✅ | ✅ | ✅ | ✅ | ⭐⭐ |
 | CMD | ✅ | ✅ (Rich auto-fallback) | ✅ | Unicode symbols (requires UTF-8 code page) | ⭐⭐ |
-| Git Bash directly | ❌ Plain input | ✅ | ❌ | ✅ | ⭐ |
+| Git Bash directly | ❌ Plain input | ❌ (stdout is a pipe, Rich disables color) | ❌ | ✅ | ⭐ |
 | Git Bash + winpty | ✅ | ✅ | ✅ | ✅ | ⭐⭐ |
 
 ---

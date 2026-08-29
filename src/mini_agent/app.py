@@ -195,6 +195,10 @@ class Application:
         if proj:
             self._context_file_loaded = proj[0]
             parts.append(f"[{proj[0]}]\n{proj[1]}")
+            # Startup hint promised; the print was lost in the
+            # composition-root split leaving this field write-only.
+            # 承诺的启动提示；组合根拆分时打印丢失，字段沦为只写。
+            self.terminal.show_info(f"context: loaded {proj[0]}")
         if parts and marker not in self.session.conversation.system_prompt:
             self.session.conversation.system_prompt += marker + "\n\n".join(parts)
 
@@ -1074,7 +1078,12 @@ class Application:
                         if selected is None:
                             return HookResult()
                     else:
-                        selected = entries[:10]
+                        # <= recall_threshold entries: inject them all (the
+                        # slice is a no-op guard; a hardcoded [:10] silently
+                        # truncated when users raised the threshold past 10)
+                        # 条目数 <= recall_threshold：全部注入（切片只是防御；
+                        # 曾硬编码 [:10]，用户把阈值调过 10 后被静默截断）
+                        selected = entries[: mem_cfg.recall_threshold]
                     if selected:
                         memory_text = "\n".join(f"- {e.content}" for e in selected)
                         app.session.conversation.system_prompt = sp + marker + memory_text

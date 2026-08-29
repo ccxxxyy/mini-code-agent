@@ -933,6 +933,10 @@ def _make_memory(app: Application) -> HandlerFn:
 # /session list default row cap; --all is the escape hatch (not configurable
 # -- no config value here). /session list 默认显示条数上限，--all 查看全部。
 _SESSION_LIST_LIMIT = 20
+# /spawn --wait & /spawn wait inline result truncation (display-only; the
+# LLM never sees this output). /spawn 阻塞式结果的内联显示截断（仅显示层，
+# LLM 不消费该输出）。
+_WAIT_RESULT_MAX_CHARS = 8000
 
 
 def _make_session(app: Application) -> HandlerFn:
@@ -1675,8 +1679,10 @@ def _format_agent_result(r) -> str:
         lines.append("```")
     if r.output:
         output = r.output
-        if len(output) > 8000:
-            output = output[:8000] + f"\n... (truncated, {len(r.output)} chars total)"
+        if len(output) > _WAIT_RESULT_MAX_CHARS:
+            output = output[:_WAIT_RESULT_MAX_CHARS] + (
+                f"\n... (truncated, {len(r.output)} chars total)"
+            )
         lines.append("")
         lines.append(output)
     return "\n".join(lines)

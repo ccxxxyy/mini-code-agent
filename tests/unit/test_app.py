@@ -157,3 +157,29 @@ def test_only_enabled_tools_registered(make_app):
     assert registered <= set(app.config.tools.enabled_tools)
     assert "read_file" in registered
     assert "bash" in registered
+
+
+async def test_memory_injection_honors_recall_threshold(make_app):
+    """Non-selective branch injects up to recall_threshold entries
+    (regression: a hardcoded [:10] silently truncated when the threshold
+    was raised past 10). 非选择性分支按 recall_threshold 注入（回归：
+    硬编码 [:10] 曾在阈值调过 10 后静默截断）。"""
+    from mini_agent.memory.persistent import MemoryEntry, PersistentMemory
+    from mini_agent.models.message import Message, Role
+    from mini_agent.tools.hooks import HookContext, HookStage
+
+    def mutate(config):
+        config.memory.recall_threshold = 30
+
+    app = make_app(mutate)
+    pm = PersistentMemory()
+    for i in range(12):
+        await pm.add_user_memory(MemoryEntry(content=f"memory-{i}", source="user"))
+    app.session.conversation.messages.append(Message(role=Role.USER, content="hi"))
+
+    await app.hook_manager.run(HookContext(stage=HookStage.PRE_LLM))
+
+    sp = app.session.conversation.system_prompt
+    assert "--- Relevant memories ---" in sp
+    for i in range(12):  # 12 <= threshold(30): ALL injected, not just 10
+        assert f"memory-{i}" in sp
