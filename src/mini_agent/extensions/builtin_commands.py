@@ -1406,7 +1406,12 @@ def _make_spawn(app: Application) -> HandlerFn:
         if first == "wait":
             from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
-            board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+            board = SubAgentBoard(
+                app.terminal.console,
+                mgr,
+                theme=app.terminal.theme,
+                refresh_interval=app.config.board_refresh_interval,
+            )
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
 
@@ -1506,7 +1511,12 @@ def _make_spawn(app: Application) -> HandlerFn:
                 if auto_wait:
                     from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
-                    board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                    board = SubAgentBoard(
+                        app.terminal.console,
+                        mgr,
+                        theme=app.terminal.theme,
+                        refresh_interval=app.config.board_refresh_interval,
+                    )
                     result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                     if result is BOARD_DETACHED:
                         assert board.pending_task is not None
@@ -1529,7 +1539,12 @@ def _make_spawn(app: Application) -> HandlerFn:
                     agent_type=agent_type_name,
                     context_summary=context_summary,
                 )
-                board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                board = SubAgentBoard(
+                    app.terminal.console,
+                    mgr,
+                    theme=app.terminal.theme,
+                    refresh_interval=app.config.board_refresh_interval,
+                )
                 result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                 if result is BOARD_DETACHED:
                     assert board.pending_task is not None
@@ -1708,7 +1723,12 @@ def _make_team(app: Application) -> HandlerFn:
 
         from mini_agent.ui.board import SubAgentBoard
 
-        board = SubAgentBoard(app.terminal.console, app.subagent_manager, theme=app.terminal.theme)
+        board = SubAgentBoard(
+            app.terminal.console,
+            app.subagent_manager,
+            theme=app.terminal.theme,
+            refresh_interval=app.config.board_refresh_interval,
+        )
         try:
             report = await board.run_while(team.start(task_text, timeout=300))
         except Exception as e:

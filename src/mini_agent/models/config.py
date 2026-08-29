@@ -51,6 +51,10 @@ class ToolConfig:
         ]
     )
     bash_timeout: float = 120.0
+    # bash output truncation cap (chars) bash 输出截断上限（字符）
+    bash_max_output_chars: int = 30_000
+    # grep match cap grep 匹配条数上限
+    grep_max_matches: int = 200
     max_file_size: int = 10_000_000
     allowed_paths: list[str] = field(default_factory=list)
     denied_paths: list[str] = field(default_factory=lambda: ["~/.ssh", "~/.aws", "~/.gnupg"])
@@ -127,6 +131,13 @@ class MemoryConfig:
     # /undo file snapshots: keep the last N turns (raise for deeper rollback)
     # /undo 文件快照：保留最近 N 轮（调大可回滚更早的改动）
     undo_keep_turns: int = 5
+    # Session autosave throttle (seconds) 会话自动保存节流间隔（秒）
+    autosave_interval: float = 30.0
+    # Compression keep window: minimum tokens kept from the conversation tail,
+    # and the hard cap (both scale down with the compression target)
+    # 压缩保留窗口：尾部最少保留 token 数与硬顶（均随压缩目标缩放）
+    keep_recent_tokens: int = 10_000
+    keep_max_tokens: int = 40_000
 
 
 @dataclass
@@ -240,6 +251,12 @@ class AgentConfig:
     agent_dirs: list[str] = field(
         default_factory=lambda: ["~/.mini-agent/agents", "./.mini-agent/agents"]
     )
+    # Background completion notification truncation (chars)
+    # 后台完成通知的输出截断上限（字符）
+    notify_max_chars: int = 4000
+    # SubAgent progress board refresh interval (seconds)
+    # SubAgent 进度面板刷新间隔（秒）
+    board_refresh_interval: float = 0.25
     theme: str = "default"
     # Collapse read-only tool calls (read_file/glob/grep) into a one-line
     # summary when >=2 run in the same round. Default OFF: full per-call

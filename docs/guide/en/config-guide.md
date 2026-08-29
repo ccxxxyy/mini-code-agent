@@ -204,6 +204,8 @@ thinking = false             # Request-side extended thinking: Anthropic thinkin
 
 [tools]
 bash_timeout = 120.0         # bash command timeout (seconds)
+bash_max_output_chars = 30000 # bash output truncation cap (chars)
+grep_max_matches = 200       # grep match cap
 max_file_size = 10000000     # File read cap (bytes)
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # Extra allowed paths outside the project (default empty)
@@ -222,6 +224,9 @@ crashed_session_cleanup_days = 40  # Crashed sessions older than this are also c
 compress_max_failures = 3    # Compression circuit breaker: skip after N consecutive ineffective compressions (0 = disabled) — prevents infinite loops when the already-read-files list gets too long
 llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
 undo_keep_turns = 5          # /undo file snapshots: keep the last N turns — raise for deeper file rollback
+autosave_interval = 30.0     # Session autosave throttle (seconds)
+keep_recent_tokens = 10000   # Compression keep window: min tokens kept from the tail (scales with target)
+keep_max_tokens = 40000      # Compression keep window hard cap
 recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)
 recall_top_k = 5             # Maximum number of entries the LLM picks during selective recall
 recall_timeout = 8.0         # Recall prefetch timeout in seconds — selection runs in parallel with the main LLM call (no first-token latency added); on timeout, head entries are injected instead
@@ -279,6 +284,8 @@ max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutiv
                              # (dangerous command / path outside project / hook confirm; default 1 = one denial stops
                              # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
+notify_max_chars = 4000      # Background completion notification truncation cap (chars)
+board_refresh_interval = 0.25 # SubAgent progress board refresh interval (seconds)
 collapse_tool_calls = false  # Collapse read-only tools (read_file/glob/grep) called >=2 times in the
                              # same round into a one-line "✓ Done (N tool uses · Xs)" summary;
                              # default false (full per-call lines), set true to opt in

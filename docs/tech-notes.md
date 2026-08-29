@@ -4091,3 +4091,35 @@ lint job 新增步骤：
 
 - `uv run mypy`：106 个源文件，零错误
 - 1441 测试全过 + 覆盖率门禁通过 + ruff clean
+
+**CI 补修**：首轮 Actions 运行在 ubuntu 上报 6 个错误——`sandbox/_low_integrity.py` 和 `sandbox/windows.py` 的 `ctypes.windll`/`ctypes.WinError` 是 Windows 专属属性，Linux 的 typeshed 里不存在。两文件加入 exclude（与 TTY 层排除同理：平台专属代码在异平台检查器下必然报错，排除比逐行 ignore 诚实）。排除后 104 文件零错误。
+
+---
+
+## §125 魔法数字接入 TOML 配置
+
+### 125.1 问题
+
+6 处调优参数只能改源码（project-assessment §2.9）：bash 输出截断（30000 字符）、grep 匹配上限（200）、会话自动保存间隔（30s）、后台通知截断（4000 字符）、压缩保留窗口（10K/40K token）、进度面板刷新率（0.25s）。都是命名常量，但对不同场景（大输出构建日志、慢终端、小上下文模型）无法调整。
+
+### 125.2 方案：语义归位而非新开 [tuning] 段
+
+按既有先例（`bash_timeout` 在 `[tools]`、`undo_keep_turns` 在 `[memory]`）把 7 个字段归入语义所属的 section，全部复用 P21 TOML 通用 `_merge` 反射（零胶水代码）：
+
+- `[tools]`：`bash_max_output_chars` / `grep_max_matches`
+- `[memory]`：`autosave_interval` / `keep_recent_tokens` / `keep_max_tokens`
+- 顶级：`notify_max_chars`（后台通知）/ `board_refresh_interval`（进度面板）
+
+接线方式因模块而异：bash/grep 从 `ctx.config.tools` 读（grep 的 `_scan` 在线程中跑无 ctx，加函数参数传入）；subagent 从 `self._config` 读（删除类属性 `NOTIFY_MAX_CHARS`）；board 加构造参数（4 个构造点传 `app.config.board_refresh_interval`）；压缩窗口经 `SummarizeOldest`/`LLMSummarizeOldest` 构造参数下传到 `_compute_keep_split`（app._setup_memory 统一装配，两分支合并为单 Compressor 构造）。
+
+### 125.3 范围取舍
+
+`MIN_KEEP_MESSAGES`（5）和 `MIN_SUMMARIZE_PREFIX_TOKENS`（2000）保持常量不暴露——它们是压缩正确性不变量（保底消息数防止把进行中的任务摘要掉、前缀不足时跳过无意义压缩），调错会直接破坏压缩链，不属于"场景调优"范畴。`LLMSummarizeOldest` 的 `MAX_HISTORY_CHARS`/`SUMMARY_MAX_TOKENS` 等同理（摘要请求的自我保护参数）。
+
+### 125.4 验证
+
+- 7 个新测试（test_tuning_config.py）：默认值与原常量一致快照 / TOML 全字段加载 / bash 截断生效 / grep 上限生效 / 通知截断生效 / 压缩窗口参数生效 / 面板刷新参数
+- 顺带修 test_autosave.py 的 FakeApp 替身：借用真实 `_autosave` 方法但缺 `config` 属性（原方法读模块常量不需要），补 `AgentConfig()`
+- 全量 1448 passed + 覆盖率 86.72%（门禁 80%）+ mypy 零错误 + ruff clean
+- 不配置时行为与修复前完全一致（默认值即原常量）
+- 真实 LLM 端到端：项目级 `.mini-agent/config.toml` 临时写入 `[tools] grep_max_matches = 2`，`mini-agent -p` headless 让 LLM 跑 grep——返回恰好 2 条匹配且末尾原文 `... (truncated to 2 matches)`，配置经完整管道（TOML 加载 → 分层合并 → ctx.config → 工具）生效；验证后配置恢复原样

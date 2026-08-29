@@ -12,7 +12,7 @@
 - [x] dataclass 使用 `slots=True`（Message/ToolCall/ToolResult 3 处性能敏感模型）
 - [x] 异步函数命名清晰区分 sync/async
 - [x] 没有未使用的 import（ruff F401 通过）
-- [x] 没有硬编码的魔法数字/字符串（MAX_OUTPUT_CHARS/MAX_RESULTS/MAX_MATCHES 等均为命名常量）
+- [x] 没有硬编码的魔法数字/字符串（均为命名常量；bash/grep 截断、自动保存间隔、通知截断、压缩窗口、面板刷新率进一步接入 TOML 配置——tech-notes §125）
 
 ### 错误处理
 - [x] 外部 I/O（文件、网络、子进程）都有 try/except（工具全部 OSError 兜底，LLM 调用 app 层捕获）

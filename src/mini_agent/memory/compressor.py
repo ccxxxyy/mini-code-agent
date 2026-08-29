@@ -91,12 +91,28 @@ class SummarizeOldest(CompressionStrategy):
     以后可以接入完整的基于 LLM 的摘要。
     """
 
+    def __init__(
+        self,
+        keep_recent_tokens: int | None = None,
+        keep_max_tokens: int | None = None,
+    ) -> None:
+        self._keep_recent_tokens = keep_recent_tokens
+        self._keep_max_tokens = keep_max_tokens
+
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         msgs = conversation.messages
         if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs, target_tokens))
+        split = _align_split_to_tool_pair(
+            msgs,
+            _compute_keep_split(
+                msgs,
+                target_tokens,
+                keep_recent_tokens=self._keep_recent_tokens,
+                keep_max_tokens=self._keep_max_tokens,
+            ),
+        )
         if split <= 0:
             return
 
@@ -142,7 +158,12 @@ def _prefix_tokens(msgs: list[Message]) -> int:
     return sum(m.token_count or count_tokens(m.content) for m in msgs)
 
 
-def _compute_keep_split(msgs: list[Message], target_tokens: int) -> int:
+def _compute_keep_split(
+    msgs: list[Message],
+    target_tokens: int,
+    keep_recent_tokens: int | None = None,
+    keep_max_tokens: int | None = None,
+) -> int:
     """Token-driven split: msgs[split:] are kept, msgs[:split] are summarized.
     从尾部反向扫描累计 token，满足最少消息数后达到 token 阈值即停。
 
@@ -161,8 +182,8 @@ def _compute_keep_split(msgs: list[Message], target_tokens: int) -> int:
     if len(msgs) <= MIN_KEEP_MESSAGES:
         return 0
 
-    keep_recent = min(KEEP_RECENT_TOKENS, target_tokens // 2)
-    keep_max = min(KEEP_MAX_TOKENS, target_tokens)
+    keep_recent = min(keep_recent_tokens or KEEP_RECENT_TOKENS, target_tokens // 2)
+    keep_max = min(keep_max_tokens or KEEP_MAX_TOKENS, target_tokens)
 
     running_tokens = 0
     keep_count = 0
@@ -365,15 +386,30 @@ class LLMSummarizeOldest(CompressionStrategy):
     MAX_SHRINKS = 3  # shrink-and-retry rounds before giving up 收缩重试轮数上限
     SHRINK_KEEP_RATIO = 0.8  # keep 80%, drop oldest 20% 保留 80%，丢最旧 20%
 
-    def __init__(self, llm: LLMProvider) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        keep_recent_tokens: int | None = None,
+        keep_max_tokens: int | None = None,
+    ) -> None:
         self._llm = llm
+        self._keep_recent_tokens = keep_recent_tokens
+        self._keep_max_tokens = keep_max_tokens
 
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         msgs = conversation.messages
         if len(msgs) <= MIN_KEEP_MESSAGES:
             return
 
-        split = _align_split_to_tool_pair(msgs, _compute_keep_split(msgs, target_tokens))
+        split = _align_split_to_tool_pair(
+            msgs,
+            _compute_keep_split(
+                msgs,
+                target_tokens,
+                keep_recent_tokens=self._keep_recent_tokens,
+                keep_max_tokens=self._keep_max_tokens,
+            ),
+        )
         if split <= 0:
             return
 

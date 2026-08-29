@@ -150,7 +150,7 @@ mini-code-agent/
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
 │   ├── mocks.py                     # Shared MockLLM + script helpers
-│   ├── unit/                        # unit test files, 1441 tests
+│   ├── unit/                        # unit test files, 1448 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -2596,7 +2596,7 @@ Context Window (e.g. 128K tokens)
 
 **第 3 级：SlidingWindow** -- 兜底：只保留能放进预算的最近消息，并带三重防护——孤儿 tool result 丢弃（防 API 400）、任务锚点（绝不丢最近一条用户消息）、摘要锚点（绝不丢头部压缩摘要）。
 
-保留窗口的分界不是按比例，而是 **token 驱动的 `_compute_keep_split`**：从尾部反向累计 token，满足 `MIN_KEEP_MESSAGES=5` 条且累计 ≥ 保留下限（`KEEP_RECENT_TOKENS=10K`）即停，累计超硬顶（`KEEP_MAX_TOKENS=40K`）强制停。下限/硬顶随 target 缩放（`min(10K, target//2)` / `min(40K, target)`）——小窗口下绝对常量会让摘要级数学上永远达不到目标。分界点还会前移避开 tool result（防孤儿导致 API 400）。
+保留窗口的分界不是按比例，而是 **token 驱动的 `_compute_keep_split`**：从尾部反向累计 token，满足 `MIN_KEEP_MESSAGES=5` 条且累计 ≥ 保留下限（`KEEP_RECENT_TOKENS=10K`）即停，累计超硬顶（`KEEP_MAX_TOKENS=40K`）强制停。下限/硬顶随 target 缩放（`min(10K, target//2)` / `min(40K, target)`）——小窗口下绝对常量会让摘要级数学上永远达不到目标；两值可经 `[memory] keep_recent_tokens / keep_max_tokens` 配置（tech-notes §125）。分界点还会前移避开 tool result（防孤儿导致 API 400）。
 
 ```python
 class Compressor:

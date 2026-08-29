@@ -10,8 +10,6 @@ from mini_agent.models.message import ToolResult
 from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext, ToolParameter, ToolSchema
 
-MAX_OUTPUT_CHARS = 30_000
-
 
 def _decode_console_bytes(data: bytes) -> str:
     """Decode subprocess output with Windows codepage fallback.
@@ -111,8 +109,9 @@ class BashTool(Tool):
             parts.append(f"[stderr]\n{stderr.rstrip()}")
         output = "\n".join(parts) or "(no output)"
 
-        if len(output) > MAX_OUTPUT_CHARS:
-            output = output[:MAX_OUTPUT_CHARS] + f"\n... (truncated, {len(output)} chars total)"
+        max_chars = ctx.config.tools.bash_max_output_chars
+        if len(output) > max_chars:
+            output = output[:max_chars] + f"\n... (truncated, {len(output)} chars total)"
 
         exit_code = proc.returncode or 0
         if exit_code != 0:

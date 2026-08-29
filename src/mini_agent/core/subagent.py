@@ -714,10 +714,6 @@ class SubAgentManager:
         results = await asyncio.gather(*(self.wait(aid, timeout=timeout) for aid in ids))
         return list(results)
 
-    # Truncation cap for background completion notifications
-    # 后台完成通知的输出截断上限
-    NOTIFY_MAX_CHARS = 4000
-
     async def build_context_summary(self, messages: list[Message]) -> str:
         """Summarize a conversation for fork-style context inheritance.
         为摘要式上下文继承生成父对话摘要（LLM 失败时回退提取式 digest）。"""
@@ -771,8 +767,9 @@ class SubAgentManager:
             status = "completed successfully"
         else:
             status = f"FAILED: {result.error or 'unknown error'}"
-        output = result.output[: self.NOTIFY_MAX_CHARS]
-        if len(result.output) > self.NOTIFY_MAX_CHARS:
+        max_chars = self._config.notify_max_chars
+        output = result.output[:max_chars]
+        if len(result.output) > max_chars:
             output += "\n... (truncated)"
         structured_block = ""
         if result.structured_output:

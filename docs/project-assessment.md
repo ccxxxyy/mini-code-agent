@@ -123,6 +123,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 这些值对不同使用场景可能需要调整，但目前只能改源码。
 
+**✅ 已修复**：全部 6 处（含压缩窗口两个 token 参数）接入分层 TOML 配置——`[tools] bash_max_output_chars / grep_max_matches`、`[memory] autosave_interval / keep_recent_tokens / keep_max_tokens`、顶级 `notify_max_chars / board_refresh_interval`。默认值与原常量一致（不配置行为不变）；`MIN_KEEP_MESSAGES`/`MIN_SUMMARIZE_PREFIX_TOKENS` 是压缩正确性不变量而非调优旋钮，保持常量。7 个新测试（默认值快照 + TOML 加载 + 各接线点生效）。详见 tech-notes §125。
+
 ### 2.10 敏感文件检测覆盖面不足
 
 `security/path_guard.py:11-22` 的敏感文件模式缺少常见的凭证文件：`.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等。

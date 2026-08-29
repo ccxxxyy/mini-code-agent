@@ -204,6 +204,8 @@ thinking = false             # 发送侧 extended thinking：Anthropic thinking 
 
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
+bash_max_output_chars = 30000 # bash 输出截断上限（字符）
+grep_max_matches = 200       # grep 匹配条数上限
 max_file_size = 10000000     # 文件读取上限（字节）
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # 额外放行的项目外路径（默认空）
@@ -222,6 +224,9 @@ crashed_session_cleanup_days = 40  # 崩溃会话超过此天数也清理（0 = 
 compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳过（0 = 禁用）——防已读文件列表过长时的死循环
 llm_summarize = true         # LLM 语义摘要压缩（默认开启）；false 退回提取式截断（无 LLM 调用）
 undo_keep_turns = 5          # /undo 文件快照保留最近 N 轮——调大可回滚更早的文件改动
+autosave_interval = 30.0     # 会话自动保存节流间隔（秒）
+keep_recent_tokens = 10000   # 压缩保留窗口：尾部最少保留 token 数（随压缩目标缩放）
+keep_max_tokens = 40000      # 压缩保留窗口硬顶
 recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入）
 recall_top_k = 5             # 选择性召回时 LLM 挑选的最大条数
 recall_timeout = 8.0         # 召回预取超时秒数——挑选与主 LLM 调用并行（不增加首 token 延迟），超时降级注入头部条目
@@ -277,6 +282,8 @@ max_agent_iterations = 80    # ReAct 循环最大迭代数（主循环与未指�
 max_consecutive_denials = 1  # 确认框连续被拒 N 次后熔断停机、回问用户（危险命令/项目外路径/hook 确认；
                              # 默认 1 = 拒一次即停；调大可给被拒后修正重试的空间。防止被拒后继续找绕过路径）
 theme = "default"            # "default" | "dark" | "light"
+notify_max_chars = 4000      # 后台完成通知的输出截断上限（字符）
+board_refresh_interval = 0.25 # SubAgent 进度面板刷新间隔（秒）
 collapse_tool_calls = false  # 只读工具（read_file/glob/grep）同轮 ≥2 次折叠为一行
                              # "✓ Done (N tool uses · Xs)" 摘要；默认 false（逐条完整显示），
                              # 设 true 开启折叠
