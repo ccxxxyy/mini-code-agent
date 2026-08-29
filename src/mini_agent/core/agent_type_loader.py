@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from mini_agent.core.agent_types import AgentTypeDefinition, register_agent_type
@@ -78,8 +79,11 @@ def parse_agent_md(path: Path) -> AgentTypeDefinition | None:
     elif isinstance(raw_tools, str):
         allowed_tools = (raw_tools,)
 
+    raw_max_iter = meta.get("max_iterations", DEFAULT_MAX_ITERATIONS)
     try:
-        max_iterations = int(meta.get("max_iterations", DEFAULT_MAX_ITERATIONS))
+        max_iterations = (
+            int(raw_max_iter) if isinstance(raw_max_iter, (str, int)) else DEFAULT_MAX_ITERATIONS
+        )
     except (ValueError, TypeError):
         max_iterations = DEFAULT_MAX_ITERATIONS
 
@@ -98,7 +102,7 @@ def parse_agent_md(path: Path) -> AgentTypeDefinition | None:
     )
 
 
-def load_agent_types(agent_dirs: list[str | Path]) -> int:
+def load_agent_types(agent_dirs: Sequence[str | Path]) -> int:
     """Scan directories for *.md agent definitions and register them.
     扫描目录中的 *.md 定义并注册。返回注册数量。"""
     count = 0

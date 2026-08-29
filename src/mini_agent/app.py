@@ -208,7 +208,7 @@ class Application:
         # Tool registry with all builtin tools 包含所有内置工具的工具 registry
         self.tool_registry = ToolRegistry()
         for tool_class in ALL_BUILTIN_TOOLS:
-            tool = tool_class()
+            tool = tool_class()  # type: ignore[abstract]
             if tool.schema.name in self.config.tools.enabled_tools:
                 self.tool_registry.register(tool)
 
@@ -272,8 +272,8 @@ class Application:
                 )
                 bash_tool = self.tool_registry.get("bash")
                 if bash_tool:
-                    bash_tool.sandbox = os_sandbox
-                    bash_tool.sandbox_config = sb_config
+                    bash_tool.sandbox = os_sandbox  # type: ignore[attr-defined]
+                    bash_tool.sandbox_config = sb_config  # type: ignore[attr-defined]
                 if self.config.security.sandbox_auto_allow:
                     self.permission_manager.sandbox_auto_allow = True
             else:
@@ -795,6 +795,7 @@ class Application:
                     await self._handle_background_delivery()
                     continue
 
+                assert isinstance(user_input, str)
                 user_input = user_input.strip()
                 if not user_input:
                     continue

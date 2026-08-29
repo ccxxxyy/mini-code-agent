@@ -326,8 +326,8 @@ def _make_todo(app: Application) -> HandlerFn:
             return "Deleted." if removed else f"Task not found: {tid}"
 
         if sub == "clear":
-            removed = store.clear_done()
-            return f"Cleared {removed} completed/failed task(s)."
+            cleared = store.clear_done()
+            return f"Cleared {cleared} completed/failed task(s)."
 
         # default: list 默认列出
         tasks = store.load()
@@ -427,14 +427,14 @@ def _make_record(app: Application) -> HandlerFn:
         if sub == "stop":
             if not rec.is_recording:
                 return "Not recording. /record start <name> to begin."
-            name = rec.recording_name
+            name = rec.recording_name or ""
             count, path = rec.stop()
             return f"Saved recording '{name}': {count} step(s) -> {path}"
 
         if sub == "cancel":
             if not rec.is_recording:
                 return "Not recording."
-            name = rec.recording_name
+            name = rec.recording_name or ""
             rec.cancel()
             return f"Recording '{name}' discarded."
 
@@ -538,6 +538,8 @@ def _make_undo(app: Application) -> HandlerFn:
             # Turns at or below the prune cutoff had their snapshots cleared by
             # begin_turn -- the user must know those files were NOT restored.
             # 低于清理线的轮次快照已被 begin_turn 清掉——用户必须知道没恢复。
+            if store is None:
+                return None
             pruned = [t for t in undo_ids if t <= turn_id - store.keep_turns]
             if not pruned:
                 return None
@@ -546,6 +548,9 @@ def _make_undo(app: Application) -> HandlerFn:
                 f"(undo_keep_turns={store.keep_turns}) -- file changes there were "
                 f"NOT restored 超出快照保留轮数，该部分文件改动未恢复."
             )
+
+        file_report: list[str] = []
+        warning: str | None = None
 
         # Code-only: restore files, keep the conversation (and turn counters)
         # 仅代码：恢复文件，对话（与轮次计数）保持不变
@@ -582,8 +587,6 @@ def _make_undo(app: Application) -> HandlerFn:
         # Both: restore files modified in the undone turns. Conv-only: discard
         # their snapshots so the code keeps its current state.
         # 双回滚：恢复被撤销轮次修改的文件。仅对话：丢弃对应快照，代码保持现状。
-        file_report: list[str] = []
-        warning: str | None = None
         if store:
             turn_id = app.agent_loop.current_turn_id
             undo_ids = [t for t in range(turn_id - n + 1, turn_id + 1) if t > 0]
@@ -1432,12 +1435,14 @@ def _make_spawn(app: Application) -> HandlerFn:
             if agent_id:
                 result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                 if result is BOARD_DETACHED:
+                    assert board.pending_task is not None
                     mgr.adopt_pending_wait([agent_id], board.pending_task)
                     return _detached_message([agent_id])
                 return MARKDOWN_RESULT + _format_agent_result(result)
             all_ids = mgr.list_active()
             results = await board.run_while(mgr.wait_all(timeout=900), detachable=True)
             if results is BOARD_DETACHED:
+                assert board.pending_task is not None
                 mgr.adopt_pending_wait(all_ids, board.pending_task)
                 return _detached_message(all_ids)
             if not results:
@@ -1504,6 +1509,7 @@ def _make_spawn(app: Application) -> HandlerFn:
                     board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
                     result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                     if result is BOARD_DETACHED:
+                        assert board.pending_task is not None
                         mgr.adopt_pending_wait([agent_id], board.pending_task)
                         return _detached_message([agent_id])
                     return MARKDOWN_RESULT + _format_agent_result(result)
@@ -1526,6 +1532,7 @@ def _make_spawn(app: Application) -> HandlerFn:
                 board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
                 result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                 if result is BOARD_DETACHED:
+                    assert board.pending_task is not None
                     mgr.adopt_pending_wait([agent_id], board.pending_task)
                     return _detached_message([agent_id])
                 return MARKDOWN_RESULT + _format_agent_result(result)
@@ -1797,12 +1804,15 @@ def _make_permission_rule(app: Application, level_name: str) -> HandlerFn:
         result = f"Added {level_name} rule: \\[{scope_str}] `{pattern}`"
         if save:
             project_dir = app.session.metadata.project_dir
-            toml_path = Path(project_dir) / ".mini-agent" / "permissions.toml"
-            try:
-                pm.save_rule_to_file(toml_path, rule)
-                result += f" (saved to {toml_path})"
-            except OSError as e:
-                result += f" (save failed: {e})"
+            if project_dir is None:
+                result += " (save failed: no project directory)"
+            else:
+                toml_path = Path(project_dir) / ".mini-agent" / "permissions.toml"
+                try:
+                    pm.save_rule_to_file(toml_path, rule)
+                    result += f" (saved to {toml_path})"
+                except OSError as e:
+                    result += f" (save failed: {e})"
         return result
 
     return handler

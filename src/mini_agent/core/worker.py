@@ -99,7 +99,7 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
 
     registry = ToolRegistry()
     for tool_class in ALL_BUILTIN_TOOLS:
-        tool = tool_class()
+        tool = tool_class()  # type: ignore[abstract]
         if tool.schema.name in config.tools.enabled_tools:
             registry.register(tool)
 
@@ -140,7 +140,7 @@ async def _run_worker_inner(spec: WorkerSpec) -> int:
         agent_type=None if not spec.agent_type else _resolve_type(spec.agent_type),
         mailbox=mailbox,
         agent_id=spec.agent_id,
-        peers=[tuple(p) for p in spec.peers] or None,
+        peers=[(p[0], p[1], p[2]) for p in spec.peers] or None,
         name=spec.name,
         permission_manager=permission_manager,
     )

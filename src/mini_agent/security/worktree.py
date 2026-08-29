@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 import subprocess
 import sys
@@ -210,7 +211,7 @@ class WorktreeManager:
         info = await self.status(worktree_path)
         return not info.is_clean
 
-    async def cleanup_stale(self, max_age_days: int) -> list[str]:
+    async def cleanup_stale(self, max_age_days: int) -> builtins.list[str]:
         """Remove worktrees older than max_age_days. Dirty ones are kept.
         清理超过 max_age_days 的过期 worktree。有未提交更改的保留。
 
