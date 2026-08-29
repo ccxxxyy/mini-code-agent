@@ -90,6 +90,8 @@ exclude = [
     "^src/mini_agent/ui/components\\.py$",
     "^src/mini_agent/cli\\.py$",
     "^src/mini_agent/remote/",
+    "^src/mini_agent/security/sandbox/_low_integrity\\.py$",
+    "^src/mini_agent/security/sandbox/windows\\.py$",
 ]
 
 [tool.ruff]
