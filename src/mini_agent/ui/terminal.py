@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -51,14 +52,14 @@ class Terminal:
         self.console = Console(theme=_markdown_styles(self.theme))
         self.renderer = StreamRenderer(self.console)
         self._completer = SlashCommandCompleter()
-        self._prompt_session = None
+        self._prompt_session: Any = None
         self._toolbar_provider = None
         self._mode_cycler = None
         self._esc_command_provider = None
         self._working_dir: Path | None = None
         self._bg_interrupt_event: asyncio.Event | None = None
         self._saved_buffer_text: str = ""
-        self._pending_input_task: asyncio.Task | None = None
+        self._pending_input_task: asyncio.Task[Any] | asyncio.Future[Any] | None = None
         self._live_started = False
         self._thinking_written = False
         # Collapsible read-only tool group (Rich Live, transient); the flag
@@ -67,7 +68,7 @@ class Terminal:
         # 可折叠只读工具组（Rich Live，transient 擦除）；开关镜像配置
         # `collapse_tool_calls`（app 启动时接线；默认关闭——逐条完整显示）。
         self.collapse_tool_calls: bool = False
-        self._ro_live = None
+        self._ro_live: Any = None
         self._ro_entries: list[dict] = []
         self._ro_start: float = 0.0
         self._ro_last_done: float = 0.0
@@ -211,6 +212,7 @@ class Terminal:
 
         # TTY: prompt_toolkit path
         self._ensure_prompt_session()
+        assert self._prompt_session is not None
         from prompt_toolkit.patch_stdout import patch_stdout
 
         default = self._saved_buffer_text
@@ -302,7 +304,7 @@ class Terminal:
             return answer in ("y", "yes")
 
         try:
-            tmp = _PS()
+            tmp: Any = _PS()
         except Exception:
             return _plain_confirm()
 
@@ -346,7 +348,7 @@ class Terminal:
             return answer in ("y", "yes")
 
         try:
-            tmp = _PS()
+            tmp: Any = _PS()
         except Exception:
             return _plain_input()
 
@@ -384,7 +386,7 @@ class Terminal:
                 return ""
 
         try:
-            tmp = _PS()
+            tmp: Any = _PS()
             raw = (await self._prompt_protected(tmp, "> ")).strip()
         except Exception:
             raw = _plain()

@@ -99,11 +99,11 @@ def _harden_windows_stdio() -> None:
         return
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except Exception:
             pass
     try:
-        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     except Exception:
         pass
 

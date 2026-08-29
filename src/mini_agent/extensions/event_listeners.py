@@ -21,6 +21,7 @@ import asyncio
 import importlib.util
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from mini_agent.events.bus import EventBus, EventHandler
@@ -28,7 +29,7 @@ from mini_agent.events.bus import EventBus, EventHandler
 logger = logging.getLogger(__name__)
 
 
-def load_event_listeners(listener_dirs: list[str | Path], bus: EventBus) -> list[str]:
+def load_event_listeners(listener_dirs: Sequence[str | Path], bus: EventBus) -> list[str]:
     """Load listener plugins from the given directories onto the bus.
     从给定目录加载监听插件并挂到事件总线上。
 

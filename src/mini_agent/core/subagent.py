@@ -331,7 +331,7 @@ class AgentSnapshot:
 
 @dataclass
 class _ActiveAgent:
-    agent: SubAgent
+    agent: SubAgent | _PaneWorkerProxy
     task_handle: asyncio.Task = field(repr=False)
     started_at: float = 0.0
 

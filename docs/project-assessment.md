@@ -109,6 +109,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 项目声称"全类型注解"（CLAUDE.md），但 CI 不跑 mypy 或 pyright。`ToolContext` 的 `Any` 字段问题（§2.7，已修复）正是类型检查会立即暴露的一类；修复 §2.7 时 mypy 顺带在 `app.py` 暴露了 3 个 `AgentLoop` 未注解属性（tech-notes §123.4），佐证全库门禁的价值。没有类型检查门禁，类型注解只是注释性质。
 
+**✅ 已修复**：CI lint job 新增 `uv run mypy` 步骤，`pyproject.toml` 配置 `[tool.mypy]`（`follow_imports=silent` + `ignore_missing_imports` + `warn_unused_ignores`）并排除 TTY/CLI/remote 层（与覆盖率排除策略一致）。全库 42 个 mypy 错误全部修复（16 个文件），mypy 对 106 个源文件零错误通过。关键修复：LLMProvider.stream 签名（async→非 async 抽象方法）、AgentLoop 三属性注解补全、list→Sequence 协变修正、多处 None 安全检查。详见 tech-notes §124。
+
 ### 2.9 魔法数字散落各模块
 
 分散在各模块中的魔法数字，例如：
@@ -144,6 +146,6 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 **主要的技术债务集中在两个方向**：
 
 1. **大文件拆分**：`app.py`（1298 行）和 `builtin_commands.py`（1815 行）需要拆分。前者的 `__init__` 应该提取工厂函数（✅ 已完成——拆为 16 个装配方法，见 §2.1 与 tech-notes §117）；后者应该按命令分文件或分组。
-2. **CI 补全**：~~覆盖率门禁实际启用~~（✅ 已完成）、~~Windows 矩阵~~（✅ 已完成）、类型检查。剩余一项是低成本高收益的改进。
+2. **CI 补全**：~~覆盖率门禁实际启用~~（✅ 已完成）、~~Windows 矩阵~~（✅ 已完成）、~~类型检查~~（✅ 已完成）。三项全部落地。
 
 同步 I/O 问题已修复（✅ 见 §2.3 与 tech-notes §119）：文件工具与 SessionStore 的阻塞 I/O 均经 `asyncio.to_thread` 移出事件循环，大型代码库上 grep 扫描不再阻塞其他并发任务（如流式输出、ESC 中断监听）。

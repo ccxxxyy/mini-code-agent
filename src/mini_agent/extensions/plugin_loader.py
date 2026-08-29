@@ -38,6 +38,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -82,7 +83,7 @@ class LoadedPlugin:
 
 
 def load_plugins(
-    plugin_dirs: list[str | Path],
+    plugin_dirs: Sequence[str | Path],
     ctx: PluginContext,
     disabled: list[str] | None = None,
 ) -> list[LoadedPlugin]:
@@ -140,7 +141,7 @@ def _discover_entry_points(disabled: set[str]) -> list[tuple[str, Any]]:
     return resolved
 
 
-def _discover_dir_files(plugin_dirs: list[str | Path]) -> list[Path]:
+def _discover_dir_files(plugin_dirs: Sequence[str | Path]) -> list[Path]:
     """List candidate plugin files across dirs (sorted, ``_``-prefixed skipped).
     列出各目录下的候选插件文件（排序，跳过 ``_`` 前缀）。"""
     files: list[Path] = []

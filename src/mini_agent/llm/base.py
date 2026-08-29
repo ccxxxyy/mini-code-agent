@@ -6,7 +6,10 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mini_agent.models.config import LLMConfig
 
 from mini_agent.models.message import ToolCall
 
@@ -60,12 +63,15 @@ class LLMResponse:
 class LLMProvider(ABC):
     """Abstract base for all LLM providers. 所有 LLM Provider 的抽象基类。"""
 
+    def __init__(self, config: LLMConfig | None = None) -> None:
+        pass
+
     async def prepare(self) -> None:
         """Optional warmup before first use (e.g. context window probing).
         首次使用前的可选预热（如上下文窗口探测），默认无操作。"""
 
     @abstractmethod
-    async def stream(
+    def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

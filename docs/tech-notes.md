@@ -4024,3 +4024,70 @@ strategy:
 - 运行时冒烟：`ToolContext` 正常构造；全量 1441 测试 + 覆盖率门禁 + ruff 通过
 
 **探针陷阱**（首轮反证假阴性的教训）：项目包不在 mypy 搜索路径时（`uvx` 隔离环境跑仓库根下的探针文件），`--ignore-missing-imports` 会把 `mini_agent` 整体静默降级为 `Any`——探针"零错误"其实是没检查。必须 `MYPYPATH=src` 让包真正被解析；判断探针是否生效，看报错里是否出现具体类型名（如 `"Mailbox"`）。
+
+---
+
+## §124 mypy 全库门禁接入 CI
+
+### 124.1 问题
+
+项目声称"全类型注解"（CLAUDE.md），但 CI 不跑 mypy 或 pyright。42 个 mypy 错误散落 16 个文件，类型注解实为注释性质——拼写错误、签名不匹配、None 安全问题、list 协变误用全部静默通过（project-assessment §2.8 指出）。
+
+### 124.2 配置
+
+`pyproject.toml` 新增 `[tool.mypy]`：
+
+```toml
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["mini_agent"]
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+exclude = [
+    "^src/mini_agent/ui/terminal\\.py$",
+    "^src/mini_agent/ui/input_handler\\.py$",
+    "^src/mini_agent/ui/esc_watcher\\.py$",
+    "^src/mini_agent/ui/components\\.py$",
+    "^src/mini_agent/cli\\.py$",
+    "^src/mini_agent/remote/",
+]
+```
+
+排除策略与覆盖率门禁一致（TTY 交互层 + CLI 入口 + 远程模式——都有 prompt_toolkit/websockets 的复杂类型交互，排除比逐行 ignore 更诚实）。`follow_imports=silent` 避免三方库的类型存根差异干扰；`warn_unused_ignores` 保证 `type: ignore` 不会累积过时。
+
+### 124.3 修复清单
+
+42 个错误全部修复，16 个文件，按类别：
+
+**签名修正（3 错误）**：`LLMProvider.stream` 从 `async def` 改为普通 `def`——抽象方法返回 `AsyncIterator`，子类实现为 async generator（`yield`），`async def` 返回 `Coroutine[..., AsyncIterator]` 与 `AsyncIterator` 不兼容。`LLMProvider` 加 `__init__(self, config: LLMConfig | None = None)` 让 `registry.py` 的构造调用类型正确。
+
+**属性注解补全（6 错误）**：`AgentLoop` 的 `snapshot_store`/`result_cache`/`mailbox` 三个属性原先 `= None` 后再赋值，mypy 推断为 `None` 类型——加 `X | None` 注解（TYPE_CHECKING 条件导入）。`_streaming_tasks` 值类型从 `Task` 放宽为 `Task | Future`。`SubAgent._ActiveAgent.agent` 从 `SubAgent` 放宽为 `SubAgent | _PaneWorkerProxy`。
+
+**协变修正（3 错误）**：`load_agent_types`/`load_event_listeners`/`load_plugins` 参数从 `list[str | Path]` 改为 `Sequence[str | Path]`——`list` 是不变的，`list[str]` 不是 `list[str | Path]` 的子类型。
+
+**None 安全检查（8 错误）**：`builtin_commands.py` 四处 `assert board.pending_task is not None` + `store is None` 守卫 + `project_dir` None 检查 + `recording_name` 的 `or ""` 兜底。
+
+**变量重定义（3 错误）**：`tool_search.py` 第二个 `lines` 去掉冗余类型注解；`builtin_commands.py` 两处 `file_report`/`warning` 提到条件分支前。
+
+**类型窄化/抑制（5 错误）**：`app.py` 的 `tool_class()` 和 `bash_tool.sandbox` 用 `type: ignore`（动态实例化无法静态验证）；`user_input` 加 `assert isinstance`；`headless.py`/`remote/server.py` 的 Terminal 子类赋值用 `type: ignore[assignment]`。
+
+**杂项（4 错误）**：`worktree.py` 的 `list` 方法名遮蔽内置类型——返回注解改用 `builtins.list`；`worker.py` 的 tuple 推断修正；`agent_type_loader.py` 加 `isinstance` 类型窄化。
+
+### 124.4 CI 接线
+
+lint job 新增步骤：
+
+```yaml
+- name: Type check
+  run: uv run mypy
+```
+
+`mypy>=1.11` 加入 dev 依赖。`uv run mypy` 自动读取 `pyproject.toml` 的 `[tool.mypy]` 配置。
+
+### 124.5 验证
+
+- `uv run mypy`：106 个源文件，零错误
+- 1441 测试全过 + 覆盖率门禁通过 + ruff clean

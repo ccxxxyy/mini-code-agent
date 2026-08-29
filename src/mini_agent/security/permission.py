@@ -936,7 +936,7 @@ class ChildPermissionManager(PermissionManager):
         self.last_matched_rule = ""
 
     @property
-    def mode(self) -> PermissionMode:  # type: ignore[override]
+    def mode(self) -> PermissionMode:
         return self._parent.mode
 
     @mode.setter

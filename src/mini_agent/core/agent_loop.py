@@ -7,7 +7,12 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mini_agent.core.mailbox import Mailbox
+    from mini_agent.memory.file_snapshots import FileSnapshotStore
+    from mini_agent.memory.tool_result_cache import ToolResultCache
 
 from mini_agent.core.agent_state import AgentPhase, AgentState
 from mini_agent.events.bus import EventBus
@@ -193,13 +198,13 @@ class AgentLoop:
         self._file_changes: dict[str, str] = {}
         # Optional per-turn file snapshots for operation-level undo (app injects)
         # 可选的每轮文件快照——操作级撤销（app.py 注入）
-        self.snapshot_store = None
+        self.snapshot_store: FileSnapshotStore | None = None
         # Optional spill-to-disk cache for oversized tool results (app injects)
         # 可选的超大工具结果溢写缓存（app.py 注入）
-        self.result_cache = None
+        self.result_cache: ToolResultCache | None = None
         # Tasks submitted mid-stream (streaming tool execution), keyed by call id
         # 流式期间提交的执行任务（按 call id 索引）
-        self._streaming_tasks: dict[str, asyncio.Task] = {}
+        self._streaming_tasks: dict[str, asyncio.Task[Any] | asyncio.Future[ToolResult]] = {}
         self.current_turn_id: int = 0
         # Model name for cost attribution (app/subagent manager sets it)
         # 模型名——供成本归属（app/subagent manager 设置）
@@ -216,7 +221,7 @@ class AgentLoop:
         self.plan_mode: bool = False
         # Cross-agent mailbox: drained at the start of each iteration (app/subagent injects)
         # 跨 Agent 收件箱——每轮开始前 drain（app/subagent 注入）
-        self.mailbox = None
+        self.mailbox: Mailbox | None = None
         self.agent_id: str = "main"
 
     @property

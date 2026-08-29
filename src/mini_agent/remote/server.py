@@ -55,7 +55,7 @@ class RemoteServer:
         from mini_agent.remote.terminal import RemoteTerminalAdapter
 
         self._original_terminal = app.terminal
-        app.terminal = RemoteTerminalAdapter(app.terminal, self._safe_send)
+        app.terminal = RemoteTerminalAdapter(app.terminal, self._safe_send)  # type: ignore[assignment]
 
     async def start(self) -> None:
         """Start the WebSocket server and block until stopped.

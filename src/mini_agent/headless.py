@@ -137,7 +137,7 @@ async def run_headless(app: Application, prompt: str, output_format: str = "text
 
     if emitter:
         _wire_ndjson(al, emitter, final_text)
-        app.terminal = _QuietTerminal(app.terminal, emitter.emit)
+        app.terminal = _QuietTerminal(app.terminal, emitter.emit)  # type: ignore[assignment]
     else:
         _wire_silent(al, final_text)
 

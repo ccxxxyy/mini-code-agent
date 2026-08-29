@@ -82,7 +82,7 @@ class ToolSearchTool(Tool):
                 content_blocks=content_blocks,
             )
 
-        lines: list[str] = [f"Found {len(matches)} tool(s):"]
+        lines = [f"Found {len(matches)} tool(s):"]
         for m in matches:
             lines.append(f"\n  server: {m['server']}")
             lines.append(f"  name: {m['name']}")
