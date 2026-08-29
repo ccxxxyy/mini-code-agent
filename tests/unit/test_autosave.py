@@ -74,9 +74,11 @@ class FakeApp:
 
     def __init__(self, tmp_path: Path):
         from mini_agent.app import Application
+        from mini_agent.models.config import AgentConfig
 
         self.session_store = SessionStore(session_dir=str(tmp_path))
         self.session = make_session()
+        self.config = AgentConfig()
         self._last_autosave = 0.0
         # Borrow the real methods 借用真实方法
         self._autosave = Application._autosave.__get__(self)

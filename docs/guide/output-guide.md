@@ -14,17 +14,17 @@
 > 帮我把 a.txt 里的 hello 改成 goodbye     ← ① 用户输入（prompt_toolkit）
 
   ╭─ edit_file ...                          ← ② Streaming 工具组装提示
-  trace [12:03:01] iter 1 idle -> thinking  ← ③ Trace 行（/trace on 时）
-  trace [12:03:01] llm  request 2 msgs      ← ③
+  trace [12:03:01.482] iter 1 idle -> thinking  ← ③ Trace 行（/trace on 时）
+  trace [12:03:01.482] llm  request 2 msgs      ← ③
 ╭── Teach: edit_file ──────────────────╮    ← ④ 教学面板（/explain on 时）
 │ Why this tool: ...                   │
 ╰──────────────────────────────────────╯
-  trace [12:03:02] llm  response 1082 tokens ← ③
+  trace [12:03:02.115] llm  response 1082 tokens ← ③
   ╭─ edit_file ...                          ← ② 或 ⑤ 工具调用行
   │  file_path=a.txt, old_text=hello...     ← ⑤ 参数摘要行
-  trace [12:03:02] perm path a.txt -> GRANTED ← ③
-  trace [12:03:02] tool edit_file start     ← ③
-  trace [12:03:02] tool edit_file done 1ms  ← ③
+  trace [12:03:02.115] perm path a.txt -> GRANTED ← ③
+  trace [12:03:02.115] tool edit_file start     ← ③
+  trace [12:03:02.115] tool edit_file done 1ms  ← ③
   ╰─ ✓ 1 lines, 42 chars                   ← ⑥ 工具结果行
   - hello world                             ← ⑦ Diff 预览（edit_file 专属）
   + goodbye world                           ← ⑦
@@ -58,7 +58,7 @@
 | 作用 | 让用户在 JSON 参数组装期间就知道 LLM 在调哪个工具 |
 | 关闭方法 | `app.py` 中删除 `self.agent_loop.on_tool_call_assembling = _on_tool_assembling` 这行 |
 
-### ③ Trace 行 `trace [HH:MM:SS] ...`
+### ③ Trace 行 `trace [HH:MM:SS.mmm] ...`
 
 | 项 | 说明 |
 |---|---|
@@ -140,19 +140,19 @@
 
 | 项 | 说明 |
 |---|---|
-| 来源 | `ui/terminal.py` `show_file_changes`（`app.py` `_handle_turn` 在 token 统计前调用） |
+| 来源 | `ui/terminal.py` `show_file_changes`（`app.py` `_run_agent_and_report` 在 token 统计前调用） |
 | 触发 | 本轮有 write_file/edit_file/delete_file 成功执行时（bash 的文件变更不跟踪） |
 | 内容 | `files changed this turn:` + 每个文件一行（`+ 路径` 绿=新建，`~ 路径` 黄=修改，`- 路径` 红=删除） |
-| 关闭方法 | `app.py` `_handle_turn` 中删除 `show_file_changes` 调用行 |
+| 关闭方法 | `app.py` `_run_agent_and_report` 中删除 `show_file_changes` 调用行 |
 
 ### ⑪ Token 统计行
 
 | 项 | 说明 |
 |---|---|
-| 来源 | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
+| 来源 | `app.py` `_run_agent_and_report` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
 | 触发 | 每轮对话完成后（文件变更汇总之后） |
 | 内容 | 配置价格后带金额 `tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)` |
-| 关闭方法 | `app.py` `_handle_turn` 中注释掉 `self.terminal.show_info(...)` 那行 |
+| 关闭方法 | `app.py` `_run_agent_and_report` 中注释掉 `self.terminal.show_info(...)` 那行 |
 
 ### ⑫ 预算警告行
 
@@ -189,7 +189,7 @@
 | 权限确认弹窗 | `terminal.py` `confirm` | 危险命令/项目外路径/`[[hooks]]` confirm 规则命中；等输入期间并发输出（并行工具的 trace/结果行）重定向到提示行上方，输入行不被打断 |
 | thinking 推理过程（dim italic） | `terminal.py` `feed_thinking` | 推理模型（DeepSeek R1、o1/o3）输出 reasoning_content 时，或 Anthropic/Responses 模型开启发送侧 thinking 时（tech-notes §110） |
 | `Goodbye!` | `app.py` `run()` finally | 正常退出时 |
-| `Interrupted.` | `app.py` `_handle_turn` except | Ctrl+C / 双 Esc 中断时 |
+| `Interrupted.` | `app.py` `_run_agent_and_report` except | Ctrl+C / 双 Esc 中断时 |
 
 ---
 
@@ -216,7 +216,7 @@
 ## 五、输出层架构
 
 ```
-用户输入  ─→  app.py _handle_turn
+用户输入  ─→  app.py _handle_turn ─→ _run_agent_and_report
                 │
                 ├─→ agent_loop.run()
                 │     │

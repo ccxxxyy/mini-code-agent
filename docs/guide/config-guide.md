@@ -200,10 +200,12 @@ temperature = 0.0
 max_tokens = 4096            # 单次回复上限；截断时自动翻倍重试最多 3 次（P44），此值是重试的起点
 timeout = 120.0
 thinking = false             # 发送侧 extended thinking：Anthropic thinking 参数 / Responses reasoning 参数（tech-notes §110）；也可用 MINI_AGENT_THINKING 或按 profile 的 MODEL_<名称>_THINKING 开启；Responses 的 effort 用 extra = {reasoning_effort = "high"} 调整（默认 medium）；各场景示例见下方"思考流（extended thinking）配置详解"
-# extra = {}                 # 透传给 API 的额外参数（如 top_p、stop、qwen 混合推理模型的 enable_thinking = true）；核心字段（model/messages）不可被覆盖
+# extra = {}                 # 透传给 API 的额外参数（如 top_p、stop、qwen 混合推理模型的 enable_thinking = true）；核心字段（model/messages）不可被覆盖。注意：仅 openai（Chat Completions）Provider 全量透传；openai-responses 只读取 reasoning_effort；anthropic 不读取 extra
 
 [tools]
 bash_timeout = 120.0         # bash 命令超时（秒）
+bash_max_output_chars = 30000 # bash 输出截断上限（字符）
+grep_max_matches = 200       # grep 匹配条数上限
 max_file_size = 10000000     # 文件读取上限（字节）
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # 额外放行的项目外路径（默认空）
@@ -222,10 +224,13 @@ crashed_session_cleanup_days = 40  # 崩溃会话超过此天数也清理（0 = 
 compress_max_failures = 3    # 压缩熔断器：连续 N 次压缩无效后跳过（0 = 禁用）——防已读文件列表过长时的死循环
 llm_summarize = true         # LLM 语义摘要压缩（默认开启）；false 退回提取式截断（无 LLM 调用）
 undo_keep_turns = 5          # /undo 文件快照保留最近 N 轮——调大可回滚更早的文件改动
-recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入）
+autosave_interval = 30.0     # 会话自动保存节流间隔（秒）
+keep_recent_tokens = 10000   # 压缩保留窗口：尾部最少保留 token 数（随压缩目标缩放）
+keep_max_tokens = 40000      # 压缩保留窗口硬顶
+recall_threshold = 10        # 记忆超过此数量时启用 LLM 选择性召回（≤ 阈值时全部注入，注入条数上限即此阈值）
 recall_top_k = 5             # 选择性召回时 LLM 挑选的最大条数
 recall_timeout = 8.0         # 召回预取超时秒数——挑选与主 LLM 调用并行（不增加首 token 延迟），超时降级注入头部条目
-consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并（0 = 禁用）
+consolidation_threshold = 20 # 记忆超过此数量时自动 LLM 语义合并（调大降低合并频率；注意 0 不是禁用而是"每次提取后都合并"，后台整固的开关是 auto_consolidate）
 auto_consolidate = true      # 启动时后台整固：双门槛满足时无感合并记忆（锁防并发、失败回滚）
 consolidate_min_hours = 24.0 # 后台整固门槛一：距上次整固的小时数
 consolidate_min_sessions = 5 # 后台整固门槛二：期间活跃的新会话数
@@ -277,6 +282,8 @@ max_agent_iterations = 80    # ReAct 循环最大迭代数（主循环与未指�
 max_consecutive_denials = 1  # 确认框连续被拒 N 次后熔断停机、回问用户（危险命令/项目外路径/hook 确认；
                              # 默认 1 = 拒一次即停；调大可给被拒后修正重试的空间。防止被拒后继续找绕过路径）
 theme = "default"            # "default" | "dark" | "light"
+notify_max_chars = 4000      # 后台完成通知的输出截断上限（字符）
+board_refresh_interval = 0.25 # SubAgent 进度面板刷新间隔（秒）
 collapse_tool_calls = false  # 只读工具（read_file/glob/grep）同轮 ≥2 次折叠为一行
                              # "✓ Done (N tool uses · Xs)" 摘要；默认 false（逐条完整显示），
                              # 设 true 开启折叠
@@ -338,6 +345,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"                  # "stdio"（子进程）| "http"（远程）| "sse"
 loading = "eager"                    # "eager"（默认）| "native"（Anthropic 原生延迟）| "dispatch"（按需搜索+调用）
+# env = { GITHUB_TOKEN = "ghp_xxx" } # 可选：stdio 子进程的额外环境变量
 
 # [mcp.servers.remote-api]
 # url = "http://localhost:8080/mcp"
@@ -450,7 +458,7 @@ enforce_read_before_edit = false
 
 ### 多模型 Profile（环境变量配置）
 
-预配多套模型参数，运行时 `/model` 一键切换。全部通过环境变量定义：
+预配多套模型参数，运行时 `/model` 一键切换。全部通过环境变量定义（不支持 TOML；`MINI_AGENT_PROFILES` 与 `PROFILE_<名>_*` 是等效的旧别名）：
 
 ```bash
 # 定义两个 Profile：fast 和 strong
@@ -602,7 +610,7 @@ MODEL_THINK_THINKING=true                    # 只有这个档案开思考
 | `arg` | 否 | 空 | 只检查此参数的值（如 `"file_path"`）；缺省检查**所有**参数值 |
 | `contains` | 否 | 空 | 参数值包含此子串才触发 |
 | `regex` | 否 | 空 | 参数值 `re.search` 命中此正则才触发；非法正则**告警跳过该条**，不阻断启动 |
-| `condition` | 否 | 空 | 条件表达式——**设置时优先于** `tool`/`arg`/`contains`/`regex` 四个固定字段；可用字段 `tool`（工具名）和 `args.<key>`（参数值）；运算符 `==`、`!=`、`=~`（正则 `re.search`）、`~=`（glob `fnmatch`），用 `and`/`or` 组合（**同一表达式内不可混用**） |
+| `condition` | 否 | 空 | 条件表达式——**设置时优先于** `tool`/`arg`/`contains`/`regex` 四个固定字段；可用字段 `tool`（工具名）、`args.<key>`（参数值）和 `event`（`pre_tool`/`post_tool`）；运算符 `==`、`!=`、`=~`（正则 `re.search`）、`~=`（glob `fnmatch`），用 `and`/`or` 组合（**同一表达式内不可混用**） |
 | `reason` | 建议填 | 自动生成 | 拒绝/确认原因，block 时原样回给 LLM、confirm 时也显示在弹窗里——写清楚"为什么+该怎么办"效果最好。notify 动作不使用此字段（用 `message`） |
 | `action` | 否 | `"block"` | `"block"` 直接拒绝；`"confirm"` 弹 y/a/n 确认框（a = 本会话内同一规则不再询问）；`"command"` 执行命令（PRE_TOOL 非零返回码阻止工具，POST_TOOL 火后不管）；`"notify"` 终端通知行；其他值告警跳过 |
 | `event` | 否 | `"pre_tool"` | `pre_tool`（默认）或 `post_tool`；其他值告警跳过 |
@@ -964,7 +972,7 @@ allow = ["glob"]           # 整体信任该工具（跳过命令/路径级检�
 deny = ["delete_file"]     # 直接拦截整个工具
 ```
 
-**优先级**：`deny 规则 > allow 规则 > 内置默认`（危险命令确认 / 敏感路径拒绝 / 项目内放行）。deny 最优先——即使路径在项目内也会被拦。
+**优先级**：命令 scope 为 `deny 规则 > allow 规则 > 内置默认`（危险命令确认）；路径 scope 为 `deny 规则 > 敏感路径/文件硬拒绝 > allow 规则 > 内置默认（项目内放行）`——`[paths] allow` **无法**放行 `~/.ssh`、`.env` 等敏感目标（PathGuard 硬拒绝先于 allow 评估，所有模式下有效）。deny 最优先——即使路径在项目内也会被拦。
 
 **deny 命令规则的匹配范围与边界**：command 类 deny 规则除命令本体外，还匹配包装内层与串联分段——`cmd /c "ping x"`、`echo hi & ping x` 都会命中 `ping*` 规则（解包 cmd /c / cmd /k / powershell -Command / sh -c 前缀，抹引号后按 `&;|` 分段逐段匹配；引号内的数据不误拒；allow 规则不解包）。但这是纵深防御而非围墙：`p^ing` 转义、环境变量间接调用、base64 编码等深度混淆无法在规则层穷尽——安全保证靠分层：混淆载体本身（cmd /c、powershell -EncodedCommand 等）在危险命令清单里必弹确认，OS 沙箱是最终围墙。deny 规则的定位是表达策略意图，不是替代沙箱。
 
@@ -976,8 +984,9 @@ deny = ["delete_file"]     # 直接拦截整个工具
 1. `denied_paths`（`~/.ssh`/`~/.aws`/`~/.gnupg`，config.toml 可配） → 硬拒绝
 2. 敏感文件名模式（`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`，共 10 种） → 硬拒绝（项目内也拦）；`.env.example`/`.env.sample`/`.env.template` 豁免
 3. 项目目录内 → 自动放行
-4. `allowed_paths` 中的路径（config.toml 可配） → 自动放行
-5. 以上都不匹配 → 询问用户（`permission_mode = "ask"` 时）
+4. 溢写缓存目录（`~/.mini-agent/cache/results`）→ 只读自动放行（LLM 读回被溢写的工具结果）
+5. `allowed_paths` 中的路径（config.toml 可配） → 自动放行
+6. 以上都不匹配 → 询问用户（`permission_mode = "ask"` 时）
 
 > **bash 通道也覆盖敏感文件**：上面这套 PathGuard 敏感文件保护只作用于 `read_file`/`write_file`/`delete_file` 三个文件工具。bash 命令曾对路径零检查——`type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` 会作普通命令被自动放行，绕过文件工具的拦截并把内容打印出来（真实验证实测泄漏过 API key）。现 permission.py 的 `command_references_sensitive_file()` 会把 bash 命令切成 token，任一 token 的 basename 命中上面同一份敏感文件模式即**弹确认**（判定 reason `sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同危险命令黑名单：变量展开（`$SECRET`）、通配、base64/echo 拼接等混淆仍可逃逸——详见 docs/tech-notes.md §90。
 

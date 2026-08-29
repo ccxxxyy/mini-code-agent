@@ -4,7 +4,7 @@
 # 未设置的字段使用内置默认值
 
 # 顶层字段 Top-level fields:
-# max_agent_iterations = 50           # 每轮对话最大 ReAct 迭代数
+# max_agent_iterations = 80           # 每轮对话最大 ReAct 迭代数
 # max_consecutive_denials = 1         # 确认框被拒 N 次后停下回问用户（危险命令/项目外路径/hook 确认；默认 1，拒一次即停；防绕过）
 # streaming_tool_execution = true     # 流式期间工具组装完成即执行（false 回退流后执行）
 
@@ -19,6 +19,8 @@
 
 [tools]
 # bash_timeout = 120.0
+# bash_max_output_chars = 30000  # bash 输出截断上限（字符）
+# grep_max_matches = 200         # grep 匹配条数上限
 # max_file_size = 10000000
 # enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 # denied_paths = ["~/.ssh", "~/.aws", "~/.gnupg"]
@@ -39,6 +41,9 @@
 # consolidate_min_hours = 24.0   # Gate 1: hours since last background consolidation 门槛一：距上次后台整固的小时数
 # consolidate_min_sessions = 5   # Gate 2: new sessions active since last run 门槛二：期间活跃的新会话数
 # recall_timeout = 8.0           # Parallel recall prefetch timeout (seconds); past it head-truncation is injected 并行召回预取超时秒数，超时注入头部截断
+# autosave_interval = 30.0       # Session autosave throttle (seconds) 会话自动保存节流间隔（秒）
+# keep_recent_tokens = 10000     # Compression keep window: min tokens kept from tail 压缩保留窗口：尾部最少保留 token 数
+# keep_max_tokens = 40000        # Compression keep window: hard cap 压缩保留窗口硬顶
 
 [security]
 # permission_mode = "ask"    # "allow" | "ask" | "deny"
@@ -72,8 +77,10 @@
 # output = 1.5
 
 # 顶级配置
-# max_agent_iterations = 50
+# max_agent_iterations = 80
 # theme = "default"          # "default" | "dark" | "light"
+# notify_max_chars = 4000          # 后台完成通知的输出截断上限（字符）
+# board_refresh_interval = 0.25    # SubAgent 进度面板刷新间隔（秒）
 
 # 插件生态：第三方注册工具/命令/技能
 # 本地文件插件目录（.py 文件，契约见 extensions/plugin_loader.py docstring）
@@ -90,6 +97,7 @@
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-github"]
 # transport = "stdio"
+# env = { GITHUB_TOKEN = "ghp_xxx" }   # 可选：stdio 子进程的额外环境变量
 #
 # HTTP 传输（远程服务器）
 # [mcp.servers.remote-api]
@@ -135,7 +143,7 @@
 # --- 条件表达式匹配（设置时覆盖固定字段）---
 # 运算符：==（精确）!=（不等）=~（正则）~=（glob）
 # 组合：and / or（不可混用）
-# 字段：tool、args.<key>（点号访问工具参数）
+# 字段：tool、args.<key>（点号访问工具参数）、event（pre_tool/post_tool）
 # [[hooks]]
 # condition = "tool == 'bash' and args.command =~ 'git push'"
 # action = "confirm"

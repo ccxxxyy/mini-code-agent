@@ -14,7 +14,6 @@ from mini_agent.models.message import ToolResult
 from mini_agent.models.permissions import ToolCategory
 from mini_agent.tools.base import Tool, ToolContext
 
-MAX_MATCHES = 200
 MAX_FILE_BYTES = 5_000_000
 IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".idea", ".vscode"}
 
@@ -61,7 +60,15 @@ class GrepTool(Tool):
 
         # Tree walk + per-file reads are blocking; run off the event loop
         # 目录遍历和逐文件读取是阻塞操作，移出事件循环执行
-        return await asyncio.to_thread(self._scan, regex, pattern, base, include, context_lines)
+        return await asyncio.to_thread(
+            self._scan,
+            regex,
+            pattern,
+            base,
+            include,
+            context_lines,
+            ctx.config.tools.grep_max_matches,
+        )
 
     def _scan(
         self,
@@ -70,6 +77,7 @@ class GrepTool(Tool):
         base: Path,
         include: str | None,
         context_lines: int,
+        max_matches: int,
     ) -> ToolResult:
         if base.is_file():
             files = [base]
@@ -115,19 +123,19 @@ class GrepTool(Tool):
                             display = display[:200] + "..."
                         matches.append(f"{f}:{lineno}: {display}")
                     file_matched = True
-                    if len(matches) >= MAX_MATCHES:
+                    if len(matches) >= max_matches:
                         break
             if file_matched:
                 files_with_matches += 1
-            if len(matches) >= MAX_MATCHES:
+            if len(matches) >= max_matches:
                 break
 
         if not matches:
             output = f"No matches for '{pattern}'"
         else:
             output = "\n".join(matches)
-            if len(matches) >= MAX_MATCHES:
-                output += f"\n... (truncated to {MAX_MATCHES} matches)"
+            if len(matches) >= max_matches:
+                output += f"\n... (truncated to {max_matches} matches)"
 
         return ToolResult(
             call_id="",

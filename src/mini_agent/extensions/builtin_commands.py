@@ -933,6 +933,10 @@ def _make_memory(app: Application) -> HandlerFn:
 # /session list default row cap; --all is the escape hatch (not configurable
 # -- no config value here). /session list 默认显示条数上限，--all 查看全部。
 _SESSION_LIST_LIMIT = 20
+# /spawn --wait & /spawn wait inline result truncation (display-only; the
+# LLM never sees this output). /spawn 阻塞式结果的内联显示截断（仅显示层，
+# LLM 不消费该输出）。
+_WAIT_RESULT_MAX_CHARS = 8000
 
 
 def _make_session(app: Application) -> HandlerFn:
@@ -1406,7 +1410,12 @@ def _make_spawn(app: Application) -> HandlerFn:
         if first == "wait":
             from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
-            board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+            board = SubAgentBoard(
+                app.terminal.console,
+                mgr,
+                theme=app.terminal.theme,
+                refresh_interval=app.config.board_refresh_interval,
+            )
             parts = raw.split(maxsplit=1)
             agent_id = parts[1].strip() if len(parts) > 1 else ""
 
@@ -1506,7 +1515,12 @@ def _make_spawn(app: Application) -> HandlerFn:
                 if auto_wait:
                     from mini_agent.ui.board import BOARD_DETACHED, SubAgentBoard
 
-                    board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                    board = SubAgentBoard(
+                        app.terminal.console,
+                        mgr,
+                        theme=app.terminal.theme,
+                        refresh_interval=app.config.board_refresh_interval,
+                    )
                     result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                     if result is BOARD_DETACHED:
                         assert board.pending_task is not None
@@ -1529,7 +1543,12 @@ def _make_spawn(app: Application) -> HandlerFn:
                     agent_type=agent_type_name,
                     context_summary=context_summary,
                 )
-                board = SubAgentBoard(app.terminal.console, mgr, theme=app.terminal.theme)
+                board = SubAgentBoard(
+                    app.terminal.console,
+                    mgr,
+                    theme=app.terminal.theme,
+                    refresh_interval=app.config.board_refresh_interval,
+                )
                 result = await board.run_while(mgr.wait(agent_id, timeout=900), detachable=True)
                 if result is BOARD_DETACHED:
                     assert board.pending_task is not None
@@ -1660,8 +1679,10 @@ def _format_agent_result(r) -> str:
         lines.append("```")
     if r.output:
         output = r.output
-        if len(output) > 8000:
-            output = output[:8000] + f"\n... (truncated, {len(r.output)} chars total)"
+        if len(output) > _WAIT_RESULT_MAX_CHARS:
+            output = output[:_WAIT_RESULT_MAX_CHARS] + (
+                f"\n... (truncated, {len(r.output)} chars total)"
+            )
         lines.append("")
         lines.append(output)
     return "\n".join(lines)
@@ -1708,7 +1729,12 @@ def _make_team(app: Application) -> HandlerFn:
 
         from mini_agent.ui.board import SubAgentBoard
 
-        board = SubAgentBoard(app.terminal.console, app.subagent_manager, theme=app.terminal.theme)
+        board = SubAgentBoard(
+            app.terminal.console,
+            app.subagent_manager,
+            theme=app.terminal.theme,
+            refresh_interval=app.config.board_refresh_interval,
+        )
         try:
             report = await board.run_while(team.start(task_text, timeout=300))
         except Exception as e:

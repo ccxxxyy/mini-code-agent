@@ -122,10 +122,10 @@ CC 有四层文件配置（用户级和项目级各拆 `settings.json` + `settin
 ### mini 的实现
 
 ```
-CLI 参数 > 环境变量 > .env > 项目 config.toml > 用户 config.toml > 默认值
+CLI 参数 > 命名 LLM 档案（MINI_AGENT_MODELS）> 环境变量 > .env > 项目 config.toml > 用户 config.toml > 默认值
 ```
 
-mini 只有两层文件配置（用户 + 项目），但多了 `.env` 和环境变量两个中间层。环境变量分两层优先级：`MINI_AGENT_*`（高）> `OPENAI_*`（低，兼容 OpenAI 生态）。
+mini 只有两层文件配置（用户 + 项目），但多了 `.env`、环境变量和命名 LLM 档案三个中间层。环境变量分两层优先级：`MINI_AGENT_*`（高）> `OPENAI_*`（低，兼容 OpenAI 生态）。
 
 ### 关键差异
 

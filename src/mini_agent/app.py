@@ -21,6 +21,7 @@ from mini_agent.memory.compressor import (
     DropToolResults,
     LLMSummarizeOldest,
     SlidingWindow,
+    SummarizeOldest,
 )
 from mini_agent.memory.context import ContextManager
 from mini_agent.memory.recall import RecallPrefetcher
@@ -52,9 +53,6 @@ from mini_agent.ui.terminal import Terminal
 from mini_agent.ui.trace import TraceRenderer
 
 logger = logging.getLogger(__name__)
-
-# Minimum seconds between automatic session saves 两次自动保存之间的最小间隔秒数
-AUTOSAVE_INTERVAL = 30.0
 
 SYSTEM_PROMPT = """You are a helpful coding agent running in a terminal (Mini-Code-Agent).
 You are powered by the LLM model: {model}
@@ -197,6 +195,10 @@ class Application:
         if proj:
             self._context_file_loaded = proj[0]
             parts.append(f"[{proj[0]}]\n{proj[1]}")
+            # Startup hint promised; the print was lost in the
+            # composition-root split leaving this field write-only.
+            # 承诺的启动提示；组合根拆分时打印丢失，字段沦为只写。
+            self.terminal.show_info(f"context: loaded {proj[0]}")
         if parts and marker not in self.session.conversation.system_prompt:
             self.session.conversation.system_prompt += marker + "\n\n".join(parts)
 
@@ -314,16 +316,15 @@ class Application:
         """Context manager + compressor + session store + background-worker
         fields. 上下文管理器 + 压缩器 + 会话存储 + 后台工作件字段。"""
         self.context_manager = ContextManager(self.config.memory)
+        keep_recent = self.config.memory.keep_recent_tokens
+        keep_max = self.config.memory.keep_max_tokens
         if self.config.memory.llm_summarize:
-            compressor = Compressor(
-                strategies=[
-                    DropToolResults(),
-                    LLMSummarizeOldest(self._llm),
-                    SlidingWindow(),
-                ]
+            summarizer: LLMSummarizeOldest | SummarizeOldest = LLMSummarizeOldest(
+                self._llm, keep_recent_tokens=keep_recent, keep_max_tokens=keep_max
             )
         else:
-            compressor = Compressor()
+            summarizer = SummarizeOldest(keep_recent_tokens=keep_recent, keep_max_tokens=keep_max)
+        compressor = Compressor(strategies=[DropToolResults(), summarizer, SlidingWindow()])
         self.context_manager.set_compressor(compressor)
         self.session_store = SessionStore()
         self._last_autosave: float = 0.0
@@ -1023,7 +1024,7 @@ class Application:
         if not self.session.conversation.messages:
             return
         now = time.monotonic()
-        if not force and now - self._last_autosave < AUTOSAVE_INTERVAL:
+        if not force and now - self._last_autosave < self.config.memory.autosave_interval:
             return
         try:
             await self.session_store.save(self.session)
@@ -1077,7 +1078,12 @@ class Application:
                         if selected is None:
                             return HookResult()
                     else:
-                        selected = entries[:10]
+                        # <= recall_threshold entries: inject them all (the
+                        # slice is a no-op guard; a hardcoded [:10] silently
+                        # truncated when users raised the threshold past 10)
+                        # 条目数 <= recall_threshold：全部注入（切片只是防御；
+                        # 曾硬编码 [:10]，用户把阈值调过 10 后被静默截断）
+                        selected = entries[: mem_cfg.recall_threshold]
                     if selected:
                         memory_text = "\n".join(f"- {e.content}" for e in selected)
                         app.session.conversation.system_prompt = sp + marker + memory_text

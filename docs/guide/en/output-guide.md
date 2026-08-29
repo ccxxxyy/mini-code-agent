@@ -14,17 +14,17 @@ After the user enters a message, the terminal may show the following outputs in 
 > change hello to goodbye in a.txt         ← ① user input (prompt_toolkit)
 
   ╭─ edit_file ...                          ← ② streaming tool-assembly hint
-  trace [12:03:01] iter 1 idle -> thinking  ← ③ trace line (when /trace on)
-  trace [12:03:01] llm  request 2 msgs      ← ③
+  trace [12:03:01.482] iter 1 idle -> thinking  ← ③ trace line (when /trace on)
+  trace [12:03:01.482] llm  request 2 msgs      ← ③
 ╭── Teach: edit_file ──────────────────╮    ← ④ teaching panel (when /explain on)
 │ Why this tool: ...                   │
 ╰──────────────────────────────────────╯
-  trace [12:03:02] llm  response 1082 tokens ← ③
+  trace [12:03:02.115] llm  response 1082 tokens ← ③
   ╭─ edit_file ...                          ← ② or ⑤ tool call line
   │  file_path=a.txt, old_text=hello...     ← ⑤ argument summary line
-  trace [12:03:02] perm path a.txt -> GRANTED ← ③
-  trace [12:03:02] tool edit_file start     ← ③
-  trace [12:03:02] tool edit_file done 1ms  ← ③
+  trace [12:03:02.115] perm path a.txt -> GRANTED ← ③
+  trace [12:03:02.115] tool edit_file start     ← ③
+  trace [12:03:02.115] tool edit_file done 1ms  ← ③
   ╰─ ✓ 1 lines, 42 chars                   ← ⑥ tool result line
   - hello world                             ← ⑦ diff preview (edit_file only)
   + goodbye world                           ← ⑦
@@ -60,7 +60,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | Purpose | Lets the user know which tool the LLM is calling while the JSON arguments are still being assembled |
 | How to disable | Delete the line `self.agent_loop.on_tool_call_assembling = _on_tool_assembling` in `app.py` |
 
-### ③ Trace Lines `trace [HH:MM:SS] ...`
+### ③ Trace Lines `trace [HH:MM:SS.mmm] ...`
 
 | Item | Description |
 |---|---|
@@ -142,19 +142,19 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 
 | Item | Description |
 |---|---|
-| Source | `ui/terminal.py` `show_file_changes` (called by `app.py` `_handle_turn` before token statistics) |
+| Source | `ui/terminal.py` `show_file_changes` (called by `app.py` `_run_agent_and_report` before token statistics) |
 | Trigger | When write_file/edit_file/delete_file executed successfully in this turn (file changes made by bash are not tracked) |
 | Content | `files changed this turn:` + one line per file (`+ path` green = created, `~ path` yellow = modified, `- path` red = deleted) |
-| How to disable | Delete the `show_file_changes` call line in `app.py` `_handle_turn` |
+| How to disable | Delete the `show_file_changes` call line in `app.py` `_run_agent_and_report` |
 
 ### ⑪ Token Statistics Line
 
 | Item | Description |
 |---|---|
-| Source | `app.py` `_handle_turn` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
+| Source | `app.py` `_run_agent_and_report` → `self.terminal.show_info(f"tokens: {turn} this turn / {total} total")` |
 | Trigger | After each conversation turn completes (after the file change summary) |
 | Content | With pricing configured, amounts are included: `tokens: 6373 this turn (¥0.0089) / 13215 total (¥0.0182)` |
-| How to disable | Comment out the `self.terminal.show_info(...)` line in `app.py` `_handle_turn` |
+| How to disable | Comment out the `self.terminal.show_info(...)` line in `app.py` `_run_agent_and_report` |
 
 ### ⑫ Budget Warning Line
 
@@ -162,7 +162,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 |---|---|
 | Source | `app.py` `_show_budget_warning` (at the end of each turn, after the token statistics line) |
 | Trigger | Session budget (budget) or cumulative total budget (total_budget) usage reaches ≥80% |
-| Content | ≥80% yellow `Session budget warning: ¥4.12 / ¥5.00 (82%)`; ≥100% red `⚠ Cumulative total budget exceeded: ...`; the two budgets are checked independently, so both lines may appear |
+| Content | ≥80% yellow `会话预算警告: ¥4.12 / ¥5.00 (82%)`; ≥100% red `⚠ 累计总预算超支: ...` (the strings are hardcoded in Chinese); the two budgets are checked independently, so both lines may appear |
 | How to disable | Remove budget/total_budget from the [cost] section of config.toml, or set them to 0 |
 
 ---
@@ -180,18 +180,18 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 | `MCP: xxx connected (N tools)` | `app.py` startup | When an MCP server connects successfully |
 | `Cleaned N stale session(s)` | `app.py` startup | When stale sessions are auto-cleaned |
 | `Cleaned N stale worktree(s)` | `app.py` startup | When stale worktrees are auto-cleaned |
-| Restore prompt `A session that did not shut down cleanly was detected...` | `app.py` `_maybe_restore_session` | When a crashed session is detected at startup |
+| Restore prompt `检测到未正常关闭的会话...` (hardcoded in Chinese) | `app.py` `_maybe_restore_session` | When a crashed session is detected at startup |
 | User input line in bold bright light-blue + framing rules | `input_handler.py` `create_prompt_style` root style + `terminal.py` `_input_rule` | The `> typed text` line is bold bright light-blue (theme.user_input) both while typing and after Enter, framed by same-color rules above and below once confirmed, directly distinguishable from dim trace/tool output in scrollback |
 | Slash command output | Strings returned by each handler in `builtin_commands.py`; plain text is printed as-is by default, output carrying the `MARKDOWN_RESULT` sentinel (spawn reports) goes through Markdown rendering, inline code (filenames / agent ids) in bright orange | When `/xxx` is entered |
 | SubAgent progress board | `ui/board.py` `SubAgentBoard` Rich Live Table | During `/spawn --wait`, `/spawn wait` or `/team` |
-| Multi-agent result overview table + `Report i/N` sections + deliverable file lines + `Structured output:` JSON block | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` / `_format_agent_result` (B17 synthetic_output) | When `/spawn wait` receives multiple results; if a sub-agent called `synthetic_output`, an extra fenced JSON block is shown |
+| Multi-agent result overview table + `报告 i/N` sections (table headers are hardcoded in Chinese) + deliverable file lines + `Structured output:` JSON block | `builtin_commands.py` `_format_agent_results_overview` / `_extract_deliverables` / `_format_agent_result` (B17 synthetic_output) | When `/spawn wait` receives multiple results; if a sub-agent called `synthetic_output`, an extra fenced JSON block is shown |
 | Worker pane output (task header / tool lines / streaming answer / linger countdown) | `core/worker.py` direct stdout printing | Inside the pane of `/spawn --pane` |
 | `Background agent xxx finished — processing result...` | `app.py` subscriber of `SubAgentCompleteEvent` | When a background agent completes (`spawn_agents background=true` / default `/spawn` dispatch / Esc-detached board); automatically interrupts input wait, drains mailbox, and triggers agent loop to process the result; deliveries landing while a slash command runs are processed right after the command returns |
 | `Summarizing conversation for context fork...` / `Context summary ready (Xs, N chars)` | `app.py` subscriber of `ContextSummaryStartEvent`/`ContextSummaryDoneEvent` | When `inherit_context=true` or `/spawn --fork` triggers a summary LLM call; `/trace on` also shows `ctx` trace lines |
 | Permission confirmation dialog | `terminal.py` `confirm` | When a dangerous command / path outside the project / a `[[hooks]]` confirm rule is hit; concurrent output during the input wait (trace/result lines from parallel tools) reroutes above the prompt so the input line is never disrupted |
 | Thinking reasoning process (dim italic) | `terminal.py` `feed_thinking` | When reasoning models (DeepSeek R1, o1/o3) output reasoning_content, or Anthropic/Responses models with request-side thinking enabled (tech-notes §110) |
 | `Goodbye!` | `app.py` `run()` finally | On normal exit |
-| `Interrupted.` | `app.py` `_handle_turn` except | On Ctrl+C / double-Esc interrupt |
+| `Interrupted.` | `app.py` `_run_agent_and_report` except | On Ctrl+C / double-Esc interrupt |
 
 ---
 
@@ -218,7 +218,7 @@ Legend for the annotations above: ① user input (prompt_toolkit) / ② streamin
 ## 5. Output Layer Architecture
 
 ```
-user input  ─→  app.py _handle_turn
+user input  ─→  app.py _handle_turn ─→ _run_agent_and_report
                 │
                 ├─→ agent_loop.run()
                 │     │

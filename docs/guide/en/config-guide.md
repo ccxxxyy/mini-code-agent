@@ -200,10 +200,12 @@ temperature = 0.0
 max_tokens = 4096            # Per-response cap; on truncation, automatically doubles and retries up to 3 times (P44) — this value is the retry starting point
 timeout = 120.0
 thinking = false             # Request-side extended thinking: Anthropic thinking param / Responses reasoning param (tech-notes §110); can also enable via MINI_AGENT_THINKING or per-profile MODEL_<NAME>_THINKING; tune Responses effort via extra = {reasoning_effort = "high"} (default medium); per-scenario examples in "Thinking Stream Configuration in Detail" below
-# extra = {}                 # Extra parameters passed through to the API (e.g. top_p, stop, or enable_thinking = true for qwen hybrid reasoning models); core fields (model/messages) cannot be overridden
+# extra = {}                 # Extra parameters passed through to the API (e.g. top_p, stop, or enable_thinking = true for qwen hybrid reasoning models); core fields (model/messages) cannot be overridden. Note: only the openai (Chat Completions) provider passes everything through; openai-responses reads only reasoning_effort; anthropic ignores extra
 
 [tools]
 bash_timeout = 120.0         # bash command timeout (seconds)
+bash_max_output_chars = 30000 # bash output truncation cap (chars)
+grep_max_matches = 200       # grep match cap
 max_file_size = 10000000     # File read cap (bytes)
 enabled_tools = ["read_file", "write_file", "edit_file", "delete_file", "bash", "glob", "grep", "spawn_agents", "send_message", "wait_message", "tool_search", "mcp_call", "ask_user", "exit_plan_mode", "task_create", "task_get", "task_list", "task_update", "load_skill", "install_skill", "synthetic_output"]
 allowed_paths = []           # Extra allowed paths outside the project (default empty)
@@ -222,10 +224,13 @@ crashed_session_cleanup_days = 40  # Crashed sessions older than this are also c
 compress_max_failures = 3    # Compression circuit breaker: skip after N consecutive ineffective compressions (0 = disabled) — prevents infinite loops when the already-read-files list gets too long
 llm_summarize = true         # LLM semantic summary compression (enabled by default); false falls back to extractive truncation (no LLM call)
 undo_keep_turns = 5          # /undo file snapshots: keep the last N turns — raise for deeper file rollback
-recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold)
+autosave_interval = 30.0     # Session autosave throttle (seconds)
+keep_recent_tokens = 10000   # Compression keep window: min tokens kept from the tail (scales with target)
+keep_max_tokens = 40000      # Compression keep window hard cap
+recall_threshold = 10        # Enable LLM selective recall when memory count exceeds this (inject all when ≤ threshold; the injection cap equals this threshold)
 recall_top_k = 5             # Maximum number of entries the LLM picks during selective recall
 recall_timeout = 8.0         # Recall prefetch timeout in seconds — selection runs in parallel with the main LLM call (no first-token latency added); on timeout, head entries are injected instead
-consolidation_threshold = 20 # Automatically run LLM semantic consolidation when memory count exceeds this (0 = disabled)
+consolidation_threshold = 20 # Automatically run LLM semantic consolidation when memory count exceeds this (raise to consolidate less often; note 0 is NOT "disabled" but "consolidate after every extraction" — the background-consolidation switch is auto_consolidate)
 auto_consolidate = true      # Background consolidation at startup: memories are merged invisibly when both gates pass (lock guards concurrency, failures roll back)
 consolidate_min_hours = 24.0 # Background consolidation gate 1: hours since the last run
 consolidate_min_sessions = 5 # Background consolidation gate 2: new sessions active since the last run
@@ -243,7 +248,7 @@ approval_mode = "default"    # Session-level permission mode at startup: "defaul
                              # approval_mode = "plan" and takes precedence.
 allowed_commands = ["git *", "uv *"]   # Confirmation-free command whitelist (default empty); a match is allowed through (including dangerous commands)
 denied_commands = ["rm -rf /", "sudo", "curl|sh", "wget|sh"]   # Unconditional deny list (default values); a match is rejected
-# Note: denied_commands is glob exact-match rejection. There are also 26 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
+# Note: denied_commands is glob exact-match rejection. There are also 28 hard-coded regexes (DANGEROUS_COMMAND_PATTERNS)
 # used for confirmation dialogs (rm -rf/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/
 # restore/clean/Windows del/rmdir/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/
 # sh -c/bash -c/powershell -Command/pwsh -c) — these are not configurable, but can be
@@ -279,6 +284,8 @@ max_consecutive_denials = 1  # Stop the turn and ask the user after N consecutiv
                              # (dangerous command / path outside project / hook confirm; default 1 = one denial stops
                              # the goal; raise it to allow corrected retries after a denial. Prevents bypass hunting)
 theme = "default"            # "default" | "dark" | "light"
+notify_max_chars = 4000      # Background completion notification truncation cap (chars)
+board_refresh_interval = 0.25 # SubAgent progress board refresh interval (seconds)
 collapse_tool_calls = false  # Collapse read-only tools (read_file/glob/grep) called >=2 times in the
                              # same round into a one-line "✓ Done (N tool uses · Xs)" summary;
                              # default false (full per-call lines), set true to opt in
@@ -340,6 +347,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 transport = "stdio"                  # "stdio" (subprocess) | "http" (remote) | "sse"
 loading = "eager"                    # "eager" (default) | "native" (Anthropic native defer) | "dispatch" (on-demand search + call)
+# env = { GITHUB_TOKEN = "ghp_xxx" } # Optional: extra environment variables for the stdio subprocess
 
 # [mcp.servers.remote-api]
 # url = "http://localhost:8080/mcp"
@@ -452,7 +460,7 @@ Note: the gate only governs the `edit_file`/`write_file` tools — `sed` and sim
 
 ### Multi-Model Profiles (Environment Variable Configuration)
 
-Preconfigure multiple sets of model parameters and switch at runtime with a single `/model` command. All defined via environment variables:
+Preconfigure multiple sets of model parameters and switch at runtime with a single `/model` command. All defined via environment variables (TOML is not supported; `MINI_AGENT_PROFILES` and `PROFILE_<NAME>_*` are equivalent legacy aliases):
 
 ```bash
 # Define two Profiles: fast and strong
@@ -604,7 +612,7 @@ Warnings only, no blocking — the LLM keeps working after the overage; whether 
 | `arg` | No | Empty | Only check this parameter's value (e.g. `"file_path"`); by default **all** parameter values are checked |
 | `contains` | No | Empty | Trigger only when the parameter value contains this substring |
 | `regex` | No | Empty | Trigger only when the parameter value matches this regex via `re.search`; invalid regexes are **skipped with a warning**, never blocking startup |
-| `condition` | No | Empty | Condition expression — when set, **takes priority over** the four fixed fields `tool`/`arg`/`contains`/`regex`; available fields: `tool` (tool name), `args.<key>` (parameter value); operators `==`, `!=`, `=~` (regex via `re.search`), `~=` (glob via `fnmatch`); combine with `and`/`or` (**no mixing** in one expression) |
+| `condition` | No | Empty | Condition expression — when set, **takes priority over** the four fixed fields `tool`/`arg`/`contains`/`regex`; available fields: `tool` (tool name), `args.<key>` (parameter value) and `event` (`pre_tool`/`post_tool`); operators `==`, `!=`, `=~` (regex via `re.search`), `~=` (glob via `fnmatch`); combine with `and`/`or` (**no mixing** in one expression) |
 | `reason` | Recommended | Auto-generated | Rejection/confirmation reason — returned verbatim to the LLM for block, also shown in the confirm dialog. Spell out "why + what to do instead" for best results. Not used by notify (use `message` instead) |
 | `action` | No | `"block"` | `"block"` rejects directly; `"confirm"` shows a y/a/n confirmation dialog (a = stop asking for the same rule within this session); `"command"` executes a command (PRE_TOOL: non-zero exit code blocks the tool; POST_TOOL: fire-and-forget); `"notify"` prints a terminal notification line; other values are skipped with a warning |
 | `event` | No | `"pre_tool"` | `pre_tool` (default) or `post_tool`; other values are skipped with a warning |
@@ -964,7 +972,7 @@ allow = ["glob"]           # Trust the tool wholesale (skips command/path-level 
 deny = ["delete_file"]     # Block the entire tool outright
 ```
 
-**Precedence**: `deny rules > allow rules > built-in defaults` (dangerous-command confirmation / sensitive-path rejection / inside-project allowance). deny wins above all — even a path inside the project gets blocked.
+**Precedence**: for the command scope, `deny rules > allow rules > built-in defaults` (dangerous-command confirmation); for the path scope, `deny rules > sensitive path/file hard rejection > allow rules > built-in defaults (inside-project allowance)` — `[paths] allow` can NOT unlock sensitive targets like `~/.ssh` or `.env` (the PathGuard hard rejection is evaluated before allow rules and holds in every mode). deny wins above all — even a path inside the project gets blocked.
 
 **What command deny rules match, and their boundary**: a command-scope deny rule matches more than the literal command — wrapped and chained forms hit too: `cmd /c "ping x"` and `echo hi & ping x` both match a `ping*` rule (cmd /c / cmd /k / powershell -Command / sh -c prefixes are unwrapped; segments split on `&;|` after blanking quoted spans; quoted data never false-denies; allow rules are NOT unwrapped). This is defense in depth, not a wall: deep obfuscation (`p^ing` escaping, env-var indirection, base64 encoding) cannot be exhaustively caught at the pattern layer — the layered guarantee is that obfuscation carriers themselves (cmd /c, powershell -EncodedCommand, etc.) sit on the dangerous-command list and always require confirmation, and the OS sandbox is the final wall. Deny rules express policy intent; they do not replace the sandbox.
 
@@ -976,8 +984,9 @@ Evaluation order (first match decides):
 1. `denied_paths` (`~/.ssh`/`~/.aws`/`~/.gnupg`, configurable in config.toml) → hard reject
 2. Sensitive filename patterns (`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`, 10 kinds in total) → hard reject (blocked even inside the project); `.env.example`/`.env.sample`/`.env.template` are exempt
 3. Inside the project directory → auto allow
-4. Paths in `allowed_paths` (configurable in config.toml) → auto allow
-5. None of the above matches → ask the user (when `permission_mode = "ask"`)
+4. The spill cache directory (`~/.mini-agent/cache/results`) → read-only auto allow (the LLM reading back spilled tool results)
+5. Paths in `allowed_paths` (configurable in config.toml) → auto allow
+6. None of the above matches → ask the user (when `permission_mode = "ask"`)
 
 > **bash channel also covers sensitive files**: this PathGuard sensitive-file protection only guards the `read_file`/`write_file`/`delete_file` tools. bash commands used to skip path checks entirely — `type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` sailed through as normal commands, bypassing the file-tool block and printing the contents (a real API key leaked during verification). Now permission.py's `command_references_sensitive_file()` tokenizes a bash command and, if any token's basename matches the same sensitive-file patterns above, routes it to a **confirmation** (decision reason `sensitive_file_command`); a denial trips the confirm-denial breaker. Honest boundary, same as the dangerous-command blacklist: obfuscated paths (env vars like `$SECRET`, wildcards, base64/echo concatenation) can still slip through — see docs/tech-notes.md §90.
 
@@ -1058,7 +1067,7 @@ Command arrives
   ↓
 ② permissions.toml allow rule / session grant? → allow
   ↓
-③ Dangerous command (27 regexes, including inline interpreters)?
+③ Dangerous command (28 regexes, including inline interpreters)?
      sandbox_auto_allow=true → allow (sandbox as backstop)
      sandbox_auto_allow=false → confirmation dialog
   ↓

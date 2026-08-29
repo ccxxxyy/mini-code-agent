@@ -48,11 +48,16 @@ class SubAgentBoard:
     """Live progress table for active sub-agents. 活跃 SubAgent 的实时进度表。"""
 
     def __init__(
-        self, console: Console, manager: SubAgentManager, theme: Theme | None = None
+        self,
+        console: Console,
+        manager: SubAgentManager,
+        theme: Theme | None = None,
+        refresh_interval: float = _REFRESH_INTERVAL,
     ) -> None:
         self._console = console
         self._manager = manager
         self._theme = theme or get_theme("default")
+        self._refresh_interval = refresh_interval
         self.pending_task: asyncio.Task | None = None
         self._detachable = False
 
@@ -87,7 +92,7 @@ class SubAgentBoard:
                     self.pending_task = task
                     return BOARD_DETACHED
                 live.update(self._render())
-                await asyncio.sleep(_REFRESH_INTERVAL)
+                await asyncio.sleep(self._refresh_interval)
         finally:
             live.update("")
             live.stop()

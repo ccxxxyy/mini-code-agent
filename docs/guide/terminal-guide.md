@@ -109,7 +109,7 @@ winpty uv run mini      # 源码安装 + winpty
 | Windows Terminal | ✅ | ✅ 全彩 | ✅ | ✅ | ⭐⭐⭐ |
 | PowerShell | ✅ | ✅ | ✅ | ✅ | ⭐⭐ |
 | CMD | ✅ | ✅（Rich 自动降级） | ✅ | Unicode 符号（需 UTF-8 代码页） | ⭐⭐ |
-| Git Bash 直接运行 | ❌ 朴素输入 | ✅ | ❌ | ✅ | ⭐ |
+| Git Bash 直接运行 | ❌ 朴素输入 | ❌（stdout 是管道，Rich 关闭颜色） | ❌ | ✅ | ⭐ |
 | Git Bash + winpty | ✅ | ✅ | ✅ | ✅ | ⭐⭐ |
 
 ---

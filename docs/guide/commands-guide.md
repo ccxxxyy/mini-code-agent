@@ -19,7 +19,7 @@
 **注意**：/clear 不更换会话 ID——清空后继续对话，自动保存会**覆盖**该会话在盘上的旧历史。想从零开始且保留当前会话的完整历史：用 `/session new`（一条命令：旧会话完整存盘 + 换新 ID 另起）。
 
 ### /compact
-手动压缩对话历史（触发四级压缩级联：DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow）。无参数。**会调用 LLM**（LLM 摘要策略时）。
+手动压缩对话历史（触发三级压缩级联：DropToolResults → LLMSummarizeOldest（LLM 失败自动回退提取式摘要；`llm_summarize = false` 时直接用提取式 SummarizeOldest）→ SlidingWindow）。无参数。**会调用 LLM**（LLM 摘要策略时）。
 手动压缩与自动压缩走同一管道——恢复附件（用户请求/已读文件/技能状态）与压缩边界字段一并写入，`/session save` 后这些状态可随会话恢复。
 
 ### /session — 会话管理
@@ -37,7 +37,7 @@
 /session tags              # 查看当前会话所有标签
 ```
 `load` 恢复完整对话（含工具调用）与 system prompt；若会话经历过压缩（存在压缩边界），一并恢复已读文件清单、用户最近请求与**技能激活状态**（`/skill` 的 `[ACTIVE]` 标记、deactivate 均恢复正常，prompt 不重复注入）。  
-无参数时显示用法。标签可用于分类会话（如 `#bug-fix`、`#refactor`），列出时带 `--tag` 按标签过滤。会话存 `~/.mini-agent/sessions/`，超过 `session_cleanup_days`（默认 30 天）的已正常关闭会话启动时自动清理（未正常关闭的不清理——它们是崩溃恢复候选）。
+无参数时显示用法。标签可用于分类会话（如 `#bug-fix`、`#refactor`），列出时带 `--tag` 按标签过滤。会话存 `~/.mini-agent/sessions/`，超过 `session_cleanup_days`（默认 30 天）的已正常关闭会话启动时自动清理；未正常关闭的按更宽松的 `crashed_session_cleanup_days`（默认 40 天）清理——保留窗口更长因为它们是崩溃恢复候选。
 
 **`/session new` 原理**：对当前会话做三件事——① **完整存盘**：全部消息/工具记录/system prompt/压缩边界原样写入它自己的 JSON 文件，之后新会话用**新 ID**写**另一个文件**，旧文件不会再被碰；② **标记正常关闭**（closed_cleanly=True）：主动离开不是崩溃，不标记的话下次启动会被崩溃检测误判弹恢复；③ **空会话跳过存盘**：一条消息都没有时不落盘（避免空 JSON 垃圾文件），但新会话照样另起。新会话保留 system prompt（指令/记忆注入，与 /clear 语义一致）、继承 model 与 project_dir。返回提示含旧会话 ID——`/session load <前缀>` 随时回去。
 
@@ -124,7 +124,7 @@
 
 | | 期间你能干嘛 | 结果怎么出现 | 输出形态 | 结果进对话历史吗 |
 |---|---|---|---|---|
-| 默认（自动投递） | 能继续打字、干别的 | 跑完后自动弹出 | 经主 LLM 转述（投递上限 4000 字符） | **进**——可追问、让 LLM 基于结果继续干活 |
+| 默认（自动投递） | 能继续打字、干别的 | 跑完后自动弹出 | 经主 LLM 转述（投递上限默认 4000 字符，顶级 `notify_max_chars` 可配） | **进**——可追问、让 LLM 基于结果继续干活 |
 | `--wait` / `/spawn wait` | 不能，终端卡住等（显示进度面板） | 等完的瞬间直接打印 | 未转述的完整原文（8000 字符内不截断） | **不进**——斜杠命令本地执行，LLM 不知道这个结果 |
 
 选择建议：想让 LLM 接着处理结果 → 用默认；只想自己看完整原文 → 用 `--wait`。
@@ -286,7 +286,7 @@ deny 规则对会话内**所有 agent 实时生效**——包括正在运行的 
 /todo done <id>              # 标记完成
 /todo fail <id>              # 标记失败
 /todo delete <id>            # 删除
-/todo clear                  # 清空
+/todo clear                  # 清除已完成/失败的任务（pending/进行中保留）
 ```
 id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出所有匹配项。列表显示的 ID 已自动截取最短唯一前缀。
 
@@ -296,7 +296,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 
 ### /record — 录制工具调用序列
 ```
-/record start <name>         # 开始录制（之后的工具调用被记录）
+/record start <name>         # 开始录制（之后成功的工具调用被记录；失败调用不录）
 /record stop                 # 停止并保存到 ~/.mini-agent/recordings/
 /record cancel               # 放弃本次录制
 /record list                 # 列出已保存录制
@@ -352,7 +352,6 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 | `/plan` | 同上（`enable_plan_mode` 配置控制启动值） |
 | `/trace` `/explain` | 开关不落盘 |
 | `/model` | 切换 LLM Profile 仅本会话 |
-| `/audit on/off` | 开关是会话级（审计日志文件本身持久） |
 | `/skill activate/deactivate` | 激活状态注入 system prompt；`/session save` 后若会话经历过压缩（存在压缩边界），`load` 时激活状态随边界恢复（prompt 不重注入），否则 prompt 仍在但注册表激活状态丢失 |
 | 确认弹窗的 `a`（always） | 会话授权，重启清空 |
 
@@ -361,6 +360,7 @@ id 可用前缀匹配；歧义前缀（匹配多个任务）会报错并列出�
 | 命令 | 落盘位置 |
 |---|---|
 | `/allow` `/deny` **--save** | 项目 `.mini-agent/permissions.toml`（每次启动自动加载） |
+| `/audit on/off` | `~/.mini-agent/.audit_on` 标记文件（跨重启持久，直到显式 off） |
 | `/theme` | `~/.mini-agent/.theme` |
 | `/memory add` | 项目 `.mini-agent/memory.json` / 用户 `~/.mini-agent/memory/` |
 | `/session save/tag` | `~/.mini-agent/sessions/` |

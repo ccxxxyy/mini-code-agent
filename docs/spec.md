@@ -150,7 +150,7 @@ mini-code-agent/
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
 │   ├── mocks.py                     # Shared MockLLM + script helpers
-│   ├── unit/                        # unit test files, 1441 tests
+│   ├── unit/                        # unit test files, 1451 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py
@@ -492,11 +492,14 @@ class ToolConfig:
         "synthetic_output",
     ])
     bash_timeout: float = 120.0
+    bash_max_output_chars: int = 30_000   # bash 输出截断上限
+    grep_max_matches: int = 200           # grep 匹配条数上限
     max_file_size: int = 10_000_000       # 10MB
     allowed_paths: list[str] = field(default_factory=list)
     denied_paths: list[str] = field(default_factory=lambda: [
         "~/.ssh", "~/.aws", "~/.gnupg"
     ])
+    enforce_read_before_edit: bool = True # 编辑前必读门（False 关闭）
 
 
 @dataclass
@@ -533,9 +536,13 @@ class MemoryConfig:
     consolidate_min_hours: float = 24.0   # 门槛一：距上次后台整固的小时数
     consolidate_min_sessions: int = 5     # 门槛二：期间活跃的新会话数
     session_cleanup_days: int = 30        # 旧会话启动时自动清理（0 = 禁用）
+    crashed_session_cleanup_days: int = 40  # 崩溃会话超此天数也清理（比正常更宽松）
     compress_max_failures: int = 3        # 熔断器：连续 N 次压缩无效后跳过（0 = 禁用）
     llm_summarize: bool = True            # LLM 语义摘要压缩（False = 抽取式截断）
     undo_keep_turns: int = 5              # /undo 文件快照保留最近 N 轮
+    autosave_interval: float = 30.0       # 会话自动保存节流间隔（秒）
+    keep_recent_tokens: int = 10_000      # 压缩保留窗口：尾部最少保留 token（随目标缩放）
+    keep_max_tokens: int = 40_000         # 压缩保留窗口硬顶
 
 
 @dataclass
@@ -573,6 +580,7 @@ class ContextConfig:
     )
     user_instructions_file: str = "~/.mini-agent/instructions.md"
     max_chars: int = 8000
+    max_include_depth: int = 5            # @-include 递归展开深度（0 禁用）
 
 
 @dataclass
@@ -610,6 +618,12 @@ class AgentConfig:
         default_factory=lambda: ["./.mini-agent/plugins", "~/.mini-agent/plugins"]
     )
     disabled_plugins: list[str] = field(default_factory=list)  # 按 entry-point 名或文件名禁用
+    # 自定义 Agent 类型目录：*.md 文件声明 agent 类型
+    agent_dirs: list[str] = field(
+        default_factory=lambda: ["~/.mini-agent/agents", "./.mini-agent/agents"]
+    )
+    notify_max_chars: int = 4000          # 后台完成通知截断上限
+    board_refresh_interval: float = 0.25  # SubAgent 进度面板刷新间隔（秒）
     theme: str = "default"
     # 只读工具（read_file/glob/grep）同轮 >=2 次折叠为一行 "✓ Done (N tool uses · Xs)"
     # 摘要；默认 False 不折叠（逐条完整显示），设 True 开启
@@ -2596,7 +2610,7 @@ Context Window (e.g. 128K tokens)
 
 **第 3 级：SlidingWindow** -- 兜底：只保留能放进预算的最近消息，并带三重防护——孤儿 tool result 丢弃（防 API 400）、任务锚点（绝不丢最近一条用户消息）、摘要锚点（绝不丢头部压缩摘要）。
 
-保留窗口的分界不是按比例，而是 **token 驱动的 `_compute_keep_split`**：从尾部反向累计 token，满足 `MIN_KEEP_MESSAGES=5` 条且累计 ≥ 保留下限（`KEEP_RECENT_TOKENS=10K`）即停，累计超硬顶（`KEEP_MAX_TOKENS=40K`）强制停。下限/硬顶随 target 缩放（`min(10K, target//2)` / `min(40K, target)`）——小窗口下绝对常量会让摘要级数学上永远达不到目标。分界点还会前移避开 tool result（防孤儿导致 API 400）。
+保留窗口的分界不是按比例，而是 **token 驱动的 `_compute_keep_split`**：从尾部反向累计 token，满足 `MIN_KEEP_MESSAGES=5` 条且累计 ≥ 保留下限（`KEEP_RECENT_TOKENS=10K`）即停，累计超硬顶（`KEEP_MAX_TOKENS=40K`）强制停。下限/硬顶随 target 缩放（`min(10K, target//2)` / `min(40K, target)`）——小窗口下绝对常量会让摘要级数学上永远达不到目标；两值可经 `[memory] keep_recent_tokens / keep_max_tokens` 配置（tech-notes §125）。分界点还会前移避开 tool result（防孤儿导致 API 400）。
 
 ```python
 class Compressor:

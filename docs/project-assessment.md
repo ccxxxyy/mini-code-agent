@@ -123,6 +123,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 这些值对不同使用场景可能需要调整，但目前只能改源码。
 
+**✅ 已修复**：全部 6 处（含压缩窗口两个 token 参数）接入分层 TOML 配置——`[tools] bash_max_output_chars / grep_max_matches`、`[memory] autosave_interval / keep_recent_tokens / keep_max_tokens`、顶级 `notify_max_chars / board_refresh_interval`。默认值与原常量一致（不配置行为不变）；`MIN_KEEP_MESSAGES`/`MIN_SUMMARIZE_PREFIX_TOKENS` 是压缩正确性不变量而非调优旋钮，保持常量。7 个新测试（默认值快照 + TOML 加载 + 各接线点生效）。详见 tech-notes §125。
+
 ### 2.10 敏感文件检测覆盖面不足
 
 `security/path_guard.py:11-22` 的敏感文件模式缺少常见的凭证文件：`.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等。
@@ -136,6 +138,30 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 ### 2.12 废弃 API 残留
 
 4 处使用了 Python 3.10 起废弃的 `asyncio.get_event_loop()`（`terminal.py:196`、`agent_loop.py:606`、`permission.py:272,291`），应改为 `asyncio.get_running_loop()`。
+
+### 2.13 CI lint 不覆盖 tests/
+
+CI 的 lint job 只检查 `src/`（`uv run ruff check src/` + `ruff format --check src/`），而本地开发惯例一直是 `src/ tests/` 双查——测试代码的 lint/格式回归 CI 抓不到，依赖开发者自觉。修法：ci.yml 两条命令补 `tests/`（本地全库当前已双查通过，改动零风险）。
+
+**证据**：`.github/workflows/ci.yml` lint job 的两个 step 参数均只有 `src/`。
+
+### 2.14 Mailbox 陈旧锁接管存在双进入竞态窗口
+
+`_with_lock` 的陈旧锁接管：两个等待进程可能**同时**判定锁文件超龄（`time.time() - mtime > STALE_LOCK_AGE`），各自 `unlink` + 重建锁，双双进入临界区——第二个 unlink 删掉的是第一个刚创建的新锁。后果是读改写丢更新（与锁要防的问题相同）。触发条件苛刻：持有者崩溃遗留锁 + 两个等待者恰在 10s 超龄边界并发到达。修法方向：接管时用"重命名抢占"（rename 是原子的，只有一个进程能成功 rename 陈旧锁）替代 unlink+recreate。
+
+**证据**：`core/mailbox.py` `_with_lock` 的 `FileExistsError` 分支——超龄判定与 `lock.unlink(missing_ok=True)` 之间无原子性保证。tech-notes §122 修复 delete-pending 时未覆盖此竞态。
+
+### 2.15 builtin_commands.py 需要拆分
+
+约 1880 行、承载全部 27 个命令的 handler，是当前最大的单文件（app.py 拆分后接棒）。应按命令域分文件（session/spawn/permission/memory/observability 等）或至少按现有 `_make_xxx` 工厂分组拆包。属大重构，建议独立立项（拆分时机注意与 §2.13 的 tests lint 接入错开，减少 diff 噪声）。
+
+**证据**：`src/mini_agent/extensions/builtin_commands.py` 行数；本文档"三、总体评价"技术债务方向 1 的后半句。
+
+### 2.16 MCP 工具命名规则无文档
+
+MCP 工具注册名为 `mcp_<服务器名>_<工具名>`（`tools/mcp/adapter.py`），config-guide 的 MCP 章节未说明——用户在 `/tools`、`/allow tool`、trace 输出里看到该形态时无处查证。轻微文档增强项。
+
+**证据**：`tools/mcp/adapter.py:34`；docs/guide/config-guide.md MCP 节无对应句（§128 审计员标注的非失真遗漏）。
 
 ---
 

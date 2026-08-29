@@ -19,7 +19,7 @@ Clear conversation history (system prompt and memory injection are preserved). N
 **Note**: /clear does NOT change the session ID — if you keep chatting after clearing, autosave will **overwrite** this session's old history on disk. To start fresh while keeping the current session's full history, use `/session new` (one command: saves the old session intact and starts under a new ID).
 
 ### /compact
-Manually compress conversation history (triggers the four-level compression cascade: DropToolResults → LLMSummarizeOldest → SummarizeOldest → SlidingWindow). No parameters. **Calls the LLM** (when using the LLM summarization strategy).
+Manually compress conversation history (triggers the three-level compression cascade: DropToolResults → LLMSummarizeOldest (falls back to the extractive digest on LLM failure; with `llm_summarize = false` the extractive SummarizeOldest is used directly) → SlidingWindow). No parameters. **Calls the LLM** (when using the LLM summarization strategy).
 Manual compaction goes through the same pipeline as auto-compression — the recovery attachment (user request / read files / skill state) and all compact-boundary fields are written, so these survive a `/session save` + restore.
 
 ### /session — Session Management
@@ -37,7 +37,7 @@ Manual compaction goes through the same pipeline as auto-compression — the rec
 /session tags              # Show all tags of the current session
 ```
 `load` restores the full conversation (tool calls included) and the system prompt; if the session has been compressed (a compact boundary exists), the read-file list, the last user request and the **skill activation state** are restored too (`/skill`'s `[ACTIVE]` markers and deactivate work again; prompts are not re-injected).
-Shows usage when called without parameters. Tags can be used to categorize sessions (e.g. `#bug-fix`, `#refactor`); use `--tag` with list to filter by tag. Sessions are stored in `~/.mini-agent/sessions/`; normally closed sessions older than `session_cleanup_days` (default 30 days) are automatically cleaned up at startup (uncleanly closed ones are kept — they are crash-recovery candidates).
+Shows usage when called without parameters. Tags can be used to categorize sessions (e.g. `#bug-fix`, `#refactor`); use `--tag` with list to filter by tag. Sessions are stored in `~/.mini-agent/sessions/`; normally closed sessions older than `session_cleanup_days` (default 30 days) are automatically cleaned up at startup ; uncleanly closed ones are cleaned up under the more lenient `crashed_session_cleanup_days` (default 40 days) — the longer window exists because they are crash-recovery candidates.
 
 **How `/session new` works**: three things happen to the current session — ① **saved intact**: all messages/tool records/system prompt/compact boundary are written to its own JSON file; the new session uses a **new ID** and writes to a **different file**, so the old file is never touched again; ② **marked cleanly closed** (closed_cleanly=True): you are leaving deliberately, not crashing — without the marker the next startup's crash detection would wrongly offer to restore it; ③ **empty sessions skip the save** (no junk empty JSON files), but a fresh session still starts. The fresh session keeps the system prompt (instructions/memory injection, same semantics as /clear) and inherits model and project_dir. The return message includes the old session's ID — `/session load <prefix>` brings it back anytime.
 
@@ -124,7 +124,7 @@ Unit prices must be configured under `[cost.pricing.<model-name>]`; otherwise am
 
 | | What you can do meanwhile | How the result appears | Output form | Enters conversation history? |
 |---|---|---|---|---|
-| Default (auto-delivery) | Keep typing, do other things | Pops up automatically on completion | Relayed by the main LLM (delivery capped at 4000 chars) | **Yes** — you can follow up and have the LLM act on it |
+| Default (auto-delivery) | Keep typing, do other things | Pops up automatically on completion | Relayed by the main LLM (delivery capped at 4000 chars by default, configurable via top-level `notify_max_chars`) | **Yes** — you can follow up and have the LLM act on it |
 | `--wait` / `/spawn wait` | Nothing — the terminal blocks (progress board shown) | Printed the moment the wait ends | Raw untruncated output (up to 8000 chars, not LLM-relayed) | **No** — slash commands run locally; the LLM does not see this result |
 
 Rule of thumb: want the LLM to keep working with the result → use the default; just want to read the full raw output yourself → use `--wait`.
@@ -286,7 +286,7 @@ List all registered tools (built-in + MCP, including search hints in dispatch/na
 /todo done <id>              # Mark done
 /todo fail <id>              # Mark failed
 /todo delete <id>            # Delete
-/todo clear                  # Clear all
+/todo clear                  # Clear completed/failed tasks (pending/in-progress are kept)
 ```
 IDs support prefix matching; an ambiguous prefix (matching multiple tasks) raises an error and lists all matches. IDs shown in the list are automatically truncated to the shortest unique prefix.
 
@@ -296,7 +296,7 @@ IDs support prefix matching; an ambiguous prefix (matching multiple tasks) raise
 
 ### /record — Record a tool-call sequence
 ```
-/record start <name>         # Start recording (subsequent tool calls are recorded)
+/record start <name>         # Start recording (subsequent SUCCESSFUL tool calls are recorded; failed calls are skipped)
 /record stop                 # Stop and save to ~/.mini-agent/recordings/
 /record cancel               # Abandon the current recording
 /record list                 # List saved recordings
@@ -352,7 +352,6 @@ Session-level (lost on restart):
 | `/plan` | Same (startup value controlled by `enable_plan_mode`) |
 | `/trace` `/explain` | State is not written to disk; without parameters, shows current state |
 | `/model` | LLM profile switch is per-session |
-| `/audit on/off` | The on/off state is session-level (the audit log file itself is persistent); no args shows current state |
 | `/skill activate/deactivate` | Activation injects into the system prompt; after `/session save`, if the session has been compressed (a compact boundary exists), `load` restores the activation state from the boundary (prompts are not re-injected) — otherwise prompts survive but the registry's active state is lost |
 | The `a` (always) answer in confirmation dialogs | Session grant, cleared on restart |
 
@@ -361,6 +360,7 @@ Persistent (disk location):
 | Command | Written to |
 |---|---|
 | `/allow` `/deny` **--save** | Project `.mini-agent/permissions.toml` (auto-loaded on every startup) |
+| `/audit on/off` | `~/.mini-agent/.audit_on` marker file (persists across restarts until explicitly turned off) |
 | `/theme` | `~/.mini-agent/.theme` |
 | `/memory add` | Project `.mini-agent/memory.json` / user `~/.mini-agent/memory/` |
 | `/session save/tag` | `~/.mini-agent/sessions/` |

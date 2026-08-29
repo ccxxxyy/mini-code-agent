@@ -46,9 +46,16 @@ class ConfigLoader:
         # 5. Load named LLM profiles 加载命名 LLM 档案
         ConfigLoader._load_profiles(config)
 
-        # 6. Strong/weak model mixing 强弱模型混编
-        config.planner_profile = os.environ.get("MINI_AGENT_PLANNER_PROFILE", "").strip()
-        config.worker_profile = os.environ.get("MINI_AGENT_WORKER_PROFILE", "").strip()
+        # 6. Strong/weak model mixing: env overrides TOML only when actually
+        # set -- an unconditional assign would wipe TOML-configured values
+        # with the empty default. 强弱模型混编：环境变量仅在设置时覆盖 TOML
+        # ——无条件赋值会用空缺省清掉 TOML 配置的值。
+        env_planner = os.environ.get("MINI_AGENT_PLANNER_PROFILE", "").strip()
+        env_worker = os.environ.get("MINI_AGENT_WORKER_PROFILE", "").strip()
+        if env_planner:
+            config.planner_profile = env_planner
+        if env_worker:
+            config.worker_profile = env_worker
 
         # 7. Apply CLI overrides (highest priority) 应用 CLI 覆盖（最高优先级）
         if cli_overrides:
