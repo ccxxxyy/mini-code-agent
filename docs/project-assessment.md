@@ -129,6 +129,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 `security/path_guard.py:11-22` 的敏感文件模式缺少常见的凭证文件：`.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等。
 
+**✅ 已修复**：`SENSITIVE_FILE_PATTERNS` 从 10 种扩到 22 种（补 `.npmrc`/`.pypirc`/`.netrc`/`_netrc`/`.git-credentials`/`.htpasswd`/`authorized_keys`，并补齐 SSH 密钥族 `id_ecdsa*`/`id_dsa*` 与密钥库 `*.ppk`/`*.jks`/`*.keystore`）；Docker/kube 配置裸名太泛化（config.json/config 会误伤所有项目），新增目录感知清单 `SENSITIVE_PATH_PATTERNS` 按"父目录/文件名"两段匹配。匹配逻辑抽为共享 `matches_sensitive_name()`，文件工具与 bash 通道（`command_references_sensitive_file`）同步生效。真实 LLM 双通道验证：read_file 读 `.npmrc` DENY（reason `path_guard:sensitive`），bash `cat .docker/config.json` 路由确认，对照组 `cat config.json`（`.docker` 外）正常放行无误伤。详见 tech-notes §130。修复后审计出的残余缺口已另行登记：第二梯队凭证文件见 §2.17，名字匹配方法本身的三条结构性逃逸（改名/混淆/无内容级检测）见 §2.18，完整分析见 tech-notes §130.4。
+
 ### 2.11 Anthropic 官方端点从未实测
 
 代码就绪但从未用真实 Anthropic API key 测试过。只在第三方兼容网关（阿里云 MaaS + deepseek-v4-pro）上验证。签名密码学校验和 prompt cache 命中统计未验证。
@@ -162,6 +164,18 @@ CI 的 lint job 只检查 `src/`（`uv run ruff check src/` + `ruff format --che
 MCP 工具注册名为 `mcp_<服务器名>_<工具名>`（`tools/mcp/adapter.py`），config-guide 的 MCP 章节未说明——用户在 `/tools`、`/allow tool`、trace 输出里看到该形态时无处查证。轻微文档增强项。
 
 **证据**：`tools/mcp/adapter.py:34`；docs/guide/config-guide.md MCP 节无对应句（§128 审计员标注的非失真遗漏）。
+
+### 2.17 敏感文件检测第二批：数据库/IaC/包管理器/Shell历史/云CLI凭证
+
+§2.10 修复后审计出的第二梯队缺口（机制零改动，纯加模式）：`.pgpass`/`.my.cnf`（数据库明文密码）、`terraform.tfstate*`（IaC 状态含 provider 密钥）、`.bash_history` 等 Shell 历史（常含敲过的明文密码）、`.composer/auth.json`/`.m2/settings.xml`（走目录感知清单）、云 CLI token 缓存（gcloud `access_tokens.db`、Azure `msal_token_cache.json`，实现前须核对真实文件名）。待拍板：① `.yarnrc.yml` 可含 npmAuthToken 但多数项目是无害配置，硬拒绝误伤代价高——不收录（写进诚实边界）或引入第三档"ASK 层级"（机制扩展，建议独立拆项）；② `cd ~/.kube && cat config` 可绕过 bash 通道目录感知模式（相对路径 token 无父目录段，§130.4 有细节、测试已固化该已知缺口）——廉价补法是把 `.docker`/`.kube` 目录名列为 bash 敏感 token，代价 `ls ~/.docker` 也弹确认；③ §2.10 实现时判断性排除的三个低敏感度文件可复议：`.aws/config`（role ARN/SSO URL 无密钥）、`.ssh/config`（主机名/密钥路径非秘密本体）、`known_hosts`（连接过的主机清单）。完整推理见 tech-notes §130.4。
+
+**证据**：tech-notes §130.4 第二梯队候选清单；`security/path_guard.py` 当前 22+2 模式不含上述文件。
+
+### 2.18 工具输出层无内容级秘密检测
+
+敏感文件防护是文件名黑名单，三条结构性逃逸在名字层无解：秘密在无害名字文件里（硬编码 key）、轻量混淆（`cat .np*` 通配 token 不命中且不经危险载体）、改名后读取——最终后果同一个：秘密进对话发往 LLM 网关（tech-notes §90 曾真实泄漏 API key）。修法：工具结果进对话前扫秘密形态（gitleaks 风格 known-prefix 正则 + PEM 块 + 可配置高熵启发式），命中替换 `[REDACTED:<类型>]` 占位；挂接点可选内置 ToolResult 过滤层或复用 POST_TOOL hook。一层兜住全部三条边界（对话是唯一外泄通道）。其自身边界：低熵自定义密码识别不了、拦外泄非拦读取、高熵数据可能误涂需说明放行方法。完整方案见 tech-notes §130.4。
+
+**证据**：tech-notes §130.4 结构性边界分析；§90 真实泄漏事件；当前代码无任何工具输出内容扫描（grep `REDACTED`/entropy 零命中）。
 
 ---
 

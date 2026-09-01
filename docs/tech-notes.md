@@ -339,13 +339,17 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 ### 实现原理
 
-五级判定策略（`security/path_guard.py`），按优先级：
+六级判定策略（`security/path_guard.py`），按优先级：
 
 ```
 1. 敏感目录（~/.ssh, ~/.aws, ~/.gnupg，可配）   → DENY  硬拒绝
-2. 敏感文件模式（.env, .env.*, *.pem, *.key,
-   id_rsa*, id_ed25519*, credentials*,
-   *secret*, *.p12, *.pfx，共 10 种）          → DENY  硬拒绝
+2. 敏感文件模式（.env/.env.*/*.pem/*.key/
+   SSH 密钥族 4 种/credentials*/*secret*/
+   *.p12/*.pfx/*.ppk/*.jks/*.keystore/
+   .npmrc/.pypirc/.netrc/_netrc/
+   .git-credentials/.htpasswd/authorized_keys
+   共 22 种，另有目录感知 2 种：.docker/config.json、
+   .kube/config——§130 扩展）                  → DENY  硬拒绝
    例外：.env.example / .env.sample / .env.template
 3. 项目目录内                                   → ALLOW 自动放行
 4. 溢写缓存目录只读（~/.mini-agent/cache/results/） → ALLOW
@@ -355,7 +359,7 @@ Permission 与 Hook 分离的理由：Permission 回答"这个操作**本质上*
 
 实现要点：
 - 路径先 `expanduser().resolve()` 规范化，用 `Path.parents` 包含关系判断目录归属——**防路径穿越**（`../../.ssh/id_rsa` 解析后照样命中拒绝规则）
-- 敏感文件用 `fnmatch` 通配匹配文件名（大小写不敏感）
+- 敏感文件用 `fnmatch` 通配匹配文件名（大小写不敏感；目录感知模式再取父目录段拼"父目录/文件名"两段匹配，见 §130）
 
 ### 设计权衡
 
@@ -4230,3 +4234,39 @@ en terminal-guide（239 行，兼容表每格/pane 降级链/远程段全给证�
 ### 129.3 §2.10/§2.12 实施后回滚（任务边界纪律）
 
 敏感文件覆盖面扩展（§2.10：模式 10→16 + Docker 父目录特判 + 2 测试）与废弃 `get_event_loop` 清理（§2.12：4 处替换）曾在 #283 会话内完整实施并通过验证，但**超出当前任务（assessment §2.9）范围**，按用户要求全部回滚（代码 `git checkout` 5 文件、文档删 ✅ 段与其 tech-notes 记录节——当时编号 §128、删除后由后续条目前移补位，敏感模式文案还原、测试数 1453→1451），待作为独立 issue 单独立项。回滚后全量 1451 passed + 覆盖率 86.73% + mypy 零错误 + ruff clean 复核通过。实施方案已验证可行，重做时可参照本节描述。
+
+---
+
+## §130 敏感文件检测覆盖面扩展（assessment §2.10）
+
+### 130.1 动机与前史
+
+assessment §2.10：`SENSITIVE_FILE_PATTERNS` 只有 10 种模式，缺 `.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等常见凭证文件——read_file 硬拒绝与 bash 通道确认（§90）两道防线的名单同源，名单缺口即双通道同时放行。本项曾在 #283 会话内实施过一版（10→16 种）并因超出任务范围回滚（见 §129.3），本次按独立 issue #285 重做且覆盖更全。
+
+### 130.2 设计：22 种文件名模式 + 2 种目录感知模式 + 共享匹配入口
+
+**文件名模式 10→22**：补 issue 点名的 `.npmrc`/`.pypirc`/`.netrc`/`.git-credentials`/`authorized_keys`，加 Windows 变体 `_netrc`、`.htpasswd`，并补齐同族遗漏——SSH 密钥族此前只有 `id_rsa*`/`id_ed25519*`，缺 `id_ecdsa*`/`id_dsa*`（同是 ssh-keygen 默认命名，没理由只拦两种）；密钥库族补 `*.ppk`（PuTTY 私钥）/`*.jks`/`*.keystore`（Java 密钥库，与已有 `*.p12`/`*.pfx` 同性质）。
+
+**目录感知模式（新机制）**：Docker 凭证在 `~/.docker/config.json`、kubeconfig 在 `~/.kube/config`，但裸名 `config.json`/`config` 匹配会误伤所有项目的普通配置文件（DENY 是硬拒绝，误伤代价高）。新增 `SENSITIVE_PATH_PATTERNS` 清单，按"父目录/文件名"两段匹配：`is_sensitive_file` 取 `path.parent.name`，bash token 取倒数第二段路径。`.aws/credentials` 无需入列——`credentials*` 裸名已覆盖。
+
+**共享匹配入口 `matches_sensitive_name(name, parent)`**：此前 `PathGuard.is_sensitive_file`（文件工具）与 `command_references_sensitive_file`（bash token）各自实现 fnmatch 循环，且行为有细微分叉（前者 lower 后匹配、后者不 lower——POSIX fnmatch 大小写敏感）。抽为 path_guard 模块级函数后两通道字面同一份逻辑，顺带统一了大小写处理，目录感知模式也自动双通道生效。
+
+### 130.3 验证
+
+- 单测：新增 4 个 PathGuard 测试（凭证 dotfile 族 / 密钥族 / `.docker`+`.kube` 目录感知 DENY / 泛化名不误伤 ALLOW）+ bash token 正反例 10 条（7 正 3 反，其中 1 条反例为 §130.4 自查后固化的 cd 相对路径已知缺口）；全量 1455 passed + mypy 零错误 + ruff clean
+- 真实 LLM 双通道 + 无污染埋点取证：临时事件监听器（`.mini-agent/listeners/` 插件机制，验证后删除）落盘 PermissionCheckEvent。read_file 读 `.npmrc` → DENY（reason `path_guard:sensitive`，LLM 复述了拒绝原因）；bash `cat .tmp-210/.npmrc` 与 `cat .tmp-210/.docker/config.json` → `{"decision": "denied", "reason": "no_ui:default_deny"}`（路由确认后被 headless fail-safe 拒绝，熔断停目标）；对照组同轮 `cat README.md | head -1` 与 `cat .tmp-210/config.json`（`.docker` 外的泛化名）→ `{"decision": "granted", "reason": "mode:ask"}`——拒绝可明确归因于敏感文件检测而非模式默认行为，泛化名零误伤
+- headless 附带观察：敏感命令确认被 fail-safe 拒绝即触发熔断，`-p` 模式最终回答为空（iterations=1）——预期行为（§90 设计如此），非本次改动引入
+
+### 130.4 残余覆盖缺口与结构性边界分析（后续立项依据）
+
+修复后按"还缺什么、什么补不了"做了一轮完整分析，结论登记为 assessment §2.17/§2.18 两个开口项，本节记录完整推理供立项时参照。
+
+**第二梯队候选（名单可解，登记为 §2.17）**：① 数据库凭证 `.pgpass`（PostgreSQL 明文密码）/`.my.cnf`（MySQL `[client] password` 段）——名字唯一零误伤，文件名模式直接加；② `terraform.tfstate*`——IaC 状态文件是著名的秘密聚集地（provider 密钥、数据库密码明文入 state），正常工作流也不该让 agent 读 state，硬拒绝合理；③ Shell 历史 `.bash_history`/`.zsh_history`/`.psql_history`/`.mysql_history`——常含用户敲过的明文密码，名字唯一；④ 包管理器第二梯队 `.composer/auth.json`（Packagist token）/`.m2/settings.xml`（Maven 服务器密码）——裸名 auth.json/settings.xml 太泛化，走目录感知清单（机制现成）；⑤ 云 CLI token 缓存——gcloud `access_tokens.db`（`credentials.db` 已被 `credentials*` 覆盖）、Azure `msal_token_cache.json`/`accessTokens.json`，实现前须逐个核对真实文件名。**唯一需要拍板的是 `.yarnrc.yml`**：可含 `npmAuthToken` 但多数项目只写 registry 配置，进硬拒绝名单会拦 agent 读正常项目文件、误伤代价高——选项 a) 不收录写进诚实边界；选项 b) 引入第三档"ASK 而非 DENY"敏感层级（机制扩展，工作量升级，建议独立拆项）。**本次实现时的三个判断性排除（低敏感度，未列 DENY，立项时可复议）**：`.aws/config`（含 region/role ARN/SSO start URL，无密钥本体——`.aws/credentials` 已被 `credentials*` 覆盖）、`.ssh/config`（暴露主机名与密钥文件路径，非秘密本体）、`known_hosts`（暴露连接过的主机清单）。同类推论：自定义路径的 kubeconfig（`KUBECONFIG=/custom/path` 指向任意文件名）本质是名字匹配方法的结构性盲区，归入边界 3 的内容级检测兜底。
+
+**三条结构性边界（名单不可解）**——与第二梯队本质不同：不是"名单不够长"，是"按名字匹配这个方法本身的盲区"，加多少模式都补不掉：
+
+1. **改名逃逸**：检测只看文件名，`.env` 复制成 `notes.txt` 后读取无拦截。实际影响比直觉小——复制动作本身带 `.env` token，`cp .env notes.txt` 今天就弹确认；真正的残余是秘密本来就在无害名字的文件里（`settings.py` 硬编码 API key）或经程序间接复制。名字层无解，出路在内容级检测（下条 3）。
+2. **混淆逃逸**：`cat .np*`（通配）、`X=.npmrc; cat $X`（变量）、base64 拼接——token 化后没有 token 长得像 `.npmrc`。已有分层缓解：混淆载体（`sh -c`/`powershell -EncodedCommand`/`cmd /c`）本身在危险命令清单里必弹确认，深度混淆逃得过敏感文件检测、逃不过载体确认（§90 设计）。真正的窗口是轻量混淆：裸 `cat .np*` 不经载体、通配 token 不命中模式，今天会被放行。**目录感知模式还有一个特有变体（实现后自查发现，测试已固化为已知缺口）**：`cd ~/.kube && cat config`——cd 后相对路径的 token 只剩裸名 `config`，取不到父目录段，两段匹配必然落空（`cat ~/.kube/config`、`cat $HOME/.kube/config` 均正常命中；22 种文件名模式不受影响——`cd /tmp && cat .npmrc` 仍命中；文件工具通道也不受影响——read_file 按 resolve 后的绝对路径取父目录）。廉价补法是把 `.docker`/`.kube` 目录名本身列为 bash 通道敏感 token（代价：`ls ~/.docker` 也弹确认），已并入 §2.17 待拍板。优化两档：便宜——含通配符的 token 匹配前先在工作目录 glob 展开一次，展开结果再过名单（补最顺手的逃逸）；重型——沙箱层路径遮蔽（Linux bwrap 可 bind 遮蔽敏感路径），但 Windows Low Integrity 只拦写不拦读（MIC 默认仅 NoWriteUp），做不到跨平台对等。
+3. **无内容级检测（影响最大、最值得做，登记为 §2.18）**：前两条逃逸的最终后果同一个——秘密进入对话、发往 LLM 网关（§90 的真实 API key 泄漏正是此链）；名字层防线全绕过后没有第二道网。方案：工具结果进对话前过秘密形态扫描，命中替换 `[REDACTED:<类型>]` 占位——known-prefix 正则集（AWS `AKIA*`、GitHub `ghp_*`、OpenAI/Anthropic `sk-*`、npm `npm_*`、Slack `xoxb-*` 等，参照 gitleaks 规则）+ PEM 块（`-----BEGIN ... PRIVATE KEY-----`）+ 高熵启发式（可配置阈值/关闭）。挂接点二选一：内置 ToolResult 过滤层，或复用现有 POST_TOOL hook 机制做成内置 hook（用户可禁用）。价值：一层兜住全部三条边界——改名、混淆、无害文件里的硬编码秘密，读到了也发不出去（对话是唯一外泄通道，护住它就护住要害）。它自身的诚实边界：低熵自定义密码识别不了；工具进程已读到秘密（拦外泄非拦读取）；高熵非秘密串（哈希/base64 数据）可能误涂，占位文案需说明放行方法。
+
+两个方向独立可并行；§2.18 价值密度更高（一层兜三条边界），§2.17 体量更小（机制零改动，纯加模式+测试+文档套路）。
