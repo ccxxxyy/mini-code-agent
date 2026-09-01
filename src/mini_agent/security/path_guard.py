@@ -15,14 +15,52 @@ SENSITIVE_FILE_PATTERNS = [
     "*.key",
     "id_rsa*",
     "id_ed25519*",
+    "id_ecdsa*",
+    "id_dsa*",
     "credentials*",
     "*secret*",
     "*.p12",
     "*.pfx",
+    "*.ppk",
+    "*.jks",
+    "*.keystore",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "_netrc",
+    ".git-credentials",
+    ".htpasswd",
+    "authorized_keys",
+]
+
+# Credential files whose bare name is too generic to match alone
+# (config.json / config would flag every project). Matched against the last
+# two path components: parent-dir/name.
+# 裸文件名过于泛化的凭证文件（config.json / config 会误伤所有项目），
+# 用"父目录/文件名"两段匹配。
+SENSITIVE_PATH_PATTERNS = [
+    ".docker/config.json",
+    ".kube/config",
 ]
 
 # .env.example is a template, not a secret
 SENSITIVE_EXCEPTIONS = [".env.example", ".env.sample", ".env.template"]
+
+
+def matches_sensitive_name(name: str, parent: str = "") -> bool:
+    """Match a bare filename (plus optional parent dir) against the sensitive
+    patterns. Shared by PathGuard.is_sensitive_file (file tools) and
+    command_references_sensitive_file (bash channel) so both stay in sync.
+    用文件名（可带父目录）匹配敏感模式。文件工具与 bash 通道共用，保持同步。"""
+    name = name.lower()
+    if name in SENSITIVE_EXCEPTIONS:
+        return False
+    if any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILE_PATTERNS):
+        return True
+    if parent:
+        pair = f"{parent.lower()}/{name}"
+        return any(fnmatch.fnmatchcase(pair, pat) for pat in SENSITIVE_PATH_PATTERNS)
+    return False
 
 
 def _result_cache_root() -> Path:
@@ -88,7 +126,4 @@ class PathGuard:
     def is_sensitive_file(path: Path) -> bool:
         """Check if file matches sensitive patterns (.env, credentials, keys).
         检查文件是否匹配敏感模式（.env、凭据、密钥）。"""
-        name = path.name.lower()
-        if name in SENSITIVE_EXCEPTIONS:
-            return False
-        return any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILE_PATTERNS)
+        return matches_sensitive_name(path.name, path.parent.name)

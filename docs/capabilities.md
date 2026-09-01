@@ -106,7 +106,7 @@
 **实现**（`tools/hooks.py` + `security/`）：
 - Hook 框架：11 个生命周期阶段（STARTUP/SHUTDOWN/SESSION_START/SESSION_END/USER_INPUT/TURN_START/TURN_END/PRE_LLM/POST_LLM/PRE_TOOL/POST_TOOL）× 6 种裁决（CONTINUE/BLOCK/MODIFY/CONFIRM/COMMAND/NOTIFY），优先级链 + 否决短路；`[[hooks]]` 配置可声明四种动作——`block`（拒绝）/ `confirm`（弹 y/a/n 确认框）/ `command`（执行 shell 命令）/ `notify`（终端通知行）；支持条件表达式（`condition` 字段，`==`/`!=`/`=~`/`~=` + `and`/`or`）和模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`）；PRE_TOOL 与 POST_TOOL 均可声明式配置
 - 危险命令确认：28 条正则（rm/sudo/chmod 777/mkfs/dd/git push/commit/reset/stash/rebase/checkout/restore/clean/Windows del/rmdir/rd/format/curl|sh/wget|sh/python -c/node -e/perl -e/ruby -e/sh -c/bash -c/powershell/pwsh/cmd /c——删除类命令 rm/del/rmdir/rd 任意形态均命中：裸 rmdir 删空目录、rm/del 删单个文件也弹确认，不限于 -rf、/s、/q）命中即弹窗，y/a/n 三选（允许一次/本会话总是/拒绝——拒绝危险命令即停止整个目标，默认阈值 1；权限弹窗按 a 后追问一行是否持久化，y 才写入项目 permissions.toml——默认仅会话级，绝不静默写盘）；弹窗等输入期间并行工具的输出重定向到提示行上方，输入行不被打断
-- 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书文件即使在项目内也拦截
+- 敏感目录拦截：~/.ssh、~/.aws、~/.gnupg 硬拒绝；.env/密钥/证书/凭证文件（npm/PyPI/netrc/git/Docker/kube 等，22 种文件名模式 + 2 种目录感知模式）即使在项目内也拦截
 - 敏感文件读泄漏防护：上面的敏感文件拦截只在 read_file/write_file/delete_file 工具层；bash 命令（`type`/`cat`/`Get-Content .env`）经 `command_references_sensitive_file()` 命中同一份敏感模式即弹确认，堵住"read_file 被拒后改用 bash 读密钥泄漏"的洞（真实验证实测泄漏过 API key）；诚实边界：变量/通配/base64 混淆仍可逃逸
 - 三级路径策略：项目内自动放行 / 敏感硬拒绝 / 项目外询问
 - 权限模式矩阵：`/mode` 或输入提示符 shift+tab 循环运行时切换 `default`（标准询问）/ `accept-edits`（写免确认，危险命令仍询问）/ `plan`（只读：拒绝 WRITE 与 EXTERNAL 类别工具 + bash 写形态命令拒绝；有权限门控传导时允许 spawn 研究型子 Agent——子 Agent 继承 plan 模式、写操作在权限层被拒，无门控时 spawn 仍禁用）/ `bypass`（除安全底线外全免确认，EXTERNAL 类别工具也免确认放行）四模式；矩阵新增**工具类别轴**：每个工具声明 READ/WRITE/EXECUTE/EXTERNAL 类别（未声明的插件工具默认 EXTERNAL 保守处理），类别门控在路径检查之前评估——install_skill 这类无路径参数的工具也被拦住——且读 `permission_manager.mode` 而非循环标志，对子 Agent 同样生效；deny 规则、敏感路径、敏感文件命令（`type .env` 类）在所有模式下有效（bypass 也拦）；配置 `[security] approval_mode` 设启动模式；`exit_plan_mode` 工具需用户批准计划才退出 plan（LLM 不能自行解除只读）；模式切换发 `PermissionModeChangedEvent`（trace 可见），`/status` 和底部工具栏显示当前模式
@@ -115,7 +115,7 @@
 - 已激活的生命周期 Hook：PRE_LLM（LLM 调用前，含 BLOCK 能力 + 自动记忆注入）、SESSION_END（退出时自动提取偏好）、PRE_TOOL/POST_TOOL（工具执行前后）
 - 声明式规则（comparison 7.2）：`[[hooks]]` TOML 配置，两种匹配方式——固定字段（tool fnmatch + arg/contains/regex）或条件表达式（`condition` 字段优先），四种动作（block/confirm/command/notify）+ 模板变量（`$TOOL_NAME`/`$TOOL_ARGS.<key>`/`$TOOL_ARGS`/`$EVENT`/`$RESULT`/`$RESULT_ERROR`）——给目录加只读锁、给 git push 加人工闸门、写 .py 文件后自动跑 formatter，均只需几行配置无需写 Python
 
-**验证**：37 个安全测试（含危险命令三态、敏感文件拦截、敏感文件经 bash 通道弹确认、Hook 阻止与观察）+ 85 个 hook 测试（test_hooks.py 55 个 + test_hook_conditions.py 30 个：含条件引擎解析/求值、四种动作类型、confirm+condition 五路径端到端、command stdout 显示、模板展开、向后兼容）
+**验证**：89 个安全测试（test_permissions.py 74 个：PathGuard 拦截/权限矩阵/危险命令三态/敏感文件拦截与 bash 通道确认；test_agent_security.py 15 个：Hook 阻止与观察等管道集成）+ 85 个 hook 测试（test_hooks.py 55 个 + test_hook_conditions.py 30 个：含条件引擎解析/求值、四种动作类型、confirm+condition 五路径端到端、command stdout 显示、模板展开、向后兼容）
 
 ---
 

@@ -72,6 +72,31 @@ def test_pem_key_denied(path_guard, project_dir):
     assert path_guard.check(project_dir / "server.pem") == PermissionLevel.DENY
 
 
+def test_credential_dotfiles_denied(path_guard, project_dir):
+    # npm/PyPI/netrc/git/htpasswd credential files are secrets too (assessment 2.10)
+    for name in [".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials", ".htpasswd"]:
+        assert path_guard.check(project_dir / name) == PermissionLevel.DENY, name
+
+
+def test_key_material_family_denied(path_guard, project_dir):
+    # full SSH key family + keystores + authorized_keys
+    names = ["id_ecdsa", "id_dsa", "authorized_keys", "putty.ppk", "release.jks", "app.keystore"]
+    for name in names:
+        assert path_guard.check(project_dir / name) == PermissionLevel.DENY, name
+
+
+def test_docker_kube_config_denied(path_guard, project_dir):
+    # bare name too generic -- matched as parent-dir/name pair
+    assert path_guard.check(project_dir / ".docker" / "config.json") == PermissionLevel.DENY
+    assert path_guard.check(project_dir / ".kube" / "config") == PermissionLevel.DENY
+
+
+def test_generic_config_names_not_sensitive(path_guard, project_dir):
+    # config.json / config outside .docker/.kube must not be flagged
+    assert path_guard.check(project_dir / "config.json") == PermissionLevel.ALLOW
+    assert path_guard.check(project_dir / "src" / "config") == PermissionLevel.ALLOW
+
+
 def test_spill_cache_read_allowed(path_guard):
     # Spill placeholder invites the LLM to read the file back -- prompting
     # for our own cache defeats the mechanism
@@ -280,11 +305,26 @@ def test_sensitive_file_command_detected():
     assert ref("Get-Content credentials.json")
     assert ref("more server.pem")
     assert ref("cp secret.key /tmp/x")  # write side leaks too
+    # assessment 2.10 additions: package-manager / VCS credential files
+    assert ref("cat ~/.npmrc")
+    assert ref("type C:\\Users\\x\\.pypirc")
+    assert ref("cat ~/.netrc")
+    assert ref("Get-Content ~/.git-credentials")
+    assert ref("cat ~/.ssh/authorized_keys")
+    # dir-aware pair patterns via bash tokens
+    assert ref("cat ~/.docker/config.json")
+    assert ref("type %USERPROFILE%\\.kube\\config")
     # Must NOT flag templates or unrelated files
     assert not ref("cat .env.example")
     assert not ref("cat README.md")
     assert not ref("ls -la")
     assert not ref("echo hello")
+    assert not ref("cat config.json")  # generic name outside .docker
+    assert not ref("kubectl apply -f config")  # generic name outside .kube
+    # KNOWN GAP (documented, tech-notes §130.4): cd-then-relative-read strips
+    # the parent segment, so dir-aware patterns cannot fire. Name patterns
+    # (.npmrc etc.) are unaffected; file tools resolve absolute paths.
+    assert not ref("cd ~/.kube && cat config")
 
 
 async def test_sensitive_file_command_asks_confirmation(path_guard):

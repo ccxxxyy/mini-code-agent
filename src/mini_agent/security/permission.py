@@ -27,9 +27,8 @@ from mini_agent.models.permissions import (
     ToolCategory,
 )
 from mini_agent.security.path_guard import (
-    SENSITIVE_EXCEPTIONS,
-    SENSITIVE_FILE_PATTERNS,
     PathGuard,
+    matches_sensitive_name,
 )
 
 if TYPE_CHECKING:
@@ -163,17 +162,17 @@ _TOKEN_SPLIT_RE = re.compile(r"[\s=]+|[|;&<>()]+")
 
 def command_references_sensitive_file(command: str) -> bool:
     """True if any token in a shell command names a sensitive file
-    (.env / *.pem / id_rsa / credentials / *secret*). A speed bump, not a wall:
-    obfuscated paths (env vars, wildcards) can still slip through.
+    (.env / *.pem / id_rsa / credentials / *secret* / .npmrc / .docker/config.json).
+    A speed bump, not a wall: obfuscated paths (env vars, wildcards) can still
+    slip through.
     命令中任一 token 命中敏感文件名则为真。减速带而非围墙：变量/通配等混淆仍可能逃逸。"""
     for raw in _TOKEN_SPLIT_RE.split(command):
         tok = raw.strip().strip("'\"")
         if not tok:
             continue
-        name = tok.replace("\\", "/").rsplit("/", 1)[-1]
-        if name in SENSITIVE_EXCEPTIONS:
-            continue
-        if any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILE_PATTERNS):
+        parts = tok.replace("\\", "/").split("/")
+        parent = parts[-2] if len(parts) >= 2 else ""
+        if matches_sensitive_name(parts[-1], parent):
             return True
     return False
 

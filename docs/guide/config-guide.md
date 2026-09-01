@@ -982,13 +982,13 @@ deny = ["delete_file"]     # 直接拦截整个工具
 
 评估顺序（先匹配先决定）：
 1. `denied_paths`（`~/.ssh`/`~/.aws`/`~/.gnupg`，config.toml 可配） → 硬拒绝
-2. 敏感文件名模式（`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`，共 10 种） → 硬拒绝（项目内也拦）；`.env.example`/`.env.sample`/`.env.template` 豁免
+2. 敏感文件名模式（`.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`id_ed25519*`/`id_ecdsa*`/`id_dsa*`/`credentials*`/`*secret*`/`*.p12`/`*.pfx`/`*.ppk`/`*.jks`/`*.keystore`/`.npmrc`/`.pypirc`/`.netrc`/`_netrc`/`.git-credentials`/`.htpasswd`/`authorized_keys`，共 22 种；另有 2 种目录感知模式 `.docker/config.json`/`.kube/config`——裸名 config.json/config 太泛化会误伤普通项目文件，按"父目录/文件名"两段匹配） → 硬拒绝（项目内也拦）；`.env.example`/`.env.sample`/`.env.template` 豁免
 3. 项目目录内 → 自动放行
 4. 溢写缓存目录（`~/.mini-agent/cache/results`）→ 只读自动放行（LLM 读回被溢写的工具结果）
 5. `allowed_paths` 中的路径（config.toml 可配） → 自动放行
 6. 以上都不匹配 → 询问用户（`permission_mode = "ask"` 时）
 
-> **bash 通道也覆盖敏感文件**：上面这套 PathGuard 敏感文件保护只作用于 `read_file`/`write_file`/`delete_file` 三个文件工具。bash 命令曾对路径零检查——`type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` 会作普通命令被自动放行，绕过文件工具的拦截并把内容打印出来（真实验证实测泄漏过 API key）。现 permission.py 的 `command_references_sensitive_file()` 会把 bash 命令切成 token，任一 token 的 basename 命中上面同一份敏感文件模式即**弹确认**（判定 reason `sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同危险命令黑名单：变量展开（`$SECRET`）、通配、base64/echo 拼接等混淆仍可逃逸——详见 docs/tech-notes.md §90。
+> **bash 通道也覆盖敏感文件**：上面这套 PathGuard 敏感文件保护只作用于 `read_file`/`write_file`/`delete_file` 三个文件工具。bash 命令曾对路径零检查——`type .env`/`cat ~/.ssh/id_rsa`/`Get-Content credentials.json` 会作普通命令被自动放行，绕过文件工具的拦截并把内容打印出来（真实验证实测泄漏过 API key）。现 permission.py 的 `command_references_sensitive_file()` 会把 bash 命令切成 token，任一 token 的 basename（目录感知模式取末两段路径）命中上面同一份敏感文件模式即**弹确认**（判定 reason `sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同危险命令黑名单：变量展开（`$SECRET`）、通配、base64/echo 拼接等混淆仍可逃逸——详见 docs/tech-notes.md §90；三条结构性边界（改名逃逸/混淆逃逸/无内容级检测）的完整分析见 tech-notes §130.4。
 
 **工具级规则（P79）**：`[tools]` 节按工具名匹配（支持 glob），在命令/路径检查**之前**评估——`deny` 直接拦截整个工具；`allow` 整体信任该工具，跳过后续资源检查（`allow = ["bash"]` 意味着危险命令也不再确认，慎用）；无匹配规则的工具照常走命令/路径检查。
 

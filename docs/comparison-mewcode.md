@@ -292,7 +292,7 @@
    deny = ["~/.ssh/*"]
    ```
 3. `PermissionManager` 加载时合并：代码内置规则 < 用户级规则 < 项目级规则
-4. 现有的 `DANGEROUS_COMMAND_PATTERNS` 和 `SENSITIVE_PATTERNS` 仍作为内置默认值
+4. 现有的 `DANGEROUS_COMMAND_PATTERNS` 和 `SENSITIVE_FILE_PATTERNS` 仍作为内置默认值
 
 代码改动：`security/permission.py` ~40 行。
 

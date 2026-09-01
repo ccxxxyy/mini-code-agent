@@ -2800,9 +2800,9 @@ class PathGuard:
         return PermissionLevel.ASK                  # 6. 兜底询问
 ```
 
-敏感文件模式 `SENSITIVE_FILE_PATTERNS`：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`id_ed25519*`、`credentials*`、`*secret*`、`*.p12`、`*.pfx`。例外清单 `SENSITIVE_EXCEPTIONS`：`.env.example` / `.env.sample` / `.env.template` 是模板不是秘密，放行。
+敏感文件模式 `SENSITIVE_FILE_PATTERNS`（22 种）：`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`id_ed25519*`、`id_ecdsa*`、`id_dsa*`、`credentials*`、`*secret*`、`*.p12`、`*.pfx`、`*.ppk`、`*.jks`、`*.keystore`、`.npmrc`、`.pypirc`、`.netrc`、`_netrc`、`.git-credentials`、`.htpasswd`、`authorized_keys`。目录感知模式 `SENSITIVE_PATH_PATTERNS`（2 种）：`.docker/config.json`、`.kube/config`——裸名 config.json/config 过于泛化会误伤普通项目文件，按"父目录/文件名"两段匹配。两份清单由模块级 `matches_sensitive_name(name, parent)` 统一匹配（文件工具与 bash 通道共用，保证同步）。例外清单 `SENSITIVE_EXCEPTIONS`：`.env.example` / `.env.sample` / `.env.template` 是模板不是秘密，放行。
 
-这份模式清单同时被 permission.py 的 `command_references_sensitive_file()` 复用：`PathGuard.is_sensitive_file` 只守 read_file/write_file/delete_file 三个文件工具，而 bash 通道曾对路径零检查——`type`/`cat`/`Get-Content`/`more .env` 会作普通命令被自动放行，绕过文件工具的敏感文件拦截并泄漏内容（真实验证实测泄漏过 API key）。现 bash 命令会被 token 化，任一 token 的 basename 命中敏感模式即路由到确认弹窗（reason=`sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同命令黑名单：变量展开 / 通配 / base64 拼接等混淆仍可逃逸——详见 tech-notes §90。
+这份模式清单同时被 permission.py 的 `command_references_sensitive_file()` 复用：`PathGuard.is_sensitive_file` 只守 read_file/write_file/delete_file 三个文件工具，而 bash 通道曾对路径零检查——`type`/`cat`/`Get-Content`/`more .env` 会作普通命令被自动放行，绕过文件工具的敏感文件拦截并泄漏内容（真实验证实测泄漏过 API key）。现 bash 命令会被 token 化，任一 token 的 basename（目录感知模式取末两段路径）命中敏感模式即路由到确认弹窗（reason=`sensitive_file_command`），拒绝时触发确认拒绝熔断。诚实边界同命令黑名单：变量展开 / 通配 / base64 拼接等混淆仍可逃逸——详见 tech-notes §90；改名逃逸 / 混淆逃逸 / 无内容级检测三条结构性边界的完整分析与优化路径见 tech-notes §130.4（开口项 assessment §2.17/§2.18）。
 
 溢写缓存目录（`~/.mini-agent/cache/results`）只读自动放行是配套设计：超大工具结果落盘后占位文案会引导 LLM 读回，每次读回都弹权限框会废掉溢写机制；写入该目录仍走询问。
 
