@@ -208,9 +208,9 @@
 ### ✅ 中优先级
 
 #### ✅ markdown 围栏剥离三处重复
-- `memory/extraction.py:140`
-- `memory/recall.py:83`
-- `memory/consolidation.py:103`
+- `memory/extraction.py:144`
+- `memory/recall.py:87`
+- `memory/consolidation.py:110`
 
 三处都在做同样的 strip ` ```json ... ``` ` 逻辑。✅ 已抽取为 `memory/_utils.py` 的 `strip_json_fence(text) -> str` 函数。
 
@@ -234,11 +234,11 @@
 - ✅ 随 shell 检测抽取一并解决：两处调用点不再直接读 `os.environ`，环境读取收敛到 `config/environment.py` 单点，测试可 monkeypatch `detect_shell` 隔离
 
 #### ✅ 权限检查逻辑内部重复
-- `permission.py:156-193`（`check()`）和 `permission.py:266-285`（`_check_rules_only()`）
+- `permission.py:406`（`check()`）和 `permission.py:651`（`_check_rules_only()`）
 - ✅ `check()` 改为先调 `_check_rules_only()`，匹配则直接返回，否则走默认模式。消除了 DENY→ALLOW→session grants 的重复遍历
 
 #### ✅ 路径 resolve 重复
-- `security/sandbox/seatbelt.py:42,45` 和 `security/sandbox/bwrap.py:30,33`
+- `security/sandbox/seatbelt.py:42,45` 和 `security/sandbox/bwrap.py:29,32`
 - ✅ 抽取为 `security/sandbox/__init__.py` 的 `resolve_path(path) -> str`，两处调用点改为 `resolve_path(path)`
 
 #### ✅ 静默 except（约 35 处）
@@ -283,20 +283,20 @@
 
 | # | 项 | 位置 | 预留用途 |
 |---|---|---|---|
-| 1 | `EventBus.on_any()` | `events/bus.py:29` | ✅ 已接入：新增 `extensions/event_listeners.py`，从 `listener_dirs` 配置目录加载 *.py 插件（`register(bus)` 或 `on_event(event)` 契约），app 启动时注册为全局监听；`emit` 同时改为记录 handler 异常日志，并补充 `off_any()` |
-| 2 | `ToolRegistry.filter()` | `tools/base.py:212` | ✅ 已接入：`AgentTeam.start()` 非写文件步骤 + `SubAgent.__init__` 工具过滤均通过 `filter()` |
-| 3 | `PermissionManager.add_rule()` | `security/permission.py:94` | ✅ 已接入：增强为带验证/去重/事件发射的完整方法；新增 `remove_rule()` 和 `list_rules()`；`/allow` `/deny` 斜杠命令运行时动态管理权限规则；`_load_rules_from_config` 和 `load_rule_files` 统一走 `add_rule()`；新增 `PermissionRuleAddedEvent` / `PermissionRuleRemovedEvent` 事件 |
+| 1 | `EventBus.on_any()` | `events/bus.py:28` | ✅ 已接入：新增 `extensions/event_listeners.py`，从 `listener_dirs` 配置目录加载 *.py 插件（`register(bus)` 或 `on_event(event)` 契约），app 启动时注册为全局监听；`emit` 同时改为记录 handler 异常日志，并补充 `off_any()` |
+| 2 | `ToolRegistry.filter()` | `tools/base.py:277` | ✅ 已接入：`AgentTeam.start()` 非写文件步骤 + `SubAgent.__init__` 工具过滤均通过 `filter()` |
+| 3 | `PermissionManager.add_rule()` | `security/permission.py:259` | ✅ 已接入：增强为带验证/去重/事件发射的完整方法；新增 `remove_rule()` 和 `list_rules()`；`/allow` `/deny` 斜杠命令运行时动态管理权限规则；`_load_rules_from_config` 和 `load_rule_files` 统一走 `add_rule()`；新增 `PermissionRuleAddedEvent` / `PermissionRuleRemovedEvent` 事件 |
 | 4 | `ProviderRegistry.list_providers()` | `llm/registry.py:27` | ✅ 已接入：`/model` 无参数时显示可用 Provider 列表 |
 | 5 | `Conversation.slice_window()` | ~~`models/message.py`~~ | ✅ 已删除（P81）：属"设计变更后的残留物"而非健康预留——被 ContextManager/Compressor 完全取代；且自身语义有坑（`token_count or 0` 使未计数消息按零成本通过，预算失效）并会切断 tool_use/tool_result 配对（严格 API 400，压缩链路已为此类 bug 修过 P71 等多阶段）；修好再接入等于重抄 `_compute_keep_split`。零生产调用方，连同单测删除 |
-| 6 | `Plan.is_complete` | `core/planner.py:74` | ✅ 已接入：`AgentTeam.start()` 用 `while not plan.is_complete` 替代手动 pending 列表 |
-| 7 | `HookAction.CONFIRM` | `tools/hooks.py:32` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
-| 8 | `PermissionDecision.PENDING` | `models/permissions.py:24` | ✅ 已接入：三部分——① pane worker 跨进程审批通道（`security/remote_confirm.py` `RemoteConfirm` 回调写 `~/.mini-agent/workers/<id>.perm-request.json` 记 PENDING 后轮询决策文件，超时 120s 安全拒绝；`worker.py` 搭建完整权限栈 `PathGuard`+`PermissionManager`+`RemoteConfirm`；`SubAgent` 新增 `permission_manager` 参数传入 `AgentLoop`；`SubAgentManager._collect_pane_result()` 轮询权限请求并通过父进程 `confirm_callback` 中转决策；`app.py` 传 `terminal.confirm` 给 `SubAgentManager`）；② remote/Web 断连排队（`server.py`：`_pending_prompts` 跟踪请求文本，最后客户端断开启动 `_disconnect_timeout` 120s 后安全拒绝，重连时 `_replay_pending_confirms` 重发待处理请求）；③ 事件可观测（`permission.py._ask_user()` 在 `await confirm` 前发射 `PermissionCheckEvent(decision="pending", reason="awaiting_user")`，`trace.py` 用 `theme.warning` 色显示 `PENDING (awaiting user)`） |
+| 6 | `Plan.is_complete` | `core/planner.py:75` | ✅ 已接入：`AgentTeam.start()` 用 `while not plan.is_complete` 替代手动 pending 列表 |
+| 7 | `HookAction.CONFIRM` | `tools/hooks.py:43` | ✅ 已接入：`[[hooks]]` 规则新增 `action = "confirm"`，命中弹 y/a/n 确认框（a = 本会话同规则不再问）；裁决在 `agent_loop._resolve_hook_confirm`（app 注入 terminal.confirm，无 UI 安全拒绝），拒绝回传 `Denied by user: <reason>`；流式执行经 `HookManager.would_confirm` 预判延迟到 _act，弹窗加锁防并行交错 |
+| 8 | `PermissionDecision.PENDING` | `models/permissions.py:71` | ✅ 已接入：三部分——① pane worker 跨进程审批通道（`security/remote_confirm.py` `RemoteConfirm` 回调写 `~/.mini-agent/workers/<id>.perm-request.json` 记 PENDING 后轮询决策文件，超时 120s 安全拒绝；`worker.py` 搭建完整权限栈 `PathGuard`+`PermissionManager`+`RemoteConfirm`；`SubAgent` 新增 `permission_manager` 参数传入 `AgentLoop`；`SubAgentManager._collect_pane_result()` 轮询权限请求并通过父进程 `confirm_callback` 中转决策；`app.py` 传 `terminal.confirm` 给 `SubAgentManager`）；② remote/Web 断连排队（`server.py`：`_pending_prompts` 跟踪请求文本，最后客户端断开启动 `_disconnect_timeout` 120s 后安全拒绝，重连时 `_replay_pending_confirms` 重发待处理请求）；③ 事件可观测（`permission.py._ask_user()` 在 `await confirm` 前发射 `PermissionCheckEvent(decision="pending", reason="awaiting_user")`，`trace.py` 用 `theme.warning` 色显示 `PENDING (awaiting user)`） |
 | 9 | `PermissionScope.TOOL` | `models/permissions.py:16` | ✅ 已接入（P79）：`PermissionManager.check_tool()` 工具级门——显式 TOOL 规则 DENY 直接拦截工具、ALLOW 整体信任（跳过命令/路径资源检查）、无匹配返回 None 落回资源级检查；`agent_loop._check_permission()` 对所有工具调用先过工具门；`/allow` `/deny` 支持 `tool` scope；permissions.toml 新增 `[tools]` 节（load/save 均支持）；`would_ask` 工具级规则直接判定不弹窗 |
-| 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:128` | ✅ 已接入（P80）：`SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`（worker），删除与 `_WORKER_PROMPT` 重复的内联 `SUBAGENT_SYSTEM_PROMPT`；未显式选类型时保留 `config.max_agent_iterations`（用户可配值优先，不被 worker 的 50 静默覆盖），显式选类型仍采纳类型完整档案 |
+| 10 | `DEFAULT_AGENT_TYPE` | `core/agent_types.py:140` | ✅ 已接入（P80）：`SubAgent.__init__` 未指定类型时回退 `get_agent_type(DEFAULT_AGENT_TYPE)`（worker），删除与 `_WORKER_PROMPT` 重复的内联 `SUBAGENT_SYSTEM_PROMPT`；未显式选类型时保留 `config.max_agent_iterations`（用户可配值优先，不被 worker 的 50 静默覆盖），显式选类型仍采纳类型完整档案 |
 | 11 | `SessionMetadata.tags` | `models/session.py:22` | ✅ 已接入：`/session tag`/`untag`/`tags` 子命令 + `/session list --tag` 按标签过滤 |
 | 12 | `UserMessageEvent.is_slash_command` | `models/events.py:24` | ✅ 已接入：斜杠命令分支 emit 事件设 `is_slash_command=True`，AuditLogger 记录 + TraceRenderer 显示 |
 | 13 | `LLMRequestEvent.estimated_tokens` | `models/events.py:34` | ✅ 已接入：`agent_loop._think()` 从 ContextManager 填入预估 token，TraceRenderer 显示 |
-| 14 | `PermissionRequest.tool_name` | `models/permissions.py:39` | ✅ 已接入：`check_path()` 新增 `tool_name` 参数，`agent_loop._check_permission()` 传入 `tc.name` |
+| 14 | `PermissionRequest.tool_name` | `models/permissions.py:86` | ✅ 已接入：`check_path()` 新增 `tool_name` 参数，`agent_loop._check_permission()` 传入 `tc.name` |
 | 15 | `PermissionManager.check()` | `security/permission.py` | ✅ 已接入（P79）：重构为真正的通用检查入口——按 `request.scope` 分发到 COMMAND（危险模式确认管道）/ PATH（DENY 规则→PathGuard→通用管道，operation 从 context 解析）/ TOOL（通用管道），任意消费者构造 `PermissionRequest` 一次调用即得正确判定；原通用逻辑抽为 `_check_generic()`，`check_path`/`check_command` 复用同一批内部管道无递归 |
 ---
 
@@ -510,7 +510,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 ✅ **A1【严重·fail-open】`delete_file` 完全绕过 PathGuard**（已修复）
 **原问题**：`_check_permission` 的路由只覆盖 read_file/glob/grep（read）和 write_file/edit_file（write），delete_file 落入 else 分支无条件 GRANTED。与 `would_ask` 含 delete_file 自相矛盾——流式阶段以为会弹窗而延迟，实际直接放行。
-**修复**：`agent_loop.py:816` 把 delete_file 加入 write 路由 `("write_file", "edit_file", "delete_file")`，与写/编辑工具走同一 `check_path(write)` 管道。回归测试 `test_delete_file_routes_through_path_check`：LLM 调 `delete_file("~/.ssh/id_rsa")` → PathGuard 拒绝 → tool_result.is_error。spec.md 权限路由图与非写步骤剥离列表同步更新。
+**修复**：把 delete_file 加入 write 路由 `("write_file", "edit_file", "delete_file")`（修复时 agent_loop.py:816；该路由后经 ToolCategory 分类重构，现为 `agent_loop.py:979-987` 按 WRITE 类别统一走 `check_path(write)`），与写/编辑工具同一管道。回归测试 `test_delete_file_routes_through_path_check`：LLM 调 `delete_file("~/.ssh/id_rsa")` → PathGuard 拒绝 → tool_result.is_error。spec.md 权限路由图与非写步骤剥离列表同步更新。
 
 ✅ **A2【高·危险命令正则可绕过】ask 模式下静默执行**（已修复）
 **原问题**：非危险命令在 ask/allow 模式自动放行，任何绕过正则的破坏性命令都不弹窗。确认绕过：`rm --recursive --force foo`/`rm foo -rf`（长选项/标志后置）、`git -C /repo push`（全局选项插在 git 与子命令间）、`chmod -R 777 /`（加 -R）。
@@ -533,7 +533,7 @@ mewcode 把记忆注入到 `history`（消息列表）里作为 `user` 消息，
 
 ✅ **A6【低·正确性】spill readback 前缀判断可误判**（已修复）
 **原问题**：`is_spill_readback` 用 `abs_path.startswith(abs(cache_dir))` 判断读回，字符串前缀匹配会把兄弟目录 `.../cache_evil/x`（cache_dir=`.../cache`）误判为读回而豁免溢写。
-**修复**：改用路径成分包含判断——`Path(raw).resolve()`，`resolved == cache_root or cache_root in resolved.parents`（与 PathGuard 的 spill 只读放行 path_guard.py:76-79 同一正确模式）；顺带删除不再使用的 `os` import。回归测试 `test_is_spill_readback_sibling_dir_not_misjudged`：`cache_evil/x` 不命中、真 cache 目录仍命中；移除修复时兄弟目录断言失败。
+**修复**：改用路径成分包含判断——`Path(raw).resolve()`，`resolved == cache_root or cache_root in resolved.parents`（与 PathGuard 的 spill 只读放行 path_guard.py:112-116 同一正确模式）；顺带删除不再使用的 `os` import。回归测试 `test_is_spill_readback_sibling_dir_not_misjudged`：`cache_evil/x` 不命中、真 cache 目录仍命中；移除修复时兄弟目录断言失败。
 
 ### B. 真差距
 
@@ -679,7 +679,7 @@ doc 0.1 节"mewcode 13 文件 vs mini 3 文件"过时：mewcode teams/ 实为 15
 ### D. 后续工作中自查发现的缺陷
 
 ✅ **D1【UI·中】思考流（reasoning_content）渲染碎行（已修复）**
-`ui/terminal.py:203-206` 的 `feed_thinking` 用 `console.print(delta, end="", style="dim italic", highlight=False)` 逐 token 输出模型思考流。Rich 的 `console.print` 不跨调用记录光标列位，每个小片段（如 `.txt`/`).`/`32).`）当独立渲染单元按 `console.width` 各自换行——短碎片落在宽度边界附近时片段间被插入换行，正文前出现一长串断续碎行。
+`ui/terminal.py` 的 `feed_thinking`（修复前 203-206 行，现位于 426-436 行）用 `console.print(delta, end="", style="dim italic", highlight=False)` 逐 token 输出模型思考流。Rich 的 `console.print` 不跨调用记录光标列位，每个小片段（如 `.txt`/`).`/`32).`）当独立渲染单元按 `console.width` 各自换行——短碎片落在宽度边界附近时片段间被插入换行，正文前出现一长串断续碎行。
 触发条件：仅推理模型吐 `reasoning_content` 时经 `on_thinking_delta → feed_thinking` 触发（普通模型无思考流，故时有时无，非稳定复现）。主回答流走 `StreamRenderer`（Live+Markdown 缓冲，renderer.py）不受影响。
 修复方案（首选 `soft_wrap=True`）：给该 print 加 `soft_wrap=True`。这不是绕过而是对准病灶——它直接关闭 Rich 的内部词折行与裁剪，"每个片段各自按宽度折行"的机制被移除，折行交给终端并保持真实光标列位；同时保留 Rich 的 dim italic 样式/主题/Windows ANSI 使能。一行修复、低风险、无功能牺牲。
 备选（非必需，更重且不更彻底）：① 仿主流做 thinking 缓冲按行 flush——解决同一症状却引入缓冲状态与额外 bug 面，仅当需要对思考流做 Markdown/Live 渲染才值得；② 裸写 `console.file.write` + 手动 ANSI——完全脱离 Rich 但丢样式整合、需自理 legacy Windows ANSI，跨平台更脆，是退步。
@@ -781,7 +781,7 @@ D2 真实验证时发现：`read_file` 正确拒了 `.env`（敏感文件），a
 
 ✅ **D7【UX·低】用户输入在终端里不够显眼,与 trace/工具/回答输出混在一起难以区分**
 **问题**（B4.2 终端验证实测暴露）：用户在 `>` 提示符后输入文字、回车确认后,prompt_toolkit 的输入行留在原地（默认样式,无颜色/无加粗），后面紧接着 trace 行（dim）、工具输出（`╭─ tool ...`）、LLM 流式回答——回看终端滚动历史时很难快速定位"哪些是我打的话、哪些是 agent 的输出"。
-**现有视觉元素**：输入区上方有一条 dim 横线（`terminal.py:106` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
+**现有视觉元素**：输入区上方有一条 dim 横线（`ui/terminal.py:174` `'─' * console.width`），trace 的 `user` 行（`trace.py:_on_user_message`）用 dim 引号包裹用户文字（但开 `/trace` 才可见，且本身也是 dim），两者都不够醒目。
 
 **✅ 已修复**：三件套——① Theme 新增 `user_input` 亮浅蓝字段（default `#5fd7ff`/dark `#7dcfff`/light 白底可读蓝 `#0969da`；不复用 warning——`#f39c12` 黑底偏暗且语义不同）；② `create_prompt_style()` 根样式 `bold {theme.user_input}`——输入文字打字时和回车后均为 bold 亮浅蓝；③ `get_user_input()` 输入行上下各一条 `user_input` 色横线（上边线输入前打，下边线输入确认后打，`_BG_INTERRUPT` 中断时不打下边线）。菜单/工具栏/滚动条均 noinherit 不受根样式影响。非 TTY 朴素 input() 路径不经过 prompt_toolkit，保留上下横线。
 

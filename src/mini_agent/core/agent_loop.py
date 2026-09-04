@@ -608,7 +608,7 @@ class AgentLoop:
                     )
                     cached = self._eager_completed.get(_cache_key)
                     if cached is not None:
-                        fut: asyncio.Future[ToolResult] = asyncio.get_event_loop().create_future()
+                        fut: asyncio.Future[ToolResult] = asyncio.get_running_loop().create_future()
                         fut.set_result(
                             ToolResult(
                                 call_id=tc.id,

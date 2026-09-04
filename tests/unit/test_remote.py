@@ -40,7 +40,7 @@ def test_client_message_format():
 
 @pytest.mark.asyncio
 async def test_permission_future_flow():
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
 
     future.set_result(True)
@@ -107,7 +107,7 @@ async def test_disconnect_timeout_denies_pending():
     """When timeout expires, all pending futures are denied."""
     from mini_agent.remote.server import RemoteServer
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
 
     server = object.__new__(RemoteServer)
@@ -126,7 +126,7 @@ async def test_disconnect_timeout_cancelled_on_reconnect():
     """Cancelling the timeout task should not deny futures."""
     from mini_agent.remote.server import RemoteServer
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
 
     server = object.__new__(RemoteServer)
@@ -148,7 +148,7 @@ async def test_resolve_cleans_prompt():
     """Resolving a permission should clean up _pending_prompts."""
     from mini_agent.remote.server import RemoteServer
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
 
     server = object.__new__(RemoteServer)

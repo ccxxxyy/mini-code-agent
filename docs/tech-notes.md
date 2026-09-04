@@ -4270,3 +4270,19 @@ assessment §2.10：`SENSITIVE_FILE_PATTERNS` 只有 10 种模式，缺 `.npmrc`
 3. **无内容级检测（影响最大、最值得做，登记为 §2.18）**：前两条逃逸的最终后果同一个——秘密进入对话、发往 LLM 网关（§90 的真实 API key 泄漏正是此链）；名字层防线全绕过后没有第二道网。方案：工具结果进对话前过秘密形态扫描，命中替换 `[REDACTED:<类型>]` 占位——known-prefix 正则集（AWS `AKIA*`、GitHub `ghp_*`、OpenAI/Anthropic `sk-*`、npm `npm_*`、Slack `xoxb-*` 等，参照 gitleaks 规则）+ PEM 块（`-----BEGIN ... PRIVATE KEY-----`）+ 高熵启发式（可配置阈值/关闭）。挂接点二选一：内置 ToolResult 过滤层，或复用现有 POST_TOOL hook 机制做成内置 hook（用户可禁用）。价值：一层兜住全部三条边界——改名、混淆、无害文件里的硬编码秘密，读到了也发不出去（对话是唯一外泄通道，护住它就护住要害）。它自身的诚实边界：低熵自定义密码识别不了；工具进程已读到秘密（拦外泄非拦读取）；高熵非秘密串（哈希/base64 数据）可能误涂，占位文案需说明放行方法。
 
 两个方向独立可并行；§2.18 价值密度更高（一层兜三条边界），§2.17 体量更小（机制零改动，纯加模式+测试+文档套路）。
+
+---
+
+## §131 废弃 API 清零（assessment §2.12）
+
+### 131.1 范围：点名 4 处 → 实际 9 处
+
+assessment §2.12 点名 src 4 处 Python 3.10 起废弃的 `asyncio.get_event_loop()`（terminal.py 输入 executor、agent_loop.py 截断重试缓存 Future、permission.py add_rule/remove_rule 事件发射）。实施时按用户"零残留"要求全库 grep，测试里另有 5 处同类用法（test_remote.py 4 处、test_memory_recall.py 1 处，均在 async 测试函数内），9 处全部替换为 `asyncio.get_running_loop()`。本项曾实施过 src 4 处并因超出任务范围回滚（§129.3），本次独立做且扩到测试。
+
+### 131.2 安全性论证（为什么 get_running_loop 不会抛 RuntimeError）
+
+`get_running_loop()` 在无运行循环时抛 RuntimeError，而 `get_event_loop()` 会隐式创建——替换前需证明所有调用点必在循环内。7 处在 async 函数体内，天然成立。permission.py 两处在**同步方法**（add_rule/remove_rule）里 create_task，逐一核对调用方：非静默（发事件）路径只有斜杠命令 handler（async）与确认弹窗持久化 `_persist_confirmed_rule`（async 确认流程内）；启动/TOML 加载路径全部传 `_silent=True` 或在 `_event_bus is None` 时短路，不触发 create_task。事件发射的既有 async 测试（test_add_rule_event_emitted 等）替换后全过，佐证论证。
+
+### 131.3 类别穷尽扫描与验证
+
+按"废弃 API"类别（而非单个函数）穷尽：grep `utcnow/utcfromtimestamp/distutils/pkg_resources/asyncio.coroutine/set_event_loop/new_event_loop/getdefaultlocale/ssl.wrap_socket/imp.load` 全库零命中；全量测试的 236 条 warning 做分类取证——234 PytestWarning（sync 测试带 asyncio 标记的既有噪声）+ 1 RuntimeWarning，**零 DeprecationWarning**。验证：1455 passed + mypy 零错误 + ruff check/format 全过。纯机械替换零行为变更，无新测试。

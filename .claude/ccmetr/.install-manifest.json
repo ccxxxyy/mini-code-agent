@@ -1,7 +1,7 @@
 {
   "mode": "replace",
   "target": "D:\\PythonProjects\\mini-code-agent\\.claude",
-  "timestamp": "2026-08-22T01:47:30Z",
+  "timestamp": "2026-09-04T12:45:19Z",
   "added": [
     "ccmetr/bin",
     "skills/metr-bug",
