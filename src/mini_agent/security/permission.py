@@ -268,7 +268,7 @@ class PermissionManager:
             return False
         self._rules.append(rule)
         if not _silent and self._event_bus is not None:
-            asyncio.get_event_loop().create_task(
+            asyncio.get_running_loop().create_task(
                 self._event_bus.emit(
                     PermissionRuleAddedEvent(
                         scope=rule.scope.value,
@@ -287,7 +287,7 @@ class PermissionManager:
             if rule.scope == scope and rule.pattern == pattern and rule.level == level:
                 self._rules.pop(i)
                 if self._event_bus is not None:
-                    asyncio.get_event_loop().create_task(
+                    asyncio.get_running_loop().create_task(
                         self._event_bus.emit(
                             PermissionRuleRemovedEvent(
                                 scope=scope.value,

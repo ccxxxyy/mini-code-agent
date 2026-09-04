@@ -18,7 +18,7 @@
 
 安全相关测试特别扎实：70+ 个权限断言，覆盖 deny 规则穿透、cmd /c 解包、写后执行检测、熔断器行为等。回归测试带注释说明守护的是哪个 bug。
 
-**证据**：`tests/conftest.py:12-26`（隔离 fixture）、`tests/unit/test_tool_categories.py`（640 行安全测试）。
+**证据**：`tests/conftest.py:13-28`（隔离 fixture）、`tests/unit/test_tool_categories.py`（640 行安全测试）。
 
 ### 1.3 架构分层清晰
 
@@ -37,13 +37,13 @@
 
 ### 1.5 安全边界诚实标注
 
-项目在多处用"诚实边界"标注已知限制：正则黑名单不可能穷尽（`permission.py:54-59`）、Windows 非管理员无文件保护（`sandbox/windows.py:55-63`）、敏感文件检测可被混淆绕过（`permission.py:164-168`）。不声称做不到的事，这比隐瞒限制好。
+项目在多处用"诚实边界"标注已知限制：正则黑名单不可能穷尽（`permission.py:50-58`）、Windows 非管理员无文件保护（`sandbox/windows.py:55-63`）、敏感文件检测可被混淆绕过（`permission.py:164-168`）。不声称做不到的事，这比隐瞒限制好。
 
 ### 1.6 LLM 重试与降级设计
 
 三个 Provider 共享统一的重试基础设施：5 次指数退避（1/2/4/8/16s + jitter）、尊重 Retry-After 头、仅重试可恢复状态码（429/500/502/503/529）。流式中断不重试（避免重复输出）是正确的设计决策。`max_tokens` 截断时自动翻倍重试最多 3 次。
 
-**证据**：`llm/base.py:91-112`、`agent_loop.py:487`。
+**证据**：`llm/base.py:97-116`、`agent_loop.py:488`（`MAX_TOKENS_RETRIES` 常量在 152 行）。
 
 ---
 
@@ -51,9 +51,9 @@
 
 ### 2.1 组合根臃肿：`Application.__init__` 433 行
 
-`app.py` 的构造函数长达 433 行（124-557 行），在里面装配了 20+ 个子系统。这不是"组合根"该有的大小——它把装配逻辑、回调注册、事件订阅、UI 回调绑定全部堆在一个方法里。没有工厂函数或 builder 拆分。结果是这个文件 1298 行，且没有对应的单元测试文件。
+`app.py` 的构造函数长达 433 行（修复前 124-557 行），在里面装配了 20+ 个子系统。这不是"组合根"该有的大小——它把装配逻辑、回调注册、事件订阅、UI 回调绑定全部堆在一个方法里。没有工厂函数或 builder 拆分。结果是这个文件 1298 行，且没有对应的单元测试文件。
 
-**证据**：`app.py:124-557`。
+**证据**：`app.py:124-557`（修复前行号；现 `__init__` 自 app.py:122 起、为 25 行调用清单）。
 
 **✅ 已修复**：`__init__` 拆为 16 个 `_setup_*`/`_wire_*` 装配方法，本体压缩为 25 行的按依赖顺序调用清单；公开构造接口与全部 `self.*` 属性名不变。新增 `tests/unit/test_app.py` 10 个装配测试补上单元测试缺口。详见 tech-notes §117。
 
@@ -71,7 +71,7 @@
 
 SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提取元数据。
 
-**证据**：`tools/builtin/grep.py:82-83`、`tools/builtin/read_file.py:51`、`memory/session_store.py:59-76`。
+**证据**：`tools/builtin/grep.py:82-83`、`tools/builtin/read_file.py:51`、`memory/session_store.py:59-76`（均为修复前行号，相应代码已改经 `asyncio.to_thread`）。
 
 **✅ 已修复**：全部阻塞文件 I/O 经 `asyncio.to_thread` 移出事件循环——grep/glob 的目录遍历+逐文件读取循环整体提取为 `_scan()` 同步方法下放线程；read_file/write_file/edit_file 的 `read_text`/`write_text` 逐调用包装；SessionStore 的 save/load/list_sessions/delete/cleanup_stale 全部下放（读循环提取为 `_list_sessions_sync`/`_cleanup_stale_sync`）。新增 4 个事件循环不阻塞回归测试（threading.Event 确定性验证）。详见 tech-notes §119。
 
@@ -101,7 +101,7 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 ### 2.7 类型系统漏洞：`ToolContext` 六字段 `Any`
 
-`tools/base.py:97-108` 的 `ToolContext` 有 7 个字段声明为 `Any`：`mcp_manager`、`mailbox`、`task_store`、`agent_loop_ref`、`ask_user_callback`、`skill_registry`、`file_state`。只有 `subagent_manager` 用了 `TYPE_CHECKING` 条件导入的正确类型。其余 6 个字段使得静态类型检查完全失效。
+`tools/base.py` 的 `ToolContext`（修复前 97-108 行，现位于 121 行起）有 7 个字段声明为 `Any`：`mcp_manager`、`mailbox`、`task_store`、`agent_loop_ref`、`ask_user_callback`、`skill_registry`、`file_state`。只有 `subagent_manager` 用了 `TYPE_CHECKING` 条件导入的正确类型。其余 6 个字段使得静态类型检查完全失效。
 
 **✅ 已修复**：7 个字段全部换成真实类型——`MCPManager`/`Mailbox`/`TaskStore`/`SkillRegistry`/`FileStateCache` 走 `TYPE_CHECKING` 条件导入（与 `subagent_manager` 同模式，运行时零循环依赖）；`agent_loop_ref` 新增 `PlanModeControl` Protocol（结构化描述 get/set_plan_mode 切面，app.py 的 SimpleNamespace 实现天然满足）；`ask_user_callback` 类型别名 `AskUserCallback = Callable[[str, list[str] | None], Awaitable[str]]`。顺带修掉同文件 3 个既有类型错误（`to_json_schema` 的 dict 值类型推断、`params_model: type` 缺 `BaseModel` 约束），`mypy src/mini_agent/tools/base.py` 零错误。详见 tech-notes §123。
 
@@ -113,7 +113,7 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 ### 2.9 魔法数字散落各模块
 
-分散在各模块中的魔法数字，例如：
+分散在各模块中的魔法数字，例如（下列为修复前行号；bash/grep/app/subagent 四处常量修复后已迁为 `models/config.py` 配置字段默认值，compressor/board 两处常量仍在原文件——`compressor.py:146`、`board.py:26`）：
 - bash 输出截断 `MAX_OUTPUT_CHARS = 30000`（`bash.py:14`）
 - grep 匹配上限 `MAX_MATCHES = 200`（`grep.py:17`）
 - 自动保存间隔 `AUTOSAVE_INTERVAL = 30.0`（`app.py:57`）
@@ -127,7 +127,7 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 ### 2.10 敏感文件检测覆盖面不足
 
-`security/path_guard.py:11-22` 的敏感文件模式缺少常见的凭证文件：`.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等。
+`security/path_guard.py:11-22`（修复前行号，扩充后列表为 11-34 行）的敏感文件模式缺少常见的凭证文件：`.npmrc`（npm 认证 token）、`.pypirc`（PyPI 密码）、`.netrc`、`.git-credentials`、`authorized_keys`、Docker 配置等。
 
 **✅ 已修复**：`SENSITIVE_FILE_PATTERNS` 从 10 种扩到 22 种（补 `.npmrc`/`.pypirc`/`.netrc`/`_netrc`/`.git-credentials`/`.htpasswd`/`authorized_keys`，并补齐 SSH 密钥族 `id_ecdsa*`/`id_dsa*` 与密钥库 `*.ppk`/`*.jks`/`*.keystore`）；Docker/kube 配置裸名太泛化（config.json/config 会误伤所有项目），新增目录感知清单 `SENSITIVE_PATH_PATTERNS` 按"父目录/文件名"两段匹配。匹配逻辑抽为共享 `matches_sensitive_name()`，文件工具与 bash 通道（`command_references_sensitive_file`）同步生效。真实 LLM 双通道验证：read_file 读 `.npmrc` DENY（reason `path_guard:sensitive`），bash `cat .docker/config.json` 路由确认，对照组 `cat config.json`（`.docker` 外）正常放行无误伤。详见 tech-notes §130。修复后审计出的残余缺口已另行登记：第二梯队凭证文件见 §2.17，名字匹配方法本身的三条结构性逃逸（改名/混淆/无内容级检测）见 §2.18，完整分析见 tech-notes §130.4。
 
@@ -139,7 +139,9 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 ### 2.12 废弃 API 残留
 
-4 处使用了 Python 3.10 起废弃的 `asyncio.get_event_loop()`（`terminal.py:196`、`agent_loop.py:606`、`permission.py:272,291`），应改为 `asyncio.get_running_loop()`。
+4 处使用了 Python 3.10 起废弃的 `asyncio.get_event_loop()`（`ui/terminal.py:197`、`agent_loop.py:611`、`permission.py:271,290`，行号为修复后 `get_running_loop()` 所在位置），应改为 `asyncio.get_running_loop()`。
+
+**✅ 已修复**：按"零残留"标准清理——除点名的 src 4 处外，实施时 grep 发现测试里还有 5 处同类用法（`test_remote.py` 4 处、`test_memory_recall.py` 1 处），全部 9 处替换为 `asyncio.get_running_loop()`。安全性论证：permission.py 两处虽在同步方法内，但所有非静默（发事件）调用路径均在事件循环内（斜杠命令 async handler / 确认弹窗 async 流程），启动加载路径全部 `_silent=True` 不发事件；其余 7 处本就在 async 上下文。另做废弃 API 类别穷尽扫描（utcnow/distutils/pkg_resources/asyncio.coroutine/set_event_loop/getdefaultlocale/ssl.wrap_socket 等）零命中，全量 236 条测试 warning 中零 DeprecationWarning。1455 passed + mypy + ruff 全过。详见 tech-notes §131。
 
 ### 2.13 CI lint 不覆盖 tests/
 
@@ -176,6 +178,12 @@ MCP 工具注册名为 `mcp_<服务器名>_<工具名>`（`tools/mcp/adapter.py`
 敏感文件防护是文件名黑名单，三条结构性逃逸在名字层无解：秘密在无害名字文件里（硬编码 key）、轻量混淆（`cat .np*` 通配 token 不命中且不经危险载体）、改名后读取——最终后果同一个：秘密进对话发往 LLM 网关（tech-notes §90 曾真实泄漏 API key）。修法：工具结果进对话前扫秘密形态（gitleaks 风格 known-prefix 正则 + PEM 块 + 可配置高熵启发式），命中替换 `[REDACTED:<类型>]` 占位；挂接点可选内置 ToolResult 过滤层或复用 POST_TOOL hook。一层兜住全部三条边界（对话是唯一外泄通道）。其自身边界：低熵自定义密码识别不了、拦外泄非拦读取、高熵数据可能误涂需说明放行方法。完整方案见 tech-notes §130.4。
 
 **证据**：tech-notes §130.4 结构性边界分析；§90 真实泄漏事件；当前代码无任何工具输出内容扫描（grep `REDACTED`/entropy 零命中）。
+
+### 2.19 测试套件 234 条 PytestWarning 噪声（冗余 asyncio 标记）
+
+`pyproject.toml` 已配 `asyncio_mode = "auto"`（async 测试自动识别），但 58 个测试文件仍带文件级 `pytestmark = pytest.mark.asyncio`——冗余且把**同步**测试函数也强行标为 asyncio，pytest-asyncio 对每个同步函数告警一次，全量 236 条 warning 中 234 条源于此。危害不在功能（测试全过）而在**信号淹没**：未来真正重要的警告（如新引入的 DeprecationWarning）会埋在噪声里——§2.12 清理时的"零 DeprecationWarning"取证就只能靠 grep 而非警告摘要肉眼确认。修法：删除 58 个文件的冗余 pytestmark 行（auto 模式下 async 测试不受影响），警告数应降至个位数。纯机械改动但触面广（58 文件），建议独立执行、避免与功能性 PR 混杂 diff。
+
+**证据**：`uv run pytest tests/ -q` 末行 `236 warnings`；warning 分类计数 234 条 PytestWarning（§131.3 取证）；`grep -rl 'pytestmark = pytest.mark.asyncio' tests/` 得 58 文件。
 
 ---
 

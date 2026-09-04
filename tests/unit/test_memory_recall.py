@@ -181,7 +181,7 @@ async def test_prefetch_timeout_falls_back_to_head_truncation():
 async def test_prefetch_does_not_block_first_poll():
     entries = make_entries(15)
     pf = RecallPrefetcher(_SlowRecallLLM('["mem_001"]', delay=2.0), timeout=5.0)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     start = loop.time()
     await pf.poll(entries, "q", top_k=5)
     assert loop.time() - start < 0.5  # no LLM round-trip on the caller 调用方无 LLM 往返

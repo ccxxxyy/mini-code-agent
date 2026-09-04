@@ -194,7 +194,7 @@ class Terminal:
                 return task.result()
 
             input_task = self._pending_input_task or asyncio.ensure_future(
-                asyncio.get_event_loop().run_in_executor(None, input, "> ")
+                asyncio.get_running_loop().run_in_executor(None, input, "> ")
             )
             self._pending_input_task = None
             event_task = asyncio.ensure_future(self._bg_interrupt_event.wait())
