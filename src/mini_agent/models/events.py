@@ -46,6 +46,18 @@ class LLMResponseEvent(Event):
     model: str = ""
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
+    # Latency instrumentation 延迟埋点
+    # ttft_ms: request sent -> first chunk carrying payload (delta / thinking /
+    # tool_call_deltas). Empty role-only preamble chunks do NOT count, so this
+    # measures time-to-first-*token*, not time-to-first-HTTP-frame. 0 when the
+    # stream yielded no payload (cancelled / error / non-streaming provider).
+    # ttft_ms：请求发出 → 首个带载荷的 chunk（正文/思考/工具调用增量）。
+    # 只含 role 的空前导 chunk 不计，故测的是首 token 而非首个 HTTP 帧。
+    # 流未产出任何载荷时为 0（取消/出错/非流式 Provider）。
+    ttft_ms: float = 0
+    # Full stream wall time: request sent -> stream exhausted.
+    # 整个流的墙钟时长：请求发出 → 流结束。
+    stream_duration_ms: float = 0
 
 
 # --- Tool Events ---

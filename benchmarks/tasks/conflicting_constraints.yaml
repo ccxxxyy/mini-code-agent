@@ -1,0 +1,7 @@
+name: conflicting_constraints
+category: feature
+description: "两种折扣需叠加；用 if/elif 的朴素实现会挂掉组合用例"
+workspace: conflicting_constraints
+prompt: "Implement the discount logic in discount.py so that ALL tests in test_discount.py pass. Read the docstring carefully -- a naive if/elif implementation will pass some tests but fail others."
+verify_command: "python -m pytest test_discount.py -v"
+max_iterations: 25

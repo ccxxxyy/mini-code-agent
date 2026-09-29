@@ -5,6 +5,24 @@ Usage 用法:
     uv run python benchmarks/runner.py --task fix_syntax_error
     uv run python benchmarks/runner.py --all
     uv run python benchmarks/runner.py --all --model deepseek-chat
+    uv run python benchmarks/runner.py --all --repeat 5     # pass^k 可靠性
+
+Reliability metrics 可靠性指标:
+    A single 100% run says almost nothing -- an agent with pass@1 = 90%
+    still fails at least once in 8 attempts 57% of the time. With
+    --repeat k the runner reports:
+      pass@1  mean per-run success rate 单次运行成功率均值
+      pass^k  fraction of tasks that succeeded in ALL k runs 全部 k 次都成功的任务占比
+      rho^k   pass^k / pass@1, consistency ratio (1.0 = fully stable) 一致性比
+    单次 100% 几乎不说明问题——pass@1=90% 的 Agent 跑 8 次至少失败一次的
+    概率是 57%。故引入重复运行与 pass^k。
+
+Caps 上限:
+    Every result records the caps in force (max_iterations, verify timeout).
+    Without them an average cost/iteration count cannot be interpreted --
+    runs killed by a cap are censored samples, not natural completions.
+    每条结果都记录生效的上限。不记录上限则平均成本/轮次无法解读——被上限
+    掐掉的运行是删失样本，不是自然完成。
 """
 
 from __future__ import annotations
@@ -24,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from mini_agent.config.loader import ConfigLoader
 from mini_agent.core.agent_loop import AgentLoop
+from mini_agent.core.metrics import MetricsCollector
 from mini_agent.events.bus import EventBus
 from mini_agent.llm.registry import ProviderRegistry
 from mini_agent.models.config import AgentConfig
@@ -43,6 +62,11 @@ Working directory: {working_dir}
 
 Complete the task using the available tools. Be efficient — use as few tool calls as possible.
 Do NOT ask questions. Make reasonable decisions and act."""
+
+# Verification subprocess cap. Recorded into every result so a timeout-driven
+# failure is never mistaken for a wrong answer.
+# 验证子进程上限。写进每条结果，避免超时失败被误读为答错。
+VERIFY_TIMEOUT_SECONDS = 30
 
 # DeepSeek pricing (per 1M tokens) DeepSeek 定价（每百万 token）
 PRICE_TABLE: dict[str, dict[str, float]] = {
@@ -108,6 +132,10 @@ def estimate_cost(tokens: int, model: str) -> float:
 async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
     """Run a single benchmark task headlessly. Returns result dict.
     以 headless 方式运行单个评测任务，返回结果字典。
+
+    Does NOT write to disk -- run_task_repeated owns persistence so that a
+    k-run aggregate is written once instead of k times.
+    不落盘——由 run_task_repeated 负责持久化，使 k 次运行只写一份聚合。
     """
     try:
         task = load_task(task_name)
@@ -157,6 +185,15 @@ async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
 
         event_bus.on(ToolCallEndEvent, on_tool_end)
 
+        # Latency/quality instrumentation: a pure EventBus subscriber, so the
+        # agent loop is unaware of it. The loop-lag probe runs concurrently
+        # with the task and reports how long the event loop was ever blocked.
+        # 延迟/质量埋点：纯 EventBus 订阅者，Agent 循环不知其存在。
+        # loop lag 探针与任务并发运行，报告事件循环被阻塞的最长时间。
+        metrics = MetricsCollector()
+        metrics.attach(event_bus)
+        metrics.start_probe()
+
         # Run agent 运行 Agent
         conversation = Conversation(
             system_prompt=BENCHMARK_SYSTEM_PROMPT.format(working_dir=work_dir)
@@ -169,6 +206,8 @@ async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
         except Exception as e:
             output = f"Agent error: {e}"
         elapsed = time.monotonic() - start_time
+        await metrics.stop_probe()
+        metrics.detach(event_bus)
 
         tokens = agent_loop.last_turn_tokens
         iterations = agent_loop.state.iteration
@@ -183,7 +222,7 @@ async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
                 cwd=str(work_dir),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=VERIFY_TIMEOUT_SECONDS,
             )
             success = verify_result.returncode == 0
             verify_output = (verify_result.stdout + verify_result.stderr).strip()[:300]
@@ -191,7 +230,13 @@ async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
             success = False
             verify_output = "Verification timed out"
 
-        result = {
+        # Censoring flag: a run that burned its whole iteration budget did not
+        # "fail on the merits", it was cut off. Averages that mix the two are
+        # meaningless. 删失标记：耗尽迭代预算的运行不是"实力不济"而是被掐断，
+        # 把两者混进均值毫无意义。
+        hit_iteration_cap = iterations >= max_iter
+
+        return {
             "task": task_name,
             "agent": "mini",
             "model": config.llm.model,
@@ -205,15 +250,119 @@ async def run_task(task_name: str, config: AgentConfig) -> dict[str, Any]:
             "elapsed_seconds": round(elapsed, 1),
             "output": output[:500] if output else "",
             "verify_output": verify_output,
+            "hit_iteration_cap": hit_iteration_cap,
+            "caps": {
+                "max_iterations": max_iter,
+                "verify_timeout_seconds": VERIFY_TIMEOUT_SECONDS,
+            },
+            "metrics": metrics.snapshot(),
         }
 
-        # Save result 保存结果
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        result_path = RESULTS_DIR / f"mini_{task_name}.json"
-        result_path.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        return result
+
+def _median(values: list[float]) -> float:
+    """Median; 0.0 for empty. Used instead of mean so one runaway run cannot
+    skew a task's headline numbers. 中位数（空则 0.0）。用中位数而非均值，
+    避免单次失控运行带偏该任务的主指标。"""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2
+
+
+async def run_task_repeated(task_name: str, config: AgentConfig, repeat: int = 1) -> dict[str, Any]:
+    """Run one task `repeat` times and persist a single aggregate result.
+    运行同一任务 repeat 次，落盘一份聚合结果。
+
+    Headline scalars (success / tokens / iterations / elapsed) stay at the
+    top level so existing report.py keeps working. With repeat == 1 the
+    output is identical in shape to the old single-run format.
+    主指标标量保持在顶层，使既有 report.py 继续可用；repeat == 1 时输出
+    形状与旧单次格式一致。
+
+    `success` at top level means "succeeded in ALL runs" -- the strict
+    reading, matching pass^k. A task that passes 3 of 5 times is not a
+    task the agent can do reliably.
+    顶层 `success` 表示"全部 k 次都成功"——严格读法，与 pass^k 一致。
+    5 次过 3 次的任务不算 Agent 能可靠完成。
+    """
+    runs: list[dict[str, Any]] = []
+    for _i in range(max(1, repeat)):
+        runs.append(await run_task(task_name, config))
+
+    # An errored run (missing workspace etc.) has no usable fields
+    # 出错的运行（workspace 缺失等）没有可用字段
+    if any("error" in r for r in runs):
+        return runs[0]
+
+    successes = sum(1 for r in runs if r.get("success"))
+    n = len(runs)
+    representative = next((r for r in runs if r.get("success")), runs[0])
+
+    aggregate: dict[str, Any] = {
+        **representative,
+        # Medians across runs 跨运行取中位数
+        "tokens": int(_median([float(r.get("tokens", 0)) for r in runs])),
+        "cost_usd": round(_median([float(r.get("cost_usd", 0.0)) for r in runs]), 6),
+        "tool_calls": int(_median([float(r.get("tool_calls", 0)) for r in runs])),
+        "iterations": int(_median([float(r.get("iterations", 0)) for r in runs])),
+        "elapsed_seconds": round(_median([float(r.get("elapsed_seconds", 0.0)) for r in runs]), 1),
+        # Strict success: all runs passed 严格成功：全部通过
+        "success": successes == n,
+        "repeat": n,
+        "successes": successes,
+        # Per-run success rate for this task 该任务的单次成功率
+        "pass_at_1": round(successes / n, 4),
+        "all_pass": successes == n,
+        "censored_runs": sum(1 for r in runs if r.get("hit_iteration_cap")),
+        "runs": [
+            {
+                "success": r.get("success"),
+                "tokens": r.get("tokens"),
+                "iterations": r.get("iterations"),
+                "elapsed_seconds": r.get("elapsed_seconds"),
+                "hit_iteration_cap": r.get("hit_iteration_cap"),
+                "tool_calls": r.get("tool_calls"),
+            }
+            for r in runs
+        ],
+    }
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    (RESULTS_DIR / f"mini_{task_name}.json").write_text(
+        json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return aggregate
+
+
+def reliability_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate pass@1 / pass^k / consistency ratio across tasks.
+    跨任务聚合 pass@1 / pass^k / 一致性比。
+
+    pass^k here is the fraction of TASKS solved in every one of the k runs,
+    which is the quantity that decays exponentially with k -- an agent at
+    pass@1 = 0.9 lands near 0.9^k when failures are independent.
+    此处 pass^k 是"每一次运行都成功的任务占比"，它随 k 指数衰减——失败独立
+    时 pass@1=0.9 的 Agent 会趋近 0.9^k。
+    """
+    scored = [r for r in results if "pass_at_1" in r]
+    if not scored:
+        return {}
+    k = max(int(r.get("repeat", 1)) for r in scored)
+    pass_at_1 = sum(float(r["pass_at_1"]) for r in scored) / len(scored)
+    pass_k = sum(1 for r in scored if r.get("all_pass")) / len(scored)
+    return {
+        "k": k,
+        "tasks": len(scored),
+        "pass_at_1": round(pass_at_1, 4),
+        "pass_pow_k": round(pass_k, 4),
+        # 1.0 = every task the agent can do at all, it does every time
+        # 1.0 = 凡是能做的任务每次都能做成
+        "consistency_ratio": round(pass_k / pass_at_1, 4) if pass_at_1 else None,
+        "censored_runs": sum(int(r.get("censored_runs", 0)) for r in scored),
+    }
 
 
 def print_result(result: dict[str, Any]) -> None:
@@ -224,7 +373,23 @@ def print_result(result: dict[str, Any]) -> None:
     cost = result.get("cost_usd", 0)
     tools = result.get("tool_calls", 0)
     elapsed = result.get("elapsed_seconds", 0)
-    print(f"  [{status}] {name:25s} tokens={tokens:>6d}  cost=${cost:.4f}  tools={tools}  time={elapsed}s")
+    repeat = int(result.get("repeat", 1))
+    rate = f"  {result.get('successes', 0)}/{repeat}" if repeat > 1 else ""
+    print(
+        f"  [{status}]{rate} {name:25s} tokens={tokens:>6d}  "
+        f"cost=${cost:.4f}  tools={tools}  time={elapsed}s"
+    )
+
+    metrics = result.get("metrics") or {}
+    ttft = (metrics.get("latency") or {}).get("llm_ttft") or {}
+    lag = metrics.get("event_loop_lag") or {}
+    if ttft.get("count"):
+        print(
+            f"         ttft p50/p95={ttft.get('p50')}/{ttft.get('p95')}ms "
+            f"(n={ttft['count']})   loop_lag max={lag.get('max')}ms"
+        )
+    if result.get("censored_runs"):
+        print(f"         censored (hit iteration cap): {result['censored_runs']}/{repeat}")
     if not result.get("success") and result.get("verify_output"):
         print(f"         verify: {result['verify_output'][:100]}")
 
@@ -235,6 +400,13 @@ async def main() -> None:
     parser.add_argument("--all", action="store_true", help="Run all tasks")
     parser.add_argument("--model", type=str, help="Override model name")
     parser.add_argument("--list", action="store_true", help="List available tasks")
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="K",
+        help="Run each task K times to compute pass@1 / pass^k (default 1)",
+    )
     args = parser.parse_args()
 
     if args.list:
@@ -254,14 +426,15 @@ async def main() -> None:
         parser.print_help()
         return
 
+    repeat = max(1, args.repeat)
     print(f"Model: {config.llm.model} ({config.llm.provider})")
-    print(f"Tasks: {len(tasks_to_run)}")
+    print(f"Tasks: {len(tasks_to_run)}   Repeat: {repeat}")
     print()
 
     results = []
     for task_name in tasks_to_run:
         print(f"Running: {task_name}...")
-        result = await run_task(task_name, config)
+        result = await run_task_repeated(task_name, config, repeat=repeat)
         print_result(result)
         results.append(result)
         print()
@@ -272,10 +445,44 @@ async def main() -> None:
     total_cost = sum(r.get("cost_usd", 0) for r in results)
     total_tools = sum(r.get("tool_calls", 0) for r in results)
     print("=" * 60)
-    print(f"Results: {passed}/{len(results)} passed")
+    label = "passed all runs" if repeat > 1 else "passed"
+    print(f"Results: {passed}/{len(results)} {label}")
     print(f"Total tokens: {total_tokens}")
     print(f"Total cost: ${total_cost:.4f}")
     print(f"Total tool calls: {total_tools}")
+
+    # Effectiveness-aware cost: cost per SOLVED task is the number that
+    # actually matters -- a cheap agent that fails is not cheap.
+    # 有效性感知成本：每个"解决了的"任务的成本才是真指标——便宜但做不成
+    # 的 Agent 并不便宜。
+    if passed:
+        print(f"Cost per solved task: ${total_cost / passed:.4f}")
+    else:
+        print("Cost per solved task: n/a (nothing solved)")
+
+    rel = reliability_summary(results)
+    if rel:
+        print()
+        print(f"Reliability (k={rel['k']}, {rel['tasks']} tasks)")
+        print(f"  pass@1 : {rel['pass_at_1']:.3f}   mean per-run success rate")
+        print(f"  pass^k : {rel['pass_pow_k']:.3f}   solved in EVERY run")
+        if rel.get("consistency_ratio") is not None:
+            print(f"  rho^k  : {rel['consistency_ratio']:.3f}   1.0 = fully stable")
+        if rel["censored_runs"]:
+            print(f"  censored: {rel['censored_runs']} run(s) hit the iteration cap")
+
+    # Aggregate latency across tasks 跨任务聚合延迟
+    ttfts = [((r.get("metrics") or {}).get("latency") or {}).get("llm_ttft") or {} for r in results]
+    lags = [(r.get("metrics") or {}).get("event_loop_lag") or {} for r in results]
+    ttft_maxes = [t["max"] for t in ttfts if t.get("max") is not None]
+    lag_maxes = [lg["max"] for lg in lags if lg.get("max") is not None]
+    if ttft_maxes or lag_maxes:
+        print()
+        print("Latency (worst across tasks)")
+        if ttft_maxes:
+            print(f"  TTFT max      : {max(ttft_maxes):.1f}ms")
+        if lag_maxes:
+            print(f"  loop lag max  : {max(lag_maxes):.1f}ms   (>100ms = loop was blocked)")
 
 
 if __name__ == "__main__":

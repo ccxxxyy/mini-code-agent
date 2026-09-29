@@ -530,9 +530,19 @@ class AgentLoop:
         streaming_enabled = self._config.streaming_tool_execution
         extra: dict[str, Any] = {"max_tokens": max_tokens} if max_tokens else {}
 
+        # TTFT instrumentation: perf_counter (monotonic, not wall clock) taken
+        # before the request so provider-side connection setup is included --
+        # that latency is real to the user. First payload chunk stops the clock.
+        # TTFT 埋点：请求前取 perf_counter（单调时钟，非墙钟），把 Provider
+        # 侧建连耗时也算进去——那对用户是真实延迟。首个载荷 chunk 停表。
+        _t_request = time.perf_counter()
+        _ttft_ms = 0.0
+
         async for chunk in self._llm.stream(api_messages, tools=tool_schemas or None, **extra):
             if self._cancelled:
                 break
+            if _ttft_ms == 0.0 and (chunk.delta or chunk.thinking or chunk.tool_call_deltas):
+                _ttft_ms = (time.perf_counter() - _t_request) * 1000
             chunks.append(chunk)
             if chunk.thinking:
                 _thinking_parts.append(chunk.thinking)
@@ -640,6 +650,8 @@ class AgentLoop:
                 model=self.model_name,
                 cache_read_input_tokens=usage.cache_read_input_tokens if usage else 0,
                 cache_creation_input_tokens=usage.cache_creation_input_tokens if usage else 0,
+                ttft_ms=round(_ttft_ms, 1),
+                stream_duration_ms=round((time.perf_counter() - _t_request) * 1000, 1),
             )
         )
         # POST_LLM hook: observe-only (mirrors POST_TOOL)

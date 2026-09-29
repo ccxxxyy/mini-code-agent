@@ -6,7 +6,7 @@
 
 ## 已完成的差异化方向（positioning.md 方向 1）
 
-- [x] **CC 对照评测框架**（`benchmarks/`）：10 个标准任务、headless runner、自动化验证、Markdown 报告生成。**10/10 通过，总成本 $0.0015**。CC 结果模板已就位，待手动补齐后即可生成对比表格。
+- [x] **CC 对照评测框架**（`benchmarks/`）：16 个标准任务、headless runner、`--repeat k` 可靠性指标（pass@1 / pass^k / 一致性比 + 删失标记）、自动化验证、`validate_tasks.py` 任务有效性反向校验、Markdown 报告生成。**48 次运行 pass^3 = 1.000、删失 0，总成本 $0.0084、每成功任务 $0.0005**。CC 结果模板已就位，待手动补齐后即可生成对比表格。诚实边界：评测集尚无区分度（tech-notes §132.6）。
 
 ---
 
@@ -119,7 +119,7 @@
 
 | 方向 | 状态 | 说明 |
 |---|---|---|
-| CC 对照评测 | ✅ 已完成 | benchmarks/ 框架 + 10/10 数据 |
+| CC 对照评测 | ✅ 已完成 | benchmarks/ 框架 + 16 任务 × 3 次 = 48 次运行数据（pass^3=1.0） |
 | 机制透明度演示 | ✅ 已完成 | /trace 命令实时展示 ReAct 内部状态（阶段/权限判定+依据/工具耗时/LLM 元信息） |
 | 垂直场景定制 | ✅ 已完成 | `/explain` 教学模式（TeachRenderer 确定性面板 + Skill 辅助）+ `/audit` 合规审计（EventBus JSONL）+ offline-ollama 内网 Skill |
 | 机制实验 | ✅ 已完成 | `experiments/` 压缩策略 A/B（none/extractive/llm 三臂）+ 强弱模型混合编排（三臂），数据见 experiments/README.md |
@@ -134,7 +134,7 @@
 | 项 | 操作 |
 |---|---|
 | Anthropic Provider 验证 | 流式/tool_use/思考流已经 Anthropic 协议端点真实验证（tech-notes §110）；剩签名密码学校验 + prompt 缓存命中待官方 Claude API key（见 checklist Phase 5/37） |
-| CC 对照评测数据补齐 | benchmarks/ 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） |
+| CC 对照评测数据补齐 | benchmarks/ 的 CC 结果模板需手动用 CC 跑 16 个任务记录（可选） |
 
 ### 待做实验
 
@@ -149,7 +149,7 @@
 |---|---|---|
 | ✅ 插件生态（plugin_loader） | 第三方 pip 包（`mini_agent.plugins` entry point）/ 本地 `.py` 文件（`plugin_dirs`）注册工具/命令/技能；四钩子契约、三层异常隔离、`disabled_plugins` 禁用、`/plugins` 展示。详见 tech-notes §83 | 已完成 |
 | Anthropic Provider E2E 验证 | 流式/tool_use/思考流已经 Anthropic 协议端点真实验证（tech-notes §110）；签名密码学校验与 prompt 缓存命中仍需官方 Anthropic API key 补验 | ~0.5 小时 |
-| CC 对照评测数据补齐 | `benchmarks/` 的 CC 结果模板需手动用 CC 跑 10 个任务记录（可选） | — |
+| CC 对照评测数据补齐 | `benchmarks/` 的 CC 结果模板需手动用 CC 跑 16 个任务记录（可选） | — |
 
 ### 已知限制（各文档的"诚实边界"统一收录于此）
 

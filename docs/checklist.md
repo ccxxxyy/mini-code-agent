@@ -195,12 +195,14 @@
 - [x] runner.py 能 headless 跑单个任务（`--task fix_syntax_error`）
 - [x] runner.py 能批量跑全部（`--all`）
 - [x] report.py 能生成 Markdown 表格（`--output benchmarks/README.md`）
-- [x] 10 个任务涵盖 bugfix/feature/test/refactor/search 五个类别
+- [x] 16 个任务涵盖 bugfix/feature/test/refactor/search 五个类别
 - [x] 每个任务有可执行的验证命令（pytest / import / 文件检查）
 - [x] CC 手动结果有模板可填
 
 ### 评测结果验证
-- [x] 10/10 全部通过（两次全量运行确认稳定）
+- [x] 16/16 全部通过（每任务 3 次重复，48 次运行 pass^3 = 1.000）
+- [x] `validate_tasks.py` 反向校验：每个新任务未修改必失败、修复后必通过
+- [ ] **评测集仍无区分度**——48 次全通过说明任务偏易，需换更弱模型对照或提升到仓库级任务（tech-notes §132.6）
 - [x] 结果 JSON 正确采集 success/tokens/tool_calls/cost/iterations/time
 - [x] 报告表格数据与 JSON 一致
 
