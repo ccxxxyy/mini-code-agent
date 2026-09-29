@@ -1,0 +1,7 @@
+name: create_from_tests
+category: feature
+description: "geometry.py 不存在，须从失败测试反推 Circle/Rectangle/total_area 的完整实现"
+workspace: create_from_tests
+prompt: "test_geometry.py fails because geometry.py does not exist. Read the tests to infer the required API and implement geometry.py so that every test passes."
+verify_command: "python -m pytest test_geometry.py -v"
+max_iterations: 25

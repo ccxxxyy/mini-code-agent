@@ -1,0 +1,7 @@
+name: hidden_dependency_bug
+category: bugfix
+description: "报错出现在 processor.py，根因却在 parser.py 的分隔符错误"
+workspace: hidden_dependency_bug
+prompt: "Run the tests in test_processor.py. They fail. Find the root cause and fix it so all tests pass. The traceback may point at a different file than the one containing the actual bug."
+verify_command: "python -m pytest test_processor.py -v"
+max_iterations: 25

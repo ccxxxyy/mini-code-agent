@@ -1,0 +1,7 @@
+name: large_file_navigation
+category: bugfix
+description: "724 行文件里定位 compute_checksum 的模数错误（255 应为 256）"
+workspace: large_file_navigation
+prompt: "bigmodule.py is a large file with many functions. The tests in test_bigmodule.py fail because compute_checksum has an off-by-one bug. Locate and fix it. Do not read the whole file -- search for the function."
+verify_command: "python -m pytest test_bigmodule.py -v"
+max_iterations: 25

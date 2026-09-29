@@ -1,0 +1,7 @@
+name: infer_convention
+category: feature
+description: "需求只说 handle empty gracefully，须从模块既有约定推断应返回 0.0 而非抛异常"
+workspace: infer_convention
+prompt: "The mean() function in stats.py crashes on empty input. Make it handle empty input gracefully, consistent with how the rest of the module behaves. Then make sure test_stats.py passes."
+verify_command: "python -m pytest test_stats.py -v"
+max_iterations: 25

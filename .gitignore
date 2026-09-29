@@ -40,3 +40,6 @@ Thumbs.db
 # Benchmark/experiment results (regenerable) 评测/实验结果（可重新生成）
 benchmarks/results/
 experiments/results/
+
+# 个人求职材料（不提交）
+简历与面试准备.md

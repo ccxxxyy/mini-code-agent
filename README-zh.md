@@ -315,7 +315,7 @@ mini-code-agent/
 - [x] P5：扩展协议（Skill 技能包、Slash 命令、MCP 协议、Anthropic Provider）
 - [x] P6：多 Agent（SubAgent 分发、Git Worktree 隔离、Agent 团队、Plan 模式）
 - [x] P7：打磨 + 测试（错误友好提示、token 缓存、主题系统、历史持久化）
-- [x] P8：评测框架（benchmarks/ 10 任务 headless 评测，10/10 通过）
+- [x] P8：评测框架（benchmarks/ 16 任务 headless 评测，48 次运行 pass^3 = 1.000）
 - [x] P9：机制透明度（`/trace` 命令实时展示 ReAct 内部状态）
 - [x] P10：垂直场景定制（`/explain` 教学模式 + `/audit` 合规审计 + 内网离线 Skill）
 - [x] P11：机制实验（`experiments/` 压缩策略 A/B + 强弱模型混合编排对照实验）
@@ -729,9 +729,9 @@ trace [15:23:24.369] turn  complete 2 iterations, 1 tools, 2236 tokens
 
 | 指标 | 数据 |
 |---|---|
-| 通过率 | **10/10 (100%)** |
-| 总 token | 62,040 |
-| 总成本 | **$0.0015**（不到一分钱） |
+| 通过率 | **16/16 全部 3 次通过（pass^3 = 1.000，48 次运行）** |
+| 总 token | 334,985 |
+| 总成本 | **$0.0084**（每成功任务 $0.0005） |
 | 平均每任务 | 6,204 token / $0.0002 / 4 次工具调用 / 6.2 秒 |
 
 完整评测数据和方法见 [benchmarks/README.md](benchmarks/README.md)。

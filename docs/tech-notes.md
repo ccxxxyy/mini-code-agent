@@ -1011,14 +1011,14 @@ def _count_cached(text): ...
 
 ## 8.2 任务设计原则
 
-10 个任务覆盖五个类别（bugfix/feature/test/refactor/search），每个任务：
+16 个任务覆盖五个类别（bugfix/feature/test/refactor/search），每个任务：
 - YAML 定义：name + prompt + verify_command，格式极简
 - Workspace fixture：预置的有 bug 的代码 / 待通过的测试 / 待搜索的文件
 - 验证命令：pytest / import / 文件存在检查，exit 0 = 通过（搜索类用 echo OK 人工判定）
 
 ## 8.3 评测结果
 
-10/10 全部通过，总成本 $0.0015。详细数据见 `benchmarks/README.md`。
+16 任务 × 3 次重复共 48 次运行全部通过（pass^3 = 1.000、删失 0），总成本 $0.0084。可靠性机制与诚实边界见 §132。详细数据见 `benchmarks/README.md`。
 
 ---
 
@@ -4286,3 +4286,66 @@ assessment §2.12 点名 src 4 处 Python 3.10 起废弃的 `asyncio.get_event_l
 ### 131.3 类别穷尽扫描与验证
 
 按"废弃 API"类别（而非单个函数）穷尽：grep `utcnow/utcfromtimestamp/distutils/pkg_resources/asyncio.coroutine/set_event_loop/new_event_loop/getdefaultlocale/ssl.wrap_socket/imp.load` 全库零命中；全量测试的 236 条 warning 做分类取证——234 PytestWarning（sync 测试带 asyncio 标记的既有噪声）+ 1 RuntimeWarning，**零 DeprecationWarning**。验证：1455 passed + mypy 零错误 + ruff check/format 全过。纯机械替换零行为变更，无新测试。
+
+---
+
+## §132 评测可靠性与自建指标层（assessment §2.5 延伸 / 求职自查 P0-1~3）
+
+### 132.1 起因：单次 100% 通过率是个没有信息量的指标
+
+原 `benchmarks/` 有 10 个任务、单次运行、10/10 通过。这个数字看起来漂亮但不可用于任何判断——业界经验是**只有落在 95%–99% 区间的指标才有信息量**：100% 只说明"这个模式能跑通"，90% 说明"不能用"，97% 才说明"失败集中在某个可识别的输入子集上，去聚类它"。
+
+更关键的是单次运行无法表达可靠性。τ-bench 提出的 `pass^k`（k 次独立重试全部成功的概率）随 k 指数衰减：**pass@1 = 90% 的 Agent，k=8 时 pass^k 仅 57%**。只报单次成功率等于隐瞒方差。
+
+### 132.2 三件事：pass^k 机制、删失标记、任务有效性反向校验
+
+**① `--repeat k` 与三个可靠性指标**（`benchmarks/runner.py`）
+- `pass@1`：各任务单次成功率的均值
+- `pass^k`：**每一次运行都成功**的任务占比（随 k 指数衰减的那个量）
+- `ρ^k = pass^k / pass@1`：一致性比，1.0 表示"凡是能做的任务每次都能做成"
+
+重构为 `run_task`（单次、不落盘）+ `run_task_repeated`（k 次、聚合落盘）两层。聚合结果的顶层标量取**中位数**而非均值（单次失控运行不带偏主指标），顶层 `success` 取**严格读法**（全部 k 次都成功）——5 次过 3 次的任务不算 Agent 能可靠完成。`report.py` 依赖的顶层键全部保留，`repeat=1` 时输出形状与旧格式一致，向后兼容。
+
+**② 删失标记（censoring）**
+每条结果记录 `caps`（max_iterations / verify 超时）与 `hit_iteration_cap`。理由：**耗尽迭代预算的运行是删失样本，不是"实力不济的失败"**，把两者混进平均成本/轮次会得出无意义的数字。不记录上限则平均值根本无法解读。同时新增"每成功任务成本"（cost / solved）——便宜但做不成的 Agent 并不便宜。
+
+**③ `validate_tasks.py`：反向校验任务本身有效**
+新增工具证明每个任务"**未修改时必失败、打上预期修复必通过**"。一个未修改就能通过的任务是白送分，会让通过率虚高。
+实施时这个工具立刻抓到了自己的一个假阳性：首轮校验在**系统 Python 3.14**（无 pytest）下跑，6 个任务全部"失败"退出码 1，我据此判定"任务有效"——实际失败原因是 `No module named pytest` 而非测试不通过。改到 `uv run`（venv Python 3.11.15 + pytest 9.1.1）复跑才拿到真结论。**教训：退出码非零不等于测试失败，必须看输出。**
+
+### 132.3 自建指标层（`core/metrics.py`）
+
+三个组件，均为零侵入设计：
+
+- **`Histogram`**：最近秩百分位，**不插值**——20 个样本的 p95 就是第 19 小的那个真实观测值；插值会造出一个从未发生过的延迟。百分位基于有界滑动窗口（长会话的内存兜底，默认 4096 样本），但 `count/sum/min/max` 对历史**全部**样本保持精确——否则被窗口淘汰的异常值会悄悄消失。快照一并输出 `window` 字段，使百分位永远不被误读为全时段数值。无样本时返回 `None` 而非 0（0 会被读成"瞬时完成"，None 才表示"无数据"）。
+- **`LoopLagProbe`**：协程反复 `sleep(interval)` 并测量实际流逝与预期的差，超出部分即事件循环无法交还控制权的时长。这是 Python 异步服务最容易漏掉的指标——loop lag 可达数秒而 HTTP 延迟看起来仍然正常，因为卡顿平等地打击每个协程。告警阈值取业界常用的 >100ms。
+- **`MetricsCollector`**：纯 EventBus 订阅者，`attach/detach` 与 `CostTracker` 同形（含 `asyncio.Lock` 防并发子 Agent 事件破坏计数器），Agent 循环完全不知其存在。采集 TTFT、流时长、工具时延（**按工具名分桶**，避免慢工具被快工具掩盖）、迭代轮次、权限判定（按 `decision` 与 `reason` 双维——`reason` 区分"策略自动拦的"与"用户拒的"，只有后者才可能是误拦）、压缩频率、子 Agent 计数。
+
+### 132.4 TTFT 的语义选择：首 token 而非首个 HTTP 帧
+
+`LLMResponseEvent` 新增 `ttft_ms` / `stream_duration_ms`，在 `_stream_once` 埋点。两个刻意的决定：
+
+1. **计时起点在请求发出前**（`perf_counter` 取于 `self._llm.stream()` 调用之前），把 Provider 侧建连耗时也算进去——那对用户是真实延迟。
+2. **只有带载荷的 chunk 才停表**（`chunk.delta or chunk.thinking or chunk.tool_call_deltas`）。只含 role 或 `finish_reason` 的空前导帧不计，所以指标衡量的是"首 token"而非"首个 HTTP 帧"。流未产出任何载荷时（取消/出错/非流式 Provider）`ttft_ms` 保持 0，且 `MetricsCollector` **不记录 0 样本**——记录它会把百分位拉向零，让指标说谎。
+
+这两点各有专门单测固化（`test_payloadless_stream_reports_zero_ttft`、`test_zero_ttft_is_not_recorded`、`test_ttft_never_exceeds_stream_duration`）。
+
+### 132.5 新增 6 个难任务与实测结果
+
+新增任务针对六类真实失败模式：`hidden_dependency_bug`（traceback 指向 processor.py 但根因在 parser.py 的分隔符）、`conflicting_constraints`（折扣需叠加，if/elif 朴素实现会挂组合用例）、`large_file_navigation`（724 行文件里定位模数错误，须 grep 而非通读）、`infer_convention`（需求只说 "handle empty gracefully"，须从模块既有约定推断返回 0.0）、`three_bugs`（三处独立 bug，须多轮迭代）、`create_from_tests`（模块不存在，从失败测试反推完整 API）。全部经 `validate_tasks.py` 证明有效。
+
+**实测（16 任务 × 3 次 = 48 次运行，deepseek-v4-flash-0731）**
+- pass@1 = 1.000｜pass^3 = 1.000｜ρ³ = 1.000｜**删失运行 = 0**
+- 总 334,985 token / $0.0084；每成功任务 $0.0005；轮次 2–9（中位 4）
+- TTFT 跨任务 p50 中位 1,317ms、p95 中位 1,763ms、**最差单次 8,423ms**
+- 事件循环阻塞跨任务 max **65.1ms**、中位 22.0ms、**越过 100ms 告警线的任务数 0**
+
+### 132.6 诚实结论：加难的尝试没有达到目的
+
+**48 次运行全通过，6 个新难任务全部 3/3——评测集仍不具备区分度。** pass^3 = 1.0 在这里只说明任务对该模型偏易，不说明能力上限。这一项（P0-1 的"补失败样本"子目标）**未达成**，出路是换更弱模型做对照组，或把任务规模提升到真实仓库级别。
+
+两个副产品值得记录：
+- **TTFT 长尾**：跨任务 p95 中位 1.76s，但最差单次 8.42s——正是均值会完全掩盖的那种尾延迟，也是"一律报百分位"这条规矩的现场证据。
+- **一次未复现的异常**：`conflicting_constraints` 单独跑时曾观测 loop lag 125.4ms（越过阈值），全量 48 次运行未复现（max 65.1ms），判定为瞬时机器噪声而非代码问题。记录在案而非抹掉。
+
+验证：1,455 → **1,477 测试**（新增 22 个）、覆盖率 86.74% → **86.93%**、mypy 105 文件零错误、ruff 全过。新增测试**零新增 warning**（未加冗余 asyncio 标记，不加剧 assessment §2.19 的噪声）。

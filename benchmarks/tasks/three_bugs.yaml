@@ -1,0 +1,7 @@
+name: three_bugs
+category: bugfix
+description: "三个函数各有一个独立 bug，须多轮运行测试逐个定位修复"
+workspace: three_bugs
+prompt: "validators.py has three independent bugs -- one in each function. Run test_validators.py, fix every failure, and re-run until all tests pass."
+verify_command: "python -m pytest test_validators.py -v"
+max_iterations: 30
