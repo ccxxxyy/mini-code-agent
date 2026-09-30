@@ -1,0 +1,155 @@
+{
+  "task": "three_bugs",
+  "agent": "mini",
+  "model": "deepseek-v4-flash-0731",
+  "category": "bugfix",
+  "success": true,
+  "tokens": 51826,
+  "cost_usd": 0.001296,
+  "tool_calls": 13,
+  "tool_names": [
+    "read_file",
+    "read_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "bash",
+    "read_file",
+    "write_file",
+    "bash"
+  ],
+  "iterations": 9,
+  "elapsed_seconds": 30.5,
+  "output": "All 3 tests pass. The three bugs fixed in `validators.py`:\n\n1. **`is_valid_email`** — was checking only that `\"@\" in value`; now requires exactly one `@` with non-empty local and domain parts (`\"a@\"`, `\"@b.com\"`, `\"noat\"` are rejected).\n2. **`is_valid_port`** — was using `0 <= value <= 65535`, allowing port 0; changed to `1 <= value <= 65535`.\n3. **`normalize_phone`** — was calling `.lstrip(\"0\")` which stripped leading zeros; now only strips non-digit characters, preserving leading zeros.",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_three_bugs_68uy30f3\nplug",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 30,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 7,
+        "window": 7,
+        "min": 1101.7,
+        "max": 1846.0,
+        "mean": 1394.7,
+        "p50": 1355.0,
+        "p95": 1846.0,
+        "p99": 1846.0
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 7,
+        "window": 7,
+        "min": 1335.9,
+        "max": 5213.5,
+        "mean": 3125.9,
+        "p50": 2804.9,
+        "p95": 5213.5,
+        "p99": 5213.5
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 360.0,
+        "max": 468.0,
+        "mean": 414.0,
+        "p50": 360.0,
+        "p95": 468.0,
+        "p99": 468.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 2,
+          "window": 2,
+          "min": 360.0,
+          "max": 468.0,
+          "mean": 414.0,
+          "p50": 360.0,
+          "p95": 468.0,
+          "p99": 468.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 7,
+      "turns": 1,
+      "tool_calls": 9,
+      "tool_errors": 1,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 34347,
+      "completion": 1587,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 0.8889,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 7.0,
+        "max": 7.0,
+        "mean": 7.0,
+        "p50": 7.0,
+        "p95": 7.0,
+        "p99": 7.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 213,
+      "window": 213,
+      "min": 0.0,
+      "max": 64.9,
+      "mean": 7.7,
+      "p50": 4.7,
+      "p95": 18.8,
+      "p99": 24.3
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 35934,
+      "iterations": 7,
+      "elapsed_seconds": 22.8,
+      "hit_iteration_cap": false,
+      "tool_calls": 9
+    },
+    {
+      "success": true,
+      "tokens": 51826,
+      "iterations": 9,
+      "elapsed_seconds": 32.1,
+      "hit_iteration_cap": false,
+      "tool_calls": 13
+    },
+    {
+      "success": true,
+      "tokens": 55630,
+      "iterations": 10,
+      "elapsed_seconds": 30.5,
+      "hit_iteration_cap": false,
+      "tool_calls": 13
+    }
+  ]
+}

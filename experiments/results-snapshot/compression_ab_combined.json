@@ -1,0 +1,984 @@
+{
+  "experiment": "compression_ab",
+  "model": "deepseek-v4-flash-0731",
+  "context_window": 6000,
+  "compression_threshold": 0.6,
+  "repeat": 3,
+  "cells": [
+    {
+      "experiment": "compression_ab",
+      "task": "multi_step_edit",
+      "arm": "none",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 21719.0,
+        "min": 21424.0,
+        "max": 21793.0
+      },
+      "tool_calls": {
+        "median": 9.0,
+        "min": 9.0,
+        "max": 10.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 5.0,
+        "max": 5.0
+      },
+      "compressed_messages": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "elapsed_seconds": {
+        "median": 12.5,
+        "min": 11.1,
+        "max": 12.6
+      },
+      "cost_usd_total": 0.001624,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 21424,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 12.5
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 21719,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 11.1
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 21793,
+          "tool_calls": 10,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 12.6
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "multi_step_edit",
+      "arm": "extractive",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 23243.0,
+        "min": 23135.0,
+        "max": 24079.0
+      },
+      "tool_calls": {
+        "median": 9.0,
+        "min": 9.0,
+        "max": 10.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 5.0,
+        "max": 5.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 12.2,
+        "min": 12.0,
+        "max": 13.5
+      },
+      "cost_usd_total": 0.001761,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 23135,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 12.0
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 23243,
+          "tool_calls": 10,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 12.2
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 24079,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 13.5
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "multi_step_edit",
+      "arm": "llm",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 23468.0,
+        "min": 23038.0,
+        "max": 24434.0
+      },
+      "tool_calls": {
+        "median": 9.0,
+        "min": 9.0,
+        "max": 10.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 5.0,
+        "max": 5.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 13.9,
+        "min": 11.5,
+        "max": 14.0
+      },
+      "cost_usd_total": 0.001774,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 23038,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 11.5
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 23468,
+          "tool_calls": 10,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 13.9
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 24434,
+          "tool_calls": 9,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 14.0
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "find_bug",
+      "arm": "none",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 15494.0,
+        "min": 15414.0,
+        "max": 15655.0
+      },
+      "tool_calls": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "compressed_messages": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "elapsed_seconds": {
+        "median": 7.7,
+        "min": 7.5,
+        "max": 8.0
+      },
+      "cost_usd_total": 0.001163,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 15414,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 0,
+          "elapsed_seconds": 8.0
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 15494,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 0,
+          "elapsed_seconds": 7.7
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 15655,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 0,
+          "elapsed_seconds": 7.5
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "find_bug",
+      "arm": "extractive",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 16355.0,
+        "min": 16274.0,
+        "max": 16385.0
+      },
+      "tool_calls": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 8.6,
+        "min": 8.4,
+        "max": 8.7
+      },
+      "cost_usd_total": 0.001226,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 16355,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.7
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 16274,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.6
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 16385,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.4
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "find_bug",
+      "arm": "llm",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 16147.0,
+        "min": 16070.0,
+        "max": 16341.0
+      },
+      "tool_calls": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 8.9,
+        "min": 8.5,
+        "max": 9.8
+      },
+      "cost_usd_total": 0.001215,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 16070,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.5
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 16341,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 9.8
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 16147,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.9
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "refactor_rename",
+      "arm": "none",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 21529.0,
+        "min": 20964.0,
+        "max": 25113.0
+      },
+      "tool_calls": {
+        "median": 7.0,
+        "min": 5.0,
+        "max": 8.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 5.0,
+        "max": 6.0
+      },
+      "compressed_messages": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "elapsed_seconds": {
+        "median": 11.5,
+        "min": 10.5,
+        "max": 14.0
+      },
+      "cost_usd_total": 0.00169,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 20964,
+          "tool_calls": 5,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 10.5
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 25113,
+          "tool_calls": 8,
+          "iterations": 6,
+          "compressed_messages": 0,
+          "elapsed_seconds": 14.0
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 21529,
+          "tool_calls": 7,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 11.5
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "refactor_rename",
+      "arm": "extractive",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 21887.0,
+        "min": 17235.0,
+        "max": 21912.0
+      },
+      "tool_calls": {
+        "median": 7.0,
+        "min": 6.0,
+        "max": 7.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 4.0,
+        "max": 5.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 10.5,
+        "min": 9.3,
+        "max": 10.7
+      },
+      "cost_usd_total": 0.001526,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 21912,
+          "tool_calls": 7,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 10.7
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 21887,
+          "tool_calls": 7,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 10.5
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 17235,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 9.3
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "refactor_rename",
+      "arm": "llm",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 21920.0,
+        "min": 17249.0,
+        "max": 22340.0
+      },
+      "tool_calls": {
+        "median": 7.0,
+        "min": 6.0,
+        "max": 8.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 4.0,
+        "max": 5.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 10.4,
+        "min": 9.0,
+        "max": 12.9
+      },
+      "cost_usd_total": 0.001537,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 17249,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 9.0
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 21920,
+          "tool_calls": 7,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 10.4
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 22340,
+          "tool_calls": 8,
+          "iterations": 5,
+          "compressed_messages": 1,
+          "elapsed_seconds": 12.9
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "write_unit_test",
+      "arm": "none",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 31381.0,
+        "min": 26816.0,
+        "max": 59760.0
+      },
+      "tool_calls": {
+        "median": 6.0,
+        "min": 5.0,
+        "max": 11.0
+      },
+      "iterations": {
+        "median": 6.0,
+        "min": 6.0,
+        "max": 10.0
+      },
+      "compressed_messages": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "elapsed_seconds": {
+        "median": 24.8,
+        "min": 19.9,
+        "max": 37.2
+      },
+      "cost_usd_total": 0.002949,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 31381,
+          "tool_calls": 6,
+          "iterations": 6,
+          "compressed_messages": 0,
+          "elapsed_seconds": 24.8
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 59760,
+          "tool_calls": 11,
+          "iterations": 10,
+          "compressed_messages": 0,
+          "elapsed_seconds": 37.2
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 26816,
+          "tool_calls": 5,
+          "iterations": 6,
+          "compressed_messages": 0,
+          "elapsed_seconds": 19.9
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "write_unit_test",
+      "arm": "extractive",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 33644.0,
+        "min": 16922.0,
+        "max": 59386.0
+      },
+      "tool_calls": {
+        "median": 6.0,
+        "min": 4.0,
+        "max": 11.0
+      },
+      "iterations": {
+        "median": 7.0,
+        "min": 4.0,
+        "max": 11.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 25.2,
+        "min": 17.4,
+        "max": 38.1
+      },
+      "cost_usd_total": 0.002749,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 33644,
+          "tool_calls": 6,
+          "iterations": 7,
+          "compressed_messages": 1,
+          "elapsed_seconds": 25.2
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 59386,
+          "tool_calls": 11,
+          "iterations": 11,
+          "compressed_messages": 1,
+          "elapsed_seconds": 38.1
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 16922,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 17.4
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "write_unit_test",
+      "arm": "llm",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 18542.0,
+        "min": 17685.0,
+        "max": 29019.0
+      },
+      "tool_calls": {
+        "median": 4.0,
+        "min": 3.0,
+        "max": 5.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 6.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 17.5,
+        "min": 15.5,
+        "max": 17.8
+      },
+      "cost_usd_total": 0.001631,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 18542,
+          "tool_calls": 3,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 17.8
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 29019,
+          "tool_calls": 5,
+          "iterations": 6,
+          "compressed_messages": 1,
+          "elapsed_seconds": 17.5
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 17685,
+          "tool_calls": 4,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 15.5
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "grep_and_report",
+      "arm": "none",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 21566.0,
+        "min": 16941.0,
+        "max": 24582.0
+      },
+      "tool_calls": {
+        "median": 7.0,
+        "min": 5.0,
+        "max": 8.0
+      },
+      "iterations": {
+        "median": 5.0,
+        "min": 4.0,
+        "max": 6.0
+      },
+      "compressed_messages": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "elapsed_seconds": {
+        "median": 13.9,
+        "min": 13.6,
+        "max": 17.9
+      },
+      "cost_usd_total": 0.001578,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 21566,
+          "tool_calls": 7,
+          "iterations": 5,
+          "compressed_messages": 0,
+          "elapsed_seconds": 13.6
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 16941,
+          "tool_calls": 5,
+          "iterations": 4,
+          "compressed_messages": 0,
+          "elapsed_seconds": 17.9
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 24582,
+          "tool_calls": 8,
+          "iterations": 6,
+          "compressed_messages": 0,
+          "elapsed_seconds": 13.9
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "grep_and_report",
+      "arm": "extractive",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 16958.0,
+        "min": 16951.0,
+        "max": 17165.0
+      },
+      "tool_calls": {
+        "median": 6.0,
+        "min": 6.0,
+        "max": 6.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 10.6,
+        "min": 9.0,
+        "max": 13.4
+      },
+      "cost_usd_total": 0.001277,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 16958,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 10.6
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 16951,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 9.0
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 17165,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 13.4
+        }
+      ]
+    },
+    {
+      "experiment": "compression_ab",
+      "task": "grep_and_report",
+      "arm": "llm",
+      "model": "deepseek-v4-flash-0731",
+      "repeat": 3,
+      "successes": 3,
+      "pass_at_1": 1.0,
+      "all_pass": true,
+      "tokens": {
+        "median": 17608.0,
+        "min": 16810.0,
+        "max": 17608.0
+      },
+      "tool_calls": {
+        "median": 6.0,
+        "min": 6.0,
+        "max": 6.0
+      },
+      "iterations": {
+        "median": 4.0,
+        "min": 4.0,
+        "max": 4.0
+      },
+      "compressed_messages": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "elapsed_seconds": {
+        "median": 12.6,
+        "min": 8.8,
+        "max": 16.6
+      },
+      "cost_usd_total": 0.0013,
+      "runs": [
+        {
+          "repeat_index": 1,
+          "success": true,
+          "tokens": 17608,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 16.6
+        },
+        {
+          "repeat_index": 2,
+          "success": true,
+          "tokens": 17608,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 12.6
+        },
+        {
+          "repeat_index": 3,
+          "success": true,
+          "tokens": 16810,
+          "tool_calls": 6,
+          "iterations": 4,
+          "compressed_messages": 1,
+          "elapsed_seconds": 8.8
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "task": "large_file_navigation",
+  "agent": "mini",
+  "model": "deepseek-v4-flash-0731",
+  "category": "bugfix",
+  "success": true,
+  "tokens": 23648,
+  "cost_usd": 0.000591,
+  "tool_calls": 5,
+  "tool_names": [
+    "grep",
+    "grep",
+    "read_file",
+    "edit_file",
+    "bash"
+  ],
+  "iterations": 5,
+  "elapsed_seconds": 10.6,
+  "output": "Fixed. The bug was in `compute_checksum` (line 435 of bigmodule.py): it returned `total % 255` instead of `total % 256`, causing an off-by-one wrap. Both tests in test_bigmodule.py now pass.",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_large_file_navigation_9l",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 25,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 5,
+        "window": 5,
+        "min": 1116.7,
+        "max": 1743.3,
+        "mean": 1331.9,
+        "p50": 1257.7,
+        "p95": 1743.3,
+        "p99": 1743.3
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 5,
+        "window": 5,
+        "min": 1574.5,
+        "max": 2683.4,
+        "mean": 2099.4,
+        "p50": 1942.5,
+        "p95": 2683.4,
+        "p99": 2683.4
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 16.0,
+        "max": 344.0,
+        "mean": 180.0,
+        "p50": 16.0,
+        "p95": 344.0,
+        "p99": 344.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 344.0,
+          "max": 344.0,
+          "mean": 344.0,
+          "p50": 344.0,
+          "p95": 344.0,
+          "p99": 344.0
+        },
+        "grep": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 5,
+      "turns": 1,
+      "tool_calls": 5,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 24031,
+      "completion": 571,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 5.0,
+        "max": 5.0,
+        "mean": 5.0,
+        "p50": 5.0,
+        "p95": 5.0,
+        "p99": 5.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 101,
+      "window": 101,
+      "min": 0.0,
+      "max": 62.7,
+      "mean": 8.0,
+      "p50": 5.2,
+      "p95": 17.4,
+      "p99": 18.2
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 24602,
+      "iterations": 5,
+      "elapsed_seconds": 10.9,
+      "hit_iteration_cap": false,
+      "tool_calls": 5
+    },
+    {
+      "success": true,
+      "tokens": 23648,
+      "iterations": 5,
+      "elapsed_seconds": 10.6,
+      "hit_iteration_cap": false,
+      "tool_calls": 5
+    },
+    {
+      "success": true,
+      "tokens": 21930,
+      "iterations": 4,
+      "elapsed_seconds": 9.7,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    }
+  ]
+}

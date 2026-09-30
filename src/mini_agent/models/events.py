@@ -175,6 +175,36 @@ class ContextSummaryDoneEvent(Event):
     char_count: int = 0
 
 
+@dataclass
+class ContextCompressedEvent(Event):
+    """Routine conversation compression ran (ContextManager.check_and_compress).
+    常规对话压缩已执行（ContextManager.check_and_compress）。
+
+    Distinct from ContextSummary*Event above, which cover the fork-style summary
+    taken when a sub-agent inherits context. Those fire once per spawn; this one
+    fires whenever the running conversation is compressed -- a different thing with
+    a different frequency, so conflating them makes a "compressions" count wrong.
+    与上面的 ContextSummary*Event 不同：那两个是子 Agent 继承上下文时的 fork 式摘要，
+    每次 spawn 一次；本事件是运行中的对话被压缩时触发——频率和含义都不同，混为一谈会
+    让"压缩次数"统计出错。
+
+    `effective` is False when the pass did not reduce the token count; those are the
+    passes that drive the compression circuit breaker, and counting them as successful
+    compressions would hide the breaker's cause.
+    `effective` 为 False 表示本次压缩没有降低 token 数；正是这类压缩在推动压缩熔断器，
+    把它们计为成功压缩会掩盖熔断的原因。
+    """
+
+    before_tokens: int = 0
+    after_tokens: int = 0
+    duration_ms: float = 0
+    # True for the manual /compact path, which bypasses threshold and breaker checks
+    # 手动 /compact 路径为 True——该路径跳过阈值与熔断检查
+    forced: bool = False
+    effective: bool = True
+    strategy: str = ""
+
+
 # --- Session Events ---
 
 

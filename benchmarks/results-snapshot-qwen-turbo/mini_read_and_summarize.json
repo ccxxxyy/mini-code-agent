@@ -1,0 +1,148 @@
+{
+  "task": "read_and_summarize",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "search",
+  "success": true,
+  "tokens": 10999,
+  "cost_usd": 0.010999,
+  "tool_calls": 2,
+  "tool_names": [
+    "read_file",
+    "write_file"
+  ],
+  "iterations": 3,
+  "elapsed_seconds": 3.4,
+  "output": "The summary file `summary.txt` has been created successfully with the following content:\n\n```\nProject Name: WeatherAPI\n\nDescription: A Python library for fetching weather data from multiple providers.\n\nKey Features:\n- Support for OpenWeatherMap, WeatherAPI, and AccuWeather\n- Automatic caching with configurable TTL\n- Async support via httpx\n- Temperature unit conversion (C/F/K)\n\nInstallation: pip install weatherapi\n```\n\nLet me know if you need any further assistance!",
+  "verify_output": "OK",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 626.2,
+        "max": 1070.2,
+        "mean": 785.6,
+        "p50": 660.4,
+        "p95": 1070.2,
+        "p99": 1070.2
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 1193.1,
+        "max": 1446.0,
+        "mean": 1302.1,
+        "p50": 1267.1,
+        "p95": 1446.0,
+        "p99": 1446.0
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 1,
+        "window": 1,
+        "min": 16.0,
+        "max": 16.0,
+        "mean": 16.0,
+        "p50": 16.0,
+        "p95": 16.0,
+        "p99": 16.0
+      },
+      "per_tool": {
+        "read_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 3,
+      "turns": 1,
+      "tool_calls": 2,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 10808,
+      "completion": 216,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 3.0,
+        "max": 3.0,
+        "mean": 3.0,
+        "p50": 3.0,
+        "p95": 3.0,
+        "p99": 3.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 37,
+      "window": 37,
+      "min": 0.0,
+      "max": 20.9,
+      "mean": 7.0,
+      "p50": 3.3,
+      "p95": 17.7,
+      "p99": 20.9
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 11024,
+      "iterations": 3,
+      "elapsed_seconds": 3.9,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    },
+    {
+      "success": true,
+      "tokens": 10999,
+      "iterations": 3,
+      "elapsed_seconds": 3.4,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    },
+    {
+      "success": true,
+      "tokens": 10993,
+      "iterations": 3,
+      "elapsed_seconds": 3.4,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    }
+  ]
+}

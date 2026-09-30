@@ -1,0 +1,172 @@
+{
+  "task": "conflicting_constraints",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "feature",
+  "success": true,
+  "tokens": 15818,
+  "cost_usd": 0.015818,
+  "tool_calls": 4,
+  "tool_names": [
+    "read_file",
+    "read_file",
+    "edit_file",
+    "bash"
+  ],
+  "iterations": 4,
+  "elapsed_seconds": 5.9,
+  "output": "All tests in test_discount.py have passed. The discount logic has been implemented correctly, and all the test cases are now passing. If you need any further assistance, feel free to ask!",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_conflicting_constraints_",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 25,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 541.2,
+        "max": 944.4,
+        "mean": 706.7,
+        "p50": 642.2,
+        "p95": 944.4,
+        "p99": 944.4
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 756.4,
+        "max": 2666.4,
+        "mean": 1429.5,
+        "p50": 1091.0,
+        "p95": 2666.4,
+        "p99": 2666.4
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 15.0,
+        "max": 140.0,
+        "mean": 56.7,
+        "p50": 15.0,
+        "p95": 140.0,
+        "p99": 140.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 140.0,
+          "max": 140.0,
+          "mean": 140.0,
+          "p50": 140.0,
+          "p95": 140.0,
+          "p99": 140.0
+        },
+        "edit_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 15.0,
+          "max": 15.0,
+          "mean": 15.0,
+          "p50": 15.0,
+          "p95": 15.0,
+          "p99": 15.0
+        },
+        "read_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 15.0,
+          "max": 15.0,
+          "mean": 15.0,
+          "p50": 15.0,
+          "p95": 15.0,
+          "p99": 15.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 4,
+      "turns": 1,
+      "tool_calls": 4,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 15448,
+      "completion": 370,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 4.0,
+        "max": 4.0,
+        "mean": 4.0,
+        "p50": 4.0,
+        "p95": 4.0,
+        "p99": 4.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 54,
+      "window": 54,
+      "min": 0.0,
+      "max": 37.1,
+      "mean": 8.9,
+      "p50": 5.0,
+      "p95": 18.4,
+      "p99": 37.1
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 15818,
+      "iterations": 4,
+      "elapsed_seconds": 5.9,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    },
+    {
+      "success": true,
+      "tokens": 15292,
+      "iterations": 4,
+      "elapsed_seconds": 4.4,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    },
+    {
+      "success": true,
+      "tokens": 19790,
+      "iterations": 5,
+      "elapsed_seconds": 6.7,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    }
+  ]
+}

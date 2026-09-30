@@ -15,6 +15,7 @@ from rich.markup import escape
 from mini_agent.events.bus import EventBus
 from mini_agent.models.events import (
     AgentPhaseChangeEvent,
+    ContextCompressedEvent,
     ContextSummaryDoneEvent,
     ContextSummaryStartEvent,
     LLMRequestEvent,
@@ -54,6 +55,7 @@ class TraceRenderer:
         bus.on(LLMResponseEvent, self._on_llm_response)
         bus.on(TurnCompleteEvent, self._on_turn_complete)
         bus.on(UserMessageEvent, self._on_user_message)
+        bus.on(ContextCompressedEvent, self._on_ctx_compressed)
         bus.on(ContextSummaryStartEvent, self._on_ctx_summary_start)
         bus.on(ContextSummaryDoneEvent, self._on_ctx_summary_done)
         bus.on(PermissionModeChangedEvent, self._on_mode_changed)
@@ -68,6 +70,7 @@ class TraceRenderer:
         bus.off(LLMResponseEvent, self._on_llm_response)
         bus.off(TurnCompleteEvent, self._on_turn_complete)
         bus.off(UserMessageEvent, self._on_user_message)
+        bus.off(ContextCompressedEvent, self._on_ctx_compressed)
         bus.off(ContextSummaryStartEvent, self._on_ctx_summary_start)
         bus.off(ContextSummaryDoneEvent, self._on_ctx_summary_done)
         bus.off(PermissionModeChangedEvent, self._on_mode_changed)
@@ -153,6 +156,21 @@ class TraceRenderer:
             return
         tc = str(e.has_tool_calls).lower()
         self._line("llm", f"response [dim]{e.tokens_used} tokens, tool_calls={tc}[/dim]")
+
+    async def _on_ctx_compressed(self, e: ContextCompressedEvent) -> None:
+        if not self.enabled:
+            return
+        # Show the ineffective case explicitly: a pass that did not shrink anything is
+        # what opens the circuit breaker, and it looks identical to a good one otherwise.
+        # 无效压缩要显式标出：没缩小任何东西的压缩正是打开熔断器的那种，否则它和正常的
+        # 压缩看起来一模一样。
+        tag = "compacted" if e.effective else "compacted (INEFFECTIVE)"
+        mode = " forced" if e.forced else ""
+        self._line(
+            "ctx",
+            f"{tag}{mode}  [dim]{e.before_tokens} -> {e.after_tokens} tokens, "
+            f"{e.duration_ms:.0f}ms, {e.strategy}[/dim]",
+        )
 
     async def _on_ctx_summary_start(self, e: ContextSummaryStartEvent) -> None:
         if not self.enabled:

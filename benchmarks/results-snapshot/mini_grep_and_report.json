@@ -1,0 +1,174 @@
+{
+  "task": "grep_and_report",
+  "agent": "mini",
+  "model": "deepseek-v4-flash-0731",
+  "category": "search",
+  "success": true,
+  "tokens": 16438,
+  "cost_usd": 0.000411,
+  "tool_calls": 6,
+  "tool_names": [
+    "grep",
+    "glob",
+    "read_file",
+    "read_file",
+    "read_file",
+    "write_file"
+  ],
+  "iterations": 4,
+  "elapsed_seconds": 14.2,
+  "output": "Done. Created `todo_report.txt` with all TODOs found in the Python files:\n\n```\nconfig.py:1 - load from environment variables\nmain.py:2 - add logging\nmain.py:6 - graceful shutdown\nutils.py:2 - support timezone\n```",
+  "verify_output": "OK",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 950.4,
+        "max": 1430.6,
+        "mean": 1266.6,
+        "p50": 1294.9,
+        "p95": 1430.6,
+        "p99": 1430.6
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 1712.5,
+        "max": 2497.0,
+        "mean": 2183.0,
+        "p50": 2082.2,
+        "p95": 2497.0,
+        "p99": 2497.0
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 15.0,
+        "max": 16.0,
+        "mean": 15.7,
+        "p50": 16.0,
+        "p95": 16.0,
+        "p99": 16.0
+      },
+      "per_tool": {
+        "glob": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        },
+        "grep": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        },
+        "write_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 15.0,
+          "max": 15.0,
+          "mean": 15.0,
+          "p50": 15.0,
+          "p95": 15.0,
+          "p99": 15.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 4,
+      "turns": 1,
+      "tool_calls": 6,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 15720,
+      "completion": 529,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 4.0,
+        "max": 4.0,
+        "mean": 4.0,
+        "p50": 4.0,
+        "p95": 4.0,
+        "p99": 4.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 81,
+      "window": 81,
+      "min": 0.0,
+      "max": 20.9,
+      "mean": 7.8,
+      "p50": 5.1,
+      "p95": 17.8,
+      "p99": 20.9
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 16249,
+      "iterations": 4,
+      "elapsed_seconds": 8.8,
+      "hit_iteration_cap": false,
+      "tool_calls": 6
+    },
+    {
+      "success": true,
+      "tokens": 16869,
+      "iterations": 4,
+      "elapsed_seconds": 14.2,
+      "hit_iteration_cap": false,
+      "tool_calls": 6
+    },
+    {
+      "success": true,
+      "tokens": 16438,
+      "iterations": 4,
+      "elapsed_seconds": 17.6,
+      "hit_iteration_cap": false,
+      "tool_calls": 3
+    }
+  ]
+}

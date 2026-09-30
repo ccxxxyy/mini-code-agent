@@ -1,0 +1,65 @@
+{
+  "experiment": "compression_ab",
+  "task": "write_unit_test",
+  "arm": "extractive",
+  "model": "deepseek-v4-flash-0731",
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "tokens": {
+    "median": 33644.0,
+    "min": 16922.0,
+    "max": 59386.0
+  },
+  "tool_calls": {
+    "median": 6.0,
+    "min": 4.0,
+    "max": 11.0
+  },
+  "iterations": {
+    "median": 7.0,
+    "min": 4.0,
+    "max": 11.0
+  },
+  "compressed_messages": {
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0
+  },
+  "elapsed_seconds": {
+    "median": 25.2,
+    "min": 17.4,
+    "max": 38.1
+  },
+  "cost_usd_total": 0.002749,
+  "runs": [
+    {
+      "repeat_index": 1,
+      "success": true,
+      "tokens": 33644,
+      "tool_calls": 6,
+      "iterations": 7,
+      "compressed_messages": 1,
+      "elapsed_seconds": 25.2
+    },
+    {
+      "repeat_index": 2,
+      "success": true,
+      "tokens": 59386,
+      "tool_calls": 11,
+      "iterations": 11,
+      "compressed_messages": 1,
+      "elapsed_seconds": 38.1
+    },
+    {
+      "repeat_index": 3,
+      "success": true,
+      "tokens": 16922,
+      "tool_calls": 4,
+      "iterations": 4,
+      "compressed_messages": 1,
+      "elapsed_seconds": 17.4
+    }
+  ]
+}

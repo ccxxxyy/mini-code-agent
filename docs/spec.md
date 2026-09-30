@@ -150,7 +150,7 @@ mini-code-agent/
 ├── tests/
 │   ├── conftest.py                  # Shared fixtures
 │   ├── mocks.py                     # Shared MockLLM + script helpers
-│   ├── unit/                        # unit test files, 1451 tests
+│   ├── unit/                        # unit test files, 1483 tests
 │   │   ├── test_agent_loop.py
 │   │   ├── test_permissions.py
 │   │   ├── test_remote_confirm.py

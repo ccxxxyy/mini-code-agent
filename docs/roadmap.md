@@ -6,7 +6,7 @@
 
 ## 已完成的差异化方向（positioning.md 方向 1）
 
-- [x] **CC 对照评测框架**（`benchmarks/`）：16 个标准任务、headless runner、`--repeat k` 可靠性指标（pass@1 / pass^k / 一致性比 + 删失标记）、自动化验证、`validate_tasks.py` 任务有效性反向校验、Markdown 报告生成。**48 次运行 pass^3 = 1.000、删失 0，总成本 $0.0084、每成功任务 $0.0005**。CC 结果模板已就位，待手动补齐后即可生成对比表格。诚实边界：评测集尚无区分度（tech-notes §132.6）。
+- [x] **CC 对照评测框架**（`benchmarks/`）：16 个标准任务、headless runner、`--repeat k` 可靠性指标（pass@1 / pass^k / 一致性比 + 删失标记）、自动化验证、`validate_tasks.py` 任务有效性反向校验、Markdown 报告生成。**48 次运行 pass^3 = 1.000、删失 0，总成本 $0.0084、每成功任务 $0.0005**。CC 结果模板已就位，待手动补齐后即可生成对比表格。**弱模型对照组（tech-notes §137）**：同样 16 任务 × 3 次换 `qwen-turbo` 跑，pass@1 = 0.792 / pass^3 = 0.750 / 删失 2 / 12-16 任务全过——**评测集是有效的测量工具，只是在 `deepseek-v4-flash` 档位上饱和**，先前「评测集尚无区分度」的判断不准确。
 
 ---
 
@@ -319,7 +319,7 @@
 
 ### ✅ 上下文管理增强
 
-对照 `D:\PythonProjects\mewcode-python\mewcode\context\manager.py` 及 `agent.py` 逐项对比。
+对照 mewcode-python 仓库的 `mewcode/context/manager.py` 及 `agent.py` 逐项对比。
 
 #### ✅ ① 聚合工具结果预算（含三个配套机制）已修复（P64.1）
 

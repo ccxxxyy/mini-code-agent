@@ -111,6 +111,8 @@ SessionStore 同理：`list_sessions()` 同步读取每个会话 JSON 文件提�
 
 **✅ 已修复**：CI lint job 新增 `uv run mypy` 步骤，`pyproject.toml` 配置 `[tool.mypy]`（`follow_imports=silent` + `ignore_missing_imports` + `warn_unused_ignores`）并排除 TTY/CLI/remote 层（与覆盖率排除策略一致）。全库 42 个 mypy 错误全部修复（16 个文件），mypy 对 106 个源文件零错误通过。关键修复：LLMProvider.stream 签名（async→非 async 抽象方法）、AgentLoop 三属性注解补全、list→Sequence 协变修正、多处 None 安全检查。详见 tech-notes §124。
 
+> ⚠️ **上述排除清单已于 2026-09-30 清零**：删掉 `exclude` 全部 8 项后全库只剩 2 个错误（`ui/input_handler.py` 的 `merged` 变量需标注为 `Completer | None`），修完 **mypy 现为全量 116 源文件零错误**。那 12.6% 的排除其实早已不必要，只是从未被复核——详见 tech-notes §134。
+
 ### 2.9 魔法数字散落各模块
 
 分散在各模块中的魔法数字，例如（下列为修复前行号；bash/grep/app/subagent 四处常量修复后已迁为 `models/config.py` 配置字段默认值，compressor/board 两处常量仍在原文件——`compressor.py:146`、`board.py:26`）：

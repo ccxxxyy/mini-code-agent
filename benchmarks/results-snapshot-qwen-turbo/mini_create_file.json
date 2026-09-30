@@ -1,0 +1,131 @@
+{
+  "task": "create_file",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "feature",
+  "success": true,
+  "tokens": 7230,
+  "cost_usd": 0.00723,
+  "tool_calls": 1,
+  "tool_names": [
+    "write_file"
+  ],
+  "iterations": 2,
+  "elapsed_seconds": 4.0,
+  "output": "The file `config.yaml` has been successfully created with the specified content. Here is the content of the file:\n\n```yaml\ndatabase:\n  host: localhost\n  port: 5432\n  name: mydb\nserver:\n  host: 0.0.0.0\n  port: 8080\nlogging:\n  level: INFO\n  file: app.log\n```\n\nLet me know if you need any further assistance!",
+  "verify_output": "",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 586.2,
+        "max": 2999.8,
+        "mean": 1793.0,
+        "p50": 586.2,
+        "p95": 2999.8,
+        "p99": 2999.8
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 1364.0,
+        "max": 3555.4,
+        "mean": 2459.7,
+        "p50": 1364.0,
+        "p95": 3555.4,
+        "p99": 3555.4
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 0,
+        "window": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      }
+    },
+    "counters": {
+      "llm_calls": 2,
+      "turns": 1,
+      "tool_calls": 1,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 7048,
+      "completion": 182,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 2.0,
+        "max": 2.0,
+        "mean": 2.0,
+        "p50": 2.0,
+        "p95": 2.0,
+        "p99": 2.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 46,
+      "window": 46,
+      "min": 0.0,
+      "max": 19.2,
+      "mean": 7.1,
+      "p50": 3.4,
+      "p95": 17.5,
+      "p99": 19.2
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 7230,
+      "iterations": 2,
+      "elapsed_seconds": 4.9,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    },
+    {
+      "success": true,
+      "tokens": 7233,
+      "iterations": 2,
+      "elapsed_seconds": 4.0,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    },
+    {
+      "success": true,
+      "tokens": 7221,
+      "iterations": 2,
+      "elapsed_seconds": 2.9,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    }
+  ]
+}

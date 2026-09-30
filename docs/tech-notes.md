@@ -3906,7 +3906,9 @@ prompt_toolkit 绑定 `s-tab`（BackTab）调用 app 的循环器（default→ac
 
 **验证**：1438 全过（1434+4），ruff check/format 通过。真实 LLM 验证（项目根目录终端）：`uv run mini-agent -p "用 grep 工具在 src 目录搜索 'asyncio.to_thread'..."` → 正确报出本次修复的全部 6 文件 11 处调用点并读出 pyproject.toml 项目名；第二轮 `-p "用 write_file 创建 .scratch_verify271.txt 内容 'hello alpha'，再用 edit_file 把 alpha 改成 beta，最后 read_file 读出"` → 文件实际内容 `hello beta`，write→edit→read 全链路经 to_thread 路径正常。
 
-**量化实测**（`verify_271_loop_block.py`，3000 文件 / 70MB，同进程内把 to_thread 退化为同步直调模拟修复前）：修复前扫描 1932.6ms、事件循环心跳最大间隔 1932.7ms（全程冻结）；修复后扫描 2178.6ms、最大间隔 44.3ms（保持响应）。线程切换代价约 12% 扫描耗时。注：此改进在交互窗口肉眼不可见——ESC 中断只在 LLM 流式期间检查（app.py `_on_stream_delta`）、spinner 由 Rich 独立线程驱动，均不反映工具执行期间的事件循环状态。
+**量化实测**（原 `verify_271_loop_block.py`，3000 文件 / 70MB，同进程内把 to_thread 退化为同步直调模拟修复前）：修复前扫描 1932.6ms、事件循环心跳最大间隔 1932.7ms（全程冻结）；修复后扫描 2178.6ms、最大间隔 44.3ms（保持响应）。线程切换代价约 12% 扫描耗时。注：此改进在交互窗口肉眼不可见——ESC 中断只在 LLM 流式期间检查（app.py `_on_stream_delta`）、spinner 由 Rich 独立线程驱动，均不反映工具执行期间的事件循环状态。
+
+> ⚠️ **本段数字已被 §133 取代，勿再引用。** 原脚本 `verify_271_loop_block.py` 已不在仓库，2026-09-30 重建为 `experiments/verify_loop_block.py` 并改为两臂交替重复 5 次：**阻塞降幅复现（1,474.0ms → 26.1ms，−98.2%），但"+12% 扫描代价"未复现**——逐次差值横跨 −19.9%~+8.5%，区间包含 0，属测量噪声。上面那个 +12% 极可能是单次测量撞上冷热页缓存差异的假象。详见 §133。
 
 ---
 
@@ -4095,7 +4097,7 @@ lint job 新增步骤：
 
 ### 124.5 验证
 
-- `uv run mypy`：106 个源文件，零错误
+- `uv run mypy`：106 个源文件，零错误 ⚠️ **排除清单已于 §134 清零，现为全量 116 文件零错误，本行及下方 exclude 配置块勿再引用**
 - 1441 测试全过 + 覆盖率门禁通过 + ruff clean
 
 **CI 补修**：首轮 Actions 运行在 ubuntu 上报 6 个错误——`sandbox/_low_integrity.py` 和 `sandbox/windows.py` 的 `ctypes.windll`/`ctypes.WinError` 是 Windows 专属属性，Linux 的 typeshed 里不存在。两文件加入 exclude（与 TTY 层排除同理：平台专属代码在异平台检查器下必然报错，排除比逐行 ignore 诚实）。排除后 104 文件零错误。
@@ -4348,4 +4350,292 @@ assessment §2.12 点名 src 4 处 Python 3.10 起废弃的 `asyncio.get_event_l
 - **TTFT 长尾**：跨任务 p95 中位 1.76s，但最差单次 8.42s——正是均值会完全掩盖的那种尾延迟，也是"一律报百分位"这条规矩的现场证据。
 - **一次未复现的异常**：`conflicting_constraints` 单独跑时曾观测 loop lag 125.4ms（越过阈值），全量 48 次运行未复现（max 65.1ms），判定为瞬时机器噪声而非代码问题。记录在案而非抹掉。
 
-验证：1,455 → **1,477 测试**（新增 22 个）、覆盖率 86.74% → **86.93%**、mypy 105 文件零错误、ruff 全过。新增测试**零新增 warning**（未加冗余 asyncio 标记，不加剧 assessment §2.19 的噪声）。
+验证：1,455 → **1,477 测试**（新增 22 个）、覆盖率 86.74% → **86.93%**、mypy 105 文件零错误（⚠️ 现为全量 116 文件，见 §134）、ruff 全过。新增测试**零新增 warning**（未加冗余 asyncio 标记，不加剧 assessment §2.19 的噪声）。
+
+---
+
+## §133 事件循环阻塞对照实验重建：`verify_loop_block.py`（§119 量化数据补链）
+
+**前因**：§119 记录的量化实测引用了脚本 `verify_271_loop_block.py`，但该脚本**已不在仓库**——数字只剩叙述，无法当场复现。求职自查时发现这是个硬伤：整个项目最常被引用的性能数字（1932.7ms → 44.3ms，代价 +12% 扫描耗时）恰好是唯一无法用一条命令重跑的。重建为 `experiments/verify_loop_block.py`。
+
+**方法**：同进程、同 fixture 跑两臂，避免磁盘缓存状态与机器负载在两次测量间漂移。
+- `blocking` 臂：把 `asyncio.to_thread` 打桩为直接调用 `fn(*args)`，让 `GrepTool._scan` 跑在事件循环上（模拟 §119 修复前）
+- `threaded` 臂：真实 `asyncio.to_thread`，即当前线上行为
+- 心跳探针：协程按 5ms 间隔 `sleep`，记录相邻醒来的实际间隔；空闲时约 5ms，阻塞期间根本不醒，故跨越阻塞段的那个间隔 ≈ 阻塞时长
+- fixture：3,000 文件 / 70.4MB（30 个子目录 × 100 文件），pattern 故意不命中，测的是遍历+读取本身而非匹配格式化
+- 两臂**交替重复 5 次**并报中位数与区间——这是重建时新增的关键设计，原因见下
+
+**实测（2026-09-30，win32 / Python 3.11.15，`--repeat 5`）**：
+
+| 臂 | 扫描中位 | 扫描区间 | 循环阻塞中位 | 阻塞区间 |
+|---|---|---|---|---|
+| blocking | 1,473.6ms | 1,317–2,193ms | **1,474.0ms** | 1,318–2,193ms |
+| threaded | 1,429.3ms | 1,221–1,905ms | **26.1ms** | 21–49ms |
+
+- **事件循环最长阻塞：1,474.0ms → 26.1ms（−98.2%）**。blocking 臂的阻塞时长始终等于扫描时长（循环被冻结全程），这是结论成立的内部一致性检验。
+- **扫描耗时：中位 −3.0%，逐次差值 [−19.9, −5.9, −8.8, −17.1, +8.5]%**。
+
+**与 §119 旧记录的冲突及判定**：§119 写"线程切换代价约 12% 扫描耗时"，**本次未复现**。逐次差值横跨 −19.9% 到 +8.5%、区间包含 0，说明扫描耗时差异**在本机测量噪声之内**。机理上也支持这个判定——`_scan` 是**整体一次性**下放（§119 的"循环整体下放"取舍），线程切换是 O(1) 一次，不随 3,000 个文件的工作量放大，因此不应产生正比于工作量的 12% 代价。旧的 +12% 极可能是单次测量假象：单臂各测一次，恰好撞上冷热页缓存差异（本次实测冷缓存 ~1.9s vs 热缓存 ~0.33s，差 6 倍，足以淹没任何真实差异）。
+
+**因此这次重建的真正产出不是那两个数字，而是"两臂交替重复 + 报区间"这个方法**。只报中位数不报区间，−3.0% 会被当成"轻微变快"的结论；报了区间才能得出正确结论——**这个代价测不出来**。
+
+**诚实边界（沿用 §119 的结论，仍然成立）**：此改进在交互窗口肉眼不可见——ESC 中断只在 LLM 流式期间检查（`app.py` `_on_stream_delta`）、spinner 由 Rich 独立线程驱动，均不反映工具执行期间的事件循环状态。真实价值在三处：① 多子 Agent 并行时一个 grep 冻结 1.5 秒会让全部兄弟 Agent 一起停；② 服务化后单循环冻结直接等于该时段所有连接的心跳/取消/背压信号失效；③ 心跳探针本身成了回归检测手段（后续演化为 `core/metrics.py` 的 `LoopLagProbe`，见 §132）。
+
+**为何不提交结果快照**：与 `benchmarks/results-snapshot/` 不同，本实验**不调用 LLM、无金钱成本、约 1 分钟可跑完**，所以脚本本身就是可复现凭证，`experiments/results/` 保持 git-ignored。
+
+**顺带修复**：`benchmarks/report.py` 的 `print(report)` 在 Windows 默认 GBK 控制台下抛 `UnicodeEncodeError` 丢掉整份报告（报告含 ✅ 等非 CP936 字符），改为输出前强制 `sys.stdout.reconfigure(encoding="utf-8")`。
+
+---
+
+## §134 mypy 排除清单清零：从 105 文件到全量 116 文件（assessment §2.8 收尾）
+
+**前因**：§124 给 CI 加 mypy 门禁时，为了让首轮变绿留了一份 `[tool.mypy] exclude`——TTY 交互层 4 个文件（`ui/terminal.py` 642 行、`ui/input_handler.py` 336、`ui/esc_watcher.py` 140、`ui/components.py` 33）、`cli.py` 177 行、Windows 专属 ctypes 的 `sandbox/_low_integrity.py` 120 行与 `sandbox/windows.py` 137 行，以及**整个 `remote/` 的 1,199 行**。合计 2,784 行 = 全库 22,061 行的 **12.6%**。
+
+当时对 ctypes 两文件的排除理由是成立的（Linux typeshed 里没有 `ctypes.windll`，异平台检查必报错）；但对 TTY 层、`cli.py`、`remote/` 的排除只是"先绕过"，从未被复核。结果是项目对外说"mypy 零错误"时，实际口径是 105/116 文件、87.4% 行数——**这句话不能在需要精确的场合用**。
+
+**动作**：把 `exclude` 整块删掉重跑。**全库只剩 2 个错误**，都在 `ui/input_handler.py:302-304`：
+
+```python
+merged = completer          # 推断为 SlashCommandCompleter | None
+...
+merged = merge_completers([completer, file_completer])   # 返回基类 Completer -> 不兼容
+merged = file_completer                                   # FileRefCompleter -> 不兼容
+```
+
+`merged` 的类型从形参 `completer: SlashCommandCompleter | None` 推断而来，但它实际要承载三种 completer。修法是显式标注为联合基类（`Completer` 本来就已 import）：
+
+```python
+merged: Completer | None = completer
+```
+
+**结果**：`uv run mypy` → **Success: no issues found in 116 source files**（全量，无排除）。ctypes 两文件在 win32 本机通过；CI 的 lint job 跑在 ubuntu 上，若 typeshed 差异复现，正确修法是给那两个文件加**文件级** `# mypy: disable-error-code=...` 或平台条件 ignore，而不是恢复整目录排除——**排除的粒度应该匹配问题的粒度**。
+
+**教训**：**门禁的排除清单必须定期挑战一次。** 这份清单从加上到删掉期间，被排除的代码自己变干净了（`remote/` 1,199 行零错误），但没人去验证，于是"暂时绕过"沉淀成了"永久盲区"，还顺带让一句对外陈述长期不精确。
+
+**失效标记**：本节取代以下旧陈述——`docs/project-assessment.md` §2.8 的"排除 TTY/CLI/remote 层……106 个源文件零错误"、tech-notes §124 的 exclude 配置块与"排除后 104 文件零错误"、§132 验证行的"mypy 105 文件零错误"。三处均为当时事实，**但均已不是现状**。
+
+**验证**：`uv run mypy` 全量 116 文件零错误；`uv run pytest tests/ -q` 1,477 全过、覆盖率 86.93%；`uv run ruff check src/ tests/` + `format --check` 全过。注意**覆盖率的 omit 清单未动**——类型检查和覆盖率是两套门禁，TTY 层能静态检查但仍无法在 CI 里跑出行覆盖，两者的排除策略本来就不必一致（§124 当初"与覆盖率排除策略一致"这个理由，现在看是把两件事错误地耦合了）。
+
+---
+
+## §135 上下文压缩消融实验：三臂 45 次运行，以及为什么只有 2/5 个格子能下结论
+
+**前因**：`experiments/compression_ab.py` 早已存在（`none` / `extractive` / `llm` 三臂），但从未跑出数据——`experiments/results/` 里只有 `verify_pending.json`。求职自查把它列为"挡'没用户量'质疑最有力的武器"却一直空着。本次补齐。
+
+**动手前先改设计**。原脚本每格只跑一次（5 任务 × 3 臂 = 15 次）。先按原样跑了一轮，结果是**同一臂的 token 差值跨任务变号**：`extractive` 在 `write_unit_test` 是 −36%、在 `refactor_rename` 是 +9%；`llm` 在 `refactor_rename` 是 −14%、在 `write_unit_test` 是 +25%。这正是 §133 刚刚栽过的坑（单次测量把冷热页缓存假象当成 +12% 真实代价），所以**没有基于这 15 次下任何结论**，而是给脚本加了 `--repeat`（照 `benchmarks/runner.py` 的 `runs[]` 约定聚合中位数+区间），重跑 **5 任务 × 3 臂 × 3 次 = 45 次**。
+
+同时给 `print_summary` 加了两个防自欺的机制：① 逐任务差值表（不只给聚合中位数）；② **符号变号检测**——若某臂差值跨任务既有正又有负，直接打印告警说"聚合中位数不是单一效应的摘要"。
+
+**实验条件**：模型 `deepseek-v4-flash-0731`（与 `benchmarks/` 同一模型，可比），强制上下文窗口 **6,000 token** / 阈值 0.6——真实的 128k 窗口下这些短任务永不触发压缩。总花费 $0.025。
+
+### 结论一：成功率零区分度
+
+**45/45 全过，三臂各 15/15。** 这个任务规模上压缩不会把任务做坏，所以**成功率这一列不承载信息**，必须看 token。这与 §132 评测集 48/48 全通过是同一个病：没有失败样本就没有区分度。
+
+> ⚠️ **上句的措辞后被 §137 收窄**：准确说法是「**在这个模型档位上**没有失败样本」——评测集本身是分得开的（换 `qwen-turbo` 后 pass@1 = 0.792），饱和的是指标而非任务过易。本节的消融若换到那个档位重跑，成功率一列可能就承载信息了，这是未做的后续。
+
+### 结论二：只有 2/5 个任务的 token 差值可分辨，判据是「轮次是否跨重复恒定」
+
+| 任务 | `none` 臂轮次 | 格内极差/中位 | 测量 | extractive | llm |
+|---|---|---|---|---|---|
+| `find_bug` | [4,4,4] 恒定 | 2% | ✅ 可分辨 | **+5.6%** | **+4.2%** |
+| `multi_step_edit` | [5,5,5] 恒定 | 2% | ✅ 可分辨 | **+7.0%** | **+8.1%** |
+| `grep_and_report` | [4,5,6] 抖动 | 35% | ❌ 被淹没 | (−21.4%) | (−18.4%) |
+| `refactor_rename` | [5,5,6] 抖动 | 19% | ❌ 被淹没 | (+1.7%) | (+1.8%) |
+| `write_unit_test` | [6,6,10] 抖动 | **105%** | ❌ 被淹没 | (+7.2%) | (−40.9%) |
+
+**在两个干净任务上，两种压缩都一致地更贵（+4.2% ~ +8.1%）。** 机理清楚：`compressed_messages` 中位恒为 **1**，即每次运行只触发约一次压缩，**摘要自身的 token 成本没有足够的后续轮次去摊薄**。
+
+**这给"压缩比是错的指标"提供了本项目的实测数据**：正确口径是**完成任务的总 token 数（含摘要自身消耗）**，按这个口径，此处的压缩是净亏的。压缩要划得来，前提是省下的前缀能在**足够多的后续轮次**里反复受益。
+
+### 结论三：污染层的方差来源是 Agent 轮次不确定性，不是压缩
+
+全 45 次**每轮平均约 4,313 token**，轮次中位 5。`write_unit_test [none]` 三次为 [6,6,10] 轮、token [26816, 31381, 59760]，**格内极差 32,944 = 中位的 105%**。一次多跑 4 轮就多烧 17k+ token，而压缩效应只有 1k 量级。
+
+**判据可以写成规则：格内极差 > 臂间差值 ⇒ 该格不可下结论。** 五个任务里三个触发此规则。
+
+### 结论四：聚合头条数字不可报
+
+脚本聚合表给出 `extractive +1.5% / llm −14.0%`，但符号变号检测同时打印了告警：
+
+```
+[!] arm 'llm' token delta changes sign across tasks (-40.9% .. +8.1%)
+    -- the aggregate median is not a summary of a single effect.
+```
+
+`llm −14.0%` 这个头条来自对符号互相矛盾的格子取中位数，**不可作为结论引用**。
+
+### 待验证假设（n=3 不足以支持，明确不当结论）
+
+`grep_and_report` 与 `write_unit_test` 上，压缩臂的轮次**严格更低且更稳**：前者 none [4,5,6] vs 两压缩臂均 [4,4,4]；后者 none [6,6,10] vs llm [4,4,6]。且 `write_unit_test` 的 llm 臂**即便去掉 none 臂那次 10 轮离群**后仍低 36.3%，所以这不是离群假象。
+
+两个互斥解释，本实验分不开：
+1. **压缩确实有益**——丢掉陈旧工具结果减少了干扰，Agent 更快收敛；
+2. **任务验证太弱**——压缩臂的工具调用数同步下降（7→6、6→4），**做的事更少却仍然通过**，说明 `verify_command` 检不出信息损失。
+
+要分开需要提高 n，并给任务补**能检出"少做了事"的断言**。这条直接指向 §132 那个未解决的问题：评测集缺的不是数量而是区分度。
+
+### 已知实现问题：压缩熔断器在极小窗口下劣化了 llm 臂
+
+`llm` 臂运行时观测到：
+
+```
+Compression circuit breaker open: 3 consecutive ineffective attempts,
+skipping further compression this session.
+```
+
+6,000 token 的极小窗口下，LLM 摘要连续三次未能有效降低 token 数即触发熔断，后续压缩被跳过——意味着 `llm` 臂在部分运行里**实际退化成近似 `none` 臂**，会把臂间差值向 0 压缩。真实 128k 窗口下不会这么快触发。**这是本实验操纵强度弱的第二个原因**（第一个是每次只压缩约 1 次）。
+
+### 产出
+
+- `experiments/results-snapshot/`（**已提交**）：15 格聚合 + 每格 `runs[]` 逐次明细 + 溯源 README。提交理由同 `benchmarks/results-snapshot/`——重跑要花真钱且结果不可复现。
+- `experiments/compression_ab.py`：新增 `--repeat`、逐任务差值表、符号变号检测；docstring 补"怎么读输出"一节。
+
+**方法论收获（与 §133 同一条）**：**报中位数必须同时报区间，并且要有一个明确的"何时不许下结论"的判据。** §133 的判据是"逐次差值区间是否包含 0"，本节的判据是"格内极差是否超过臂间差值"。两次都是先得出了一个漂亮但错误的结论，再靠重复测量推翻它。
+
+---
+
+## §136 计时断言 flaky 清除：两处零余量 TTFT 断言
+
+**前因**：§135 跑完消融实验后跑全量回归，`tests/unit/test_metrics.py::test_collector_consumes_loop_ttft_end_to_end` 挂了一次。单独重跑通过——典型 flaky。这是个需要当场查清的信号，因为 §132 记录的那 4 个事件循环回归测试专门用 `threading.Event` 做确定性验证以避开计时断言，而这里却漏了两处计时断言进来。
+
+**量化翻车率**：单独循环重跑 12 次挂 1 次（约 8%）。抓到断言原文：
+
+```
+assert snap["latency"]["llm_ttft"]["p50"] >= 30.0
+E   assert 29.6 >= 30.0
+```
+
+标称 `MockLLM(delay=0.03)` 即 30ms，实测 TTFT **29.6ms**。
+
+**根因**：`asyncio.sleep` 按事件循环时钟调度（`time.monotonic`），而 TTFT 用 `time.perf_counter` 计时（`agent_loop.py:538` 取 `_t_request`、`:545` 在首个带载荷 chunk 停表）。**两个时钟不同源**，Windows 上 `monotonic` 精度可粗至约 15.6ms，故 sleep 可能比 perf_counter 走满标称时长早约一个 tick 返回。
+
+先误判了欠量规模：单独测 `asyncio.sleep(0.03)` 200 次，min 30.128ms，**从不欠量**——所以最初按 0.4ms 定容差（3ms）。重跑 30 次仍挂 2 次，抓到第二处：
+
+```
+assert event.ttft_ms >= 50.0
+E   AssertionError: expected >=47.0ms, got 40.4
+```
+
+标称 50ms 实测 **40.4ms，欠 9.6ms**。两次实测（−0.4ms / −9.6ms）都在一个 tick 内，**说明欠量是绝对值有界而非按比例**——这一点决定了修法。
+
+**修法**：容差设为一个 tick（`SLEEP_UNDERSHOOT_MS = 16.0`），同时**把标称延迟拉大**，让下界仍有说服力：
+
+| 测试 | 原标称 | 原下界 | 新标称 | 新下界 |
+|---|---|---|---|---|
+| `test_ttft_measures_delay_before_first_payload` | 50ms | ≥50.0（零余量） | 200ms | ≥184.0 |
+| `test_collector_consumes_loop_ttft_end_to_end` | 30ms | ≥30.0（零余量） | 150ms | ≥134.0 |
+
+**为什么不是单纯放宽容差**：若保持 50ms 标称而容差放到 16ms，下界变成 34ms——这个下界既能被真实的 50ms 挂起通过，也能被一个 34ms 的无关延迟通过，**断言失去了区分力**。把标称拉到 200ms 后，184ms 的下界只有真实计到那段挂起才能过。两个测试共增加约 0.3 秒运行时间。
+
+**为什么不改成完全确定性（打桩时钟）**：可以做——把 `agent_loop` 命名空间里的 `time` 换成一个 `perf_counter` 返回脚本化序列的 shim。但那样断言的就只是 `(t1-t0)*1000` 这段算术，而"挂起真的被计到了"这个语义会丢失；而"空帧不停表"这条更关键的语义已由 `test_payloadless_stream_reports_zero_ttft` 确定性地覆盖（断言 `ttft_ms == 0`，不含计时）。所以此处保留计时但给足余量。
+
+**验证**：`tests/unit/test_metrics.py` 连续 40 次全过（修复前 30 次挂 2 次）；全量 **1,477 测试全过**、覆盖率 86.93%、mypy 全量 116 文件零错误、ruff 全过。
+
+**方法论收获**：**计时断言的下界必须同时满足两个条件——能被真实效应通过、不能被噪声通过。** 零余量断言违反前者，过宽容差违反后者；唯一的出路是把被测量的效应本身放大到远超噪声尺度。这与 §133/§135 的"报中位数必须同时报区间"是同一类错误的两个面：前者是单次测量误把噪声当效应，此处是断言边界误把噪声当失败。
+
+---
+
+## §137 弱模型对照组：评测集其实有区分度，之前是被强模型饱和了
+
+**前因**：§132 记录评测集 48/48 全过、§135 记录消融 45/45 全过，两处都下了"评测集没有区分度"的结论，并把"换更弱模型做对照"列为下一步。但那个结论**只基于一个模型**——这是个推理漏洞：全过既可能说明题太简单，也可能说明这个模型对这批题太强。两者的处置方式完全相反。
+
+**动手前先修一个设计缺陷**。`runner.py` 的 `RESULTS_DIR` 是模块常量，结果文件只按任务名命名（`mini_<task>.json`），所以**跑第二个模型会静默覆盖第一个**。探路阶段真踩了：用 `--model qwen-turbo` 试跑三个任务，把基线的 `mini_create_file` / `mini_three_bugs` / `mini_hidden_dependency_bug` 覆盖掉了，靠 §133 建的 `benchmarks/results-snapshot/` 才恢复——**分离快照的设计当天就救了自己一次**。修法是新增 `--results-dir`（默认仍为 `benchmarks/results`，向后兼容），并在 `.gitignore` 用 `benchmarks/results-[a-z]*/` + `!benchmarks/results-snapshot*/` 覆盖按模型分的运行时目录。
+
+**选对照模型本身是个实验**。端点有 261 个可用模型，单任务探路结果：
+
+| 模型 | `create_file`（最易） | `three_bugs`（最难） |
+|---|---|---|
+| `qwen2.5-1.5b-instruct` | **FAIL** | — |
+| `qwen3-8b` | PASS | 超时 300s |
+| `qwen-turbo` | **PASS** | **FAIL** |
+
+**弱模型不是越弱越好**：1.5b 连最简单的任务都过不了，全 0 和全 1 一样没信息量。`qwen-turbo` 易过难挂，有梯度，选它。
+
+**结果（16 任务 × 3 次 = 48 次运行）**：
+
+| 指标 | 基线 `deepseek-v4-flash-0731` | 对照 `qwen-turbo` |
+|---|---|---|
+| 运行通过 | 48/48 | **38/48** |
+| pass@1 | 1.000 | **0.792** |
+| pass^3 | 1.000 | **0.750** |
+| 任务全过 | 16/16 | **12/16** |
+| 删失运行 | 0 | **2** |
+
+**结论修正**：§132/§135 的"评测集没有区分度"**说法不准确**。准确说法是——**评测集在 `deepseek-v4-flash` 这个能力档位上饱和，换到 `qwen-turbo` 档位就分得开**。0.792 正落在有信息量的区间，失败集中在四个任务（`three_bugs` 0/3、`multi_step_edit` 0/3、`write_unit_test` 0/3、`infer_convention` 2/3），其中三个是难度最高的，**说明难度排序是有效的**。任务不是太简单，是对那个模型太简单。
+
+### 三件此前未被真实数据检验的机制，这次全部生效
+
+**① pass^k 的指数衰减第一次显现。** 全过时 pass^3 与 pass@1 恒等，基线看不出差别。对照组 **0.750 < 0.792**，差距来自 `infer_convention` 的 2/3——一个"**不稳，而非不能**"的任务。单次成功率会给它 0.667 的部分功劳，pass^3 直接判不可靠。这就是引入 pass^k 的全部理由，现在有了本项目的实例。
+
+**② 删失机制第一次有了真实样本。** `write_unit_test` 三次失败的逐次明细是 **(22 轮, 触顶)**、(13 轮, 未触顶)、**(20 轮, 触顶)**——两次删失一次真实失败。**这两类不能混进同一个均值**：删失样本本来还要继续烧 token，当成自然失败会把成本算低。不记 `caps` 和 `hit_iteration_cap` 就做不出这个区分（§132 建的这两个字段此前一直是 0/false，等于没被检验过）。
+
+**③ "每成功任务成本"的分母效应第一次可量化。** 总成本 ÷ 16 得 $0.0236，总成本 ÷ 全过任务数 12 得 **$0.0315**，差 **33%**。基线两个口径相同（16/16），差异藏不住的只有对照组。这是 SWE-Bench+ 论点在自己数据上的复现。
+> ⚠️ `qwen-turbo` 不在 `PRICE_TABLE` 里，落到 `default` 占位价（$1.00/1M），**跨模型成本绝对值不可比**；可用的只有同一模型内两个分母之间的 33% 差距这个结构性结论。
+
+**附带观测**：探路时 `qwen3-8b` 跑 `create_file` 测到 loop lag **198.7ms**，越过 100ms 告警线（基线跨 16 任务 max 是 65.1ms）。未重复验证，仅登记。
+
+**方法论收获一**：**"指标饱和"和"评测集无效"是两件事，区分它们需要第二个观测点。** §133 是靠重复测量推翻噪声结论，§135 是靠格内方差判定不可下结论，本节是靠**换一个档位的被测对象**推翻"题太简单"的误判。三次都是同一个毛病——**单一观测点上的结论**。
+
+**方法论收获二：消融实验和对照组实验是同一台仪器的两种用法，而我把顺序做反了。** 两者用同一套评测集、同一个 runner，只是控制变量不同——**消融改 harness 的模块（这个零件有用吗），对照组改被测的模型（这把尺子刻度够细吗）**。
+
+我的实际顺序是：先做消融（§135，45 次运行 45/45 全过，成功率一列毫无信息量），再看评测（§132，48/48 全过），据此判定"评测集没有区分度"。**这个判断之所以错，是因为全程只用了一个模型**——等于拿一把没校准过的尺子去量，然后抱怨量不出差异。
+
+**正确顺序是：先用对照组确认评测集有区分度（校准尺子），再用消融去测模块价值。** 代价是 §135 那轮 45 次运行在"成功率"这个维度上什么也没测出来（它仍有产出：2 个可分辨任务上"压缩净亏 4%~8%"的反直觉结论，以及"格内极差 > 臂间差值即不下结论"这条判据）。
+
+**推广**：任何"我测不出差异"的结论之前，都必须先回答"**我的测量工具在这个量程上有刻度吗**"。这个问题只能靠换被测对象来回答，不能靠加大被测对象的难度——§132 试过加难度（新增 6 个更难任务，全部 3/3 通过），那条路失败了。
+
+---
+
+## §138 常规上下文压缩的埋点缺失，以及一个计数错位的指标 bug
+
+**前因**：求职自查要准备一个"含一次工具失败重试 + 一次上下文压缩触发"的现场 demo。验证时发现 `-p --output-format stream-json` 能完整展示工具失败与自纠，但**压缩完全看不到**。查下去发现问题比"没映射到 NDJSON"严重得多。
+
+### 发现一：常规压缩路径零埋点
+
+`ContextSummaryStartEvent` / `ContextSummaryDoneEvent` 的 docstring 写的是 "Fork-style context summarization"，且 `grep` 确认**只在 `core/subagent.py:722,726` 发射**——那是**子 Agent 继承上下文**时的摘要，每次 spawn 一次。
+
+而常规对话压缩（`ContextManager.check_and_compress`，由 `agent_loop.py:360,462` 调用）——`memory/compressor.py` 和 `memory/context.py` 里 `emit` / `event_bus` / `Event` **三个关键词全部零命中**。
+
+**这违反了项目自己在 §121 定的规矩**："任何超过 1 秒的隐式 LLM 调用都必须有埋点"。`llm_summarize = true` 时压缩正是一次隐式 LLM 调用。
+
+### 发现二：`compressions` 这个指标计的是别的东西
+
+`MetricsCollector` 的 `compressions` 计数器订阅的是 `ContextSummaryDoneEvent`——也就是 fork 事件。**它永远数不到一次真正的对话压缩。** 48 次评测里 `compressions` 全是 0，看起来"正常"（那批任务没派生子 Agent），掩盖了接线错误。
+
+更糟的是 `tests/unit/test_metrics.py` 里有一个测试**把这个 bug 固化了**：它 `emit(ContextSummaryDoneEvent(duration_ms=48000.0))` 然后断言 `mc.compressions == 1`。那个 48000ms 正是 §121 记录的 fork 摘要实测时长（46–54s），**说明写测试时就知道这是 fork，只是名字用错了**。
+
+### 修法
+
+**新事件 `ContextCompressedEvent`**，字段选择都有理由：
+- `before_tokens` / `after_tokens`——不报压缩比（§135：压缩比是错的指标），报两端原值让消费方自己决定口径
+- `effective`——压缩是否真的降低了 token。**无效压缩也要发**：正是它们打开压缩熔断器，丢掉的话熔断的原因对指标消费方就不可见
+- `forced`——区分手动 `/compact` 与阈值自动触发，两者跳过的检查不同
+- `strategy`——报出实际跑的级联（如 `DropToolResults+LLMSummarizeOldest+SlidingWindow`）。一次压缩究竟做了摘要还是只滑了窗口，含义完全不同。为此给 `Compressor` 加了公开 `strategies` 属性，避免观察方伸手进 `_strategies` 私有字段
+
+**`ContextManager.set_event_bus()`** 走与既有 `set_compressor()` 相同的注入模式。**故意设为可选**：headless 调用方（`benchmarks/runner.py`、`experiments/`）不带 bus 构造 ContextManager，必须继续可用。发射点包在 try/except 里——**走到那里时对话已被改写**，让订阅者的异常上抛会使调用方拿到"已压缩的对话 + False 返回值"。
+
+**指标层拆成两个计数器**：`compressions`（真实压缩）与 `context_forks`（子 Agent fork），各带独立的时延直方图；另加 `compressions_ineffective` 和 `compressed_tokens_saved`。那个固化 bug 的测试改成断言正确语义，并显式加了 `assert mc.compressions == 0, "a context fork is not a compression"`。
+
+**三个出口全部接上**：`ui/trace.py`（`/trace on` 显示 `ctx compacted 13455 -> 3051 tokens`，无效时标 `(INEFFECTIVE)`）、`headless.py`（新增 `_wire_ndjson_bus`——压缩由 ContextManager 发射而非循环回调，原有的回调接线看不到它）、`remote/server.py`（浏览器原本会看到一段数秒卡顿却没有任何解释，正是 §121 给 fork 摘要加事件所要修的那个"看起来卡死"的故障模式）。
+
+### 端到端验证
+
+项目配置临时设 `context_window = 4000`，headless 跑一次多文件读取：
+
+```
+tool_call           read_file README.md
+tool_result         ... is_error=False
+tool_call           read_file CLAUDE.md
+...
+context_compressed  before=13455 after=3051 duration=24.7ms effective=True
+                    strategy=DropToolResults+LLMSummarizeOldest+SlidingWindow
+context_compressed  before=3051  after=3051 duration=0.1ms  effective=False
+turn_end            tokens=11113 iterations=2
+```
+
+第二条是**无效压缩**（3051 → 3051），即熔断器的前兆——正是加 `effective` 字段要暴露的东西。此前这两条在 NDJSON 和远程模式里都完全不存在。
+
+**验证**：新增 6 个测试（事件字段、forced 标记、无效压缩、无 bus 时不崩、订阅者抛异常不中断压缩、指标层不再把 fork 计为压缩），**1,483 测试全过**、覆盖率 86.92%、mypy 全量 116 文件零错误、ruff 全过。
+
+**方法论收获**：**"有埋点"要按出口逐个核，不能只看事件类是否存在。** 这次的事件类存在、指标字段存在、TUI 能看到，但常规压缩根本不发事件，而那个名叫 `compressions` 的指标测的是另一件事——**三层都"看起来有"，合起来是零覆盖**。而且单测不仅没抓住，还把错误语义固化成了断言。

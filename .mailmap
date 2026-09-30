@@ -1,0 +1,4 @@
+# 归一化提交作者身份 Canonicalize commit author identity
+# 两台开发机的 git config user.name 不一致（cxy / xiaosaxiaozai），邮箱同为一个。
+# Two dev machines had different git config user.name; same email throughout.
+xiaosaxiaozai <xiaosaxiaozai@qq.com> cxy <xiaosaxiaozai@qq.com>

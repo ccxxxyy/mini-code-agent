@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from mini_agent.llm.token_counter import count_tokens, truncate_to_tokens
 from mini_agent.memory.compressor import SlidingWindow
@@ -27,6 +28,8 @@ class ContextManager:
         self._total_tokens = 0
         self._compressor = None  # set via set_compressor() after init
         # 初始化后通过 set_compressor() 设置
+        self._event_bus = None  # set via set_event_bus() after init
+        # 初始化后通过 set_event_bus() 设置
         # Circuit breaker: stop retrying compression after N consecutive
         # ineffective attempts (tokens did not decrease)
         # 熔断器：连续 N 次压缩无效后停止重试
@@ -67,6 +70,22 @@ class ContextManager:
         """Inject the compressor (avoids circular import at init time).
         注入压缩器（避免初始化时的循环导入）。"""
         self._compressor = compressor
+
+    def set_event_bus(self, event_bus) -> None:
+        """Inject the EventBus so compression passes are observable.
+        注入 EventBus，让压缩过程可观测。
+
+        Optional on purpose: headless callers (benchmarks/runner.py, experiments)
+        build a ContextManager without a bus and must keep working. Compression
+        stays silent then, which is why this is injected rather than required --
+        but every interactive path must wire it, or an implicit LLM call (the LLM
+        summarize strategy) runs with no instrumentation at all.
+        故意设为可选：headless 调用方（benchmarks/runner.py、experiments）不带 bus
+        构造 ContextManager，必须继续可用。那种情况下压缩静默无声，这也是采用注入而非
+        必填的原因——但所有交互路径都必须接上，否则一次隐式 LLM 调用（LLM 摘要策略）
+        将完全没有埋点。
+        """
+        self._event_bus = event_bus
 
     def set_skill_provider(self, provider) -> None:
         """Inject a callable returning (invoked_names, active_names).
@@ -260,6 +279,7 @@ class ContextManager:
 
         old_total = self._total_tokens
         target = int(self._max_tokens * 0.5)
+        _t0 = time.perf_counter()
         await self._compressor.compress(conversation, target)
         self._inject_read_files(conversation)
         # Fallback: SlidingWindow alone doesn't create a summary, but
@@ -319,7 +339,43 @@ class ContextManager:
                 )
             self._compress_failures = 0
             self._breaker_warned = False
+
+        await self._emit_compressed(old_total, _t0, force)
         return True
+
+    async def _emit_compressed(self, before: int, t0: float, forced: bool) -> None:
+        """Announce a completed compression pass on the EventBus.
+        在 EventBus 上公告一次完成的压缩。
+
+        Emitted for ineffective passes too (`effective=False`): those are what open
+        the circuit breaker, so dropping them would leave the breaker's cause invisible
+        to any metrics consumer.
+        无效压缩也发（`effective=False`）：正是它们打开了熔断器，丢掉的话指标消费方就
+        看不到熔断的原因。
+
+        A failing subscriber must not abort compression -- the conversation has already
+        been rewritten by the time we get here, so raising would leave the caller
+        believing compression did not happen.
+        订阅者报错不能中断压缩——走到这里时对话已被改写，抛异常会让调用方以为压缩没发生。
+        """
+        if self._event_bus is None:
+            return
+        from mini_agent.models.events import ContextCompressedEvent
+
+        strategies = getattr(self._compressor, "strategies", None) or []
+        try:
+            await self._event_bus.emit(
+                ContextCompressedEvent(
+                    before_tokens=before,
+                    after_tokens=self._total_tokens,
+                    duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+                    forced=forced,
+                    effective=self._total_tokens < before,
+                    strategy="+".join(type(s).__name__ for s in strategies),
+                )
+            )
+        except Exception:
+            logger.debug("ContextCompressedEvent emit failed", exc_info=True)
 
     def _inject_read_files(self, conversation: Conversation) -> None:
         """After compression, inject recovery context: user's last request,

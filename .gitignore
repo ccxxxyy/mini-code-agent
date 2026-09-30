@@ -37,8 +37,14 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 
-# Benchmark/experiment results (regenerable) 评测/实验结果（可重新生成）
+# Benchmark/experiment run output (live dirs; re-runs shouldn't dirty the tree)
+# 评测/实验的运行时输出目录（重跑不污染工作区）
+# 提交版证据快照在 *-snapshot* 目录，不在此列。
+# results-* covers per-model dirs from `runner.py --results-dir`
+# results-* 匹配 `runner.py --results-dir` 产生的按模型分目录
 benchmarks/results/
+benchmarks/results-[a-z]*/
+!benchmarks/results-snapshot*/
 experiments/results/
 
 # 个人求职材料（不提交）
