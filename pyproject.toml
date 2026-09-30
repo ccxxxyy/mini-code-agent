@@ -84,6 +84,26 @@ ignore_missing_imports = true
 warn_unused_ignores = true
 no_implicit_optional = true
 
+# Platform-divergent modules. An ignore that is REQUIRED on one platform reads as
+# "unused" on the other, so warn_unused_ignores can never be satisfied on both:
+#   - sandbox/windows.py, sandbox/_low_integrity.py: ctypes.windll / ctypes.WinError
+#     do not exist in the Linux typeshed (errors on Linux, ignore unused on Windows)
+#   - cli.py: sys.stdout.reconfigure needs a union-attr ignore on Windows, resolves
+#     cleanly on Linux (ignore unused on Linux)
+# Relaxed PER MODULE rather than globally, and NOT by re-excluding the files --
+# excluding a whole directory is what previously hid 1,199 lines of remote/ from the
+# type checker for months (tech-notes §134).
+# 平台分歧模块。某平台上必需的 ignore 在另一平台上就是"未使用"，warn_unused_ignores
+# 无法在两个平台同时满足。按模块放宽而非全局，也不用重新排除文件——整目录排除正是
+# 此前让 remote/ 的 1,199 行长期脱离类型检查的原因（tech-notes §134）。
+[[tool.mypy.overrides]]
+module = [
+    "mini_agent.cli",
+    "mini_agent.security.sandbox.windows",
+    "mini_agent.security.sandbox._low_integrity",
+]
+warn_unused_ignores = false
+
 [tool.ruff]
 target-version = "py311"
 src = ["src"]

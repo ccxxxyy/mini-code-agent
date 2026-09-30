@@ -34,8 +34,8 @@ class TOKEN_MANDATORY_LABEL(ctypes.Structure):
 
 
 def _setup_ctypes() -> tuple:
-    advapi32 = ctypes.windll.advapi32
-    kernel32 = ctypes.windll.kernel32
+    advapi32 = ctypes.windll.advapi32  # type: ignore[attr-defined]
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     advapi32.OpenProcessToken.argtypes = [
         wintypes.HANDLE,
@@ -71,12 +71,12 @@ def lower_integrity() -> None:
         TOKEN_ADJUST_DEFAULT | TOKEN_QUERY,
         ctypes.byref(token),
     ):
-        raise ctypes.WinError()
+        raise ctypes.WinError()  # type: ignore[attr-defined]
 
     sid_ptr = ctypes.c_void_p()
     try:
         if not advapi32.ConvertStringSidToSidW(LOW_INTEGRITY_SID, ctypes.byref(sid_ptr)):
-            raise ctypes.WinError()
+            raise ctypes.WinError()  # type: ignore[attr-defined]
         try:
             label = TOKEN_MANDATORY_LABEL()
             label.Label.Sid = sid_ptr
@@ -88,7 +88,7 @@ def lower_integrity() -> None:
                 ctypes.byref(label),
                 ctypes.sizeof(label) + sid_len,
             ):
-                raise ctypes.WinError()
+                raise ctypes.WinError()  # type: ignore[attr-defined]
         finally:
             kernel32.LocalFree(sid_ptr)
     finally:

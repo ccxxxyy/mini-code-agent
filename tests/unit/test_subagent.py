@@ -67,22 +67,29 @@ async def test_spawn_parallel(tmp_path):
 
 
 async def test_parallel_faster_than_serial(tmp_path):
-    """3 agents with 0.2s LLM delay should finish in ~0.2s, not ~0.6s.
-    Threshold 0.5s leaves a 0.3s scheduling-overhead budget so the test
-    stays stable under full-suite load while still ruling out serial
-    execution (which cannot finish under 0.6s).
-    3 个带 0.2 秒 LLM 延迟的 Agent 应在约 0.2 秒内完成，而非约 0.6 秒。
-    阈值 0.5 秒留出 0.3 秒调度开销余量——全量测试高负载下保持稳定，
-    同时仍能排除串行（串行不可能低于 0.6 秒）。"""
+    """Parallel spawn overlaps LLM delays; compare to sequential spawns on the same run.
+    Relative timing avoids flaky absolute thresholds under full-suite CI load.
+    并行 spawn 重叠 LLM 延迟；与同一次运行中的串行 spawn 对比，
+    避免全量 CI 负载下绝对阈值 flaky。"""
     import time
 
-    mgr = make_manager([text_response("ok")], tmp_path, delay=0.2)
+    delay = 0.15
+    scripts = [text_response("ok")]
+
+    mgr = make_manager(scripts, tmp_path, delay=delay)
     start = time.monotonic()
     ids = await mgr.spawn_parallel(["a", "b", "c"])
     await mgr.wait_all(ids)
-    elapsed = time.monotonic() - start
+    parallel_elapsed = time.monotonic() - start
 
-    assert elapsed < 0.5
+    mgr_serial = make_manager(scripts, tmp_path, delay=delay)
+    start = time.monotonic()
+    for label in ("a", "b", "c"):
+        agent_id = await mgr_serial.spawn(label)
+        await mgr_serial.wait(agent_id)
+    serial_elapsed = time.monotonic() - start
+
+    assert parallel_elapsed < serial_elapsed * 0.85
 
 
 async def test_wait_unknown_agent(tmp_path):
