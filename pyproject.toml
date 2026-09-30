@@ -83,16 +83,6 @@ follow_imports = "silent"
 ignore_missing_imports = true
 warn_unused_ignores = true
 no_implicit_optional = true
-exclude = [
-    "^src/mini_agent/ui/terminal\\.py$",
-    "^src/mini_agent/ui/input_handler\\.py$",
-    "^src/mini_agent/ui/esc_watcher\\.py$",
-    "^src/mini_agent/ui/components\\.py$",
-    "^src/mini_agent/cli\\.py$",
-    "^src/mini_agent/remote/",
-    "^src/mini_agent/security/sandbox/_low_integrity\\.py$",
-    "^src/mini_agent/security/sandbox/windows\\.py$",
-]
 
 [tool.ruff]
 target-version = "py311"

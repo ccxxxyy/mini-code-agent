@@ -1,0 +1,131 @@
+{
+  "task": "create_file",
+  "agent": "mini",
+  "model": "deepseek-v4-flash-0731",
+  "category": "feature",
+  "success": true,
+  "tokens": 7457,
+  "cost_usd": 0.000186,
+  "tool_calls": 1,
+  "tool_names": [
+    "write_file"
+  ],
+  "iterations": 2,
+  "elapsed_seconds": 5.3,
+  "output": "Created `config.yaml` with the requested sections:\n\n- **database**: host `localhost`, port `5432`, name `mydb`\n- **server**: host `0.0.0.0`, port `8080`\n- **logging**: level `INFO`, file `app.log`\n\nProper YAML indentation used throughout.",
+  "verify_output": "",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 1772.0,
+        "max": 2258.1,
+        "mean": 2015.0,
+        "p50": 1772.0,
+        "p95": 2258.1,
+        "p99": 2258.1
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 2,
+        "window": 2,
+        "min": 2465.7,
+        "max": 3090.4,
+        "mean": 2778.1,
+        "p50": 2465.7,
+        "p95": 3090.4,
+        "p99": 3090.4
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 0,
+        "window": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      }
+    },
+    "counters": {
+      "llm_calls": 2,
+      "turns": 1,
+      "tool_calls": 1,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 7232,
+      "completion": 225,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 2.0,
+        "max": 2.0,
+        "mean": 2.0,
+        "p50": 2.0,
+        "p95": 2.0,
+        "p99": 2.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 52,
+      "window": 52,
+      "min": 0.0,
+      "max": 17.3,
+      "mean": 8.1,
+      "p50": 3.7,
+      "p95": 17.2,
+      "p99": 17.3
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 7457,
+      "iterations": 2,
+      "elapsed_seconds": 5.6,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    },
+    {
+      "success": true,
+      "tokens": 7507,
+      "iterations": 2,
+      "elapsed_seconds": 5.3,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    },
+    {
+      "success": true,
+      "tokens": 7441,
+      "iterations": 2,
+      "elapsed_seconds": 4.5,
+      "hit_iteration_cap": false,
+      "tool_calls": 1
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "task": "add_function",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "feature",
+  "success": true,
+  "tokens": 18654,
+  "cost_usd": 0.018654,
+  "tool_calls": 4,
+  "tool_names": [
+    "read_file",
+    "read_file",
+    "write_file",
+    "bash"
+  ],
+  "iterations": 5,
+  "elapsed_seconds": 6.2,
+  "output": "All tests in `test_utils.py` have passed successfully. The `parse_csv` function has been implemented in `utils.py` to split a comma-separated string into a list of trimmed strings and return an empty list for empty input. The implementation meets the requirements and passes all the test cases.",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_add_function_m_zhgm6c\npl",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 5,
+        "window": 5,
+        "min": 642.9,
+        "max": 1453.1,
+        "mean": 896.9,
+        "p50": 735.9,
+        "p95": 1453.1,
+        "p99": 1453.1
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 5,
+        "window": 5,
+        "min": 744.2,
+        "max": 2023.7,
+        "mean": 1150.2,
+        "p50": 1029.3,
+        "p95": 2023.7,
+        "p99": 2023.7
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 1,
+        "window": 1,
+        "min": 390.0,
+        "max": 390.0,
+        "mean": 390.0,
+        "p50": 390.0,
+        "p95": 390.0,
+        "p99": 390.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 390.0,
+          "max": 390.0,
+          "mean": 390.0,
+          "p50": 390.0,
+          "p95": 390.0,
+          "p99": 390.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 5,
+      "turns": 1,
+      "tool_calls": 4,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 18403,
+      "completion": 189,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 5.0,
+        "max": 5.0,
+        "mean": 5.0,
+        "p50": 5.0,
+        "p95": 5.0,
+        "p99": 5.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 57,
+      "window": 57,
+      "min": 0.0,
+      "max": 18.3,
+      "mean": 8.2,
+      "p50": 6.4,
+      "p95": 18.2,
+      "p99": 18.3
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 18592,
+      "iterations": 5,
+      "elapsed_seconds": 6.2,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    },
+    {
+      "success": true,
+      "tokens": 22815,
+      "iterations": 6,
+      "elapsed_seconds": 7.1,
+      "hit_iteration_cap": false,
+      "tool_calls": 5
+    },
+    {
+      "success": true,
+      "tokens": 18654,
+      "iterations": 5,
+      "elapsed_seconds": 6.0,
+      "hit_iteration_cap": false,
+      "tool_calls": 4
+    }
+  ]
+}

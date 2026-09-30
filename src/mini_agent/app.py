@@ -326,6 +326,12 @@ class Application:
             summarizer = SummarizeOldest(keep_recent_tokens=keep_recent, keep_max_tokens=keep_max)
         compressor = Compressor(strategies=[DropToolResults(), summarizer, SlidingWindow()])
         self.context_manager.set_compressor(compressor)
+        # Compression is an implicit LLM call when llm_summarize is on; without a bus
+        # it would run with no instrumentation on any surface (tech-notes: any implicit
+        # LLM call over ~1s needs a probe).
+        # llm_summarize 开启时压缩是一次隐式 LLM 调用；不接 bus 则它在所有出口上都没有
+        # 埋点（tech-notes：任何超过约 1 秒的隐式 LLM 调用都必须有埋点）。
+        self.context_manager.set_event_bus(self.event_bus)
         self.session_store = SessionStore()
         self._last_autosave: float = 0.0
         # Memory subsystem background workers: startup consolidation task and

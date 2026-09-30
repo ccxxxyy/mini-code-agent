@@ -121,6 +121,33 @@ def _wire_ndjson(al: Any, emitter: _NdjsonEmitter, capture: list[str]) -> None:
     al.on_tool_end = _on_tool_end
 
 
+def _wire_ndjson_bus(bus: Any, emitter: _NdjsonEmitter) -> None:
+    """Forward EventBus-only events that have no agent_loop callback.
+    转发只存在于 EventBus 上、没有 agent_loop 回调的事件。
+
+    Context compression reaches the NDJSON stream only through here: it is emitted by
+    ContextManager, not by the loop, so the callback wiring above cannot see it. Before
+    this, a compression pass -- including its implicit LLM summarize call -- was
+    invisible to every non-TUI consumer.
+    上下文压缩只能经此进入 NDJSON 流：它由 ContextManager 发射而非循环，上面的回调接线
+    看不到它。在此之前，一次压缩（含其隐式的 LLM 摘要调用）对所有非 TUI 消费方都是不可见的。
+    """
+    from mini_agent.models.events import ContextCompressedEvent
+
+    async def _on_compressed(event: ContextCompressedEvent) -> None:
+        emitter.emit(
+            "context_compressed",
+            before_tokens=event.before_tokens,
+            after_tokens=event.after_tokens,
+            duration_ms=round(event.duration_ms, 1),
+            forced=event.forced,
+            effective=event.effective,
+            strategy=event.strategy,
+        )
+
+    bus.on(ContextCompressedEvent, _on_compressed)
+
+
 async def run_headless(app: Application, prompt: str, output_format: str = "text") -> int:
     """Execute one prompt and return the process exit code (0 ok / 1 error).
     执行单个 prompt，返回进程退出码（0 正常 / 1 异常）。"""
@@ -137,6 +164,7 @@ async def run_headless(app: Application, prompt: str, output_format: str = "text
 
     if emitter:
         _wire_ndjson(al, emitter, final_text)
+        _wire_ndjson_bus(app.event_bus, emitter)
         app.terminal = _QuietTerminal(app.terminal, emitter.emit)  # type: ignore[assignment]
     else:
         _wire_silent(al, final_text)

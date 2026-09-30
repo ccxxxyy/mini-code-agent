@@ -1,0 +1,65 @@
+{
+  "experiment": "compression_ab",
+  "task": "multi_step_edit",
+  "arm": "none",
+  "model": "deepseek-v4-flash-0731",
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "tokens": {
+    "median": 21719.0,
+    "min": 21424.0,
+    "max": 21793.0
+  },
+  "tool_calls": {
+    "median": 9.0,
+    "min": 9.0,
+    "max": 10.0
+  },
+  "iterations": {
+    "median": 5.0,
+    "min": 5.0,
+    "max": 5.0
+  },
+  "compressed_messages": {
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0
+  },
+  "elapsed_seconds": {
+    "median": 12.5,
+    "min": 11.1,
+    "max": 12.6
+  },
+  "cost_usd_total": 0.001624,
+  "runs": [
+    {
+      "repeat_index": 1,
+      "success": true,
+      "tokens": 21424,
+      "tool_calls": 9,
+      "iterations": 5,
+      "compressed_messages": 0,
+      "elapsed_seconds": 12.5
+    },
+    {
+      "repeat_index": 2,
+      "success": true,
+      "tokens": 21719,
+      "tool_calls": 9,
+      "iterations": 5,
+      "compressed_messages": 0,
+      "elapsed_seconds": 11.1
+    },
+    {
+      "repeat_index": 3,
+      "success": true,
+      "tokens": 21793,
+      "tool_calls": 10,
+      "iterations": 5,
+      "compressed_messages": 0,
+      "elapsed_seconds": 12.6
+    }
+  ]
+}

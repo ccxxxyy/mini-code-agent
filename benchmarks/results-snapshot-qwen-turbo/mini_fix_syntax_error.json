@@ -1,0 +1,148 @@
+{
+  "task": "fix_syntax_error",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "bugfix",
+  "success": true,
+  "tokens": 10636,
+  "cost_usd": 0.010636,
+  "tool_calls": 2,
+  "tool_names": [
+    "read_file",
+    "edit_file"
+  ],
+  "iterations": 3,
+  "elapsed_seconds": 3.2,
+  "output": "The syntax error in the file `broken.py` has been fixed. The function definition now includes the required colon (`:`) at the end of the line. The file should now be importable by Python.",
+  "verify_output": "",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 595.2,
+        "max": 1355.6,
+        "mean": 874.0,
+        "p50": 671.3,
+        "p95": 1355.6,
+        "p99": 1355.6
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 3,
+        "window": 3,
+        "min": 916.5,
+        "max": 1455.8,
+        "mean": 1197.0,
+        "p50": 1218.6,
+        "p95": 1455.8,
+        "p99": 1455.8
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 1,
+        "window": 1,
+        "min": 15.0,
+        "max": 15.0,
+        "mean": 15.0,
+        "p50": 15.0,
+        "p95": 15.0,
+        "p99": 15.0
+      },
+      "per_tool": {
+        "read_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 15.0,
+          "max": 15.0,
+          "mean": 15.0,
+          "p50": 15.0,
+          "p95": 15.0,
+          "p99": 15.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 3,
+      "turns": 1,
+      "tool_calls": 2,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 10494,
+      "completion": 142,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 3.0,
+        "max": 3.0,
+        "mean": 3.0,
+        "p50": 3.0,
+        "p95": 3.0,
+        "p99": 3.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 33,
+      "window": 33,
+      "min": 0.0,
+      "max": 37.6,
+      "mean": 10.6,
+      "p50": 10.5,
+      "p95": 34.8,
+      "p99": 37.6
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 10636,
+      "iterations": 3,
+      "elapsed_seconds": 3.6,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    },
+    {
+      "success": true,
+      "tokens": 10643,
+      "iterations": 3,
+      "elapsed_seconds": 3.2,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    },
+    {
+      "success": true,
+      "tokens": 10634,
+      "iterations": 3,
+      "elapsed_seconds": 3.0,
+      "hit_iteration_cap": false,
+      "tool_calls": 2
+    }
+  ]
+}

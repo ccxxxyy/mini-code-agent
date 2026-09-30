@@ -1,0 +1,190 @@
+{
+  "task": "write_unit_test",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "test",
+  "success": false,
+  "tokens": 127395,
+  "cost_usd": 0.127395,
+  "tool_calls": 20,
+  "tool_names": [
+    "read_file",
+    "write_file",
+    "bash",
+    "edit_file",
+    "bash",
+    "edit_file",
+    "bash",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file"
+  ],
+  "iterations": 20,
+  "elapsed_seconds": 55.2,
+  "output": "(stopped: iteration limit or cancellation)",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_write_unit_test_wnep4sy1",
+  "hit_iteration_cap": true,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 22,
+        "window": 22,
+        "min": 612.4,
+        "max": 1396.4,
+        "mean": 836.6,
+        "p50": 795.5,
+        "p95": 1138.5,
+        "p99": 1396.4
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 22,
+        "window": 22,
+        "min": 818.2,
+        "max": 7580.4,
+        "mean": 3614.7,
+        "p50": 2825.4,
+        "p95": 6293.3,
+        "p99": 7580.4
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 7,
+        "window": 7,
+        "min": 16.0,
+        "max": 172.0,
+        "mean": 69.4,
+        "p50": 16.0,
+        "p95": 172.0,
+        "p99": 172.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 3,
+          "window": 3,
+          "min": 109.0,
+          "max": 172.0,
+          "mean": 140.7,
+          "p50": 141.0,
+          "p95": 172.0,
+          "p99": 172.0
+        },
+        "edit_file": {
+          "unit": "ms",
+          "count": 3,
+          "window": 3,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        },
+        "read_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 22,
+      "turns": 1,
+      "tool_calls": 22,
+      "tool_errors": 18,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 172235,
+      "completion": 8096,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 0.1818,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 22.0,
+        "max": 22.0,
+        "mean": 22.0,
+        "p50": 22.0,
+        "p95": 22.0,
+        "p99": 22.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 764,
+      "window": 764,
+      "min": 0.0,
+      "max": 68.5,
+      "mean": 6.9,
+      "p50": 3.7,
+      "p95": 18.7,
+      "p99": 24.1
+    }
+  },
+  "repeat": 3,
+  "successes": 0,
+  "pass_at_1": 0.0,
+  "all_pass": false,
+  "censored_runs": 2,
+  "runs": [
+    {
+      "success": false,
+      "tokens": 180331,
+      "iterations": 22,
+      "elapsed_seconds": 80.1,
+      "hit_iteration_cap": true,
+      "tool_calls": 22
+    },
+    {
+      "success": false,
+      "tokens": 71549,
+      "iterations": 13,
+      "elapsed_seconds": 25.0,
+      "hit_iteration_cap": false,
+      "tool_calls": 13
+    },
+    {
+      "success": false,
+      "tokens": 127395,
+      "iterations": 20,
+      "elapsed_seconds": 55.2,
+      "hit_iteration_cap": true,
+      "tool_calls": 20
+    }
+  ]
+}

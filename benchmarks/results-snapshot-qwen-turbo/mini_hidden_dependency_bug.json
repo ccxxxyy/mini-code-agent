@@ -1,0 +1,173 @@
+{
+  "task": "hidden_dependency_bug",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "bugfix",
+  "success": true,
+  "tokens": 25902,
+  "cost_usd": 0.025902,
+  "tool_calls": 5,
+  "tool_names": [
+    "read_file",
+    "read_file",
+    "read_file",
+    "edit_file",
+    "bash"
+  ],
+  "iterations": 6,
+  "elapsed_seconds": 8.1,
+  "output": "All tests passed successfully. The issue was resolved by changing the delimiter in the `parse_csv_line` function from a semicolon (`;`) to a comma (`,`), which aligns with the test cases.",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_hidden_dependency_bug_wf",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 25,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 6,
+        "window": 6,
+        "min": 467.2,
+        "max": 1024.7,
+        "mean": 666.3,
+        "p50": 549.4,
+        "p95": 1024.7,
+        "p99": 1024.7
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 6,
+        "window": 6,
+        "min": 661.8,
+        "max": 1581.7,
+        "mean": 981.6,
+        "p50": 837.0,
+        "p95": 1581.7,
+        "p99": 1581.7
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 16.0,
+        "max": 62.0,
+        "mean": 39.0,
+        "p50": 16.0,
+        "p95": 62.0,
+        "p99": 62.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 62.0,
+          "max": 62.0,
+          "mean": 62.0,
+          "p50": 62.0,
+          "p95": 62.0,
+          "p99": 62.0
+        },
+        "edit_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        },
+        "read_file": {
+          "unit": "ms",
+          "count": 2,
+          "window": 2,
+          "min": 16.0,
+          "max": 62.0,
+          "mean": 39.0,
+          "p50": 16.0,
+          "p95": 62.0,
+          "p99": 62.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 6,
+      "turns": 1,
+      "tool_calls": 5,
+      "tool_errors": 0,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 22448,
+      "completion": 276,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 1.0,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 6.0,
+        "max": 6.0,
+        "mean": 6.0,
+        "p50": 6.0,
+        "p95": 6.0,
+        "p99": 6.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 57,
+      "window": 57,
+      "min": 0.0,
+      "max": 20.2,
+      "mean": 7.2,
+      "p50": 3.9,
+      "p95": 18.9,
+      "p99": 20.2
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 22724,
+      "iterations": 6,
+      "elapsed_seconds": 6.1,
+      "hit_iteration_cap": false,
+      "tool_calls": 5
+    },
+    {
+      "success": true,
+      "tokens": 25902,
+      "iterations": 6,
+      "elapsed_seconds": 8.1,
+      "hit_iteration_cap": false,
+      "tool_calls": 5
+    },
+    {
+      "success": true,
+      "tokens": 30792,
+      "iterations": 7,
+      "elapsed_seconds": 9.4,
+      "hit_iteration_cap": false,
+      "tool_calls": 6
+    }
+  ]
+}

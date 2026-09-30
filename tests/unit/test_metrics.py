@@ -26,6 +26,25 @@ from mini_agent.tools.base import ToolRegistry
 from mini_agent.tools.builtin import ReadFileTool
 from tests.mocks import MockLLM, text_response, tool_call_response
 
+# How far below a nominal `asyncio.sleep` duration a perf_counter-measured elapsed time
+# may legitimately land. The sleep is scheduled on the loop clock (time.monotonic) but
+# TTFT is measured with time.perf_counter (agent_loop.py:538,545); on Windows monotonic
+# can be ~15.6ms coarse, so the sleep may return up to roughly one timer tick before
+# perf_counter has advanced the full duration. The shortfall is bounded in ABSOLUTE
+# terms, not proportionally -- observed 29.6 against a nominal 30.0 (-0.4ms) and 40.4
+# against a nominal 50.0 (-9.6ms), both inside one tick.
+# That is why the delays below are set well above the tick rather than just above the
+# assertion floor: a 200ms stall minus a 16ms tolerance still leaves a floor that only a
+# real measurement of that stall can clear.
+# perf_counter 测出的耗时允许比 asyncio.sleep 的标称时长低多少。sleep 按事件循环时钟
+# （time.monotonic）调度，TTFT 用 time.perf_counter 计时（agent_loop.py:538,545）；
+# Windows 上 monotonic 精度可粗至约 15.6ms，故 sleep 可能比 perf_counter 走满标称时长
+# 早约一个 tick 返回。欠量是**绝对值**有界而非按比例——实测标称 30.0 得 29.6（−0.4ms）、
+# 标称 50.0 得 40.4（−9.6ms），均在一个 tick 内。
+# 所以下面的延迟取值远高于该 tick 而不只是刚过断言下界：200ms 挂起减去 16ms 容差，
+# 剩下的下界仍然只有真实计到这段挂起才能通过。
+SLEEP_UNDERSHOOT_MS = 16.0
+
 # --- Histogram 直方图 ---
 
 
@@ -202,8 +221,19 @@ async def test_collector_counts_turns_permissions_compression_subagents():
     # `reason` separates policy blocks from user refusals -- only the latter
     # are candidate false positives. reason 区分策略拦截与用户拒绝。
     assert mc.permission_reasons["user_confirm"] == 2
-    assert mc.compressions == 1
-    assert mc.compression_duration.percentile(50) == 48000.0
+    # ContextSummaryDoneEvent is the fork-style summary taken when a sub-agent inherits
+    # context (the 48s figure here is that real observed duration), NOT a conversation
+    # compression. This assertion used to read `mc.compressions == 1`, which encoded the
+    # wiring bug: `compressions` was subscribed to this event, so it could never count an
+    # actual compression pass. Routine compression now emits ContextCompressedEvent and
+    # is asserted in tests/unit/test_context.py.
+    # ContextSummaryDoneEvent 是子 Agent 继承上下文时的 fork 式摘要（这里的 48 秒正是实测
+    # 时长），不是对话压缩。本断言原来写的是 `mc.compressions == 1`，把接线 bug 固化了：
+    # `compressions` 订阅的是这个事件，因此永远数不到一次真正的压缩。常规压缩现在发射
+    # ContextCompressedEvent，在 tests/unit/test_context.py 中断言。
+    assert mc.context_forks == 1
+    assert mc.context_fork_duration.percentile(50) == 48000.0
+    assert mc.compressions == 0, "a context fork is not a compression"
     assert mc.subagents_spawned == 1
     assert mc.subagents_failed == 1
 
@@ -285,11 +315,18 @@ async def _capture_response_event(loop) -> LLMResponseEvent:
 
 
 async def test_ttft_measures_delay_before_first_payload(tool_context):
-    """A provider that stalls 50ms before its first chunk must report a
-    TTFT of at least 50ms. 首 chunk 前挂起 50ms 的 Provider，TTFT 必须 >= 50ms。"""
-    loop = _loop_with(MockLLM(delay=0.05, text="hi"), tool_context)
+    """A provider that stalls before its first chunk must report a TTFT that reflects
+    that stall. 首 chunk 前挂起的 Provider，TTFT 必须反映这段挂起。
+
+    Bound is nominal minus SLEEP_UNDERSHOOT_MS; see that constant for why asserting the
+    nominal delay exactly made this test fail ~1 run in 10.
+    下界取标称值减 SLEEP_UNDERSHOOT_MS；直接断言标称值曾导致约十次一挂，理由见该常量。
+    """
+    stall_ms = 200.0
+    loop = _loop_with(MockLLM(delay=stall_ms / 1000, text="hi"), tool_context)
     event = await _capture_response_event(loop)
-    assert event.ttft_ms >= 50.0, f"expected >=50ms, got {event.ttft_ms}"
+    floor = stall_ms - SLEEP_UNDERSHOOT_MS
+    assert event.ttft_ms >= floor, f"expected >={floor}ms, got {event.ttft_ms}"
 
 
 async def test_ttft_never_exceeds_stream_duration(tool_context):
@@ -341,11 +378,19 @@ async def test_tool_call_deltas_count_as_first_payload(tool_context):
 async def test_collector_consumes_loop_ttft_end_to_end(tool_context):
     """Full pipeline: agent loop emits -> collector aggregates -> snapshot.
     全管道：Agent 循环发射 -> 采集器聚合 -> 快照。"""
-    loop = _loop_with(MockLLM(delay=0.03, text="ok"), tool_context)
+    stall_ms = 150.0
+    loop = _loop_with(MockLLM(delay=stall_ms / 1000, text="ok"), tool_context)
     mc = MetricsCollector(probe_loop_lag=False)
     mc.attach(loop._event_bus)
     await loop.run(Conversation())
     snap = mc.snapshot()
     assert snap["counters"]["llm_calls"] >= 1
     assert snap["latency"]["llm_ttft"]["count"] >= 1
-    assert snap["latency"]["llm_ttft"]["p50"] >= 30.0
+    # Tolerance rationale: see SLEEP_UNDERSHOOT_MS. What this test proves is that a real
+    # measurement reaches the snapshot -- a value near the stall means the stall was
+    # timed, rather than an empty frame or a zero slipping through the pipeline.
+    # 容差理由见 SLEEP_UNDERSHOOT_MS。本测试要证明的是真实测量值到达了快照——数值接近
+    # 挂起时长即说明计到了这段挂起，而不是空帧或 0 混过了管道。
+    floor = stall_ms - SLEEP_UNDERSHOOT_MS
+    p50 = snap["latency"]["llm_ttft"]["p50"]
+    assert p50 >= floor, f"expected >={floor}ms, got {p50}"

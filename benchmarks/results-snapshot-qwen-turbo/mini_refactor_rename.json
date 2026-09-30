@@ -1,0 +1,169 @@
+{
+  "task": "refactor_rename",
+  "agent": "mini",
+  "model": "qwen-turbo",
+  "category": "refactor",
+  "success": true,
+  "tokens": 28202,
+  "cost_usd": 0.028202,
+  "tool_calls": 12,
+  "tool_names": [
+    "read_file",
+    "read_file",
+    "read_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "edit_file",
+    "bash",
+    "edit_file",
+    "bash",
+    "edit_file",
+    "bash"
+  ],
+  "iterations": 6,
+  "elapsed_seconds": 11.2,
+  "output": "The refactoring is complete and all tests have passed successfully. Here's a summary of the changes made:\n\n1. Renamed the function `calc_total` to `calculate_total` in `helpers.py`.\n2. Updated the import statement in `app.py` to use the new function name.\n3. Updated the usage of `calc_total` in `app.py` to `calculate_total`.\n4. Adjusted the test file `test_app.py` to import and use the updated function name.\n\nAll tests in `test_app.py` executed without errors, confirming that the refactoring was",
+  "verify_output": "============================= test session starts =============================\nplatform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0 -- <REPO>\\.venv\\Scripts\\python.exe\ncachedir: .pytest_cache\nrootdir: <HOME>\\AppData\\Local\\Temp\\bench_refactor_rename_cajl8l1k",
+  "hit_iteration_cap": false,
+  "caps": {
+    "max_iterations": 20,
+    "verify_timeout_seconds": 30
+  },
+  "metrics": {
+    "latency": {
+      "llm_ttft": {
+        "unit": "ms",
+        "count": 8,
+        "window": 8,
+        "min": 640.9,
+        "max": 1055.3,
+        "mean": 773.0,
+        "p50": 686.9,
+        "p95": 1055.3,
+        "p99": 1055.3
+      },
+      "llm_stream_duration": {
+        "unit": "ms",
+        "count": 8,
+        "window": 8,
+        "min": 791.6,
+        "max": 2244.9,
+        "mean": 1222.5,
+        "p50": 960.5,
+        "p95": 2244.9,
+        "p99": 2244.9
+      },
+      "tool_duration": {
+        "unit": "ms",
+        "count": 4,
+        "window": 4,
+        "min": 16.0,
+        "max": 500.0,
+        "mean": 355.5,
+        "p50": 422.0,
+        "p95": 500.0,
+        "p99": 500.0
+      },
+      "per_tool": {
+        "bash": {
+          "unit": "ms",
+          "count": 3,
+          "window": 3,
+          "min": 422.0,
+          "max": 500.0,
+          "mean": 468.7,
+          "p50": 484.0,
+          "p95": 500.0,
+          "p99": 500.0
+        },
+        "read_file": {
+          "unit": "ms",
+          "count": 1,
+          "window": 1,
+          "min": 16.0,
+          "max": 16.0,
+          "mean": 16.0,
+          "p50": 16.0,
+          "p95": 16.0,
+          "p99": 16.0
+        }
+      }
+    },
+    "counters": {
+      "llm_calls": 8,
+      "turns": 1,
+      "tool_calls": 12,
+      "tool_errors": 2,
+      "compressions": 0,
+      "subagents_spawned": 0,
+      "subagents_failed": 0
+    },
+    "tokens": {
+      "prompt": 36103,
+      "completion": 594,
+      "cache_read": 0,
+      "cache_creation": 0
+    },
+    "quality": {
+      "tool_success_rate": 0.8333,
+      "turn_iterations": {
+        "unit": "count",
+        "count": 1,
+        "window": 1,
+        "min": 8.0,
+        "max": 8.0,
+        "mean": 8.0,
+        "p50": 8.0,
+        "p95": 8.0,
+        "p99": 8.0
+      }
+    },
+    "permissions": {
+      "by_decision": {},
+      "by_reason": {}
+    },
+    "event_loop_lag": {
+      "unit": "ms",
+      "count": 104,
+      "window": 104,
+      "min": 0.0,
+      "max": 65.0,
+      "mean": 8.4,
+      "p50": 6.4,
+      "p95": 19.9,
+      "p99": 23.7
+    }
+  },
+  "repeat": 3,
+  "successes": 3,
+  "pass_at_1": 1.0,
+  "all_pass": true,
+  "censored_runs": 0,
+  "runs": [
+    {
+      "success": true,
+      "tokens": 36697,
+      "iterations": 8,
+      "elapsed_seconds": 11.2,
+      "hit_iteration_cap": false,
+      "tool_calls": 12
+    },
+    {
+      "success": true,
+      "tokens": 21422,
+      "iterations": 5,
+      "elapsed_seconds": 7.8,
+      "hit_iteration_cap": false,
+      "tool_calls": 10
+    },
+    {
+      "success": true,
+      "tokens": 28202,
+      "iterations": 6,
+      "elapsed_seconds": 12.5,
+      "hit_iteration_cap": false,
+      "tool_calls": 18
+    }
+  ]
+}

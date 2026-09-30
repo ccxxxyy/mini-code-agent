@@ -143,8 +143,24 @@ def generate_report(mini: list[dict], cc: dict[str, dict]) -> str:
     k = max(repeats) if repeats else 1
     label = "passed all runs" if k > 1 else "pass rate"
     lines.append(f"- **Mini {label}**: {mini_pass}/{len(mini)}")
-    lines.append(f"- **Total tokens**: {total_mini_tokens}")
-    lines.append(f"- **Total cost**: ${total_mini_cost:.4f}")
+    # Every sum below is over the ONE representative run per task (the `tokens`/`cost_usd`
+    # top-level fields), NOT over all k*n runs. Saying "total over 48 runs" here and then
+    # dividing by 48 contradicts the per-task medians in the table above, so the label has
+    # to name its denominator.
+    # 下面每个合计的分母都是"每任务一次代表运行"（JSON 顶层 tokens/cost_usd），不是全部
+    # k*n 次运行。若标成"48 次运行总量"，除一下就会和上表的每任务中位数矛盾，故标签必须写明分母。
+    lines.append(f"- **Tokens, representative run x {len(mini)} tasks**: {total_mini_tokens}")
+    lines.append(f"- **Cost, representative run x {len(mini)} tasks**: ${total_mini_cost:.4f}")
+    if k > 1:
+        all_run_tokens = sum(
+            int(run.get("tokens", 0)) for r in mini for run in (r.get("runs") or [])
+        )
+        if all_run_tokens:
+            lines.append(
+                f"- **Tokens, ALL {sum(int(r.get('repeat', 1)) for r in mini)} runs**: "
+                f"{all_run_tokens} — the full spend; the two totals have different "
+                "denominators 全量开销；两个合计的分母不同"
+            )
     lines.append(f"- **Avg tokens/task**: {total_mini_tokens // n}")
     lines.append(f"- **Avg cost/task**: ${total_mini_cost / n:.4f}")
     # Cost per SOLVED task -- a cheap agent that fails is not cheap
@@ -227,6 +243,13 @@ def main() -> None:
         Path(args.output).write_text(report, encoding="utf-8")
         print(f"Report written to {args.output}")
     else:
+        # The report carries non-CP936 glyphs (check marks, em dashes). A default Windows
+        # console is GBK, so a bare print() raises UnicodeEncodeError and loses the whole
+        # report. Force UTF-8 on the stream instead of degrading the content.
+        # 报告含 GBK 无法编码的字符（对勾、破折号），Windows 默认控制台是 GBK，
+        # 裸 print() 会抛 UnicodeEncodeError 丢掉整份报告。此处强制流为 UTF-8。
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         print(report)
 
 

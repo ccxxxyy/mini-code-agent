@@ -411,6 +411,29 @@ class RemoteServer:
 
         al.on_tool_start = on_tool_start
         al.on_tool_end = on_tool_end
+
+        # Context compression is emitted by ContextManager on the EventBus, not as an
+        # AgentLoop callback, so it needs its own subscription. Without it the browser
+        # sees a multi-second stall (the implicit LLM summarize call) with no explanation
+        # -- the same "looks hung" failure mode that the fork-summary events were added
+        # to fix.
+        # 上下文压缩由 ContextManager 在 EventBus 上发射，不是 AgentLoop 回调，故需单独
+        # 订阅。不订阅的话浏览器会看到一段数秒的卡顿（隐式 LLM 摘要调用）却没有任何解释
+        # ——正是当初给 fork 摘要加事件所要修的那个"看起来卡死"的故障模式。
+        from mini_agent.models.events import ContextCompressedEvent
+
+        async def on_compressed(event: ContextCompressedEvent) -> None:
+            await self._ws_send(
+                "context_compressed",
+                before_tokens=event.before_tokens,
+                after_tokens=event.after_tokens,
+                duration_ms=round(event.duration_ms, 1),
+                forced=event.forced,
+                effective=event.effective,
+                strategy=event.strategy,
+            )
+
+        self._app.event_bus.on(ContextCompressedEvent, on_compressed)
         self._app.permission_manager._confirm = self._confirm_via_ws
 
     async def _confirm_via_ws(self, prompt: str) -> bool | str:

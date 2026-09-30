@@ -295,7 +295,7 @@ def create_prompt_session(
         except Exception:
             return False
 
-    merged = completer
+    merged: Completer | None = completer
     if working_dir is not None:
         file_completer = FileRefCompleter(working_dir)
         if completer is not None:

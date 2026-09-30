@@ -591,6 +591,16 @@ class Compressor:
             SlidingWindow(),
         ]
 
+    @property
+    def strategies(self) -> list[CompressionStrategy]:
+        """The cascade, in run order. Exposed so observers can report WHICH
+        strategies ran without reaching into a private attribute -- a compression
+        pass means something different depending on whether it summarized or just
+        slid the window.
+        级联策略（按执行顺序）。公开以便观察方报告"跑了哪些策略"而不必伸手进私有字段——
+        一次压缩究竟是做了摘要还是只滑了窗口，含义完全不同。"""
+        return list(self._strategies)
+
     async def compress(self, conversation: Conversation, target_tokens: int) -> None:
         for strategy in self._strategies:
             # Recount after each stage

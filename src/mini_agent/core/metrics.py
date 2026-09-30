@@ -38,6 +38,7 @@ from collections import deque
 from typing import Any
 
 from mini_agent.models.events import (
+    ContextCompressedEvent,
     ContextSummaryDoneEvent,
     LLMResponseEvent,
     PermissionCheckEvent,
@@ -199,6 +200,7 @@ class MetricsCollector:
         self.stream_duration = Histogram("llm_stream_duration", unit="ms")
         self.tool_duration = Histogram("tool_duration", unit="ms")
         self.compression_duration = Histogram("context_compression", unit="ms")
+        self.context_fork_duration = Histogram("context_fork", unit="ms")
         self.iterations = Histogram("turn_iterations", unit="count")
         # Per-tool latency so a slow tool cannot hide behind a fast one
         # 按工具分桶，避免慢工具被快工具掩盖
@@ -211,7 +213,25 @@ class MetricsCollector:
         self.completion_tokens = 0
         self.cache_read_tokens = 0
         self.cache_creation_tokens = 0
+        # Routine conversation compression (ContextCompressedEvent).
+        # 常规对话压缩（ContextCompressedEvent）。
         self.compressions = 0
+        # Passes that did NOT reduce tokens -- these open the circuit breaker, so
+        # folding them into `compressions` would report a working compressor while
+        # the breaker is shutting it off.
+        # 未降低 token 的压缩——它们打开熔断器；混进 `compressions` 会在熔断器正在
+        # 关停压缩时报告"压缩正常工作"。
+        self.compressions_ineffective = 0
+        self.compressed_tokens_saved = 0
+        # Fork-style summaries taken when a sub-agent inherits context
+        # (ContextSummaryDoneEvent). A DIFFERENT thing from the above: it fires
+        # once per spawn, not once per compression. Conflating the two was a real
+        # bug -- `compressions` used to be wired to this event, so it could never
+        # count an actual compression.
+        # 子 Agent 继承上下文时的 fork 式摘要（ContextSummaryDoneEvent）。与上面是
+        # 两回事：它每次 spawn 触发一次，而非每次压缩一次。混为一谈曾是真 bug——
+        # `compressions` 原本接的是这个事件，因此永远数不到一次真正的压缩。
+        self.context_forks = 0
         self.subagents_spawned = 0
         self.subagents_failed = 0
         # decision -> count, and reason -> count. `reason` is what separates
@@ -234,7 +254,8 @@ class MetricsCollector:
         bus.on(ToolCallEndEvent, self._on_tool_end)
         bus.on(TurnCompleteEvent, self._on_turn_complete)
         bus.on(PermissionCheckEvent, self._on_permission)
-        bus.on(ContextSummaryDoneEvent, self._on_compression)
+        bus.on(ContextCompressedEvent, self._on_compression)
+        bus.on(ContextSummaryDoneEvent, self._on_context_fork)
         bus.on(SubAgentSpawnEvent, self._on_subagent_spawn)
         bus.on(SubAgentCompleteEvent, self._on_subagent_complete)
 
@@ -243,7 +264,8 @@ class MetricsCollector:
         bus.off(ToolCallEndEvent, self._on_tool_end)
         bus.off(TurnCompleteEvent, self._on_turn_complete)
         bus.off(PermissionCheckEvent, self._on_permission)
-        bus.off(ContextSummaryDoneEvent, self._on_compression)
+        bus.off(ContextCompressedEvent, self._on_compression)
+        bus.off(ContextSummaryDoneEvent, self._on_context_fork)
         bus.off(SubAgentSpawnEvent, self._on_subagent_spawn)
         bus.off(SubAgentCompleteEvent, self._on_subagent_complete)
 
@@ -303,11 +325,22 @@ class MetricsCollector:
             reason = event.reason or "(none)"
             self.permission_reasons[reason] = self.permission_reasons.get(reason, 0) + 1
 
-    async def _on_compression(self, event: ContextSummaryDoneEvent) -> None:
+    async def _on_compression(self, event: ContextCompressedEvent) -> None:
         async with self._lock:
             self.compressions += 1
+            if not event.effective:
+                self.compressions_ineffective += 1
+            saved = event.before_tokens - event.after_tokens
+            if saved > 0:
+                self.compressed_tokens_saved += saved
             if event.duration_ms > 0:
                 self.compression_duration.record(event.duration_ms)
+
+    async def _on_context_fork(self, event: ContextSummaryDoneEvent) -> None:
+        async with self._lock:
+            self.context_forks += 1
+            if event.duration_ms > 0:
+                self.context_fork_duration.record(event.duration_ms)
 
     async def _on_subagent_spawn(self, event: SubAgentSpawnEvent) -> None:
         async with self._lock:
@@ -342,6 +375,9 @@ class MetricsCollector:
                 "tool_calls": self.tool_calls,
                 "tool_errors": self.tool_errors,
                 "compressions": self.compressions,
+                "compressions_ineffective": self.compressions_ineffective,
+                "compressed_tokens_saved": self.compressed_tokens_saved,
+                "context_forks": self.context_forks,
                 "subagents_spawned": self.subagents_spawned,
                 "subagents_failed": self.subagents_failed,
             },
@@ -364,6 +400,8 @@ class MetricsCollector:
         }
         if self.compressions:
             out["latency"]["context_compression"] = self.compression_duration.snapshot()
+        if self.context_forks:
+            out["latency"]["context_fork"] = self.context_fork_duration.snapshot()
         if self.per_tool:
             out["latency"]["per_tool"] = {
                 name: hist.snapshot() for name, hist in sorted(self.per_tool.items())

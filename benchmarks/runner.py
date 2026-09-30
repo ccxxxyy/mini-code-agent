@@ -272,7 +272,12 @@ def _median(values: list[float]) -> float:
     return (ordered[mid - 1] + ordered[mid]) / 2
 
 
-async def run_task_repeated(task_name: str, config: AgentConfig, repeat: int = 1) -> dict[str, Any]:
+async def run_task_repeated(
+    task_name: str,
+    config: AgentConfig,
+    repeat: int = 1,
+    results_dir: Path | None = None,
+) -> dict[str, Any]:
     """Run one task `repeat` times and persist a single aggregate result.
     运行同一任务 repeat 次，落盘一份聚合结果。
 
@@ -330,8 +335,14 @@ async def run_task_repeated(task_name: str, config: AgentConfig, repeat: int = 1
         ],
     }
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIR / f"mini_{task_name}.json").write_text(
+    # Results are keyed by task name only, so a second model's run would silently
+    # overwrite the first one's. That is how a control-arm experiment destroys its own
+    # baseline -- keep each model in its own directory.
+    # 结果文件只按任务名命名，所以跑第二个模型会静默覆盖第一个——对照组实验就是这样
+    # 毁掉自己基线的。每个模型用各自的目录。
+    out_dir = results_dir or RESULTS_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"mini_{task_name}.json").write_text(
         json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return aggregate
@@ -407,6 +418,17 @@ async def main() -> None:
         metavar="K",
         help="Run each task K times to compute pass@1 / pass^k (default 1)",
     )
+    parser.add_argument(
+        "--results-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Where to write result JSON (default benchmarks/results). Use a separate "
+            "directory per model -- results are keyed by task name only, so a second "
+            "model would otherwise overwrite the first one's baseline."
+        ),
+    )
     args = parser.parse_args()
 
     if args.list:
@@ -427,14 +449,16 @@ async def main() -> None:
         return
 
     repeat = max(1, args.repeat)
+    results_dir = Path(args.results_dir) if args.results_dir else RESULTS_DIR
     print(f"Model: {config.llm.model} ({config.llm.provider})")
     print(f"Tasks: {len(tasks_to_run)}   Repeat: {repeat}")
+    print(f"Results dir: {results_dir}")
     print()
 
     results = []
     for task_name in tasks_to_run:
         print(f"Running: {task_name}...")
-        result = await run_task_repeated(task_name, config, repeat=repeat)
+        result = await run_task_repeated(task_name, config, repeat=repeat, results_dir=results_dir)
         print_result(result)
         results.append(result)
         print()

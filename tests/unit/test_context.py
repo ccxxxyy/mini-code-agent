@@ -1355,3 +1355,197 @@ async def test_force_compress_writes_skill_boundary_even_when_below_threshold():
     assert conv.compact_boundary is not None
     assert conv.compact_boundary["active_skills"] == ["code-review"]
     assert conv.compact_boundary["skill_invocations"] == ["code-review"]
+
+
+# --- ContextCompressedEvent 压缩埋点 ---
+
+
+async def test_compression_emits_event_with_before_after_tokens():
+    """A compression pass must announce itself on the EventBus with real numbers.
+    一次压缩必须在 EventBus 上带真实数字公告自己。
+
+    Before this event existed the routine compression path emitted nothing at all,
+    so its implicit LLM summarize call was invisible on every surface except the TUI.
+    本事件出现前，常规压缩路径什么都不发，其隐式 LLM 摘要调用在除 TUI 外的所有出口
+    都不可见。
+    """
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import ContextCompressedEvent
+
+    bus = EventBus()
+    seen: list[ContextCompressedEvent] = []
+
+    async def grab(e: ContextCompressedEvent) -> None:
+        seen.append(e)
+
+    bus.on(ContextCompressedEvent, grab)
+
+    cm = ContextManager(MemoryConfig(context_window=1000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+    cm.set_event_bus(bus)
+
+    conv = Conversation()
+    for _ in range(12):
+        conv.messages.append(make_tool_msg())
+
+    assert await cm.check_and_compress(conv) is True
+    assert len(seen) == 1, "exactly one event per compression pass"
+    e = seen[0]
+    assert e.before_tokens > 0
+    # after_tokens may legitimately be 0: DropToolResults strips the payload from every
+    # tool message, so a conversation that is entirely tool results compresses to empty.
+    # after_tokens 可以合法地为 0：DropToolResults 会剥掉每条工具消息的载荷，故全是
+    # 工具结果的对话会被压成空。
+    assert 0 <= e.after_tokens < e.before_tokens
+    assert e.effective is True
+    assert e.duration_ms >= 0
+    assert e.forced is False
+    # The cascade must be reported, not left blank -- "compressed" means something
+    # different depending on whether it summarized or only slid the window.
+    # 必须报出级联策略而非留空——究竟是做了摘要还是只滑了窗口，含义完全不同。
+    assert "SlidingWindow" in e.strategy
+
+
+async def test_compression_event_marks_forced_for_manual_compact():
+    """force=True (manual /compact) must be distinguishable from a threshold trigger.
+    force=True（手动 /compact）必须与阈值自动触发可区分。"""
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import ContextCompressedEvent
+
+    bus = EventBus()
+    seen: list[ContextCompressedEvent] = []
+
+    async def grab(e: ContextCompressedEvent) -> None:
+        seen.append(e)
+
+    bus.on(ContextCompressedEvent, grab)
+
+    cm = ContextManager(MemoryConfig(context_window=100_000, compression_threshold=0.75))
+    cm.set_compressor(Compressor())
+    cm.set_event_bus(bus)
+
+    conv = Conversation()
+    conv.messages.append(make_msg(content="hi", token_count=10))
+    conv.messages.append(make_msg(role=Role.ASSISTANT, content="hello", token_count=10))
+
+    assert await cm.check_and_compress(conv, force=True) is True
+    assert len(seen) == 1
+    assert seen[0].forced is True
+
+
+async def test_compression_event_reports_ineffective_pass():
+    """An ineffective pass (tokens did not drop) must still be emitted, flagged.
+    无效压缩（token 没降）也必须发出并被标记。
+
+    These are exactly the passes that open the compression circuit breaker; dropping
+    them would make a metrics consumer report a healthy compressor while the breaker
+    is shutting it off.
+    正是这类压缩打开了压缩熔断器；丢掉它们会让指标消费方在熔断器正在关停压缩时
+    报告"压缩健康"。
+    """
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import ContextCompressedEvent
+
+    bus = EventBus()
+    seen: list[ContextCompressedEvent] = []
+
+    async def grab(e: ContextCompressedEvent) -> None:
+        seen.append(e)
+
+    bus.on(ContextCompressedEvent, grab)
+
+    class NoOpStrategy:
+        async def compress(self, conversation: Conversation, target_tokens: int) -> None:
+            return None
+
+    cm = ContextManager(MemoryConfig(context_window=1000, compression_threshold=0.5))
+    cm.set_compressor(Compressor(strategies=[NoOpStrategy()]))  # type: ignore[list-item]
+    cm.set_event_bus(bus)
+
+    conv = Conversation()
+    for _ in range(12):
+        conv.messages.append(make_tool_msg())
+
+    assert await cm.check_and_compress(conv) is True
+    assert len(seen) == 1
+    assert seen[0].effective is False
+    assert seen[0].after_tokens >= seen[0].before_tokens
+
+
+async def test_compression_without_event_bus_still_works():
+    """Headless callers build a ContextManager with no bus; compression must not break.
+    headless 调用方不带 bus 构造 ContextManager；压缩不能因此失败。"""
+    cm = ContextManager(MemoryConfig(context_window=1000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+
+    conv = Conversation()
+    for _ in range(12):
+        conv.messages.append(make_tool_msg())
+
+    assert await cm.check_and_compress(conv) is True
+
+
+async def test_failing_subscriber_does_not_abort_compression():
+    """A raising subscriber must not make compression look like it did not happen.
+    订阅者抛异常不能让压缩看起来没发生。
+
+    By emit time the conversation has already been rewritten, so propagating the
+    exception would leave the caller with a compressed conversation and a False return.
+    发射时对话已被改写，让异常上抛会使调用方拿到"已压缩的对话 + False 返回值"。
+    """
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import ContextCompressedEvent
+
+    bus = EventBus()
+
+    async def boom(e: ContextCompressedEvent) -> None:
+        raise RuntimeError("subscriber exploded")
+
+    bus.on(ContextCompressedEvent, boom)
+
+    cm = ContextManager(MemoryConfig(context_window=1000, compression_threshold=0.5))
+    cm.set_compressor(Compressor())
+    cm.set_event_bus(bus)
+
+    conv = Conversation()
+    for _ in range(12):
+        conv.messages.append(make_tool_msg())
+
+    assert await cm.check_and_compress(conv) is True
+
+
+async def test_metrics_counts_compression_not_context_fork():
+    """MetricsCollector.compressions must count real compressions, not sub-agent forks.
+    MetricsCollector.compressions 必须计真实压缩，而非子 Agent fork。
+
+    It used to be wired to ContextSummaryDoneEvent -- the fork-style summary taken when
+    a sub-agent inherits context -- so the counter could never register an actual
+    conversation compression. The two are now separate counters.
+    它原本接的是 ContextSummaryDoneEvent（子 Agent 继承上下文时的 fork 式摘要），
+    因此这个计数器永远数不到一次真正的对话压缩。现在两者是独立计数器。
+    """
+    from mini_agent.core.metrics import MetricsCollector
+    from mini_agent.events.bus import EventBus
+    from mini_agent.models.events import ContextCompressedEvent, ContextSummaryDoneEvent
+
+    bus = EventBus()
+    mc = MetricsCollector(probe_loop_lag=False)
+    mc.attach(bus)
+
+    await bus.emit(ContextCompressedEvent(before_tokens=900, after_tokens=400, duration_ms=12.0))
+    await bus.emit(
+        ContextCompressedEvent(
+            before_tokens=400, after_tokens=400, duration_ms=8.0, effective=False
+        )
+    )
+    await bus.emit(ContextSummaryDoneEvent(duration_ms=5000.0, char_count=1234))
+
+    snap = mc.snapshot()
+    assert snap["counters"]["compressions"] == 2
+    assert snap["counters"]["compressions_ineffective"] == 1
+    assert snap["counters"]["compressed_tokens_saved"] == 500
+    # The fork is counted separately and must NOT inflate `compressions`
+    # fork 单独计数，不得抬高 `compressions`
+    assert snap["counters"]["context_forks"] == 1
+    assert "context_compression" in snap["latency"]
+    assert "context_fork" in snap["latency"]

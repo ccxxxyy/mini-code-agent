@@ -26,8 +26,9 @@
 ## Summary 汇总
 
 - **Mini passed all runs**: 16/16
-- **Total tokens**: 334985
-- **Total cost**: $0.0084
+- **Tokens, representative run x 16 tasks**: 334985
+- **Cost, representative run x 16 tasks**: $0.0084
+- **Tokens, ALL 48 runs**: 974714 — the full spend; the two totals have different denominators 全量开销；两个合计的分母不同
 - **Avg tokens/task**: 20936
 - **Avg cost/task**: $0.0005
 - **Cost per solved task**: $0.0005
